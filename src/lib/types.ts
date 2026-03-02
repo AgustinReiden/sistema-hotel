@@ -1,0 +1,82 @@
+export type UserRole = "admin" | "receptionist" | "client";
+
+export type RoomStatus = "available" | "occupied" | "maintenance" | "cleaning";
+
+export type ReservationStatus =
+  | "pending"
+  | "confirmed"
+  | "checked_in"
+  | "checked_out"
+  | "cancelled";
+
+export type ActionResult<T = void> =
+  | { success: true; data?: T }
+  | { success: false; error: string; code?: string };
+
+export type Room = {
+  id: number;
+  room_number: string;
+  room_type: string;
+  status: RoomStatus;
+  capacity_adults: number;
+  capacity_children: number;
+  beds_configuration: string;
+  amenities: string[];
+  description: string | null;
+  image_url: string | null;
+  base_price: number;
+};
+
+export type Reservation = {
+  id: string;
+  client_name: string;
+  check_in_target: string;
+  check_out_target: string;
+  room_id: number;
+  status: ReservationStatus;
+  actual_check_in: string | null;
+  actual_check_out: string | null;
+  total_price: number;
+  paid_amount: number;
+};
+
+export type HotelSettings = {
+  id: number;
+  name: string;
+  standard_check_in_time: string;
+  standard_check_out_time: string;
+  late_check_out_time: string;
+  currency: string;
+  contact_email: string;
+  contact_phone: string;
+  address: string;
+  hero_title: string;
+  hero_subtitle: string;
+  hero_image_url?: string | null;
+  services_image_url?: string | null;
+  logo_url?: string | null;
+  contact_instagram?: string | null;
+};
+
+export type Guest = {
+  id: string;
+  client_name: string;
+  status: ReservationStatus;
+  check_in_target: string;
+  check_out_target: string;
+  room_number: string;
+  total_price: number;
+  paid_amount: number;
+};
+
+export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
+
+export type Payment = {
+  id: string;
+  reservation_id: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  reference_code: string | null;
+  notes: string | null;
+  created_at: string;
+};
