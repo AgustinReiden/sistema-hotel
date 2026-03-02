@@ -25,6 +25,8 @@ export type Room = {
   description: string | null;
   image_url: string | null;
   base_price: number;
+  half_day_price: number;
+  is_active: boolean;
 };
 
 export type Reservation = {
@@ -46,6 +48,7 @@ export type HotelSettings = {
   standard_check_in_time: string;
   standard_check_out_time: string;
   late_check_out_time: string;
+  timezone: string;
   currency: string;
   contact_email: string;
   contact_phone: string;

@@ -37,6 +37,7 @@ export default function RoomCard({ room }: RoomCardProps) {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
   const [isCheckoutConfirmOpen, setIsCheckoutConfirmOpen] = useState(false);
+  const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [extendNights, setExtendNights] = useState(1);
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
@@ -104,13 +105,16 @@ export default function RoomCard({ room }: RoomCardProps) {
   const onCancelReservation = () => {
     const reservationId = room.reservationId;
     if (!reservationId) return;
+    setIsCancelConfirmOpen(true);
+  };
 
-    if (!confirm("¿Estás seguro de cancelar esta reserva? Se vaciarán los registros de pago y se liberará la habitación.")) {
-      return;
-    }
+  const executeCancelReservation = () => {
+    const reservationId = room.reservationId;
+    if (!reservationId) return;
 
     startTransition(async () => {
       const result = await handleCancelReservation(reservationId);
+      setIsCancelConfirmOpen(false);
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -189,7 +193,7 @@ export default function RoomCard({ room }: RoomCardProps) {
               <div className="text-right">
                 <p className="text-xs text-slate-500 mb-0.5">Pendiente</p>
                 <p className={`text-sm font-bold ${debt > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                  ${debt.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  ${debt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                 </p>
               </div>
             </div>
@@ -269,9 +273,9 @@ export default function RoomCard({ room }: RoomCardProps) {
         onSubmit={(clientName, nights) => handleAssignWalkIn(room.id, clientName, nights)}
       />
 
-      {room.reservationId && (
+      {isPaymentModalOpen && room.reservationId && (
         <PaymentModal
-          isOpen={isPaymentModalOpen}
+          isOpen
           onClose={() => setIsPaymentModalOpen(false)}
           reservationId={room.reservationId}
           clientName={room.client || "Desconocido"}
@@ -351,6 +355,36 @@ export default function RoomCard({ room }: RoomCardProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Reservation Confirm Modal */}
+      {isCancelConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Cancelar Reserva</h3>
+            <p className="text-sm text-slate-600 mb-6">
+              ¿Estás seguro de cancelar la reserva de <strong>{room.client}</strong>? Se vaciarán los registros de pago y se liberará la habitación.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                className="px-4 py-2 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                onClick={() => setIsCancelConfirmOpen(false)}
+                disabled={isPending}
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-white font-bold bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                onClick={executeCancelReservation}
+                disabled={isPending}
+              >
+                Sí, Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -315,11 +315,11 @@ export async function getAvailableRooms(
 
   const occupiedRoomIds = overlappingReservations.map((r) => r.room_id);
 
+  // Only filter by is_active, not by current status (cleaning/maintenance are temporary)
   let query = supabase
     .from("rooms")
     .select("*")
     .eq("is_active", true)
-    .eq("status", "available")
     .order("room_number");
 
   if (occupiedRoomIds.length > 0) {
@@ -426,10 +426,10 @@ export async function cancelReservation(reservationId: string): Promise<void> {
 export async function extendReservation(reservationId: string, extraNights: number): Promise<void> {
   const supabase = await createClient();
 
-  // 1. Get current reservation
+  // 1. Get current reservation + room base price
   const { data: res, error: fetchErr } = await supabase
     .from("reservations")
-    .select("room_id, check_out_target")
+    .select("room_id, check_out_target, total_price, rooms ( base_price )")
     .eq("id", reservationId)
     .single();
 
@@ -455,10 +455,19 @@ export async function extendReservation(reservationId: string, extraNights: numb
     throw new Error("No se puede ampliar la reserva porque la habitación ya está comprometida para esas fechas.");
   }
 
-  // 3. Update reservation
+  // 3. Recalculate total price with the extra nights
+  type RoomRow = { base_price: number };
+  const roomData = res.rooms as RoomRow | RoomRow[] | null;
+  const basePrice = Array.isArray(roomData)
+    ? roomData[0]?.base_price ?? 0
+    : roomData?.base_price ?? 0;
+  const currentTotal = Number(res.total_price) || 0;
+  const newTotal = currentTotal + extraNights * basePrice;
+
+  // 4. Update reservation
   const { error: updateErr } = await supabase
     .from("reservations")
-    .update({ check_out_target: newOutString })
+    .update({ check_out_target: newOutString, total_price: newTotal })
     .eq("id", reservationId);
 
   if (updateErr) throw updateErr;

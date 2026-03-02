@@ -14,6 +14,7 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
       standard_check_in_time: String(formData.get("standard_check_in_time") ?? ""),
       standard_check_out_time: String(formData.get("standard_check_out_time") ?? ""),
       late_check_out_time: String(formData.get("late_check_out_time") ?? ""),
+      timezone: String(formData.get("timezone") ?? "America/Argentina/Tucuman"),
       currency: String(formData.get("currency") ?? ""),
       contact_email: String(formData.get("contact_email") ?? "") || null,
       contact_phone: String(formData.get("contact_phone") ?? ""),

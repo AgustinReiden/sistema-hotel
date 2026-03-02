@@ -3,6 +3,7 @@ import Image from "next/image";
 import { Star, MapPin, Coffee, Check, Instagram, Phone } from "lucide-react";
 import PublicSearchForm from "./components/PublicSearchForm";
 import RoomCard from "./components/RoomCard";
+import ScrollToResults from "./components/ScrollToResults";
 import { getAllRooms, getAvailableRooms, getHotelSettings } from "@/lib/data";
 
 type PageProps = {
@@ -40,18 +41,7 @@ export default async function Home({ searchParams }: PageProps) {
 
   return (
     <div className="min-h-screen bg-stone-50 selection:bg-brand-500 selection:text-white font-sans scroll-smooth">
-      {isSearching && (
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.onload = function() {
-                var el = document.getElementById('habitaciones');
-                if(el) el.scrollIntoView({behavior: 'smooth'});
-              }
-            `
-          }}
-        />
-      )}
+      {isSearching && <ScrollToResults />}
       {/* Navbar Premium */}
       <nav className="absolute w-full z-50 bg-transparent transition-all duration-300">
         <div className="max-w-7xl mx-auto px-6 h-24 flex items-center justify-between">
@@ -131,7 +121,7 @@ export default async function Home({ searchParams }: PageProps) {
             <div className="w-24 h-1 bg-brand-500 mx-auto mb-6"></div>
             <p className="text-slate-600 max-w-2xl mx-auto text-lg font-light">
               {isSearching
-                ? `Mostrando opciones del ${new Date(`${checkin}T14:00:00Z`).toLocaleDateString()} al ${new Date(`${checkout}T10:00:00Z`).toLocaleDateString()}`
+                ? `Mostrando opciones del ${new Date(`${checkin}T12:00:00Z`).toLocaleDateString()} al ${new Date(`${checkout}T12:00:00Z`).toLocaleDateString()}`
                 : "Diseñadas pensando en su confort absoluto. Cada espacio ofrece una perfecta armonía entre diseño contemporáneo y comodidad clásica."}
             </p>
           </div>
@@ -152,6 +142,9 @@ export default async function Home({ searchParams }: PageProps) {
                     checkIn={checkin || ""}
                     checkOut={checkout || ""}
                     isAvailable={true}
+                    checkInTime={settings.standard_check_in_time?.substring(0, 5)}
+                    checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
+                    timezone={settings.timezone}
                   />
                 ))
               ) : null
@@ -163,6 +156,9 @@ export default async function Home({ searchParams }: PageProps) {
                   checkIn={checkin || ""}
                   checkOut={checkout || ""}
                   isAvailable={availableRoomIds.has(room.id)}
+                  checkInTime={settings.standard_check_in_time?.substring(0, 5)}
+                  checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
+                  timezone={settings.timezone}
                 />
               ))
             )}

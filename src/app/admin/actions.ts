@@ -27,6 +27,8 @@ export async function handleLateCheckOut(reservationId: string): Promise<ActionR
     await applyLateCheckOut(reservationId);
     revalidatePath("/admin");
     revalidatePath("/admin/timeline");
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cobrar medio dia.");
@@ -40,6 +42,7 @@ export async function handleCheckOut(reservationId: string): Promise<ActionResul
     revalidatePath("/admin");
     revalidatePath("/admin/timeline");
     revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ejecutar check-out.");
@@ -121,6 +124,7 @@ export async function handleExtendReservation(reservationId: string, nights: num
     revalidatePath("/admin");
     revalidatePath("/admin/timeline");
     revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ampliar la reserva.");

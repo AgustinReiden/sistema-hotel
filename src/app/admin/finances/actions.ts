@@ -29,6 +29,7 @@ export async function registerPaymentAction(
         return { success: false, error: rpcError.message || "Fallo al registrar el pago." };
     }
 
+    revalidatePath("/admin");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/guests");
     revalidatePath("/admin/timeline");

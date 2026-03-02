@@ -89,6 +89,30 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
                         Si un huésped se queda después de esta hora, se le cobrará el día completo en lugar de medio día.
                     </p>
                 </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Zona Horaria</label>
+                    <select
+                        name="timezone"
+                        defaultValue={settings?.timezone || "America/Argentina/Tucuman"}
+                        required
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    >
+                        <option value="America/Argentina/Buenos_Aires">Argentina - Buenos Aires</option>
+                        <option value="America/Argentina/Tucuman">Argentina - Tucumán</option>
+                        <option value="America/Argentina/Cordoba">Argentina - Córdoba</option>
+                        <option value="America/Argentina/Mendoza">Argentina - Mendoza</option>
+                        <option value="America/Argentina/Salta">Argentina - Salta</option>
+                        <option value="America/Montevideo">Uruguay - Montevideo</option>
+                        <option value="America/Santiago">Chile - Santiago</option>
+                        <option value="America/Sao_Paulo">Brasil - São Paulo</option>
+                        <option value="America/Asuncion">Paraguay - Asunción</option>
+                        <option value="America/La_Paz">Bolivia - La Paz</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Zona horaria usada para calcular horarios de check-in/check-out y medio día.
+                    </p>
+                </div>
             </div>
 
             <div className="space-y-4 pt-4">

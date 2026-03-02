@@ -77,15 +77,15 @@ export default function PaymentModal({
                     <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl flex items-center justify-between mb-6">
                         <div>
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Total Estadía</p>
-                            <p className="text-lg font-bold text-slate-800">${numericTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-lg font-bold text-slate-800">${numericTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                         </div>
                         <div className="text-right">
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Pagado Prev.</p>
-                            <p className="text-lg font-bold text-emerald-600">${numericPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-lg font-bold text-emerald-600">${numericPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                         </div>
                         <div className="text-right">
                             <p className="text-xs font-bold amber-500 text-amber-600 uppercase tracking-wider mb-1">Restante</p>
-                            <p className="text-xl font-bold text-amber-600">${debt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-xl font-bold text-amber-600">${debt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                         </div>
                     </div>
 

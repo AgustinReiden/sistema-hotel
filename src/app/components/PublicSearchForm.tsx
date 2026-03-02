@@ -18,6 +18,14 @@ export default function PublicSearchForm() {
     const [checkOut, setCheckOut] = useState(defaultCheckOut);
     const [guests, setGuests] = useState("2");
 
+    const handleCheckInChange = (value: string) => {
+        setCheckIn(value);
+        // Auto-adjust checkout if it falls on or before the new checkin
+        if (new Date(value) >= new Date(checkOut)) {
+            setCheckOut(format(addDays(new Date(value), 1), "yyyy-MM-dd"));
+        }
+    };
+
     const handleSearch = () => {
         if (new Date(checkIn) >= new Date(checkOut)) {
             alert("La fecha de salida debe ser posterior a la de llegada.");
@@ -44,7 +52,7 @@ export default function PublicSearchForm() {
                         id="checkIn"
                         type="date"
                         value={checkIn}
-                        onChange={(e) => setCheckIn(e.target.value)}
+                        onChange={(e) => handleCheckInChange(e.target.value)}
                         className="w-full bg-transparent text-slate-800 font-medium outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                         max="9999-12-31"
                         min={format(new Date(), "yyyy-MM-dd")}

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { X, Loader2, CheckCircle2, BedDouble, Users, MapPin, CalendarDays, ShieldCheck } from "lucide-react";
+import { X, Loader2, CheckCircle2, BedDouble, Users, CalendarDays, ShieldCheck } from "lucide-react";
 import { handlePublicBooking } from "../actions";
 import { Room } from "@/lib/types";
+import { localToISO } from "@/lib/format";
 import { differenceInDays } from "date-fns";
 
 interface BookingModalProps {
@@ -14,6 +16,9 @@ interface BookingModalProps {
     checkIn: string;
     checkOut: string;
     imageSrc: string;
+    checkInTime: string;
+    checkOutTime: string;
+    timezone: string;
 }
 
 export default function BookingModal({
@@ -23,7 +28,11 @@ export default function BookingModal({
     checkIn,
     checkOut,
     imageSrc,
+    checkInTime,
+    checkOutTime,
+    timezone,
 }: BookingModalProps) {
+    const router = useRouter();
     const [clientName, setClientName] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -44,9 +53,8 @@ export default function BookingModal({
         setLoading(true);
         setError(null);
 
-        // Consider checkin at 14:00 and checkout at 10:00 UTC
-        const checkInDateTime = `${checkIn}T14:00:00Z`;
-        const checkOutDateTime = `${checkOut}T10:00:00Z`;
+        const checkInDateTime = localToISO(checkIn, checkInTime, timezone);
+        const checkOutDateTime = localToISO(checkOut, checkOutTime, timezone);
 
         const result = await handlePublicBooking(
             room.id,
@@ -84,14 +92,14 @@ export default function BookingModal({
                             Tu reserva para la <strong>{room.room_type}</strong> ha sido confirmada en estado <span className="text-amber-500 font-bold">Pendiente</span>.
                         </p>
                         <p className="text-slate-500 mb-10 font-light max-w-md">
-                            Te esperamos el <strong className="font-semibold text-slate-800">{new Date(`${checkIn}T14:00:00Z`).toLocaleDateString()}</strong> en nuestra recepción. El pago se coordinará al momento del check-in.
+                            Te esperamos el <strong className="font-semibold text-slate-800">{new Date(`${checkIn}T12:00:00Z`).toLocaleDateString()}</strong> en nuestra recepción. El pago se coordinará al momento del check-in.
                         </p>
                         <button
                             onClick={() => {
                                 onClose();
                                 setSuccess(false);
                                 setClientName("");
-                                window.location.reload();
+                                router.refresh();
                             }}
                             className="px-10 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl tracking-wide uppercase text-sm transition-all shadow-xl shadow-slate-900/20 cursor-pointer"
                         >
@@ -132,11 +140,11 @@ export default function BookingModal({
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <div className="text-xs text-slate-500">Check-in</div>
-                                                <div className="font-semibold text-slate-800">{new Date(`${checkIn}T14:00:00Z`).toLocaleDateString()}</div>
+                                                <div className="font-semibold text-slate-800">{new Date(`${checkIn}T12:00:00Z`).toLocaleDateString()}</div>
                                             </div>
                                             <div>
                                                 <div className="text-xs text-slate-500">Check-out</div>
-                                                <div className="font-semibold text-slate-800">{new Date(`${checkOut}T10:00:00Z`).toLocaleDateString()}</div>
+                                                <div className="font-semibold text-slate-800">{new Date(`${checkOut}T12:00:00Z`).toLocaleDateString()}</div>
                                             </div>
                                         </div>
                                         <div className="mt-3 inline-flex items-center px-2.5 py-1 rounded bg-slate-100 text-xs font-medium text-slate-600">

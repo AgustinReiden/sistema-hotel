@@ -23,47 +23,20 @@ type DashboardRoom = {
   paidAmount: number;
 };
 
-function isRoomOccupiedNow(reservation: Reservation, now: Date): boolean {
-  if (reservation.status === "checked_in") {
-    return true;
-  }
-
-  if (reservation.status === "pending" || reservation.status === "confirmed") {
-    const checkIn = new Date(reservation.check_in_target);
-    const checkOut = new Date(reservation.check_out_target);
-    return checkIn <= now && checkOut > now;
-  }
-
-  return false;
-}
-
-function formatMoney(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(amount);
-  }
+function isRoomOccupiedNow(reservation: Reservation): boolean {
+  return reservation.status === "checked_in";
 }
 
 export default async function Dashboard() {
-  const { rooms, reservations, todayIncome, hotelSettings } = await getDashboardData();
+  const { rooms, reservations } = await getDashboardData();
   const now = new Date();
-  const currencyCode = (hotelSettings.currency || "USD").toUpperCase();
 
   let lateCheckoutsCount = 0;
 
   const mappedRooms: DashboardRoom[] = rooms.map((room) => {
     const roomReservations = reservations.filter((reservation) => reservation.room_id === room.id);
     const activeReservation = roomReservations.find((reservation) =>
-      isRoomOccupiedNow(reservation, now)
+      isRoomOccupiedNow(reservation)
     );
 
     let status = room.status;

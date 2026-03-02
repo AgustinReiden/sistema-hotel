@@ -42,6 +42,9 @@ export const hotelSettingsSchema = z.object({
   late_check_out_time: z
     .string()
     .regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/, "Formato de hora invalido"),
+  timezone: z
+    .string()
+    .min(1, "La zona horaria es obligatoria."),
   currency: z
     .string()
     .trim()

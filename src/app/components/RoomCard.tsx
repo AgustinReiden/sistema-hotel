@@ -11,9 +11,12 @@ interface RoomCardProps {
     checkIn: string;
     checkOut: string;
     isAvailable: boolean;
+    checkInTime?: string;
+    checkOutTime?: string;
+    timezone?: string;
 }
 
-export default function RoomCard({ room, checkIn, checkOut, isAvailable }: RoomCardProps) {
+export default function RoomCard({ room, checkIn, checkOut, isAvailable, checkInTime = "14:00", checkOutTime = "10:00", timezone = "America/Argentina/Tucuman" }: RoomCardProps) {
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     const isAllowedHost = (url: string | null) => {
@@ -129,6 +132,9 @@ export default function RoomCard({ room, checkIn, checkOut, isAvailable }: RoomC
                 checkIn={checkIn}
                 checkOut={checkOut}
                 imageSrc={validImageSrc}
+                checkInTime={checkInTime}
+                checkOutTime={checkOutTime}
+                timezone={timezone}
             />
         </>
     );
