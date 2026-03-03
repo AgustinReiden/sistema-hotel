@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, Users, ChevronRight, ChevronDown } from "lucide-react";
+import { Calendar, Users, Search, ChevronDown } from "lucide-react";
 import { format, addDays } from "date-fns";
 
 export default function PublicSearchForm() {
@@ -20,7 +20,6 @@ export default function PublicSearchForm() {
 
     const handleCheckInChange = (value: string) => {
         setCheckIn(value);
-        // Auto-adjust checkout if it falls on or before the new checkin
         if (new Date(value) >= new Date(checkOut)) {
             setCheckOut(format(addDays(new Date(value), 1), "yyyy-MM-dd"));
         }
@@ -41,11 +40,12 @@ export default function PublicSearchForm() {
     };
 
     return (
-        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl shadow-slate-200/50 p-2 md:p-3 border border-slate-100 flex flex-col md:flex-row gap-3">
-            <div className="flex-1 flex items-center px-4 py-3 md:py-4 bg-slate-50 rounded-xl border border-slate-100 group hover:border-brand-200 transition-colors cursor-pointer relative">
-                <Calendar className="text-brand-500 mr-3" size={24} />
+        <div className="max-w-4xl mx-auto bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl shadow-black/10 p-2 md:p-3 border border-white/80 flex flex-col md:flex-row gap-2">
+            {/* Check-in */}
+            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors cursor-pointer relative">
+                <Calendar className="text-brand-500 mr-3 shrink-0" size={20} />
                 <div className="text-left w-full">
-                    <label htmlFor="checkIn" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5 block cursor-pointer">
+                    <label htmlFor="checkIn" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block cursor-pointer">
                         Llegada
                     </label>
                     <input
@@ -53,17 +53,21 @@ export default function PublicSearchForm() {
                         type="date"
                         value={checkIn}
                         onChange={(e) => handleCheckInChange(e.target.value)}
-                        className="w-full bg-transparent text-slate-800 font-medium outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                        className="w-full bg-transparent text-slate-800 font-semibold text-sm outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                         max="9999-12-31"
                         min={format(new Date(), "yyyy-MM-dd")}
                     />
                 </div>
             </div>
 
-            <div className="flex-1 flex items-center px-4 py-3 md:py-4 bg-slate-50 rounded-xl border border-slate-100 group hover:border-brand-200 transition-colors cursor-pointer relative">
-                <Calendar className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3" size={24} />
+            {/* Separador vertical */}
+            <div className="hidden md:block w-px bg-slate-200 my-3"></div>
+
+            {/* Check-out */}
+            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors cursor-pointer relative">
+                <Calendar className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3 shrink-0" size={20} />
                 <div className="text-left w-full">
-                    <label htmlFor="checkOut" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5 block cursor-pointer">
+                    <label htmlFor="checkOut" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block cursor-pointer">
                         Salida
                     </label>
                     <input
@@ -72,43 +76,48 @@ export default function PublicSearchForm() {
                         value={checkOut}
                         max="9999-12-31"
                         onChange={(e) => setCheckOut(e.target.value)}
-                        className="w-full bg-transparent text-slate-800 font-medium outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                        className="w-full bg-transparent text-slate-800 font-semibold text-sm outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                         min={format(addDays(new Date(checkIn), 1), "yyyy-MM-dd")}
                     />
                 </div>
             </div>
 
-            <div className="flex-1 flex items-center px-4 py-3 md:py-4 bg-slate-50 rounded-xl border border-slate-100 group hover:border-brand-200 transition-colors cursor-pointer relative">
-                <Users className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3" size={24} />
+            {/* Separador vertical */}
+            <div className="hidden md:block w-px bg-slate-200 my-3"></div>
+
+            {/* Huespedes */}
+            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors cursor-pointer relative">
+                <Users className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3 shrink-0" size={20} />
                 <div className="text-left w-full relative">
-                    <label htmlFor="guests" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5 block cursor-pointer">
-                        Huéspedes
+                    <label htmlFor="guests" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block cursor-pointer">
+                        Hu&eacute;spedes
                     </label>
                     <div className="relative">
                         <select
                             id="guests"
                             value={guests}
                             onChange={(e) => setGuests(e.target.value)}
-                            className="w-full bg-transparent text-slate-800 font-medium outline-none cursor-pointer appearance-none pr-8 relative z-10"
+                            className="w-full bg-transparent text-slate-800 font-semibold text-sm outline-none cursor-pointer appearance-none pr-8 relative z-10"
                         >
-                            <option value="1">1 Huésped</option>
-                            <option value="2">2 Huéspedes</option>
-                            <option value="3">3 Huéspedes</option>
-                            <option value="4">4 Huéspedes</option>
-                            <option value="5">5 Huéspedes</option>
-                            <option value="6">6 Huéspedes</option>
+                            <option value="1">1 Persona</option>
+                            <option value="2">2 Personas</option>
+                            <option value="3">3 Personas</option>
+                            <option value="4">4 Personas</option>
+                            <option value="5">5 Personas</option>
+                            <option value="6">6 Personas</option>
                         </select>
-                        <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-0" size={16} />
+                        <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-0" size={14} />
                     </div>
                 </div>
             </div>
 
+            {/* Boton buscar */}
             <button
                 onClick={handleSearch}
-                className="bg-brand-600 hover:bg-brand-700 text-white px-8 py-4 rounded-xl font-bold transition-all shadow-lg shadow-brand-500/25 flex items-center justify-center gap-2 group cursor-pointer"
+                className="bg-brand-600 hover:bg-brand-700 text-white px-6 md:px-8 py-4 rounded-xl font-bold transition-all shadow-lg shadow-brand-600/25 hover:shadow-brand-600/40 flex items-center justify-center gap-2 group cursor-pointer"
             >
-                Buscar
-                <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                <Search size={18} />
+                <span className="md:hidden">Buscar</span>
             </button>
         </div>
     );

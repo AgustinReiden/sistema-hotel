@@ -3,29 +3,27 @@
 @theme {
   --color-brand-50: #f0fdf4;
   --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-300: #86efac;
+  --color-brand-400: #4ade80;
   --color-brand-500: #22c55e;
   --color-brand-600: #16a34a;
   --color-brand-700: #15803d;
   --color-brand-800: #166534;
   --color-brand-900: #14532d;
+
+  --font-sans: var(--font-body), system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-display), Georgia, 'Times New Roman', serif;
 }
 
 :root {
-  --background: #f8fafc;
+  --background: #fafaf9;
   --foreground: #0f172a;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0f172a;
-    --foreground: #f8fafc;
-  }
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -40,4 +38,25 @@ body {
 .dark .glass {
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Fade-in animation for sections */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.7s ease-out both;
 }
