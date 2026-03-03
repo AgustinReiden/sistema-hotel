@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    experimental: {
+        serverActions: {
+            allowedOrigins: ['hotelelrefugio.com.ar'],
+        },
+    },
     reactCompiler: true,
     images: {
         remotePatterns: [
