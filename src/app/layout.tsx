@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
-import { DM_Sans, Playfair_Display } from 'next/font/google';
+import { DM_Sans, Cormorant_Garamond } from 'next/font/google';
 import './globals.css';
 import { Toaster } from 'sonner';
 
 const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-body' });
-const playfair = Playfair_Display({ subsets: ['latin'], variable: '--font-display' });
+const cormorant = Cormorant_Garamond({ subsets: ['latin'], weight: ['300', '400', '500', '600', '700'], variable: '--font-display' });
 
 export const metadata: Metadata = {
   title: 'El Refugio | Hotel & Servicios de Ruta',
@@ -18,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body className={`${dmSans.variable} ${playfair.variable} font-sans bg-slate-50 text-slate-900 min-h-screen antialiased selection:bg-brand-500 selection:text-white`}>
+      <body className={`${dmSans.variable} ${cormorant.variable} font-sans bg-slate-50 text-slate-900 min-h-screen antialiased selection:bg-brand-500 selection:text-white`}>
         {children}
         <Toaster position="top-right" richColors />
       </body>

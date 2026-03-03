@@ -49,7 +49,7 @@ export default async function Home({ searchParams }: PageProps) {
           {/* Solo logo, sin texto */}
           <Link href="/" className="shrink-0">
             {settings?.logo_url ? (
-              <div className="relative w-20 h-20 flex items-center justify-center drop-shadow-lg">
+              <div className="relative w-36 h-36 flex items-center justify-center drop-shadow-lg">
                 <Image src={settings.logo_url} alt={settings?.name || "El Refugio"} fill className="object-contain" />
               </div>
             ) : (
@@ -89,19 +89,12 @@ export default async function Home({ searchParams }: PageProps) {
             priority
             className="object-cover"
           />
-          {/* Overlays mejorados - la imagen se ve mucho mejor */}
-          <div className="absolute inset-0 bg-gradient-to-b from-slate-950/70 via-slate-900/30 to-stone-50"></div>
+          {/* Overlay suave - deja ver más la foto */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/15 to-stone-50"></div>
         </div>
 
         <div className="relative z-10 max-w-7xl mx-auto px-6 w-full text-center mt-8 mb-32">
-          {/* Subtitulo arriba del titulo principal */}
-          {settings?.hero_subtitle && (
-            <p className="text-sm md:text-base font-medium tracking-[0.3em] uppercase text-white/70 mb-6 animate-fade-up">
-              {settings.hero_subtitle}
-            </p>
-          )}
-
-          <h1 className="text-5xl md:text-7xl lg:text-8xl font-serif text-white mb-8 leading-[1.1] drop-shadow-2xl animate-fade-up" style={{ animationDelay: '0.1s' }}>
+          <h1 className="text-5xl md:text-7xl lg:text-[6.5rem] font-serif font-light text-white mb-8 leading-[1.05] tracking-tight animate-fade-up hero-title" style={{ animationDelay: '0.1s' }}>
             {settings?.hero_title || "Tu refugio en el camino"}
           </h1>
 

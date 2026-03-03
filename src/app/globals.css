@@ -60,3 +60,8 @@ html {
 .animate-fade-up {
   animation: fadeUp 0.7s ease-out both;
 }
+
+/* Hero title con sombra para legibilidad sobre foto clara */
+.hero-title {
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5), 0 1px 6px rgba(0, 0, 0, 0.3);
+}
