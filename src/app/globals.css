@@ -13,7 +13,7 @@
   --color-brand-900: #14532d;
 
   --font-sans: var(--font-body), system-ui, -apple-system, sans-serif;
-  --font-serif: var(--font-display), Georgia, 'Times New Roman', serif;
+  --font-serif: var(--font-display), system-ui, sans-serif;
 }
 
 :root {
@@ -61,7 +61,7 @@ html {
   animation: fadeUp 0.7s ease-out both;
 }
 
-/* Hero title con sombra para legibilidad sobre foto clara */
+/* Hero title con sombra para separar del fondo */
 .hero-title {
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5), 0 1px 6px rgba(0, 0, 0, 0.3);
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.3);
 }

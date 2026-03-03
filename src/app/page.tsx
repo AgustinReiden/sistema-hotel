@@ -46,15 +46,15 @@ export default async function Home({ searchParams }: PageProps) {
       {/* ── Navbar ── */}
       <nav className="absolute w-full z-50">
         <div className="max-w-7xl mx-auto px-6 h-24 flex items-center justify-between">
-          {/* Solo logo, sin texto */}
+          {/* Logo con fondo blanco sutil para contraste */}
           <Link href="/" className="shrink-0">
             {settings?.logo_url ? (
-              <div className="relative w-36 h-36 flex items-center justify-center drop-shadow-lg">
-                <Image src={settings.logo_url} alt={settings?.name || "El Refugio"} fill className="object-contain" />
+              <div className="relative w-36 h-36 flex items-center justify-center bg-white/85 rounded-xl p-2 shadow-lg">
+                <Image src={settings.logo_url} alt={settings?.name || "El Refugio"} fill className="object-contain p-1" />
               </div>
             ) : (
-              <div className="w-14 h-14 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/20">
-                <Star className="text-white fill-white/80" size={24} />
+              <div className="w-14 h-14 bg-white/85 backdrop-blur-md rounded-xl flex items-center justify-center shadow-lg">
+                <Star className="text-brand-700 fill-brand-600" size={24} />
               </div>
             )}
           </Link>
@@ -80,7 +80,8 @@ export default async function Home({ searchParams }: PageProps) {
       </nav>
 
       {/* ── Hero Section ── */}
-      <section className="relative min-h-[92vh] flex items-center justify-center pt-20 overflow-hidden">
+      <section className="relative min-h-[92vh] flex items-center justify-center overflow-hidden">
+        {/* Imagen de fondo */}
         <div className="absolute inset-0">
           <Image
             src={settings?.hero_image_url || "https://images.unsplash.com/photo-1545642412-ea820db826a7?auto=format&fit=crop&q=80&w=2000"}
@@ -89,24 +90,22 @@ export default async function Home({ searchParams }: PageProps) {
             priority
             className="object-cover"
           />
-          {/* Overlay suave - deja ver más la foto */}
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/15 to-stone-50"></div>
+          {/* Overlay uniforme - oscurece parejo sin fundido blanco */}
+          <div className="absolute inset-0 bg-black/40"></div>
         </div>
 
-        <div className="relative z-10 max-w-7xl mx-auto px-6 w-full text-center mt-8 mb-32">
-          <h1 className="text-5xl md:text-7xl lg:text-[6.5rem] font-serif font-light text-white mb-8 leading-[1.05] tracking-tight animate-fade-up hero-title" style={{ animationDelay: '0.1s' }}>
+        {/* Contenido: título + buscador en flexbox vertical, sin absolute */}
+        <div className="relative z-10 max-w-7xl mx-auto px-6 w-full flex flex-col items-center gap-12 md:gap-16 pt-32 pb-16">
+          <h1 className="text-4xl md:text-6xl lg:text-7xl font-serif font-bold text-white text-center leading-[1.1] tracking-tight animate-fade-up hero-title" style={{ animationDelay: '0.1s' }}>
             {settings?.hero_title || "Tu refugio en el camino"}
           </h1>
 
-          {/* Buscador */}
-          <div className="max-w-5xl mx-auto transform translate-y-1/2 absolute left-0 right-0 bottom-0 px-6 animate-fade-up" style={{ animationDelay: '0.3s' }}>
+          {/* Buscador - flujo natural debajo del título */}
+          <div className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
             <PublicSearchForm />
           </div>
         </div>
       </section>
-
-      {/* Espaciador para el buscador absolutizado */}
-      <div className="h-32 md:h-16"></div>
 
       {/* ── Seccion Habitaciones ── */}
       <section id="habitaciones" className="py-24 bg-stone-50 scroll-mt-20">
