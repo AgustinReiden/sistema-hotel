@@ -2,18 +2,26 @@
 
 import { publicCreateReservation } from "@/lib/data";
 import { ActionResult } from "@/lib/types";
+import { publicBookingSchema } from "@/lib/validations";
 import { revalidatePath } from "next/cache";
 
 export async function handlePublicBooking(
     roomId: number,
     clientName: string,
     checkIn: string,
-    checkOut: string
+    checkOut: string,
+    clientPhone: string,
+    clientDni: string
 ): Promise<ActionResult> {
     try {
-        if (!clientName || clientName.trim().length === 0) {
-            return { success: false, error: "El nombre es requerido." };
-        }
+        const validated = publicBookingSchema.parse({
+            roomId,
+            clientName,
+            clientDni,
+            clientPhone,
+            checkIn,
+            checkOut,
+        });
 
         const inDate = new Date(checkIn);
         const outDate = new Date(checkOut);
@@ -21,15 +29,27 @@ export async function handlePublicBooking(
             return { success: false, error: "La fecha de salida debe ser posterior a la de llegada." };
         }
 
-        await publicCreateReservation({ roomId, clientName, checkIn, checkOut });
+        await publicCreateReservation({
+            roomId: validated.roomId,
+            clientName: validated.clientName,
+            checkIn,
+            checkOut,
+            clientPhone: validated.clientPhone,
+            clientDni: validated.clientDni,
+        });
         revalidatePath("/");
         revalidatePath("/admin");
+        revalidatePath("/admin/solicitudes");
         return { success: true };
     } catch (error: unknown) {
         console.error("Booking error:", error);
+        if (error && typeof error === "object" && "issues" in error) {
+            const zodError = error as { issues: { message: string }[] };
+            return { success: false, error: zodError.issues[0]?.message || "Datos inválidos." };
+        }
         return {
             success: false,
-            error: error instanceof Error ? error.message : "Error al procesar la reserva correcta. Revise la disponibilidad."
+            error: error instanceof Error ? error.message : "Error al procesar la reserva. Revise la disponibilidad."
         };
     }
 }

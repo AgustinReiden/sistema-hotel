@@ -4,6 +4,7 @@ import { createClient } from "./supabase/server";
 import type {
   Guest,
   HotelSettings,
+  PendingReservation,
   Reservation,
   ReservationStatus,
   Room,
@@ -57,6 +58,8 @@ type CreateReservationInput = {
   clientName: string;
   checkIn: string;
   checkOut: string;
+  clientPhone?: string;
+  clientDni?: string;
 };
 
 export async function getHotelSettings(): Promise<HotelSettings> {
@@ -259,6 +262,8 @@ export async function publicCreateReservation({
   clientName,
   checkIn,
   checkOut,
+  clientPhone,
+  clientDni,
 }: CreateReservationInput): Promise<string> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_public_create_reservation", {
@@ -266,6 +271,8 @@ export async function publicCreateReservation({
     p_client_name: clientName,
     p_check_in: checkIn,
     p_check_out: checkOut,
+    p_client_phone: clientPhone || null,
+    p_client_dni: clientDni || null,
   });
 
   if (error) throw error;
@@ -471,4 +478,114 @@ export async function extendReservation(reservationId: string, extraNights: numb
     .eq("id", reservationId);
 
   if (updateErr) throw updateErr;
+}
+
+// ---- Solicitudes de Reserva ----
+
+type PendingReservationRow = {
+  id: string;
+  client_name: string;
+  client_phone: string | null;
+  client_dni: string | null;
+  status: ReservationStatus;
+  check_in_target: string;
+  check_out_target: string;
+  total_price: number;
+  whatsapp_notified: boolean;
+  rooms: { room_number: string; room_type: string } | { room_number: string; room_type: string }[] | null;
+};
+
+export async function getSolicitudesData(): Promise<PendingReservation[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("reservations")
+    .select(`
+      id,
+      client_name,
+      client_phone,
+      client_dni,
+      status,
+      check_in_target,
+      check_out_target,
+      total_price,
+      whatsapp_notified,
+      rooms ( room_number, room_type )
+    `)
+    .in("status", ["pending", "confirmed", "cancelled"])
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  const rows = (data ?? []) as PendingReservationRow[];
+  return rows.map((r) => {
+    const roomRelation = r.rooms;
+    const room = Array.isArray(roomRelation) ? roomRelation[0] : roomRelation;
+
+    return {
+      id: r.id,
+      client_name: r.client_name,
+      client_phone: r.client_phone,
+      client_dni: r.client_dni,
+      status: r.status,
+      check_in_target: r.check_in_target,
+      check_out_target: r.check_out_target,
+      total_price: Number(r.total_price) || 0,
+      whatsapp_notified: r.whatsapp_notified ?? false,
+      room_number: room?.room_number ?? "N/A",
+      room_type: room?.room_type ?? "N/A",
+    };
+  });
+}
+
+export async function confirmReservation(reservationId: string): Promise<Record<string, unknown>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_confirm_reservation", {
+    p_reservation_id: reservationId,
+  });
+
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+export async function getReservationWithRoom(reservationId: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("reservations")
+    .select(`
+      id,
+      client_name,
+      client_phone,
+      client_dni,
+      status,
+      check_in_target,
+      check_out_target,
+      total_price,
+      whatsapp_notified,
+      rooms ( room_number, room_type )
+    `)
+    .eq("id", reservationId)
+    .single();
+
+  if (error) throw error;
+
+  type RoomJoin = { room_number: string; room_type: string };
+  const roomRelation = data.rooms as RoomJoin | RoomJoin[] | null;
+  const room = Array.isArray(roomRelation) ? roomRelation[0] : roomRelation;
+
+  return {
+    ...data,
+    room_number: room?.room_number ?? "N/A",
+    room_type: room?.room_type ?? "N/A",
+  };
+}
+
+export async function updateWhatsappStatus(reservationId: string, notified: boolean): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reservations")
+    .update({ whatsapp_notified: notified })
+    .eq("id", reservationId);
+
+  if (error) throw error;
 }

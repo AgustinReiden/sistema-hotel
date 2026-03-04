@@ -28,6 +28,25 @@ export const createReservationSchema = z
     path: ["checkOut"],
   });
 
+export const publicBookingSchema = z.object({
+  roomId: z.number().int().positive("El ID de la habitación es inválido."),
+  clientName: z
+    .string()
+    .trim()
+    .min(2, "El nombre debe tener al menos 2 caracteres."),
+  clientDni: z
+    .string()
+    .trim()
+    .min(6, "El DNI debe tener al menos 6 caracteres."),
+  clientPhone: z
+    .string()
+    .trim()
+    .min(8, "El teléfono debe tener al menos 8 dígitos.")
+    .regex(/^[\d\s\-+()]+$/, "El teléfono contiene caracteres inválidos."),
+  checkIn: z.string().min(1, "La fecha de entrada es requerida."),
+  checkOut: z.string().min(1, "La fecha de salida es requerida."),
+});
+
 export const hotelSettingsSchema = z.object({
   name: z.string().trim().min(3, "El nombre del hotel debe tener al menos 3 caracteres."),
   standard_check_in_time: z

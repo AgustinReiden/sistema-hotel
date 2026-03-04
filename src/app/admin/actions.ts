@@ -10,8 +10,13 @@ import {
   markRoomAsAvailable,
   cancelReservation,
   extendReservation,
+  confirmReservation,
+  getReservationWithRoom,
+  updateWhatsappStatus,
+  getHotelSettings,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
+import { notifyReservationWebhook } from "@/lib/webhook";
 import type { ActionResult } from "@/lib/types";
 import { assignWalkInSchema, createReservationSchema } from "@/lib/validations";
 
@@ -103,16 +108,120 @@ export async function handleCreateReservation(
   }
 }
 
-export async function handleCancelReservation(reservationId: string): Promise<ActionResult> {
+export async function handleCancelReservation(
+  reservationId: string
+): Promise<ActionResult<{ whatsappSent: boolean }>> {
   try {
+    // 1. Obtener datos antes de cancelar (para el webhook)
+    const reservation = await getReservationWithRoom(reservationId);
+    const settings = await getHotelSettings();
+
+    // 2. Cancelar la reserva
     await cancelReservation(reservationId);
+
+    // 3. Enviar notificación WhatsApp
+    let whatsappSent = false;
+    if (reservation.client_phone) {
+      const result = await notifyReservationWebhook({
+        reservation_id: reservationId,
+        status: "cancelled",
+        client_name: reservation.client_name,
+        client_phone: reservation.client_phone,
+        client_dni: reservation.client_dni,
+        room_type: reservation.room_type,
+        room_number: reservation.room_number,
+        check_in: reservation.check_in_target,
+        check_out: reservation.check_out_target,
+        total_price: Number(reservation.total_price) || 0,
+        hotel_phone: settings.contact_phone || "",
+      });
+      whatsappSent = result.success;
+      await updateWhatsappStatus(reservationId, whatsappSent);
+    }
+
     revalidatePath("/admin");
     revalidatePath("/admin/timeline");
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
-    return { success: true };
+    revalidatePath("/admin/solicitudes");
+    return { success: true, data: { whatsappSent } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cancelar la reserva.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleConfirmReservation(
+  reservationId: string
+): Promise<ActionResult<{ whatsappSent: boolean }>> {
+  try {
+    // 1. Confirmar la reserva (RPC retorna datos)
+    const data = await confirmReservation(reservationId);
+    const settings = await getHotelSettings();
+
+    // 2. Enviar notificación WhatsApp
+    let whatsappSent = false;
+    const clientPhone = data.client_phone as string | null;
+    if (clientPhone) {
+      const result = await notifyReservationWebhook({
+        reservation_id: reservationId,
+        status: "confirmed",
+        client_name: (data.client_name as string) || "",
+        client_phone: clientPhone,
+        client_dni: (data.client_dni as string) || null,
+        room_type: (data.room_type as string) || "",
+        room_number: (data.room_number as string) || "",
+        check_in: (data.check_in_target as string) || "",
+        check_out: (data.check_out_target as string) || "",
+        total_price: Number(data.total_price) || 0,
+        hotel_phone: settings.contact_phone || "",
+      });
+      whatsappSent = result.success;
+      await updateWhatsappStatus(reservationId, whatsappSent);
+    }
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/timeline");
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/solicitudes");
+    return { success: true, data: { whatsappSent } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al confirmar la reserva.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleResendWhatsapp(
+  reservationId: string
+): Promise<ActionResult<{ whatsappSent: boolean }>> {
+  try {
+    const reservation = await getReservationWithRoom(reservationId);
+    const settings = await getHotelSettings();
+
+    if (!reservation.client_phone) {
+      return { success: false, error: "La reserva no tiene teléfono registrado." };
+    }
+
+    const result = await notifyReservationWebhook({
+      reservation_id: reservationId,
+      status: reservation.status,
+      client_name: reservation.client_name,
+      client_phone: reservation.client_phone,
+      client_dni: reservation.client_dni,
+      room_type: reservation.room_type,
+      room_number: reservation.room_number,
+      check_in: reservation.check_in_target,
+      check_out: reservation.check_out_target,
+      total_price: Number(reservation.total_price) || 0,
+      hotel_phone: settings.contact_phone || "",
+    });
+
+    await updateWhatsappStatus(reservationId, result.success);
+
+    revalidatePath("/admin/solicitudes");
+    return { success: true, data: { whatsappSent: result.success } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al reenviar el mensaje.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

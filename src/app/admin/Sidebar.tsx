@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Clock, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet } from 'lucide-react';
+import { Clock, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
 export default function Sidebar({ role }: { role: string }) {
@@ -25,6 +25,10 @@ export default function Sidebar({ role }: { role: string }) {
                 <Link href="/admin/timeline" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                     <Clock size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                     <span className="font-medium">Time-Line</span>
+                </Link>
+                <Link href="/admin/solicitudes" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                    <ClipboardList size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
+                    <span className="font-medium">Solicitudes</span>
                 </Link>
                 <Link href="/admin/guests" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                     <Users size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />

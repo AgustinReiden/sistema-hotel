@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { X, Loader2, CheckCircle2, BedDouble, Users, CalendarDays, ShieldCheck } from "lucide-react";
+import { X, Loader2, CheckCircle2, BedDouble, Users, CalendarDays, ShieldCheck, Phone, CreditCard } from "lucide-react";
 import { handlePublicBooking } from "../actions";
 import { Room } from "@/lib/types";
 import { localToISO } from "@/lib/format";
@@ -34,6 +34,8 @@ export default function BookingModal({
 }: BookingModalProps) {
     const router = useRouter();
     const [clientName, setClientName] = useState("");
+    const [clientDni, setClientDni] = useState("");
+    const [clientPhone, setClientPhone] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
@@ -49,6 +51,14 @@ export default function BookingModal({
             setError("Por favor ingresa tu nombre completo.");
             return;
         }
+        if (!clientDni.trim() || clientDni.trim().length < 6) {
+            setError("Por favor ingresa un DNI válido (mínimo 6 caracteres).");
+            return;
+        }
+        if (!clientPhone.trim() || clientPhone.trim().length < 8) {
+            setError("Por favor ingresa un número de teléfono válido.");
+            return;
+        }
 
         setLoading(true);
         setError(null);
@@ -60,7 +70,9 @@ export default function BookingModal({
             room.id,
             clientName,
             checkInDateTime,
-            checkOutDateTime
+            checkOutDateTime,
+            clientPhone.trim(),
+            clientDni.trim()
         );
 
         setLoading(false);
@@ -75,30 +87,41 @@ export default function BookingModal({
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-6 bg-slate-950/60 backdrop-blur-md animate-in fade-in duration-300">
             <div className="bg-white rounded-none md:rounded-3xl shadow-2xl w-full h-full md:h-auto md:max-h-[90vh] md:max-w-5xl overflow-y-auto md:overflow-hidden relative flex flex-col md:flex-row">
-                <button
-                    onClick={onClose}
-                    className="absolute top-4 right-4 z-20 w-10 h-10 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full flex items-center justify-center text-slate-800 md:text-slate-500 md:bg-slate-100 hover:text-slate-900 transition-colors shadow-sm"
-                >
-                    <X size={20} />
-                </button>
+                {/* Solo mostrar botón de cerrar cuando NO está en éxito */}
+                {!success && (
+                    <button
+                        onClick={onClose}
+                        className="absolute top-4 right-4 z-20 w-10 h-10 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full flex items-center justify-center text-slate-800 md:text-slate-500 md:bg-slate-100 hover:text-slate-900 transition-colors shadow-sm"
+                    >
+                        <X size={20} />
+                    </button>
+                )}
 
                 {success ? (
                     <div className="p-12 md:p-20 text-center w-full flex flex-col items-center justify-center animate-in zoom-in-95 duration-500">
-                        <div className="w-24 h-24 bg-green-50 text-green-500 rounded-full flex items-center justify-center mb-6 shadow-inner border border-green-100">
+                        <div className="w-24 h-24 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mb-6 shadow-inner border border-amber-100">
                             <CheckCircle2 size={48} />
                         </div>
-                        <h3 className="text-4xl font-serif text-slate-900 mb-4">¡Reserva Exitosa!</h3>
+                        <h3 className="text-4xl font-serif text-slate-900 mb-4">¡Reserva Registrada!</h3>
                         <p className="text-slate-600 text-lg mb-2">
-                            Tu reserva para la <strong>{room.room_type}</strong> ha sido confirmada en estado <span className="text-amber-500 font-bold">Pendiente</span>.
+                            Tu reserva para la <strong>{room.room_type}</strong> ha sido registrada y está <span className="text-amber-500 font-bold">pendiente de confirmación</span>.
                         </p>
-                        <p className="text-slate-500 mb-10 font-light max-w-md">
-                            Te esperamos el <strong className="font-semibold text-slate-800">{new Date(`${checkIn}T12:00:00Z`).toLocaleDateString()}</strong> en nuestra recepción. El pago se coordinará al momento del check-in.
+                        <div className="flex items-center gap-3 bg-green-50 border border-green-100 rounded-xl px-6 py-4 mb-4 max-w-md">
+                            <Phone size={20} className="text-green-600 shrink-0" />
+                            <p className="text-sm text-green-700 text-left">
+                                Te vamos a avisar por <strong>WhatsApp</strong> al número proporcionado cuando tu reserva sea confirmada.
+                            </p>
+                        </div>
+                        <p className="text-slate-400 mb-10 text-sm font-light max-w-md">
+                            El pago se coordinará al momento del check-in en recepción.
                         </p>
                         <button
                             onClick={() => {
                                 onClose();
                                 setSuccess(false);
                                 setClientName("");
+                                setClientDni("");
+                                setClientPhone("");
                                 router.refresh();
                             }}
                             className="px-10 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl tracking-wide uppercase text-sm transition-all shadow-xl shadow-slate-900/20 cursor-pointer"
@@ -181,22 +204,59 @@ export default function BookingModal({
                         <div className="w-full md:w-7/12 p-8 md:p-12 flex flex-col justify-center bg-white">
                             <div className="max-w-md mx-auto w-full">
                                 <h3 className="text-xs font-bold text-brand-500 uppercase tracking-widest mb-3">Paso Final</h3>
-                                <h2 className="text-4xl font-serif text-slate-900 mb-8 leading-tight">Completa tus datos para confirmar</h2>
+                                <h2 className="text-4xl font-serif text-slate-900 mb-8 leading-tight">Completa tus datos para reservar</h2>
 
-                                <form onSubmit={handleSubmit} className="space-y-6">
-                                    <div className="space-y-2">
+                                <form onSubmit={handleSubmit} className="space-y-5">
+                                    <div className="space-y-1.5">
                                         <label htmlFor="clientName" className="block text-sm font-bold tracking-wide uppercase text-slate-600">
-                                            Nombre Completo del Titular
+                                            Nombre Completo
                                         </label>
                                         <input
                                             id="clientName"
                                             type="text"
                                             value={clientName}
                                             onChange={(e) => setClientName(e.target.value)}
-                                            className="w-full px-5 py-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                                            className="w-full px-5 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
                                             placeholder="Ingresa tu nombre y apellido"
                                             required
                                         />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label htmlFor="clientDni" className="block text-sm font-bold tracking-wide uppercase text-slate-600">
+                                                <span className="flex items-center gap-1.5">
+                                                    <CreditCard size={14} />
+                                                    DNI
+                                                </span>
+                                            </label>
+                                            <input
+                                                id="clientDni"
+                                                type="text"
+                                                value={clientDni}
+                                                onChange={(e) => setClientDni(e.target.value)}
+                                                className="w-full px-5 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                                                placeholder="12345678"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label htmlFor="clientPhone" className="block text-sm font-bold tracking-wide uppercase text-slate-600">
+                                                <span className="flex items-center gap-1.5">
+                                                    <Phone size={14} />
+                                                    Teléfono
+                                                </span>
+                                            </label>
+                                            <input
+                                                id="clientPhone"
+                                                type="tel"
+                                                value={clientPhone}
+                                                onChange={(e) => setClientPhone(e.target.value)}
+                                                className="w-full px-5 py-3.5 bg-slate-50 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                                                placeholder="3814XXXXXX"
+                                                required
+                                            />
+                                        </div>
                                     </div>
 
                                     {error && (
@@ -208,17 +268,17 @@ export default function BookingModal({
                                     <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
                                         <ShieldCheck className="text-brand-600 shrink-0" size={24} />
                                         <p className="text-xs text-slate-500 leading-relaxed font-light">
-                                            Al confirmar, estás generando una pre-reserva de la habitación. El pago total se abonará en mostrador o mediante los métodos de pago proporcionados luego por el staff.
+                                            Al confirmar, estás generando una solicitud de reserva. Te notificaremos por WhatsApp cuando sea confirmada. El pago se coordinará al momento del check-in.
                                         </p>
                                     </div>
 
-                                    <div className="pt-4">
+                                    <div className="pt-2">
                                         <button
                                             type="submit"
                                             disabled={loading}
                                             className="w-full py-5 bg-brand-600 hover:bg-brand-700 active:scale-[0.98] text-white font-bold tracking-wider uppercase rounded-xl transition-all shadow-xl shadow-brand-500/30 flex items-center justify-center disabled:opacity-70 disabled:active:scale-100 cursor-pointer"
                                         >
-                                            {loading ? <Loader2 className="animate-spin" size={24} /> : "Confirmar Reserva"}
+                                            {loading ? <Loader2 className="animate-spin" size={24} /> : "Solicitar Reserva"}
                                         </button>
                                         <p className="text-center text-[10px] uppercase font-bold tracking-widest text-slate-400 mt-4">
                                             Proceso 100% Seguro

@@ -5,7 +5,7 @@ import { es } from "date-fns/locale";
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
 import { getDashboardData } from "@/lib/data";
-import type { Reservation } from "@/lib/types";
+
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,7 @@ type DashboardRoom = {
   paidAmount: number;
 };
 
-function isRoomOccupiedNow(reservation: Reservation): boolean {
+function isRoomOccupiedNow(reservation: { status: string }): boolean {
   return reservation.status === "checked_in";
 }
 

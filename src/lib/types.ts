@@ -32,6 +32,8 @@ export type Room = {
 export type Reservation = {
   id: string;
   client_name: string;
+  client_phone: string | null;
+  client_dni: string | null;
   check_in_target: string;
   check_out_target: string;
   room_id: number;
@@ -40,6 +42,21 @@ export type Reservation = {
   actual_check_out: string | null;
   total_price: number;
   paid_amount: number;
+  whatsapp_notified: boolean;
+};
+
+export type PendingReservation = {
+  id: string;
+  client_name: string;
+  client_phone: string | null;
+  client_dni: string | null;
+  status: ReservationStatus;
+  check_in_target: string;
+  check_out_target: string;
+  total_price: number;
+  whatsapp_notified: boolean;
+  room_number: string;
+  room_type: string;
 };
 
 export type HotelSettings = {
