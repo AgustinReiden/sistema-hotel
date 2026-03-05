@@ -79,9 +79,9 @@ export default async function Home({ searchParams }: PageProps) {
         </div>
       </nav>
 
-      {/* ── Hero Section ── */}
-      <section className="relative min-h-[92vh] flex items-center justify-center overflow-hidden">
-        {/* Imagen de fondo */}
+      {/* ── Hero + Habitaciones (imagen de fondo continua) ── */}
+      <div className="relative overflow-hidden">
+        {/* Imagen de fondo que cubre hero + habitaciones */}
         <div className="absolute inset-0">
           <Image
             src={settings?.hero_image_url || "https://images.unsplash.com/photo-1545642412-ea820db826a7?auto=format&fit=crop&q=80&w=2000"}
@@ -90,88 +90,88 @@ export default async function Home({ searchParams }: PageProps) {
             priority
             className="object-cover"
           />
-          {/* Overlay uniforme - oscurece parejo sin fundido blanco */}
-          <div className="absolute inset-0 bg-black/40"></div>
+          <div className="absolute inset-0 bg-black/45"></div>
         </div>
 
-        {/* Contenido: título + buscador en flexbox vertical, sin absolute */}
-        <div className="relative z-10 max-w-7xl mx-auto px-6 w-full flex flex-col items-center gap-12 md:gap-16 pt-32 pb-16">
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-serif font-bold text-white text-center leading-[1.1] tracking-tight animate-fade-up hero-title" style={{ animationDelay: '0.1s' }}>
-            {settings?.hero_title || "Tu refugio en el camino"}
-          </h1>
+        {/* ── Hero Section ── */}
+        <section className="relative z-10 min-h-[92vh] flex items-center justify-center">
+          <div className="max-w-7xl mx-auto px-6 w-full flex flex-col items-center gap-12 md:gap-16 pt-32 pb-16">
+            <h1 className="text-4xl md:text-6xl lg:text-7xl font-serif font-bold text-white text-center leading-[1.1] tracking-tight animate-fade-up hero-title" style={{ animationDelay: '0.1s' }}>
+              {settings?.hero_title || "Tu refugio en el camino"}
+            </h1>
 
-          {/* Buscador - flujo natural debajo del título */}
-          <div className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
-            <PublicSearchForm />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Seccion Habitaciones ── */}
-      <section id="habitaciones" className="py-24 bg-stone-50 scroll-mt-20">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <p className="text-xs font-bold tracking-[0.3em] text-brand-600 uppercase mb-3">Alojamiento</p>
-            <h2 className="text-4xl md:text-5xl font-serif text-slate-900 mb-6">
-              {isSearching ? "Disponibilidad" : "Nuestras Habitaciones"}
-            </h2>
-            <div className="w-16 h-[2px] bg-brand-500 mx-auto mb-6"></div>
-            <p className="text-slate-500 max-w-2xl mx-auto text-lg font-light leading-relaxed">
-              {isSearching
-                ? `Mostrando opciones del ${new Date(`${checkin}T12:00:00Z`).toLocaleDateString("es-AR")} al ${new Date(`${checkout}T12:00:00Z`).toLocaleDateString("es-AR")}`
-                : "Habitaciones c\u00f3modas y silenciosas, pensadas para que descanses de verdad despu\u00e9s de la ruta."}
-            </p>
-          </div>
-
-          {comboMessage && (
-            <div className="max-w-3xl mx-auto mb-10 p-6 bg-brand-50 border border-brand-200 text-brand-800 rounded-xl text-center shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
-              <p className="text-lg font-medium">{comboMessage}</p>
+            <div className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
+              <PublicSearchForm />
             </div>
-          )}
+          </div>
+        </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {isSearching ? (
-              availableRooms.length > 0 ? (
-                availableRooms.map((room) => (
+        {/* ── Seccion Habitaciones ── */}
+        <section id="habitaciones" className="relative z-10 py-24 scroll-mt-20">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-16">
+              <p className="text-xs font-bold tracking-[0.3em] text-brand-400 uppercase mb-3">Alojamiento</p>
+              <h2 className="text-4xl md:text-5xl font-serif text-white mb-6">
+                {isSearching ? "Disponibilidad" : "Nuestras Habitaciones"}
+              </h2>
+              <div className="w-16 h-[2px] bg-brand-400 mx-auto mb-6"></div>
+              <p className="text-white/70 max-w-2xl mx-auto text-lg font-light leading-relaxed">
+                {isSearching
+                  ? `Mostrando opciones del ${new Date(`${checkin}T12:00:00Z`).toLocaleDateString("es-AR")} al ${new Date(`${checkout}T12:00:00Z`).toLocaleDateString("es-AR")}`
+                  : "Habitaciones c\u00f3modas y silenciosas, pensadas para que descanses de verdad despu\u00e9s de la ruta."}
+              </p>
+            </div>
+
+            {comboMessage && (
+              <div className="max-w-3xl mx-auto mb-10 p-6 bg-white/10 backdrop-blur-sm border border-white/20 text-white rounded-xl text-center shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <p className="text-lg font-medium">{comboMessage}</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {isSearching ? (
+                availableRooms.length > 0 ? (
+                  availableRooms.map((room) => (
+                    <RoomCard
+                      key={room.id}
+                      room={room}
+                      checkIn={checkin || ""}
+                      checkOut={checkout || ""}
+                      isAvailable={true}
+                      checkInTime={settings.standard_check_in_time?.substring(0, 5)}
+                      checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
+                      timezone={settings.timezone}
+                    />
+                  ))
+                ) : null
+              ) : (
+                allRooms.map((room) => (
                   <RoomCard
                     key={room.id}
                     room={room}
                     checkIn={checkin || ""}
                     checkOut={checkout || ""}
-                    isAvailable={true}
+                    isAvailable={availableRoomIds.has(room.id)}
                     checkInTime={settings.standard_check_in_time?.substring(0, 5)}
                     checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
                     timezone={settings.timezone}
                   />
                 ))
-              ) : null
-            ) : (
-              allRooms.map((room) => (
-                <RoomCard
-                  key={room.id}
-                  room={room}
-                  checkIn={checkin || ""}
-                  checkOut={checkout || ""}
-                  isAvailable={availableRoomIds.has(room.id)}
-                  checkInTime={settings.standard_check_in_time?.substring(0, 5)}
-                  checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
-                  timezone={settings.timezone}
-                />
-              ))
+              )}
+            </div>
+
+            {isSearching && availableRooms.length === 0 && (
+              <div className="mt-16 max-w-2xl mx-auto p-12 bg-white/10 backdrop-blur-sm border border-white/20 text-center rounded-2xl shadow-sm">
+                <h3 className="text-2xl font-serif text-white mb-3">Sin disponibilidad</h3>
+                <p className="text-white/70 font-light leading-relaxed">
+                  Lamentablemente, nuestras habitaciones est&aacute;n completamente reservadas para las fechas seleccionadas.
+                  Le invitamos a probar con otro rango de fechas.
+                </p>
+              </div>
             )}
           </div>
-
-          {isSearching && availableRooms.length === 0 && (
-            <div className="mt-16 max-w-2xl mx-auto p-12 bg-white border border-slate-200 text-center rounded-2xl shadow-sm">
-              <h3 className="text-2xl font-serif text-slate-800 mb-3">Sin disponibilidad</h3>
-              <p className="text-slate-500 font-light leading-relaxed">
-                Lamentablemente, nuestras habitaciones est&aacute;n completamente reservadas para las fechas seleccionadas.
-                Le invitamos a probar con otro rango de fechas.
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
+        </section>
+      </div>
 
       {/* ── Servicios ── */}
       <section id="servicios" className="py-24 bg-white border-y border-stone-200 scroll-mt-20">
