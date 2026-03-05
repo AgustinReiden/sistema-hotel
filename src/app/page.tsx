@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Star, MapPin, UtensilsCrossed, BedDouble, Fuel, Instagram, Phone, Mail } from "lucide-react";
 import PublicSearchForm from "./components/PublicSearchForm";
-import RoomCard from "./components/RoomCard";
+import RoomCarousel from "./components/RoomCarousel";
 import ScrollToResults from "./components/ScrollToResults";
 import { getAllRooms, getAvailableRooms, getHotelSettings } from "@/lib/data";
 
@@ -128,35 +128,29 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="md:px-8">
               {isSearching ? (
                 availableRooms.length > 0 ? (
-                  availableRooms.map((room) => (
-                    <RoomCard
-                      key={room.id}
-                      room={room}
-                      checkIn={checkin || ""}
-                      checkOut={checkout || ""}
-                      isAvailable={true}
-                      checkInTime={settings.standard_check_in_time?.substring(0, 5)}
-                      checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
-                      timezone={settings.timezone}
-                    />
-                  ))
-                ) : null
-              ) : (
-                allRooms.map((room) => (
-                  <RoomCard
-                    key={room.id}
-                    room={room}
+                  <RoomCarousel
+                    rooms={availableRooms}
                     checkIn={checkin || ""}
                     checkOut={checkout || ""}
-                    isAvailable={availableRoomIds.has(room.id)}
+                    availableRoomIds={availableRooms.map((r) => r.id)}
                     checkInTime={settings.standard_check_in_time?.substring(0, 5)}
                     checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
                     timezone={settings.timezone}
                   />
-                ))
+                ) : null
+              ) : (
+                <RoomCarousel
+                  rooms={allRooms}
+                  checkIn={checkin || ""}
+                  checkOut={checkout || ""}
+                  availableRoomIds={Array.from(availableRoomIds)}
+                  checkInTime={settings.standard_check_in_time?.substring(0, 5)}
+                  checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
+                  timezone={settings.timezone}
+                />
               )}
             </div>
 
