@@ -61,7 +61,7 @@ export async function notifyReservationWebhook(
  * que necesita Evolution API (sin + ni espacios).
  * Ej: "3814123456" → "5493814123456"
  */
-function formatPhoneForWhatsapp(phone: string | null): string | null {
+export function formatPhoneForWhatsapp(phone: string | null): string | null {
   if (!phone) return null;
 
   // Limpiar caracteres no numéricos

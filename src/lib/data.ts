@@ -360,7 +360,7 @@ export async function getAvailableRooms(
   return rooms;
 }
 
-function determineSmarterAvailableRooms(availableRooms: Room[], targetGuests: number): Room[] {
+export function determineSmarterAvailableRooms(availableRooms: Room[], targetGuests: number): Room[] {
   const capMap = new Map<number, Room[]>();
   for (const r of availableRooms) {
     const cap = r.capacity_adults + r.capacity_children;
