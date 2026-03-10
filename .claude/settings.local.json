@@ -53,7 +53,10 @@
       "Bash(git add src/app/page.tsx public/images/fondo-hero.webp)",
       "Bash(git push)",
       "Bash(npm install embla-carousel-react)",
-      "Bash(git add src/app/components/RoomCarousel.tsx src/app/page.tsx package.json package-lock.json)"
+      "Bash(git add src/app/components/RoomCarousel.tsx src/app/page.tsx package.json package-lock.json)",
+      "Bash(grep -r \"cliente\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)",
+      "Bash(grep -h \"CREATE TABLE\\\\|DROP TABLE\\\\|CREATE VIEW\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)",
+      "Bash(grep -h \"CREATE TABLE\\\\|ALTER TABLE\\\\|ADD COLUMN\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)"
     ]
   }
 }

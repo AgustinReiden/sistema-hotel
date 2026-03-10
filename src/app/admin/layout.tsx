@@ -12,11 +12,10 @@ export default async function AdminLayout({
     let role = "receptionist";
     let userEmail = user?.email || "";
     if (user) {
-        const { data: profile } = await supabase.from('profiles').select('role, email').eq('id', user.id).single();
+        const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
         if (profile?.role) {
             role = profile.role;
         }
-        if (profile?.email) userEmail = profile.email;
     }
 
     return (

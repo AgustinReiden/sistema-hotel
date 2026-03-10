@@ -12,7 +12,7 @@ export default function Sidebar({ role, userEmail }: { role: string; userEmail: 
                     <BedDouble size={18} className="text-white" />
                 </div>
                 <Link href="/">
-                    <span className="text-white font-bold text-lg tracking-wide hover:opacity-80 transition-opacity">Hotel<span className="text-emerald-400">Sync</span></span>
+                    <span className="text-white font-bold text-lg tracking-wide hover:opacity-80 transition-opacity">El <span className="text-emerald-400">Refugio</span></span>
                 </Link>
             </div>
 

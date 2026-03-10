@@ -314,7 +314,7 @@ export default function RoomCard({ room }: RoomCardProps) {
                   onClick={() => setIsWalkInModalOpen(true)}
                   className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
                 >
-                  Asignar Walking
+                  Hacer Check-In
                 </button>
                 <button
                   onClick={onSetMaintenance}
