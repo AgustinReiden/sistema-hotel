@@ -31,12 +31,27 @@ function getPaymentMethodName(method: string) {
     }
 }
 
-export default async function FinancesPage() {
-    const supabase = await createClient();
+type FinancesPageProps = {
+    searchParams: Promise<{ date?: string }>;
+};
 
-    // Fetch today's payments
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+export default async function FinancesPage({ searchParams }: FinancesPageProps) {
+    const supabase = await createClient();
+    const params = await searchParams;
+
+    // Fetch hotel settings to get timezone
+    const { data: settingsData } = await supabase.from('hotel_settings').select('timezone').single();
+    const hotelTimezone = settingsData?.timezone || 'America/Argentina/Buenos_Aires';
+
+    // Determine the selected date (YYYY-MM-DD) — defaults to today in hotel timezone
+    const todayLocalStr = new Date().toLocaleDateString('en-CA', { timeZone: hotelTimezone });
+    const selectedDateStr = params.date || todayLocalStr;
+
+    // Compute UTC start/end of the selected day in hotel's local timezone
+    const localMidnight = new Date(`${selectedDateStr}T00:00:00`);
+    const utcOffsetMs = localMidnight.getTime() - new Date(localMidnight.toLocaleString('en-US', { timeZone: hotelTimezone })).getTime();
+    const dayStartUTC = new Date(localMidnight.getTime() - utcOffsetMs);
+    const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
 
     const { data: paymentsData } = await supabase
         .from('payments')
@@ -44,7 +59,8 @@ export default async function FinancesPage() {
             id, amount, payment_method, created_at, notes,
             reservation:reservations(id, client_name, rooms(room_number))
         `)
-        .gte('created_at', today.toISOString())
+        .gte('created_at', dayStartUTC.toISOString())
+        .lt('created_at', dayEndUTC.toISOString())
         .order('created_at', { ascending: false });
 
     const payments = paymentsData || [];
@@ -65,14 +81,35 @@ export default async function FinancesPage() {
 
     const debts = (activeReservations || []).filter(r => Number(r.total_price) > Number(r.paid_amount));
     const totalDebtPending = debts.reduce((sum, r) => sum + (Number(r.total_price) - Number(r.paid_amount)), 0);
+    const isToday = selectedDateStr === todayLocalStr;
 
     return (
         <div className="p-8 pb-20 overflow-y-auto w-full">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-slate-900 mb-2">Resumen Financiero</h1>
-                <p className="text-slate-500">
-                    Monitorea la caja del día, ingresos registrados y saldos pendientes de huéspedes actuales.
-                </p>
+            <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Resumen Financiero</h1>
+                    <p className="text-slate-500">
+                        Monitorea la caja del día, ingresos registrados y saldos pendientes de huéspedes actuales.
+                    </p>
+                </div>
+                <form method="GET" className="flex items-center gap-2 shrink-0">
+                    <label htmlFor="fin-date" className="text-sm font-semibold text-slate-600 whitespace-nowrap">Ver fecha:</label>
+                    <input
+                        id="fin-date"
+                        type="date"
+                        name="date"
+                        defaultValue={selectedDateStr}
+                        className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-brand-500 outline-none"
+                    />
+                    <button type="submit" className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold rounded-lg transition-colors">
+                        Filtrar
+                    </button>
+                    {!isToday && (
+                        <a href="/admin/finances" className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700 underline">
+                            Hoy
+                        </a>
+                    )}
+                </form>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

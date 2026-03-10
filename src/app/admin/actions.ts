@@ -7,6 +7,7 @@ import {
   assignWalkIn,
   staffCreateReservation,
   doCheckout,
+  doCheckIn,
   markRoomAsAvailable,
   cancelReservation,
   extendReservation,
@@ -37,6 +38,33 @@ export async function handleLateCheckOut(reservationId: string): Promise<ActionR
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cobrar medio dia.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleCheckIn(reservationId: string): Promise<ActionResult> {
+  try {
+    await doCheckIn(reservationId);
+    revalidatePath("/admin");
+    revalidatePath("/admin/timeline");
+    revalidatePath("/admin/guests");
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al realizar el check-in.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleSetMaintenance(roomId: number): Promise<ActionResult> {
+  try {
+    const supabase = (await import("@/lib/supabase/server")).createClient;
+    const client = await supabase();
+    const { error } = await client.rpc("rpc_set_room_maintenance", { p_room_id: roomId });
+    if (error) throw error;
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al poner habitación en mantenimiento.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

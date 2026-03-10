@@ -10,6 +10,8 @@ import {
   handleMarkAvailable,
   handleCancelReservation,
   handleCheckOut,
+  handleCheckIn,
+  handleSetMaintenance,
   handleAssignWalkIn,
   handleExtendReservation,
 } from "./actions";
@@ -26,8 +28,10 @@ type RoomCardProps = {
     check_out_target: string | null;
     isLate: boolean;
     reservationId: string | null;
+    reservationStatus: string | null;
     totalPrice: number;
     paidAmount: number;
+    basePrice: number;
   };
 };
 
@@ -41,6 +45,31 @@ export default function RoomCard({ room }: RoomCardProps) {
   const [extendNights, setExtendNights] = useState(1);
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
+  const isConfirmedArrival = room.reservationStatus === "confirmed";
+
+  const onCheckIn = () => {
+    const reservationId = room.reservationId;
+    if (!reservationId) return;
+    startTransition(async () => {
+      const result = await handleCheckIn(reservationId);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Check-in realizado correctamente.");
+    });
+  };
+
+  const onSetMaintenance = () => {
+    startTransition(async () => {
+      const result = await handleSetMaintenance(room.id);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Habitación puesta en mantenimiento.");
+    });
+  };
 
   const onLateCheckout = () => {
     const reservationId = room.reservationId;
@@ -83,6 +112,19 @@ export default function RoomCard({ room }: RoomCardProps) {
       }
 
       toast.success("Check-out realizado correctamente.");
+    });
+  };
+
+  const executeCheckoutAfterPayment = () => {
+    const reservationId = room.reservationId;
+    if (!reservationId) return;
+    startTransition(async () => {
+      const result = await handleCheckOut(reservationId);
+      if (!result.success) {
+        toast.error("Pago registrado. Error al ejecutar el check-out: " + result.error);
+        return;
+      }
+      toast.success("Pago registrado y check-out realizado.");
     });
   };
 
@@ -162,12 +204,15 @@ export default function RoomCard({ room }: RoomCardProps) {
               ? room.isLate
                 ? "bg-amber-500 text-white border-amber-600 shadow-sm"
                 : "bg-blue-100 text-blue-700 border-blue-200"
-              : "bg-slate-200 text-slate-600 border-slate-300"
+              : room.status === "maintenance"
+                ? "bg-red-100 text-red-700 border-red-200"
+                : "bg-slate-200 text-slate-600 border-slate-300"
             }`}
         >
           {room.status === "available" && "Disponible"}
           {room.status === "occupied" && (room.isLate ? "Retraso Check-out" : "Ocupada")}
           {room.status === "cleaning" && "Limpieza"}
+          {room.status === "maintenance" && "Mantenimiento"}
         </div>
       </div>
 
@@ -239,14 +284,47 @@ export default function RoomCard({ room }: RoomCardProps) {
         )}
 
         {room.status === "available" && (
-          <div className="flex flex-col items-center justify-center py-6">
-            <BedDouble size={32} className="text-slate-200 mb-3" />
-            <button
-              onClick={() => setIsWalkInModalOpen(true)}
-              className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
-            >
-              Asignar Walking
-            </button>
+          <div className="flex flex-col items-center justify-center py-4 gap-2">
+            {isConfirmedArrival ? (
+              <>
+                <div className="w-full bg-green-50 border border-green-200 rounded-lg p-3 text-center mb-1">
+                  <p className="text-xs text-green-600 font-bold uppercase tracking-wide mb-0.5">Reserva Confirmada</p>
+                  <p className="text-sm font-semibold text-green-800 truncate">{room.client}</p>
+                  <p className="text-xs text-green-600 mt-0.5">Check-out: {room.checkout}</p>
+                </div>
+                <button
+                  onClick={onCheckIn}
+                  disabled={isPending}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
+                >
+                  Confirmar Check-In
+                </button>
+                <button
+                  onClick={onCancelReservation}
+                  disabled={isPending}
+                  className="w-full text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors text-center"
+                >
+                  Cancelar Reserva
+                </button>
+              </>
+            ) : (
+              <>
+                <BedDouble size={32} className="text-slate-200 mb-1" />
+                <button
+                  onClick={() => setIsWalkInModalOpen(true)}
+                  className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
+                >
+                  Asignar Walking
+                </button>
+                <button
+                  onClick={onSetMaintenance}
+                  disabled={isPending}
+                  className="w-full text-xs font-bold text-slate-400 hover:text-slate-600 hover:underline transition-colors text-center mt-1"
+                >
+                  Poner en Mantenimiento
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -264,12 +342,28 @@ export default function RoomCard({ room }: RoomCardProps) {
             </button>
           </div>
         )}
+
+        {room.status === "maintenance" && (
+          <div className="flex flex-col items-center justify-center py-6">
+            <p className="text-sm text-slate-500 font-medium text-center px-4">
+              Habitación fuera de servicio por mantenimiento.
+            </p>
+            <button
+              onClick={onMarkAvailable}
+              disabled={isPending}
+              className="mt-4 w-full bg-white hover:bg-slate-50 disabled:opacity-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
+            >
+              Marcar Disponible
+            </button>
+          </div>
+        )}
       </div>
 
       <WalkInModal
         isOpen={isWalkInModalOpen}
         onClose={() => setIsWalkInModalOpen(false)}
         roomNumber={room.number}
+        basePrice={room.basePrice}
         onSubmit={(clientName, nights) => handleAssignWalkIn(room.id, clientName, nights)}
       />
 
@@ -283,6 +377,7 @@ export default function RoomCard({ room }: RoomCardProps) {
           paidAmount={room.paidAmount}
           onSuccess={() => {
             setIsPaymentModalOpen(false);
+            executeCheckoutAfterPayment();
           }}
         />
       )}

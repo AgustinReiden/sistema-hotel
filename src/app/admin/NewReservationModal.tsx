@@ -30,7 +30,6 @@ export default function NewReservationModal({ isOpen, onClose, onSubmit, rooms }
     const [roomId, setRoomId] = useState<number | "">("");
     const [checkIn, setCheckIn] = useState(format(defaultCheckIn, "yyyy-MM-dd'T'HH:mm"));
     const [checkOut, setCheckOut] = useState(format(defaultCheckOut, "yyyy-MM-dd'T'HH:mm"));
-
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     if (!isOpen) return null;
@@ -38,6 +37,12 @@ export default function NewReservationModal({ isOpen, onClose, onSubmit, rooms }
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!clientName.trim() || roomId === "" || !checkIn || !checkOut) return;
+
+        if (new Date(checkOut) <= new Date(checkIn)) {
+            toast.error("La fecha de salida debe ser posterior a la fecha de entrada.");
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const result = await onSubmit({
@@ -49,7 +54,6 @@ export default function NewReservationModal({ isOpen, onClose, onSubmit, rooms }
 
             if (result.success) {
                 toast.success("Reserva creada correctamente.");
-                // Reset state
                 setClientName("");
                 setRoomId("");
                 setCheckIn(format(defaultCheckIn, "yyyy-MM-dd'T'HH:mm"));

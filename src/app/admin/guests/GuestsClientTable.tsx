@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Guest } from "@/lib/types";
@@ -8,6 +9,7 @@ import { DollarSign } from "lucide-react";
 import PaymentModal from "@/app/components/PaymentModal";
 
 export default function GuestsClientTable({ initialGuests, searchQuery }: { initialGuests: Guest[], searchQuery: string }) {
+    const router = useRouter();
     const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
 
     return (
@@ -103,6 +105,7 @@ export default function GuestsClientTable({ initialGuests, searchQuery }: { init
                     clientName={selectedGuest.client_name}
                     totalPrice={selectedGuest.total_price}
                     paidAmount={selectedGuest.paid_amount}
+                    onSuccess={() => { setSelectedGuest(null); router.refresh(); }}
                 />
             )}
         </div>

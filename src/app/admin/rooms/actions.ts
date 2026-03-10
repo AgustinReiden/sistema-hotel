@@ -7,6 +7,12 @@ import { revalidatePath } from "next/cache";
 export async function updateRoomAction(roomId: number, roomData: Partial<Room>): Promise<ActionResult> {
     const supabase = await createClient();
 
+    // Auth check (same as createRoomAction / deleteRoomAction)
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "No autorizado." };
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (!["admin", "staff"].includes(profile?.role)) return { success: false, error: "Permisos insuficientes para modificar habitaciones." };
+
     // Basic validation to prevent overriding ID
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...updateData } = roomData;

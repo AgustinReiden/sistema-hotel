@@ -9,14 +9,17 @@ type WalkInModalProps = {
     onClose: () => void;
     onSubmit: (clientName: string, nights: number) => Promise<{ success: boolean, error?: string }>;
     roomNumber: string;
+    basePrice?: number;
 };
 
-export default function WalkInModal({ isOpen, onClose, onSubmit, roomNumber }: WalkInModalProps) {
+export default function WalkInModal({ isOpen, onClose, onSubmit, roomNumber, basePrice = 0 }: WalkInModalProps) {
     const [clientName, setClientName] = useState("");
     const [nights, setNights] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     if (!isOpen) return null;
+
+    const estimatedTotal = basePrice > 0 ? basePrice * nights : null;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -71,6 +74,17 @@ export default function WalkInModal({ isOpen, onClose, onSubmit, roomNumber }: W
                             className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                         />
                     </div>
+
+                    {estimatedTotal !== null && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
+                            <div>
+                                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wide">Total estimado</p>
+                                <p className="text-xs text-emerald-500 mt-0.5">{nights} noche{nights !== 1 ? "s" : ""} × ${basePrice.toLocaleString("es-AR")}</p>
+                            </div>
+                            <p className="text-2xl font-bold text-emerald-700">${estimatedTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
+                        </div>
+                    )}
+
                     <div className="pt-2 flex gap-3">
                         <button
                             type="button"

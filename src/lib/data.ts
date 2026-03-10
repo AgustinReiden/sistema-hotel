@@ -78,7 +78,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       supabase
         .from("reservations")
         .select("*")
-        .in("status", ACTIVE_RESERVATION_STATUSES)
+        .in("status", ["checked_in", "confirmed"])
         .order("check_in_target", { ascending: true }),
       supabase.rpc("get_today_extra_income"),
       supabase.from("hotel_settings").select("*").single(),
@@ -149,7 +149,7 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
   };
 }
 
-export async function getGuestsData(searchTerm = ""): Promise<Guest[]> {
+export async function getGuestsData(searchTerm = "", statusFilter = ""): Promise<Guest[]> {
   const supabase = await createClient();
   const normalizedSearch = searchTerm.trim();
 
@@ -171,6 +171,10 @@ export async function getGuestsData(searchTerm = ""): Promise<Guest[]> {
 
   if (normalizedSearch) {
     query = query.ilike("client_name", `%${normalizedSearch}%`);
+  }
+
+  if (statusFilter) {
+    query = query.eq("status", statusFilter);
   }
 
   const { data, error } = await query;
@@ -202,6 +206,14 @@ export async function applyLateCheckOut(reservationId: string): Promise<void> {
     p_reservation_id: reservationId,
   });
 
+  if (error) throw error;
+}
+
+export async function doCheckIn(reservationId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_staff_checkin_reservation", {
+    p_reservation_id: reservationId,
+  });
   if (error) throw error;
 }
 
@@ -433,15 +445,16 @@ export async function cancelReservation(reservationId: string): Promise<void> {
 export async function extendReservation(reservationId: string, extraNights: number): Promise<void> {
   const supabase = await createClient();
 
-  // 1. Get current reservation + room base price
+  // 1. Get current reservation
   const { data: res, error: fetchErr } = await supabase
     .from("reservations")
-    .select("room_id, check_out_target, total_price, rooms ( base_price )")
+    .select("room_id, check_in_target, check_out_target, total_price")
     .eq("id", reservationId)
     .single();
 
   if (fetchErr) throw fetchErr;
 
+  const currentIn = new Date(res.check_in_target);
   const currentOut = new Date(res.check_out_target);
   const newOut = new Date(currentOut);
   newOut.setDate(newOut.getDate() + extraNights);
@@ -462,14 +475,14 @@ export async function extendReservation(reservationId: string, extraNights: numb
     throw new Error("No se puede ampliar la reserva porque la habitación ya está comprometida para esas fechas.");
   }
 
-  // 3. Recalculate total price with the extra nights
-  type RoomRow = { base_price: number };
-  const roomData = res.rooms as RoomRow | RoomRow[] | null;
-  const basePrice = Array.isArray(roomData)
-    ? roomData[0]?.base_price ?? 0
-    : roomData?.base_price ?? 0;
+  // 3. Compute the actual nightly rate from the existing reservation
   const currentTotal = Number(res.total_price) || 0;
-  const newTotal = currentTotal + extraNights * basePrice;
+  // Duration in ms → days (using floor to avoid floating-point issues with half-day checkout)
+  const existingNights = Math.max(1, Math.round(
+    (currentOut.getTime() - currentIn.getTime()) / (1000 * 60 * 60 * 24)
+  ));
+  const nightlyRate = currentTotal / existingNights;
+  const newTotal = currentTotal + extraNights * nightlyRate;
 
   // 4. Update reservation
   const { error: updateErr } = await supabase

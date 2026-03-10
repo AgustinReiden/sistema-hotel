@@ -19,12 +19,18 @@ type DashboardRoom = {
   check_out_target: string | null;
   isLate: boolean;
   reservationId: string | null;
+  reservationStatus: string | null;
   totalPrice: number;
   paidAmount: number;
+  basePrice: number;
 };
 
 function isRoomOccupiedNow(reservation: { status: string }): boolean {
   return reservation.status === "checked_in";
+}
+
+function isRoomConfirmed(reservation: { status: string }): boolean {
+  return reservation.status === "confirmed";
 }
 
 export default async function Dashboard() {
@@ -38,12 +44,16 @@ export default async function Dashboard() {
     const activeReservation = roomReservations.find((reservation) =>
       isRoomOccupiedNow(reservation)
     );
+    const confirmedReservation = !activeReservation
+      ? roomReservations.find((r) => isRoomConfirmed(r))
+      : undefined;
 
     let status = room.status;
     let isLate = false;
     let checkout: string | null = null;
     let client: string | null = null;
     let reservationId: string | null = null;
+    let reservationStatus: string | null = null;
     let totalPrice = 0;
     let paidAmount = 0;
 
@@ -54,6 +64,7 @@ export default async function Dashboard() {
         locale: es,
       });
       reservationId = activeReservation.id;
+      reservationStatus = activeReservation.status;
       totalPrice = activeReservation.total_price;
       paidAmount = activeReservation.paid_amount;
 
@@ -61,6 +72,16 @@ export default async function Dashboard() {
         isLate = true;
         lateCheckoutsCount++;
       }
+    } else if (confirmedReservation) {
+      // Show confirmed reservations as a "pending check-in" state
+      client = confirmedReservation.client_name;
+      checkout = format(new Date(confirmedReservation.check_out_target), "dd MMM HH:mm", {
+        locale: es,
+      });
+      reservationId = confirmedReservation.id;
+      reservationStatus = confirmedReservation.status;
+      totalPrice = confirmedReservation.total_price;
+      paidAmount = confirmedReservation.paid_amount;
     }
 
     return {
@@ -73,8 +94,10 @@ export default async function Dashboard() {
       check_out_target: activeReservation?.check_out_target ?? null,
       isLate,
       reservationId,
+      reservationStatus,
       totalPrice,
       paidAmount,
+      basePrice: room.base_price,
     };
   });
 

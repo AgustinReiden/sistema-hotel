@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Clock, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
-export default function Sidebar({ role }: { role: string }) {
+export default function Sidebar({ role, userEmail }: { role: string; userEmail: string }) {
     const isAdmin = role === 'admin';
 
     return (
@@ -66,7 +66,7 @@ export default function Sidebar({ role }: { role: string }) {
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-white truncate">{isAdmin ? 'Admin' : 'Recepcionista'}</p>
-                            <p className="text-xs text-slate-500 truncate">Recepción</p>
+                            <p className="text-xs text-slate-500 truncate">{userEmail || 'Recepción'}</p>
                         </div>
                     </div>
                     <div className="w-full">

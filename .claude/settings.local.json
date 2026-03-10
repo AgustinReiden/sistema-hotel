@@ -44,7 +44,16 @@
       "Bash(git add next.config.mjs src/app/globals.css src/app/layout.tsx src/app/page.tsx .claude/launch.json)",
       "Bash(git add src/app/globals.css src/app/layout.tsx src/app/page.tsx)",
       "Bash(ls -la /c/Users/jorge/Desktop/sistema-hotel/src/app/api*)",
-      "Bash(xargs grep -l \"webhook\\\\|n8n\\\\|api/\")"
+      "Bash(xargs grep -l \"webhook\\\\|n8n\\\\|api/\")",
+      "Bash(python -c \":*)",
+      "Bash(findstr /i \"evolution sendText httpRequest\")",
+      "Bash(node -e \":*)",
+      "Bash(git add src/app/actions.ts src/app/admin/Sidebar.tsx src/app/admin/actions.ts src/app/admin/page.tsx src/app/components/BookingModal.tsx src/lib/data.ts src/lib/types.ts src/lib/validations.ts src/lib/webhook.ts src/app/admin/solicitudes/page.tsx src/app/admin/solicitudes/SolicitudesClient.tsx supabase_migrations/22_reservation_requests.sql)",
+      "WebFetch(domain:kbwikplgzmrerceamdja.supabase.co)",
+      "Bash(git add src/app/page.tsx public/images/fondo-hero.webp)",
+      "Bash(git push)",
+      "Bash(npm install embla-carousel-react)",
+      "Bash(git add src/app/components/RoomCarousel.tsx src/app/page.tsx package.json package-lock.json)"
     ]
   }
 }

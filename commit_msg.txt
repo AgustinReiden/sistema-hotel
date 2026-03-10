@@ -1,0 +1,25 @@
+feat: implement analysis plan - bugs, features and improvements
+
+Bugs fixed:
+- GuestsClientTable: add router.refresh() on payment success
+- RoomCard: auto-execute checkout after payment modal success
+- NewReservationModal: client-side date validation checkOut > checkIn
+- finances/page: use hotel timezone for start-of-day calculation
+- rooms/actions: add auth check to updateRoomAction
+- RoomCard: add maintenance status badge and UI
+
+Features:
+- Check-in button for confirmed reservations on dashboard
+- Finances page: date filter with hotel timezone support
+- Guests page: status filter pills (checked_in/confirmed/checked_out/cancelled)
+- RoomCard: Poner en Mantenimiento button on available rooms
+- WalkInModal: live price estimate preview (nights x base_price)
+- Sidebar: show real logged-in user email
+- admin/actions: handleCheckIn + handleSetMaintenance server actions
+
+Improvements:
+- extendReservation: use actual nightly rate from reservation instead of base_price
+- getGuestsData: accepts optional statusFilter parameter
+
+Migrations:
+- 23_checkin_maintenance_rpcs.sql: rpc_staff_checkin_reservation + rpc_set_room_maintenance
