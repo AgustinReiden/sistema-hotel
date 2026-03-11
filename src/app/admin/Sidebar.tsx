@@ -50,10 +50,10 @@ export default function Sidebar({ role, userEmail }: { role: string; userEmail: 
                             <Settings size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                             <span className="font-medium">Ajustes</span>
                         </Link>
-                        <a href="#" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors hidden">
+                        <Link href="/admin/analytics" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <BarChart3 size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Reportes</span>
-                        </a>
+                            <span className="font-medium">Análisis</span>
+                        </Link>
                     </>
                 )}
             </nav>

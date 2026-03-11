@@ -602,3 +602,167 @@ export async function updateWhatsappStatus(reservationId: string, notified: bool
 
   if (error) throw error;
 }
+
+// ---- Analytics Dashboard ----
+
+export type DailyIncome = { date: string; total: number };
+export type RoomTypeOccupancy = { room_type: string; count: number };
+export type PaymentMethodBreakdown = { method: string; total: number };
+export type StatusBreakdown = { status: string; count: number };
+
+export type AnalyticsData = {
+  // KPIs
+  occupancyRate: number;
+  totalIncome: number;
+  totalReservations: number;
+  averageTicket: number;
+  totalCheckIns: number;
+  totalCancellations: number;
+  // Chart data
+  dailyIncome: DailyIncome[];
+  roomTypeOccupancy: RoomTypeOccupancy[];
+  paymentMethods: PaymentMethodBreakdown[];
+  statusBreakdown: StatusBreakdown[];
+};
+
+export async function getAnalyticsData(
+  startDateStr: string,
+  endDateStr: string
+): Promise<AnalyticsData> {
+  const supabase = await createClient();
+
+  // Build UTC boundaries from date strings
+  const startUTC = new Date(`${startDateStr}T00:00:00`).toISOString();
+  const endUTC = new Date(`${endDateStr}T23:59:59.999`).toISOString();
+
+  const [
+    roomsResult,
+    checkedInResult,
+    reservationsInRangeResult,
+    paymentsInRangeResult,
+  ] = await Promise.all([
+    // All active rooms
+    supabase.from("rooms").select("id, room_type").eq("is_active", true),
+    // Currently checked-in reservations
+    supabase.from("reservations").select("id").eq("status", "checked_in"),
+    // Reservations created in the date range (excluding cancelled for avg ticket)
+    supabase
+      .from("reservations")
+      .select("id, status, total_price, actual_check_in, room_id, rooms(room_type)")
+      .gte("created_at", startUTC)
+      .lte("created_at", endUTC),
+    // Payments in the date range
+    supabase
+      .from("payments")
+      .select("id, amount, payment_method, created_at")
+      .gte("created_at", startUTC)
+      .lte("created_at", endUTC),
+  ]);
+
+  const rooms = roomsResult.data ?? [];
+  const checkedIn = checkedInResult.data ?? [];
+  const reservations = reservationsInRangeResult.data ?? [];
+  const payments = paymentsInRangeResult.data ?? [];
+
+  // ── KPIs ──
+  const totalRooms = rooms.length;
+  const occupancyRate = totalRooms > 0 ? (checkedIn.length / totalRooms) * 100 : 0;
+
+  const totalIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+
+  const totalReservations = reservations.length;
+
+  const nonCancelledReservations = reservations.filter(
+    (r) => r.status !== "cancelled"
+  );
+  const averageTicket =
+    nonCancelledReservations.length > 0
+      ? nonCancelledReservations.reduce(
+          (sum, r) => sum + Number(r.total_price),
+          0
+        ) / nonCancelledReservations.length
+      : 0;
+
+  const totalCheckIns = reservations.filter(
+    (r) => r.actual_check_in !== null
+  ).length;
+
+  const totalCancellations = reservations.filter(
+    (r) => r.status === "cancelled"
+  ).length;
+
+  // ── Chart: Daily Income ──
+  const dailyMap = new Map<string, number>();
+  for (const p of payments) {
+    const day = new Date(p.created_at).toISOString().split("T")[0];
+    dailyMap.set(day, (dailyMap.get(day) || 0) + Number(p.amount));
+  }
+  // Fill in missing days in range
+  const cursor = new Date(startDateStr);
+  const endDate = new Date(endDateStr);
+  while (cursor <= endDate) {
+    const key = cursor.toISOString().split("T")[0];
+    if (!dailyMap.has(key)) dailyMap.set(key, 0);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  const dailyIncome: DailyIncome[] = Array.from(dailyMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, total]) => ({ date, total }));
+
+  // ── Chart: Room Type Occupancy ──
+  type RoomJoinRow = {
+    room_id: number;
+    rooms: { room_type: string } | { room_type: string }[] | null;
+  };
+  const roomTypeMap = new Map<string, number>();
+  for (const r of reservations.filter(
+    (r) => r.status === "checked_in" || r.status === "confirmed"
+  ) as unknown as RoomJoinRow[]) {
+    const roomRel = r.rooms;
+    const roomType = Array.isArray(roomRel)
+      ? roomRel[0]?.room_type
+      : roomRel?.room_type;
+    if (roomType) {
+      roomTypeMap.set(roomType, (roomTypeMap.get(roomType) || 0) + 1);
+    }
+  }
+  const roomTypeOccupancy: RoomTypeOccupancy[] = Array.from(
+    roomTypeMap.entries()
+  ).map(([room_type, count]) => ({ room_type, count }));
+
+  // ── Chart: Payment Methods ──
+  const methodMap = new Map<string, number>();
+  for (const p of payments) {
+    methodMap.set(
+      p.payment_method,
+      (methodMap.get(p.payment_method) || 0) + Number(p.amount)
+    );
+  }
+  const paymentMethodsData: PaymentMethodBreakdown[] = Array.from(
+    methodMap.entries()
+  )
+    .map(([method, total]) => ({ method, total }))
+    .sort((a, b) => b.total - a.total);
+
+  // ── Chart: Status Breakdown ──
+  const statusMap = new Map<string, number>();
+  for (const r of reservations) {
+    statusMap.set(r.status, (statusMap.get(r.status) || 0) + 1);
+  }
+  const statusBreakdown: StatusBreakdown[] = Array.from(
+    statusMap.entries()
+  ).map(([status, count]) => ({ status, count }));
+
+  return {
+    occupancyRate,
+    totalIncome,
+    totalReservations,
+    averageTicket,
+    totalCheckIns,
+    totalCancellations,
+    dailyIncome,
+    roomTypeOccupancy,
+    paymentMethods: paymentMethodsData,
+    statusBreakdown,
+  };
+}
