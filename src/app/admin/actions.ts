@@ -18,21 +18,35 @@ import {
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import { notifyReservationWebhook } from "@/lib/webhook";
-import type { ActionResult } from "@/lib/types";
+import type { ActionResult, PaymentMethod } from "@/lib/types";
 import { assignWalkInSchema, createReservationSchema } from "@/lib/validations";
 
 type CreateReservationPayload = {
   roomId: number;
   clientName: string;
+  clientDni: string;
+  clientPhone?: string;
   checkIn: string;
   checkOut: string;
 };
+
+type CheckoutPayload = {
+  reservationId: string;
+  paymentAmount?: number;
+  paymentMethod?: PaymentMethod;
+  paymentNotes?: string;
+};
+
+function revalidateCalendarViews() {
+  revalidatePath("/admin/calendario");
+  revalidatePath("/admin/timeline");
+}
 
 export async function handleLateCheckOut(reservationId: string): Promise<ActionResult> {
   try {
     await applyLateCheckOut(reservationId);
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     return { success: true };
@@ -46,7 +60,7 @@ export async function handleCheckIn(reservationId: string): Promise<ActionResult
   try {
     await doCheckIn(reservationId);
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
     return { success: true };
   } catch (error: unknown) {
@@ -62,6 +76,7 @@ export async function handleSetMaintenance(roomId: number): Promise<ActionResult
     const { error } = await client.rpc("rpc_set_room_maintenance", { p_room_id: roomId });
     if (error) throw error;
     revalidatePath("/admin");
+    revalidateCalendarViews();
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al poner habitación en mantenimiento.");
@@ -69,11 +84,21 @@ export async function handleSetMaintenance(roomId: number): Promise<ActionResult
   }
 }
 
-export async function handleCheckOut(reservationId: string): Promise<ActionResult> {
+export async function handleCheckOut({
+  reservationId,
+  paymentAmount,
+  paymentMethod,
+  paymentNotes,
+}: CheckoutPayload): Promise<ActionResult> {
   try {
-    await doCheckout(reservationId);
+    await doCheckout({
+      reservationId,
+      paymentAmount,
+      paymentMethod,
+      paymentNotes,
+    });
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     return { success: true };
@@ -87,6 +112,7 @@ export async function handleMarkAvailable(roomId: number): Promise<ActionResult>
   try {
     await markRoomAsAvailable(roomId);
     revalidatePath("/admin");
+    revalidateCalendarViews();
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al marcar habitacion disponible.");
@@ -108,7 +134,7 @@ export async function handleAssignWalkIn(
     );
 
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
 
     return { success: true, data: { reservationId } };
@@ -126,7 +152,7 @@ export async function handleCreateReservation(
     const reservationId = await staffCreateReservation(validated);
 
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
 
     return { success: true, data: { reservationId } };
@@ -137,7 +163,8 @@ export async function handleCreateReservation(
 }
 
 export async function handleCancelReservation(
-  reservationId: string
+  reservationId: string,
+  reason: string
 ): Promise<ActionResult<{ whatsappSent: boolean }>> {
   try {
     // 1. Obtener datos antes de cancelar (para el webhook)
@@ -145,7 +172,7 @@ export async function handleCancelReservation(
     const settings = await getHotelSettings();
 
     // 2. Cancelar la reserva
-    await cancelReservation(reservationId);
+    await cancelReservation(reservationId, reason);
 
     // 3. Enviar notificación WhatsApp
     let whatsappSent = false;
@@ -168,7 +195,7 @@ export async function handleCancelReservation(
     }
 
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/solicitudes");
@@ -209,7 +236,7 @@ export async function handleConfirmReservation(
     }
 
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/solicitudes");
     return { success: true, data: { whatsappSent } };
@@ -259,7 +286,7 @@ export async function handleExtendReservation(reservationId: string, nights: num
     if (nights <= 0) throw new Error("Debe agregar al menos 1 noche.");
     await extendReservation(reservationId, nights);
     revalidatePath("/admin");
-    revalidatePath("/admin/timeline");
+    revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     return { success: true };

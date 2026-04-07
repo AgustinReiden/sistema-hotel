@@ -16,6 +16,7 @@ import {
   handleExtendReservation,
 } from "./actions";
 import PaymentModal from "../components/PaymentModal";
+import type { UserRole } from "@/lib/types";
 
 type RoomCardProps = {
   room: {
@@ -32,10 +33,12 @@ type RoomCardProps = {
     totalPrice: number;
     paidAmount: number;
     basePrice: number;
+    hasArrivalToday: boolean;
   };
+  role: UserRole;
 };
 
-export default function RoomCard({ room }: RoomCardProps) {
+export default function RoomCard({ room, role }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -43,9 +46,10 @@ export default function RoomCard({ room }: RoomCardProps) {
   const [isCheckoutConfirmOpen, setIsCheckoutConfirmOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [extendNights, setExtendNights] = useState(1);
+  const [cancelReason, setCancelReason] = useState("");
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
-  const isConfirmedArrival = room.reservationStatus === "confirmed";
+  const isConfirmedArrival = room.hasArrivalToday;
 
   const onCheckIn = () => {
     const reservationId = room.reservationId;
@@ -87,8 +91,7 @@ export default function RoomCard({ room }: RoomCardProps) {
   };
 
   const onCheckoutClick = () => {
-    const reservationId = room.reservationId;
-    if (!reservationId) return;
+    if (!room.reservationId) return;
 
     if (debt > 0) {
       setIsPaymentModalOpen(true);
@@ -103,7 +106,7 @@ export default function RoomCard({ room }: RoomCardProps) {
     if (!reservationId) return;
 
     startTransition(async () => {
-      const result = await handleCheckOut(reservationId);
+      const result = await handleCheckOut({ reservationId });
       setIsCheckoutConfirmOpen(false);
 
       if (!result.success) {
@@ -115,17 +118,27 @@ export default function RoomCard({ room }: RoomCardProps) {
     });
   };
 
-  const executeCheckoutAfterPayment = () => {
+  const submitCheckoutPayment = async ({
+    amount,
+    paymentMethod,
+  }: {
+    amount: number;
+    paymentMethod: "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
+  }) => {
     const reservationId = room.reservationId;
-    if (!reservationId) return;
-    startTransition(async () => {
-      const result = await handleCheckOut(reservationId);
-      if (!result.success) {
-        toast.error("Pago registrado. Error al ejecutar el check-out: " + result.error);
-        return;
-      }
-      toast.success("Pago registrado y check-out realizado.");
+    if (!reservationId) return { success: false as const, error: "Reserva no encontrada." };
+
+    const result = await handleCheckOut({
+      reservationId,
+      paymentAmount: amount,
+      paymentMethod,
     });
+
+    if (result.success) {
+      setIsPaymentModalOpen(false);
+    }
+
+    return result;
   };
 
   const submitExtend = (e: React.FormEvent) => {
@@ -145,22 +158,24 @@ export default function RoomCard({ room }: RoomCardProps) {
   };
 
   const onCancelReservation = () => {
-    const reservationId = room.reservationId;
-    if (!reservationId) return;
+    if (!room.reservationId) return;
+    setCancelReason("");
     setIsCancelConfirmOpen(true);
   };
 
   const executeCancelReservation = () => {
     const reservationId = room.reservationId;
-    if (!reservationId) return;
+    const reason = cancelReason.trim();
+    if (!reservationId || !reason) return;
 
     startTransition(async () => {
-      const result = await handleCancelReservation(reservationId);
+      const result = await handleCancelReservation(reservationId, reason);
       setIsCancelConfirmOpen(false);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
+      setCancelReason("");
       toast.success("Reserva cancelada exitosamente.");
     });
   };
@@ -179,8 +194,7 @@ export default function RoomCard({ room }: RoomCardProps) {
 
   return (
     <div
-      className={`relative bg-white rounded-xl border transition-all duration-300 shadow-sm hover:shadow-md ${room.isLate ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200"
-        }`}
+      className={`relative bg-white rounded-xl border transition-all duration-300 shadow-sm hover:shadow-md ${room.isLate ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200"}`}
     >
       <div
         className={`p-4 border-b flex justify-between items-start rounded-t-xl ${room.status === "available"
@@ -228,8 +242,7 @@ export default function RoomCard({ room }: RoomCardProps) {
               <div>
                 <p className="text-xs text-slate-500 mb-0.5">Check-out Target</p>
                 <p
-                  className={`text-sm font-bold flex items-center ${room.isLate ? "text-amber-600" : "text-slate-800"
-                    }`}
+                  className={`text-sm font-bold flex items-center ${room.isLate ? "text-amber-600" : "text-slate-800"}`}
                 >
                   <Clock size={14} className="mr-1.5" />
                   {room.checkout}
@@ -288,7 +301,7 @@ export default function RoomCard({ room }: RoomCardProps) {
             {isConfirmedArrival ? (
               <>
                 <div className="w-full bg-green-50 border border-green-200 rounded-lg p-3 text-center mb-1">
-                  <p className="text-xs text-green-600 font-bold uppercase tracking-wide mb-0.5">Reserva Confirmada</p>
+                  <p className="text-xs text-green-600 font-bold uppercase tracking-wide mb-0.5">Reserva para Hoy</p>
                   <p className="text-sm font-semibold text-green-800 truncate">{room.client}</p>
                   <p className="text-xs text-green-600 mt-0.5">Check-out: {room.checkout}</p>
                 </div>
@@ -297,7 +310,7 @@ export default function RoomCard({ room }: RoomCardProps) {
                   disabled={isPending}
                   className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
                 >
-                  Confirmar Check-In
+                  Hacer Check-In Automático
                 </button>
                 <button
                   onClick={onCancelReservation}
@@ -371,18 +384,14 @@ export default function RoomCard({ room }: RoomCardProps) {
         <PaymentModal
           isOpen
           onClose={() => setIsPaymentModalOpen(false)}
-          reservationId={room.reservationId}
           clientName={room.client || "Desconocido"}
           totalPrice={room.totalPrice}
           paidAmount={room.paidAmount}
-          onSuccess={() => {
-            setIsPaymentModalOpen(false);
-            executeCheckoutAfterPayment();
-          }}
+          role={role}
+          onSubmitPayment={submitCheckoutPayment}
         />
       )}
 
-      {/* Checkout Confirm Modal */}
       {isCheckoutConfirmOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
@@ -412,7 +421,6 @@ export default function RoomCard({ room }: RoomCardProps) {
         </div>
       )}
 
-      {/* Extend Reservation Modal */}
       {isExtendModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
@@ -427,7 +435,7 @@ export default function RoomCard({ room }: RoomCardProps) {
                   type="number"
                   min="1"
                   value={extendNights}
-                  onChange={(e) => setExtendNights(parseInt(e.target.value) || 1)}
+                  onChange={(e) => setExtendNights(parseInt(e.target.value, 10) || 1)}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring outline-none"
                   required
                 />
@@ -454,15 +462,25 @@ export default function RoomCard({ room }: RoomCardProps) {
         </div>
       )}
 
-      {/* Cancel Reservation Confirm Modal */}
       {isCancelConfirmOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden p-6 relative">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Cancelar Reserva</h3>
-            <p className="text-sm text-slate-600 mb-6">
-              ¿Estás seguro de cancelar la reserva de <strong>{room.client}</strong>? Se vaciarán los registros de pago y se liberará la habitación.
+            <p className="text-sm text-slate-600 mb-4">
+              Indica el motivo de cancelación para la reserva de <strong>{room.client}</strong>. Quedará auditado en la tabla de control.
             </p>
-            <div className="flex gap-3 justify-end">
+            <label className="block text-sm font-semibold text-slate-700 mb-2" htmlFor={`cancel-reason-${room.id}`}>
+              Motivo
+            </label>
+            <textarea
+              id={`cancel-reason-${room.id}`}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={4}
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-red-500 focus:ring outline-none resize-none"
+              placeholder="Ej. El pasajero reprogramó el viaje."
+            />
+            <div className="flex gap-3 justify-end mt-6">
               <button
                 type="button"
                 className="px-4 py-2 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
@@ -473,9 +491,9 @@ export default function RoomCard({ room }: RoomCardProps) {
               </button>
               <button
                 type="button"
-                className="px-4 py-2 text-white font-bold bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                className="px-4 py-2 text-white font-bold bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
                 onClick={executeCancelReservation}
-                disabled={isPending}
+                disabled={isPending || !cancelReason.trim()}
               >
                 Sí, Cancelar
               </button>

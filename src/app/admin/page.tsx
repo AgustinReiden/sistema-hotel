@@ -4,8 +4,7 @@ import { es } from "date-fns/locale";
 
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
-import { getDashboardData } from "@/lib/data";
-
+import { getCurrentUserRole, getDashboardData } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -23,19 +22,40 @@ type DashboardRoom = {
   totalPrice: number;
   paidAmount: number;
   basePrice: number;
+  hasArrivalToday: boolean;
 };
 
-function isRoomOccupiedNow(reservation: { status: string }): boolean {
+function getDateKey(date: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function isRoomOccupiedNow(reservation: { status: string }) {
   return reservation.status === "checked_in";
 }
 
-function isRoomConfirmed(reservation: { status: string }): boolean {
-  return reservation.status === "confirmed";
+function isRoomConfirmedToday(
+  reservation: { status: string; check_in_target: string },
+  todayKey: string,
+  timeZone: string
+) {
+  return (
+    reservation.status === "confirmed" &&
+    getDateKey(new Date(reservation.check_in_target), timeZone) === todayKey
+  );
 }
 
 export default async function Dashboard() {
-  const { rooms, reservations } = await getDashboardData();
+  const [{ rooms, reservations, hotelSettings }, role] = await Promise.all([
+    getDashboardData(),
+    getCurrentUserRole(),
+  ]);
   const now = new Date();
+  const todayKey = getDateKey(now, hotelSettings.timezone);
 
   let lateCheckoutsCount = 0;
 
@@ -45,7 +65,9 @@ export default async function Dashboard() {
       isRoomOccupiedNow(reservation)
     );
     const confirmedReservation = !activeReservation
-      ? roomReservations.find((r) => isRoomConfirmed(r))
+      ? roomReservations.find((reservation) =>
+        isRoomConfirmedToday(reservation, todayKey, hotelSettings.timezone)
+      )
       : undefined;
 
     let status = room.status;
@@ -73,7 +95,6 @@ export default async function Dashboard() {
         lateCheckoutsCount++;
       }
     } else if (confirmedReservation) {
-      // Show confirmed reservations as a "pending check-in" state
       client = confirmedReservation.client_name;
       checkout = format(new Date(confirmedReservation.check_out_target), "dd MMM HH:mm", {
         locale: es,
@@ -98,6 +119,7 @@ export default async function Dashboard() {
       totalPrice,
       paidAmount,
       basePrice: room.base_price,
+      hasArrivalToday: Boolean(confirmedReservation),
     };
   });
 
@@ -144,7 +166,7 @@ export default async function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {mappedRooms.map((room) => (
-            <RoomCard key={room.id} room={room} />
+            <RoomCard key={room.id} room={room} role={role} />
           ))}
         </div>
       </div>

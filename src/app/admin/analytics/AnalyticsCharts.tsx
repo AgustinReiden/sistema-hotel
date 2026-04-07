@@ -178,25 +178,26 @@ function DonutChart({
   const r = 80;
   const innerR = 50;
 
-  let startAngle = -90;
-  const arcs = data.map((d, i) => {
+  const arcs = data.reduce<
+    Array<{ key: string; value: number; pct: number; angle: number; start: number; color: string }>
+  >((acc, d, i) => {
+    const previousArc = acc[acc.length - 1];
+    const start = previousArc ? previousArc.start + previousArc.angle : -90;
     const pct = total > 0 ? d.value / total : 0;
     const angle = pct * 360;
-    const start = startAngle;
-    startAngle += angle;
-    return { ...d, pct, angle, start, color: colorMap?.[d.key] ?? CHART_COLORS[i % CHART_COLORS.length] };
-  });
+    acc.push({
+      ...d,
+      pct,
+      angle,
+      start,
+      color: colorMap?.[d.key] ?? CHART_COLORS[i % CHART_COLORS.length],
+    });
+    return acc;
+  }, []);
 
   function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
     const rad = (angleDeg * Math.PI) / 180;
     return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-  }
-
-  function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number) {
-    const start = polarToCartesian(cx, cy, r, endAngle);
-    const end = polarToCartesian(cx, cy, r, startAngle);
-    const largeArc = endAngle - startAngle > 180 ? 1 : 0;
-    return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`;
   }
 
   return (
@@ -205,8 +206,6 @@ function DonutChart({
         <svg width={200} height={200}>
           {arcs.map((arc) => {
             if (arc.angle < 0.5) return null;
-            const outerPath = describeArc(cx, cy, r, arc.start, arc.start + arc.angle);
-            const innerPath = describeArc(cx, cy, innerR, arc.start, arc.start + arc.angle);
             const outerStart = polarToCartesian(cx, cy, r, arc.start);
             const innerStart = polarToCartesian(cx, cy, innerR, arc.start);
             const outerEnd = polarToCartesian(cx, cy, r, arc.start + arc.angle);

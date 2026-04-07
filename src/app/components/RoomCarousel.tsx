@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Room } from "@/lib/types";
@@ -37,22 +37,22 @@ export default function RoomCarousel({
 
   const availableSet = useMemo(() => new Set(availableRoomIds), [availableRoomIds]);
 
-  const onSelect = useCallback(() => {
-    if (!emblaApi) return;
-    setCanScrollPrev(emblaApi.canScrollPrev());
-    setCanScrollNext(emblaApi.canScrollNext());
-  }, [emblaApi]);
-
   useEffect(() => {
     if (!emblaApi) return;
-    onSelect();
-    emblaApi.on("select", onSelect);
-    emblaApi.on("reInit", onSelect);
-    return () => {
-      emblaApi.off("select", onSelect);
-      emblaApi.off("reInit", onSelect);
+    const syncScrollButtons = () => {
+      setCanScrollPrev(emblaApi.canScrollPrev());
+      setCanScrollNext(emblaApi.canScrollNext());
     };
-  }, [emblaApi, onSelect]);
+
+    emblaApi.on("select", syncScrollButtons);
+    emblaApi.on("reInit", syncScrollButtons);
+    emblaApi.emit("select");
+
+    return () => {
+      emblaApi.off("select", syncScrollButtons);
+      emblaApi.off("reInit", syncScrollButtons);
+    };
+  }, [emblaApi]);
 
   const showArrows = rooms.length > 3;
 

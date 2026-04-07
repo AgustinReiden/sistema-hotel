@@ -10,7 +10,7 @@ export default async function AdminLayout({
     const { data: { user } } = await supabase.auth.getUser();
 
     let role = "receptionist";
-    let userEmail = user?.email || "";
+    const userEmail = user?.email || "";
     if (user) {
         const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
         if (profile?.role) {

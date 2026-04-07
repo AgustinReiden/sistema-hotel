@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+const optionalPhoneSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  },
+  z
+    .string()
+    .trim()
+    .min(8, "El telefono debe tener al menos 8 digitos.")
+    .regex(/^[\d\s\-+()]+$/, "El telefono contiene caracteres invalidos.")
+    .optional()
+);
+
 export const assignWalkInSchema = z.object({
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),
   clientName: z
@@ -20,6 +34,11 @@ export const createReservationSchema = z
       .string()
       .trim()
       .min(2, "El nombre del huesped debe tener al menos 2 caracteres."),
+    clientDni: z
+      .string()
+      .trim()
+      .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
+    clientPhone: optionalPhoneSchema,
     checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
     checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
   })
@@ -29,7 +48,7 @@ export const createReservationSchema = z
   });
 
 export const publicBookingSchema = z.object({
-  roomId: z.number().int().positive("El ID de la habitación es inválido."),
+  roomId: z.number().int().positive("El ID de la habitacion es invalido."),
   clientName: z
     .string()
     .trim()
@@ -37,12 +56,12 @@ export const publicBookingSchema = z.object({
   clientDni: z
     .string()
     .trim()
-    .min(6, "El DNI debe tener al menos 6 caracteres."),
+    .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
   clientPhone: z
     .string()
     .trim()
-    .min(8, "El teléfono debe tener al menos 8 dígitos.")
-    .regex(/^[\d\s\-+()]+$/, "El teléfono contiene caracteres inválidos."),
+    .min(8, "El telefono debe tener al menos 8 digitos.")
+    .regex(/^[\d\s\-+()]+$/, "El telefono contiene caracteres invalidos."),
   checkIn: z.string().min(1, "La fecha de entrada es requerida."),
   checkOut: z.string().min(1, "La fecha de salida es requerida."),
 });
@@ -70,12 +89,12 @@ export const hotelSettingsSchema = z.object({
     .regex(/^[A-Za-z]{3}$/, "La moneda debe ser un codigo ISO de 3 letras (ej. USD, ARS).")
     .transform((value) => value.toUpperCase()),
   contact_email: z.string().optional().nullable(),
-  contact_phone: z.string().min(5, "El teléfono debe tener al menos 5 caracteres."),
+  contact_phone: z.string().min(5, "El telefono debe tener al menos 5 caracteres."),
   contact_instagram: z.string().optional().nullable(),
-  address: z.string().min(5, "La dirección debe tener al menos 5 caracteres."),
-  hero_title: z.string().min(5, "El título principal debe tener al menos 5 caracteres."),
-  hero_subtitle: z.string().min(5, "El subtítulo debe tener al menos 5 caracteres."),
-  hero_image_url: z.string().url("Debe ser una URL válida.").or(z.string().startsWith('/', 'Debe empezar con /')).optional().nullable(),
-  services_image_url: z.string().url("Debe ser una URL válida.").or(z.string().startsWith('/', 'Debe empezar con /')).optional().nullable(),
-  logo_url: z.string().url("Debe ser una URL válida.").or(z.string().startsWith('/', 'Debe empezar con /')).optional().nullable(),
+  address: z.string().min(5, "La direccion debe tener al menos 5 caracteres."),
+  hero_title: z.string().min(5, "El titulo principal debe tener al menos 5 caracteres."),
+  hero_subtitle: z.string().min(5, "El subtitulo debe tener al menos 5 caracteres."),
+  hero_image_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
+  services_image_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
+  logo_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
 });

@@ -5,7 +5,6 @@ import {
   TrendingUp,
   CalendarCheck,
   DollarSign,
-  Users,
   XCircle,
   LogIn,
 } from "lucide-react";

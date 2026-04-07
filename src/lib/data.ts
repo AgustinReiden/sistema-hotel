@@ -5,9 +5,11 @@ import type {
   Guest,
   HotelSettings,
   PendingReservation,
+  PaymentMethod,
   Reservation,
   ReservationStatus,
   Room,
+  UserRole,
 } from "./types";
 
 const ACTIVE_RESERVATION_STATUSES: ReservationStatus[] = [
@@ -58,8 +60,15 @@ type CreateReservationInput = {
   clientName: string;
   checkIn: string;
   checkOut: string;
+  clientDni: string;
   clientPhone?: string;
-  clientDni?: string;
+};
+
+type CheckoutReservationInput = {
+  reservationId: string;
+  paymentAmount?: number;
+  paymentMethod?: PaymentMethod;
+  paymentNotes?: string;
 };
 
 export async function getHotelSettings(): Promise<HotelSettings> {
@@ -67,6 +76,24 @@ export async function getHotelSettings(): Promise<HotelSettings> {
   const { data, error } = await supabase.from("hotel_settings").select("*").single();
   if (error) throw error;
   return data as HotelSettings;
+}
+
+export async function getCurrentUserRole(): Promise<UserRole> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return "client";
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (error) throw error;
+  return (data?.role as UserRole | undefined) ?? "client";
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -140,9 +167,18 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
   if (roomsResult.error) throw roomsResult.error;
   if (reservationsResult.error) throw reservationsResult.error;
 
+  const reservations = (reservationsResult.data ?? []).map((reservation: Reservation & {
+    total_price: number | string;
+    paid_amount: number | string;
+  }) => ({
+    ...reservation,
+    total_price: Number(reservation.total_price) || 0,
+    paid_amount: Number(reservation.paid_amount) || 0,
+  })) as Reservation[];
+
   return {
     rooms: (roomsResult.data ?? []) as Room[],
-    reservations: (reservationsResult.data ?? []) as Reservation[],
+    reservations,
     startDate: today,
     endDate: end,
     daysCount: days,
@@ -217,10 +253,18 @@ export async function doCheckIn(reservationId: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function doCheckout(reservationId: string): Promise<void> {
+export async function doCheckout({
+  reservationId,
+  paymentAmount,
+  paymentMethod,
+  paymentNotes,
+}: CheckoutReservationInput): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("rpc_staff_checkout_reservation", {
     p_reservation_id: reservationId,
+    p_payment_amount: paymentAmount ?? null,
+    p_payment_method: paymentMethod ?? null,
+    p_payment_notes: paymentNotes ?? null,
   });
 
   if (error) throw error;
@@ -296,6 +340,8 @@ export async function staffCreateReservation({
   clientName,
   checkIn,
   checkOut,
+  clientDni,
+  clientPhone,
 }: CreateReservationInput): Promise<string> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_staff_create_reservation", {
@@ -303,6 +349,8 @@ export async function staffCreateReservation({
     p_client_name: clientName,
     p_check_in: checkIn,
     p_check_out: checkOut,
+    p_client_dni: clientDni,
+    p_client_phone: clientPhone || null,
   });
 
   if (error) throw error;
@@ -433,10 +481,11 @@ export function determineSmarterAvailableRooms(availableRooms: Room[], targetGue
   return resultRooms;
 }
 
-export async function cancelReservation(reservationId: string): Promise<void> {
+export async function cancelReservation(reservationId: string, reason: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("rpc_cancel_reservation", {
     p_reservation_id: reservationId,
+    p_reason: reason,
   });
 
   if (error) throw error;

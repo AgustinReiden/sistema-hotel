@@ -32,6 +32,7 @@ export async function registerPaymentAction(
     revalidatePath("/admin");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/guests");
+    revalidatePath("/admin/calendario");
     revalidatePath("/admin/timeline");
 
     return { success: true };
