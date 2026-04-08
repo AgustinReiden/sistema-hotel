@@ -46,28 +46,16 @@ const ROW_HEIGHT = 84;
 const BAR_TOP = 4;
 const BAR_HEIGHT = 76;
 
-function getReservationPalette(status: Reservation["status"], id: string) {
-  const hash = Array.from(id).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const variant = hash % 3;
-  switch (status) {
+function getReservationPalette(category: "active" | "next" | "future" | "pending") {
+  switch (category) {
     case "pending":
-      return [
-        { from: "#fbbf24", to: "#f59e0b" }, // amber
-        { from: "#fb923c", to: "#f97316" }, // orange
-        { from: "#f43f5e", to: "#e11d48" }, // rose
-      ][variant];
-    case "checked_in":
-      return [
-        { from: "#60a5fa", to: "#3b82f6" }, // blue
-        { from: "#818cf8", to: "#6366f1" }, // indigo
-        { from: "#a78bfa", to: "#8b5cf6" }, // violet
-      ][variant];
-    default:
-      return [
-        { from: "#34d399", to: "#10b981" }, // emerald
-        { from: "#2dd4bf", to: "#14b8a6" }, // teal
-        { from: "#22d3ee", to: "#06b6d4" }, // cyan
-      ][variant];
+      return { from: "#94a3b8", to: "#64748b" }; // slate (grey)
+    case "active":
+      return { from: "#34d399", to: "#10b981" }; // emerald (green)
+    case "next":
+      return { from: "#fbbf24", to: "#f59e0b" }; // amber (yellow)
+    case "future":
+      return { from: "#60a5fa", to: "#3b82f6" }; // blue
   }
 }
 
@@ -192,14 +180,18 @@ export default function CalendarClient({
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
             <span className="w-3 h-3 rounded-full bg-emerald-400" />
-            Confirmada
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-blue-400" />
-            Check-in
+            Activa
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
             <span className="w-3 h-3 rounded-full bg-amber-400" />
+            Próxima
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
+            <span className="w-3 h-3 rounded-full bg-blue-400" />
+            Futuras
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
+            <span className="w-3 h-3 rounded-full bg-slate-400" />
             Pendiente
           </span>
         </div>
@@ -241,6 +233,23 @@ export default function CalendarClient({
               .map((reservation) => buildReservationPlacement(reservation, start, daysCount))
               .filter((placement): placement is ReservationPlacement => placement !== null);
 
+            let foundNext = false;
+            const categoryMap = new Map<string, "active" | "next" | "future" | "pending">();
+            roomReservations.forEach((r) => {
+              if (r.status === "pending") {
+                categoryMap.set(r.id, "pending");
+              } else if (r.status === "checked_in") {
+                categoryMap.set(r.id, "active");
+              } else {
+                if (!foundNext) {
+                  categoryMap.set(r.id, "next");
+                  foundNext = true;
+                } else {
+                  categoryMap.set(r.id, "future");
+                }
+              }
+            });
+
             return (
               <div key={room.id} className="flex border-b border-slate-100 hover:bg-slate-50/20">
                 <div
@@ -270,10 +279,11 @@ export default function CalendarClient({
 
                   {placements.map((placement) => {
                     const { cellSpan, startsBeforeRange, endsAfterRange } = placement;
-                    const palette = getReservationPalette(placement.reservation.status, placement.reservation.id);
+                    const category = categoryMap.get(placement.reservation.id) ?? "pending";
+                    const palette = getReservationPalette(category);
                     const width = cellSpan * CELL_WIDTH;
                     
-                    const gap = 5;
+                    const gap = 6;
                     const paddingV = 4;
                     const tl_x = startsBeforeRange ? 0 : gap;
                     const bl_x = startsBeforeRange ? 0 : CELL_WIDTH + gap;
@@ -308,7 +318,7 @@ export default function CalendarClient({
                             points={points} 
                             fill={`url(#grad-${placement.reservation.id})`} 
                             stroke={`url(#grad-${placement.reservation.id})`} 
-                            strokeWidth="10" 
+                            strokeWidth="4" 
                             strokeLinejoin="round" 
                             className="drop-shadow-sm transition-opacity group-hover:opacity-90 pointer-events-auto cursor-pointer"
                             onClick={() => openReservationDetails(placement.reservation)}
