@@ -14,7 +14,6 @@ import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
 import { handleCancelReservation, handleCreateReservation } from "../actions";
-import { getCalendarCellState } from "@/lib/calendar";
 import type { Reservation, Room, UserRole } from "@/lib/types";
 
 type CalendarClientProps = {
@@ -35,9 +34,8 @@ type CreateDraft = {
 
 type ReservationPlacement = {
   reservation: Reservation;
-  stayStartIndex: number;
-  staySpan: number;
-  checkoutIndex: number | null;
+  visibleStartIndex: number;
+  cellSpan: number;
   startsBeforeRange: boolean;
   endsAfterRange: boolean;
 };
@@ -78,32 +76,29 @@ function buildReservationPlacement(
 
   const checkInIndex = differenceInCalendarDays(checkInDay, start);
   const checkoutIndex = differenceInCalendarDays(checkOutDay, start);
-  const stayStartIndex = Math.max(0, checkInIndex);
-  const stayEndIndex = Math.min(daysCount, checkoutIndex);
-  const staySpan = Math.max(0, stayEndIndex - stayStartIndex);
-  const checkoutVisible = checkoutIndex >= 0 && checkoutIndex < daysCount ? checkoutIndex : null;
 
-  if (staySpan === 0 && checkoutVisible === null) {
-    return null;
-  }
+  if (checkoutIndex < 0 || checkInIndex >= daysCount) return null;
+
+  const visibleStartIndex = Math.max(0, checkInIndex);
+  const visibleEndIndex = Math.min(daysCount - 1, checkoutIndex);
+
+  if (visibleStartIndex > visibleEndIndex) return null;
+
+  const startsBeforeRange = checkInIndex < 0;
+  const endsAfterRange = checkoutIndex >= daysCount;
+
+  const cellSpan = visibleEndIndex - visibleStartIndex + 1;
 
   return {
     reservation,
-    stayStartIndex,
-    staySpan,
-    checkoutIndex: checkoutVisible,
-    startsBeforeRange: checkInIndex < 0,
-    endsAfterRange: checkoutIndex >= daysCount,
+    visibleStartIndex,
+    cellSpan,
+    startsBeforeRange,
+    endsAfterRange,
   };
 }
 
-function buildDiagonalOverlay(color: string) {
-  return `linear-gradient(135deg, ${color} 0%, ${color} 47%, transparent 47%, transparent 100%)`;
-}
 
-function buildDiagonalLine(color: string) {
-  return `linear-gradient(135deg, transparent 48.4%, ${color} 48.4%, ${color} 51.6%, transparent 51.6%)`;
-}
 
 export default function CalendarClient({
   rooms,
@@ -251,107 +246,54 @@ export default function CalendarClient({
                   </div>
 
                   {placements.map((placement) => {
-                    if (placement.staySpan === 0) return null;
-
+                    const { cellSpan, startsBeforeRange, endsAfterRange } = placement;
                     const tone = getReservationTone(placement.reservation.status);
-                    const width = placement.staySpan * CELL_WIDTH;
-                    const showText = width >= 150;
-                    const left = placement.stayStartIndex * CELL_WIDTH;
+                    const width = cellSpan * CELL_WIDTH;
+                    
+                    const tl = "0 0";
+                    const tr = endsAfterRange ? "100% 0" : `calc(100% - ${CELL_WIDTH}px) 0`;
+                    const br = "100% 100%";
+                    const bl = startsBeforeRange ? "0 100%" : `${CELL_WIDTH}px 100%`;
+                    
+                    const clipPath = `polygon(${tl}, ${tr}, ${br}, ${bl})`;
+                    const left = placement.visibleStartIndex * CELL_WIDTH;
+
+                    const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
+                    const showText = horizontalWidth >= 100;
+                    
+                    const paddingLeft = startsBeforeRange ? 16 : (CELL_WIDTH / 2) + 16;
+                    const paddingRight = endsAfterRange ? 16 : 16;
 
                     return (
                       <button
                         type="button"
                         key={`stay-${placement.reservation.id}`}
                         onClick={() => openReservationDetails(placement.reservation)}
-                        className={`absolute z-10 border-y border-x px-4 text-left shadow-sm transition-transform hover:-translate-y-0.5 ${tone.barClass} ${
-                          placement.startsBeforeRange ? "" : "rounded-l-2xl"
-                        } ${
-                          placement.checkoutIndex !== null || placement.endsAfterRange ? "" : "rounded-r-2xl"
-                        }`}
+                        className={`absolute z-10 text-left transition-transform hover:-translate-y-0.5 ${tone.barClass}`}
                         style={{
                           left: `${left}px`,
                           top: `${BAR_TOP}px`,
                           width: `${width}px`,
                           height: `${BAR_HEIGHT}px`,
+                          clipPath,
+                          paddingLeft: `${paddingLeft}px`,
+                          paddingRight: `${paddingRight}px`,
                         }}
                       >
                         {showText && (
                           <div className="flex h-full flex-col justify-center overflow-hidden">
-                            <p className="text-sm font-semibold truncate">{placement.reservation.client_name}</p>
-                            <p className="text-xs opacity-90">
-                              {placement.reservation.status === "checked_in" ? "En estadia" : "Reserva"}
+                            <p className="text-sm font-semibold truncate leading-tight mb-0.5">{placement.reservation.client_name}</p>
+                            <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 leading-none">
+                              {placement.reservation.status === "checked_in" ? "En estadia" : (placement.reservation.status === "pending" ? "Pendiente" : "Confirmada")}
                             </p>
                           </div>
                         )}
-                      </button>
-                    );
-                  })}
-
-                  {placements.map((placement) => {
-                    if (placement.checkoutIndex === null) return null;
-
-                    const checkoutDay = days[placement.checkoutIndex];
-                    const cellState = getCalendarCellState(roomReservations, room.id, checkoutDay);
-                    const sharedWithAnotherStay =
-                      Boolean(cellState.stayReservation) &&
-                      cellState.stayReservation?.id !== placement.reservation.id;
-                    const tone = getReservationTone(placement.reservation.status);
-                    const left = placement.checkoutIndex * CELL_WIDTH;
-
-                    return (
-                      <div
-                        key={`checkout-${placement.reservation.id}`}
-                        className="absolute"
-                        style={{
-                          left: `${left}px`,
-                          top: `${BAR_TOP}px`,
-                          width: `${CELL_WIDTH}px`,
-                          height: `${BAR_HEIGHT}px`,
-                        }}
-                      >
-                        {!sharedWithAnotherStay && (
-                          <button
-                            type="button"
-                            onClick={() => openReservationDetails(placement.reservation)}
-                            className={`absolute inset-0 z-10 border-y border-r bg-white/95 text-slate-500 shadow-sm ${
-                              placement.staySpan === 0 && !placement.startsBeforeRange ? "rounded-l-2xl" : ""
-                            } rounded-r-2xl`}
-                          >
-                            <span className="absolute bottom-2 right-3 text-[11px] font-semibold">Salida</span>
-                          </button>
+                        {!endsAfterRange && (
+                          <span className="absolute bottom-1 right-2 text-[9px] font-bold uppercase tracking-wider opacity-60">
+                            Salida
+                          </span>
                         )}
-
-                        <button
-                          type="button"
-                          onClick={() => openReservationDetails(placement.reservation)}
-                          className="absolute inset-0 z-20"
-                          style={{
-                            clipPath: sharedWithAnotherStay ? "polygon(0 0, 100% 0, 0 100%)" : undefined,
-                          }}
-                        >
-                          <span
-                            className="absolute inset-0"
-                            style={{
-                              backgroundImage: buildDiagonalOverlay(tone.accent),
-                              borderTopLeftRadius: "16px",
-                              borderBottomLeftRadius: sharedWithAnotherStay ? "0px" : "16px",
-                              borderTopRightRadius: sharedWithAnotherStay ? "0px" : "16px",
-                              borderBottomRightRadius: sharedWithAnotherStay ? "0px" : "16px",
-                            }}
-                          />
-                        </button>
-
-                        <div
-                          className="absolute inset-0 z-30 pointer-events-none"
-                          style={{
-                            backgroundImage: buildDiagonalLine("rgba(15, 23, 42, 0.45)"),
-                            borderTopLeftRadius: "16px",
-                            borderBottomLeftRadius: sharedWithAnotherStay ? "0px" : "16px",
-                            borderTopRightRadius: sharedWithAnotherStay ? "0px" : "16px",
-                            borderBottomRightRadius: sharedWithAnotherStay ? "0px" : "16px",
-                          }}
-                        />
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
