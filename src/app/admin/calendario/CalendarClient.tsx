@@ -46,23 +46,28 @@ const ROW_HEIGHT = 84;
 const BAR_TOP = 4;
 const BAR_HEIGHT = 76;
 
-function getReservationTone(status: Reservation["status"]) {
+function getReservationPalette(status: Reservation["status"], id: string) {
+  const hash = Array.from(id).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const variant = hash % 3;
   switch (status) {
     case "pending":
-      return {
-        barClass: "bg-gradient-to-r from-slate-400 via-slate-500 to-slate-400 text-white shadow-sm ring-1 ring-black/5",
-        accent: "rgba(100, 116, 139, 0.92)",
-      };
+      return [
+        { from: "#fbbf24", to: "#f59e0b" }, // amber
+        { from: "#fb923c", to: "#f97316" }, // orange
+        { from: "#f43f5e", to: "#e11d48" }, // rose
+      ][variant];
     case "checked_in":
-      return {
-        barClass: "bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 text-white shadow-sm ring-1 ring-black/5",
-        accent: "rgba(37, 99, 235, 0.95)",
-      };
+      return [
+        { from: "#60a5fa", to: "#3b82f6" }, // blue
+        { from: "#818cf8", to: "#6366f1" }, // indigo
+        { from: "#a78bfa", to: "#8b5cf6" }, // violet
+      ][variant];
     default:
-      return {
-        barClass: "bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-400 text-white shadow-sm ring-1 ring-black/5",
-        accent: "rgba(5, 150, 105, 0.95)",
-      };
+      return [
+        { from: "#34d399", to: "#10b981" }, // emerald
+        { from: "#2dd4bf", to: "#14b8a6" }, // teal
+        { from: "#22d3ee", to: "#06b6d4" }, // cyan
+      ][variant];
   }
 }
 
@@ -186,20 +191,16 @@ export default function CalendarClient({
       <div className="flex flex-wrap items-center justify-between mb-5 gap-4">
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500" />
+            <span className="w-3 h-3 rounded-full bg-emerald-400" />
             Confirmada
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-400 to-blue-500" />
+            <span className="w-3 h-3 rounded-full bg-blue-400" />
             Check-in
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-gradient-to-r from-slate-400 to-slate-500" />
+            <span className="w-3 h-3 rounded-full bg-amber-400" />
             Pendiente
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-4 h-3 bg-slate-400" style={{ clipPath: "polygon(0 0, 80% 0, 100% 100%, 20% 100%)" }} />
-            Forma de cinta
           </span>
         </div>
         <p className="text-sm text-slate-500">
@@ -269,55 +270,67 @@ export default function CalendarClient({
 
                   {placements.map((placement) => {
                     const { cellSpan, startsBeforeRange, endsAfterRange } = placement;
-                    const tone = getReservationTone(placement.reservation.status);
+                    const palette = getReservationPalette(placement.reservation.status, placement.reservation.id);
                     const width = cellSpan * CELL_WIDTH;
                     
-                    const tl = "0 0";
-                    const tr = endsAfterRange ? "100% 0" : `calc(100% - ${CELL_WIDTH}px) 0`;
-                    const br = "100% 100%";
-                    const bl = startsBeforeRange ? "0 100%" : `${CELL_WIDTH}px 100%`;
-                    
-                    const clipPath = `polygon(${tl}, ${tr}, ${br}, ${bl})`;
-                    const left = placement.visibleStartIndex * CELL_WIDTH;
+                    const gap = 5;
+                    const paddingV = 4;
+                    const tl_x = startsBeforeRange ? 0 : gap;
+                    const bl_x = startsBeforeRange ? 0 : CELL_WIDTH + gap;
+                    const tr_x = endsAfterRange ? width : width - CELL_WIDTH - gap;
+                    const br_x = endsAfterRange ? width : width - gap;
 
+                    const points = `${tl_x},${paddingV} ${tr_x},${paddingV} ${br_x},${BAR_HEIGHT - paddingV} ${bl_x},${BAR_HEIGHT - paddingV}`;
+                    
+                    const left = placement.visibleStartIndex * CELL_WIDTH;
                     const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
                     const showText = horizontalWidth >= 100;
-                    
-                    const paddingLeft = startsBeforeRange ? 16 : 60;
-                    const paddingRight = endsAfterRange ? 16 : 60;
 
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={`stay-${placement.reservation.id}`}
                         onClick={() => openReservationDetails(placement.reservation)}
-                        className={`absolute z-10 transition-all duration-300 animate-float-ribbon ribbon-gradient-anim ${tone.barClass}`}
+                        className="absolute z-10 cursor-pointer animate-float-ribbon group"
                         style={{
                           left: `${left}px`,
                           top: `${BAR_TOP}px`,
                           width: `${width}px`,
                           height: `${BAR_HEIGHT}px`,
-                          clipPath,
-                          paddingLeft: `${paddingLeft}px`,
-                          paddingRight: `${paddingRight}px`,
                         }}
                       >
+                        <svg className="absolute inset-0 w-full h-full" style={{ overflow: 'visible' }}>
+                          <defs>
+                            <linearGradient id={`grad-${placement.reservation.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                              <stop offset="0%" stopColor={palette.from} />
+                              <stop offset="100%" stopColor={palette.to} />
+                            </linearGradient>
+                          </defs>
+                          <polygon 
+                            points={points} 
+                            fill={`url(#grad-${placement.reservation.id})`} 
+                            stroke={`url(#grad-${placement.reservation.id})`} 
+                            strokeWidth="10" 
+                            strokeLinejoin="round" 
+                            className="drop-shadow-sm transition-opacity group-hover:opacity-90"
+                          />
+                        </svg>
+
                         {showText && (
-                          <div className="flex h-full flex-col justify-center items-center overflow-hidden">
-                            <p className="text-[13px] font-bold truncate leading-tight mb-0.5 max-w-full drop-shadow-md">
+                          <div className="relative z-10 flex h-full flex-col justify-center items-center pointer-events-none">
+                            <p className="text-[14px] font-black tracking-tight text-white drop-shadow-md whitespace-nowrap">
                               {placement.reservation.client_name}
                             </p>
-                            <p className="text-[9px] uppercase font-black tracking-widest opacity-90 leading-none drop-shadow-md">
+                            <p className="text-[10px] uppercase font-black tracking-widest text-white/90 drop-shadow-md whitespace-nowrap">
                               {placement.reservation.status === "checked_in" ? "En estadia" : (placement.reservation.status === "pending" ? "Pendiente" : "Confirmada")}
                             </p>
                           </div>
                         )}
                         {!endsAfterRange && (
-                          <span className="absolute bottom-[6px] right-[14px] text-[8.5px] font-black uppercase tracking-widest opacity-80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]">
+                          <span className="absolute bottom-[6px] right-[24px] z-10 text-[9px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
                             Salida
                           </span>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
