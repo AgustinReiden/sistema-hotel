@@ -289,8 +289,7 @@ export default function CalendarClient({
                     return (
                       <div
                         key={`stay-${placement.reservation.id}`}
-                        onClick={() => openReservationDetails(placement.reservation)}
-                        className="absolute z-10 cursor-pointer animate-float-ribbon group"
+                        className="absolute z-10 animate-float-ribbon group pointer-events-none"
                         style={{
                           left: `${left}px`,
                           top: `${BAR_TOP}px`,
@@ -298,7 +297,7 @@ export default function CalendarClient({
                           height: `${BAR_HEIGHT}px`,
                         }}
                       >
-                        <svg className="absolute inset-0 w-full h-full" style={{ overflow: 'visible' }}>
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
                           <defs>
                             <linearGradient id={`grad-${placement.reservation.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
                               <stop offset="0%" stopColor={palette.from} />
@@ -311,7 +310,8 @@ export default function CalendarClient({
                             stroke={`url(#grad-${placement.reservation.id})`} 
                             strokeWidth="10" 
                             strokeLinejoin="round" 
-                            className="drop-shadow-sm transition-opacity group-hover:opacity-90"
+                            className="drop-shadow-sm transition-opacity group-hover:opacity-90 pointer-events-auto cursor-pointer"
+                            onClick={() => openReservationDetails(placement.reservation)}
                           />
                         </svg>
 
