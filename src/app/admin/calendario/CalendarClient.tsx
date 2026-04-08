@@ -43,24 +43,24 @@ type ReservationPlacement = {
 const CELL_WIDTH = 120;
 const ROOM_COLUMN_WIDTH = 240;
 const ROW_HEIGHT = 84;
-const BAR_TOP = 10;
-const BAR_HEIGHT = 50;
+const BAR_TOP = 4;
+const BAR_HEIGHT = 76;
 
 function getReservationTone(status: Reservation["status"]) {
   switch (status) {
     case "pending":
       return {
-        barClass: "bg-slate-200 border-slate-300 text-slate-700",
+        barClass: "bg-gradient-to-r from-slate-400 via-slate-500 to-slate-400 text-white shadow-sm ring-1 ring-black/5",
         accent: "rgba(100, 116, 139, 0.92)",
       };
     case "checked_in":
       return {
-        barClass: "bg-blue-500 border-blue-600 text-white",
+        barClass: "bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 text-white shadow-sm ring-1 ring-black/5",
         accent: "rgba(37, 99, 235, 0.95)",
       };
     default:
       return {
-        barClass: "bg-emerald-500 border-emerald-600 text-white",
+        barClass: "bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-400 text-white shadow-sm ring-1 ring-black/5",
         accent: "rgba(5, 150, 105, 0.95)",
       };
   }
@@ -161,23 +161,45 @@ export default function CalendarClient({
 
   return (
     <>
+      <style>{`
+        .ribbon-gradient-anim {
+          background-size: 200% 100%;
+          animation: ribbon-bg 5s linear infinite;
+        }
+        @keyframes ribbon-bg {
+          0% { background-position: 0% 50%; }
+          100% { background-position: -200% 50%; }
+        }
+        .animate-float-ribbon {
+          animation: float-ribbon 4s ease-in-out infinite;
+        }
+        @keyframes float-ribbon {
+          0%, 100% { transform: translateY(0); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05)); }
+          50% { transform: translateY(-3px); filter: drop-shadow(0 8px 8px rgba(0,0,0,0.1)); }
+        }
+        .animate-float-ribbon:hover {
+          animation-play-state: paused;
+          transform: translateY(-4px);
+          filter: drop-shadow(0 10px 15px rgba(0,0,0,0.15));
+        }
+      `}</style>
       <div className="flex flex-wrap items-center justify-between mb-5 gap-4">
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-emerald-500" />
+            <span className="w-3 h-3 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500" />
             Confirmada
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-blue-500" />
+            <span className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-400 to-blue-500" />
             Check-in
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-slate-400" />
+            <span className="w-3 h-3 rounded-full bg-gradient-to-r from-slate-400 to-slate-500" />
             Pendiente
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-sm bg-white border border-slate-300 [background-image:linear-gradient(135deg,rgba(15,23,42,0.75)_0%,rgba(15,23,42,0.75)_47%,transparent_47%,transparent_100%)]" />
-            Checkout
+            <span className="w-4 h-3 bg-slate-400" style={{ clipPath: "polygon(0 0, 80% 0, 100% 100%, 20% 100%)" }} />
+            Forma de cinta
           </span>
         </div>
         <p className="text-sm text-slate-500">
@@ -261,15 +283,15 @@ export default function CalendarClient({
                     const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
                     const showText = horizontalWidth >= 100;
                     
-                    const paddingLeft = startsBeforeRange ? 16 : (CELL_WIDTH / 2) + 16;
-                    const paddingRight = endsAfterRange ? 16 : 16;
+                    const paddingLeft = startsBeforeRange ? 16 : 60;
+                    const paddingRight = endsAfterRange ? 16 : 60;
 
                     return (
                       <button
                         type="button"
                         key={`stay-${placement.reservation.id}`}
                         onClick={() => openReservationDetails(placement.reservation)}
-                        className={`absolute z-10 text-left transition-transform hover:-translate-y-0.5 ${tone.barClass}`}
+                        className={`absolute z-10 transition-all duration-300 animate-float-ribbon ribbon-gradient-anim ${tone.barClass}`}
                         style={{
                           left: `${left}px`,
                           top: `${BAR_TOP}px`,
@@ -281,15 +303,17 @@ export default function CalendarClient({
                         }}
                       >
                         {showText && (
-                          <div className="flex h-full flex-col justify-center overflow-hidden">
-                            <p className="text-sm font-semibold truncate leading-tight mb-0.5">{placement.reservation.client_name}</p>
-                            <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 leading-none">
+                          <div className="flex h-full flex-col justify-center items-center overflow-hidden">
+                            <p className="text-[13px] font-bold truncate leading-tight mb-0.5 max-w-full drop-shadow-md">
+                              {placement.reservation.client_name}
+                            </p>
+                            <p className="text-[9px] uppercase font-black tracking-widest opacity-90 leading-none drop-shadow-md">
                               {placement.reservation.status === "checked_in" ? "En estadia" : (placement.reservation.status === "pending" ? "Pendiente" : "Confirmada")}
                             </p>
                           </div>
                         )}
                         {!endsAfterRange && (
-                          <span className="absolute bottom-1 right-2 text-[9px] font-bold uppercase tracking-wider opacity-60">
+                          <span className="absolute bottom-[6px] right-[14px] text-[8.5px] font-black uppercase tracking-widest opacity-80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]">
                             Salida
                           </span>
                         )}
