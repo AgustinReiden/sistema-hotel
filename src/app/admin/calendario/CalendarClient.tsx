@@ -202,9 +202,9 @@ export default function CalendarClient({
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <div className="min-w-max">
-          <div className="flex border-b border-slate-200 sticky top-0 z-20 bg-slate-50">
+          <div className="flex border-b border-slate-200 sticky top-0 z-30 bg-slate-50">
             <div
-              className="shrink-0 p-4 font-semibold text-slate-700 border-r border-slate-200 sticky left-0 z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
+              className="shrink-0 p-4 font-semibold text-slate-700 border-r border-slate-200 sticky left-0 z-40 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
               style={{ width: `${ROOM_COLUMN_WIDTH}px` }}
             >
               Habitacion
@@ -253,7 +253,7 @@ export default function CalendarClient({
             return (
               <div key={room.id} className="flex border-b border-slate-100 hover:bg-slate-50/20">
                 <div
-                  className="shrink-0 p-4 font-medium text-slate-800 bg-white border-r border-slate-200 sticky left-0 z-10 shadow-[1px_0_0_0_#e2e8f0]"
+                  className="shrink-0 p-4 font-medium text-slate-800 bg-white border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0]"
                   style={{ width: `${ROOM_COLUMN_WIDTH}px`, minHeight: `${ROW_HEIGHT}px` }}
                 >
                   Hab. {room.room_number}
