@@ -4,7 +4,10 @@ import { es } from "date-fns/locale";
 
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
-import { getCurrentUserRole, getDashboardData } from "@/lib/data";
+import {
+  getActiveAssociatedClients,
+  getDashboardData,
+} from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,9 @@ type DashboardRoom = {
   isLate: boolean;
   reservationId: string | null;
   reservationStatus: string | null;
+  baseTotalPrice: number;
+  discountPercent: number;
+  discountAmount: number;
   totalPrice: number;
   paidAmount: number;
   basePrice: number;
@@ -50,9 +56,9 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, hotelSettings }, role] = await Promise.all([
+  const [{ rooms, reservations, hotelSettings }, associatedClients] = await Promise.all([
     getDashboardData(),
-    getCurrentUserRole(),
+    getActiveAssociatedClients(),
   ]);
   const now = new Date();
   const todayKey = getDateKey(now, hotelSettings.timezone);
@@ -76,6 +82,9 @@ export default async function Dashboard() {
     let client: string | null = null;
     let reservationId: string | null = null;
     let reservationStatus: string | null = null;
+    let baseTotalPrice = 0;
+    let discountPercent = 0;
+    let discountAmount = 0;
     let totalPrice = 0;
     let paidAmount = 0;
 
@@ -87,6 +96,9 @@ export default async function Dashboard() {
       });
       reservationId = activeReservation.id;
       reservationStatus = activeReservation.status;
+      baseTotalPrice = activeReservation.base_total_price;
+      discountPercent = activeReservation.discount_percent;
+      discountAmount = activeReservation.discount_amount;
       totalPrice = activeReservation.total_price;
       paidAmount = activeReservation.paid_amount;
 
@@ -101,6 +113,9 @@ export default async function Dashboard() {
       });
       reservationId = confirmedReservation.id;
       reservationStatus = confirmedReservation.status;
+      baseTotalPrice = confirmedReservation.base_total_price;
+      discountPercent = confirmedReservation.discount_percent;
+      discountAmount = confirmedReservation.discount_amount;
       totalPrice = confirmedReservation.total_price;
       paidAmount = confirmedReservation.paid_amount;
     }
@@ -116,6 +131,9 @@ export default async function Dashboard() {
       isLate,
       reservationId,
       reservationStatus,
+      baseTotalPrice,
+      discountPercent,
+      discountAmount,
       totalPrice,
       paidAmount,
       basePrice: room.base_price,
@@ -136,7 +154,7 @@ export default async function Dashboard() {
               {lateCheckoutsCount} Check-out Retrasado
             </div>
           )}
-          <NewReservationButton rooms={rooms} />
+          <NewReservationButton rooms={rooms} associatedClients={associatedClients} />
         </div>
       </header>
 
@@ -166,7 +184,11 @@ export default async function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {mappedRooms.map((room) => (
-            <RoomCard key={room.id} room={room} role={role} />
+            <RoomCard
+              key={room.id}
+              room={room}
+              associatedClients={associatedClients}
+            />
           ))}
         </div>
       </div>

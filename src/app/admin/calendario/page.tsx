@@ -1,15 +1,22 @@
 import { CalendarDays } from "lucide-react";
 
 import CalendarClient from "./CalendarClient";
-import { getCurrentUserRole, getHotelSettings, getTimelineData } from "@/lib/data";
+import {
+  getActiveAssociatedClients,
+  getCurrentUserRole,
+  getHotelSettings,
+  getTimelineData,
+} from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function CalendarPage() {
-  const [{ rooms, reservations, startDate, daysCount }, hotelSettings, role] = await Promise.all([
+  const [{ rooms, reservations, startDate, daysCount }, hotelSettings, role, associatedClients] =
+    await Promise.all([
     getTimelineData(14),
     getHotelSettings(),
     getCurrentUserRole(),
+    getActiveAssociatedClients(),
   ]);
 
   return (
@@ -30,6 +37,7 @@ export default async function CalendarPage() {
           startDate={startDate.toISOString()}
           daysCount={daysCount}
           role={role}
+          associatedClients={associatedClients}
           standardCheckInTime={hotelSettings.standard_check_in_time.slice(0, 5)}
           standardCheckOutTime={hotelSettings.standard_check_out_time.slice(0, 5)}
         />

@@ -5,16 +5,18 @@ import { X, Loader2, DollarSign, CreditCard, Banknote, Landmark, Wallet } from "
 import { toast } from "sonner";
 
 import { registerPaymentAction } from "@/app/admin/finances/actions";
-import type { ActionResult, PaymentMethod, UserRole } from "@/lib/types";
+import type { ActionResult, PaymentMethod } from "@/lib/types";
 
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   clientName: string;
+  baseTotalPrice?: number | string;
+  discountPercent?: number | string;
+  discountAmount?: number | string;
   totalPrice: number | string;
   paidAmount: number | string;
   reservationId?: string;
-  role?: UserRole;
   onSuccess?: () => void;
   onSubmitPayment?: (payload: {
     amount: number;
@@ -26,18 +28,25 @@ export default function PaymentModal({
   isOpen,
   onClose,
   clientName,
+  baseTotalPrice,
+  discountPercent,
+  discountAmount,
   totalPrice,
   paidAmount,
   reservationId,
-  role,
   onSuccess,
   onSubmitPayment,
 }: PaymentModalProps) {
+  const numericBaseTotal = Number(baseTotalPrice ?? totalPrice);
+  const numericDiscountPercent = Number(discountPercent ?? 0);
+  const numericDiscountAmount = Number(discountAmount ?? 0);
   const numericTotal = Number(totalPrice);
   const numericPaid = Number(paidAmount);
   const debt = Math.max(0, numericTotal - numericPaid);
   const isCheckoutMode = Boolean(onSubmitPayment);
-  const amountEditable = isCheckoutMode ? role === "admin" : true;
+  const amountEditable = !isCheckoutMode;
+  const showDiscountBreakdown =
+    numericDiscountPercent > 0 || numericDiscountAmount > 0 || numericBaseTotal !== numericTotal;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +129,38 @@ export default function PaymentModal({
             </div>
           </div>
 
+          {showDiscountBreakdown && (
+            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl mb-6">
+              <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3">
+                Descuento aplicado
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-emerald-600 uppercase font-bold mb-1">Total base</p>
+                  <p className="font-semibold text-slate-800">
+                    ${numericBaseTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-emerald-600 uppercase font-bold mb-1">% Descuento</p>
+                  <p className="font-semibold text-slate-800">
+                    {numericDiscountPercent.toLocaleString("es-AR", {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 2,
+                    })}
+                    %
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-emerald-600 uppercase font-bold mb-1">Descuento</p>
+                  <p className="font-semibold text-slate-800">
+                    -${numericDiscountAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <form id="payment-form" onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">Monto a abonar ($)</label>
@@ -139,9 +180,7 @@ export default function PaymentModal({
               />
               <p className="mt-2 text-xs text-slate-500">
                 {isCheckoutMode
-                  ? amountEditable
-                    ? "Como admin puedes ajustar el monto final del checkout."
-                    : "Recepcion solo puede cobrar el saldo exacto pendiente."
+                  ? "El check-out solo permite cobrar el saldo exacto pendiente."
                   : "Puedes registrar un pago parcial o total para esta reserva."}
               </p>
             </div>

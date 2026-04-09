@@ -2,6 +2,9 @@ import "server-only";
 
 import { createClient } from "./supabase/server";
 import type {
+  AssignWalkInPayload,
+  AssociatedClient,
+  CreateReservationPayload,
   Guest,
   HotelSettings,
   PendingReservation,
@@ -29,6 +32,9 @@ type DashboardData = {
     check_out_target: string;
     actual_check_in: string | null;
     actual_check_out: string | null;
+    base_total_price: number;
+    discount_percent: number;
+    discount_amount: number;
     total_price: number;
     paid_amount: number;
   }[];
@@ -64,12 +70,38 @@ type CreateReservationInput = {
   clientPhone?: string;
 };
 
+type AssociatedClientRow = {
+  id: string;
+  display_name: string;
+  document_id: string;
+  phone: string | null;
+  discount_percent: number | string;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 type CheckoutReservationInput = {
   reservationId: string;
   paymentAmount?: number;
   paymentMethod?: PaymentMethod;
   paymentNotes?: string;
 };
+
+function toAssociatedClient(row: AssociatedClientRow): AssociatedClient {
+  return {
+    id: row.id,
+    display_name: row.display_name,
+    document_id: row.document_id,
+    phone: row.phone,
+    discount_percent: Number(row.discount_percent) || 0,
+    notes: row.notes,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
 
 export async function getHotelSettings(): Promise<HotelSettings> {
   const supabase = await createClient();
@@ -94,6 +126,40 @@ export async function getCurrentUserRole(): Promise<UserRole> {
 
   if (error) throw error;
   return (data?.role as UserRole | undefined) ?? "client";
+}
+
+export async function getActiveAssociatedClients(): Promise<AssociatedClient[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("associated_clients")
+    .select("*")
+    .eq("is_active", true)
+    .order("display_name");
+
+  if (error) throw error;
+  return ((data ?? []) as AssociatedClientRow[]).map(toAssociatedClient);
+}
+
+export async function getAssociatedClients(searchTerm = ""): Promise<AssociatedClient[]> {
+  const supabase = await createClient();
+  const normalizedSearch = searchTerm.trim();
+
+  let query = supabase
+    .from("associated_clients")
+    .select("*")
+    .order("is_active", { ascending: false })
+    .order("display_name");
+
+  if (normalizedSearch) {
+    query = query.or(
+      `display_name.ilike.%${normalizedSearch}%,document_id.ilike.%${normalizedSearch}%`
+    );
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return ((data ?? []) as AssociatedClientRow[]).map(toAssociatedClient);
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -125,6 +191,9 @@ export async function getDashboardData(): Promise<DashboardData> {
     check_out_target: string;
     actual_check_in: string | null;
     actual_check_out: string | null;
+    base_total_price: number | string | null;
+    discount_percent: number | string | null;
+    discount_amount: number | string | null;
     total_price: number | string;
     paid_amount: number | string;
   }) => ({
@@ -136,6 +205,9 @@ export async function getDashboardData(): Promise<DashboardData> {
     check_out_target: r.check_out_target,
     actual_check_in: r.actual_check_in,
     actual_check_out: r.actual_check_out,
+    base_total_price: Number(r.base_total_price) || 0,
+    discount_percent: Number(r.discount_percent) || 0,
+    discount_amount: Number(r.discount_amount) || 0,
     total_price: Number(r.total_price) || 0,
     paid_amount: Number(r.paid_amount) || 0,
   }));
@@ -168,10 +240,16 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
   if (reservationsResult.error) throw reservationsResult.error;
 
   const reservations = (reservationsResult.data ?? []).map((reservation: Reservation & {
+    base_total_price: number | string | null;
+    discount_percent: number | string | null;
+    discount_amount: number | string | null;
     total_price: number | string;
     paid_amount: number | string;
   }) => ({
     ...reservation,
+    base_total_price: Number(reservation.base_total_price) || 0,
+    discount_percent: Number(reservation.discount_percent) || 0,
+    discount_amount: Number(reservation.discount_amount) || 0,
     total_price: Number(reservation.total_price) || 0,
     paid_amount: Number(reservation.paid_amount) || 0,
   })) as Reservation[];
@@ -297,16 +375,14 @@ export async function checkRoomAvailability(
   return (data ?? []).length === 0;
 }
 
-export async function assignWalkIn(
-  roomId: number,
-  clientName: string,
-  nights: number
-): Promise<string> {
+export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_staff_assign_walk_in", {
-    p_room_id: roomId,
-    p_client_name: clientName,
-    p_nights: nights,
+    p_room_id: input.roomId,
+    p_client_name: input.customerMode === "manual" ? input.clientName : null,
+    p_nights: input.nights,
+    p_associated_client_id:
+      input.customerMode === "associated" ? input.associatedClientId : null,
   });
 
   if (error) throw error;
@@ -335,22 +411,20 @@ export async function publicCreateReservation({
   return String(data);
 }
 
-export async function staffCreateReservation({
-  roomId,
-  clientName,
-  checkIn,
-  checkOut,
-  clientDni,
-  clientPhone,
-}: CreateReservationInput): Promise<string> {
+export async function staffCreateReservation(
+  input: CreateReservationPayload
+): Promise<string> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_staff_create_reservation", {
-    p_room_id: roomId,
-    p_client_name: clientName,
-    p_check_in: checkIn,
-    p_check_out: checkOut,
-    p_client_dni: clientDni,
-    p_client_phone: clientPhone || null,
+    p_room_id: input.roomId,
+    p_check_in: input.checkIn,
+    p_check_out: input.checkOut,
+    p_client_name: input.customerMode === "manual" ? input.clientName : null,
+    p_client_dni: input.customerMode === "manual" ? input.clientDni : null,
+    p_client_phone:
+      input.customerMode === "manual" ? input.clientPhone || null : null,
+    p_associated_client_id:
+      input.customerMode === "associated" ? input.associatedClientId : null,
   });
 
   if (error) throw error;
@@ -497,7 +571,9 @@ export async function extendReservation(reservationId: string, extraNights: numb
   // 1. Get current reservation
   const { data: res, error: fetchErr } = await supabase
     .from("reservations")
-    .select("room_id, check_in_target, check_out_target, total_price")
+    .select(
+      "room_id, check_in_target, check_out_target, total_price, base_total_price, discount_percent"
+    )
     .eq("id", reservationId)
     .single();
 
@@ -526,17 +602,28 @@ export async function extendReservation(reservationId: string, extraNights: numb
 
   // 3. Compute the actual nightly rate from the existing reservation
   const currentTotal = Number(res.total_price) || 0;
+  const currentBaseTotal = Number(res.base_total_price) || currentTotal;
+  const currentDiscountPercent = Number(res.discount_percent) || 0;
   // Duration in ms → days (using floor to avoid floating-point issues with half-day checkout)
   const existingNights = Math.max(1, Math.round(
     (currentOut.getTime() - currentIn.getTime()) / (1000 * 60 * 60 * 24)
   ));
-  const nightlyRate = currentTotal / existingNights;
-  const newTotal = currentTotal + extraNights * nightlyRate;
+  const nightlyBaseRate = currentBaseTotal / existingNights;
+  const newBaseTotal = currentBaseTotal + extraNights * nightlyBaseRate;
+  const newDiscountAmount =
+    Math.round(((newBaseTotal * currentDiscountPercent) / 100) * 100) / 100;
+  const newTotal = newBaseTotal - newDiscountAmount;
 
   // 4. Update reservation
   const { error: updateErr } = await supabase
     .from("reservations")
-    .update({ check_out_target: newOutString, total_price: newTotal })
+    .update({
+      check_out_target: newOutString,
+      base_total_price: newBaseTotal,
+      discount_percent: currentDiscountPercent,
+      discount_amount: newDiscountAmount,
+      total_price: newTotal,
+    })
     .eq("id", reservationId);
 
   if (updateErr) throw updateErr;

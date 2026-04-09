@@ -16,7 +16,7 @@ import {
   handleExtendReservation,
 } from "./actions";
 import PaymentModal from "../components/PaymentModal";
-import type { UserRole } from "@/lib/types";
+import type { AssociatedClient } from "@/lib/types";
 
 type RoomCardProps = {
   room: {
@@ -30,15 +30,18 @@ type RoomCardProps = {
     isLate: boolean;
     reservationId: string | null;
     reservationStatus: string | null;
+    baseTotalPrice: number;
+    discountPercent: number;
+    discountAmount: number;
     totalPrice: number;
     paidAmount: number;
     basePrice: number;
     hasArrivalToday: boolean;
   };
-  role: UserRole;
+  associatedClients: AssociatedClient[];
 };
 
-export default function RoomCard({ room, role }: RoomCardProps) {
+export default function RoomCard({ room, associatedClients }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -377,7 +380,8 @@ export default function RoomCard({ room, role }: RoomCardProps) {
         onClose={() => setIsWalkInModalOpen(false)}
         roomNumber={room.number}
         basePrice={room.basePrice}
-        onSubmit={(clientName, nights) => handleAssignWalkIn(room.id, clientName, nights)}
+        associatedClients={associatedClients}
+        onSubmit={(data) => handleAssignWalkIn({ ...data, roomId: room.id })}
       />
 
       {isPaymentModalOpen && room.reservationId && (
@@ -385,9 +389,11 @@ export default function RoomCard({ room, role }: RoomCardProps) {
           isOpen
           onClose={() => setIsPaymentModalOpen(false)}
           clientName={room.client || "Desconocido"}
+          baseTotalPrice={room.baseTotalPrice}
+          discountPercent={room.discountPercent}
+          discountAmount={room.discountAmount}
           totalPrice={room.totalPrice}
           paidAmount={room.paidAmount}
-          role={role}
           onSubmitPayment={submitCheckoutPayment}
         />
       )}

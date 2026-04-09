@@ -14,38 +14,100 @@ const optionalPhoneSchema = z.preprocess(
     .optional()
 );
 
-export const assignWalkInSchema = z.object({
+const associatedClientIdSchema = z.string().uuid("El asociado seleccionado es invalido.");
+
+const percentageSchema = z.preprocess(
+  (value) => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") return value;
+      return Number(trimmed);
+    }
+    return value;
+  },
+  z
+    .number()
+    .min(0, "El descuento no puede ser negativo.")
+    .max(100, "El descuento no puede superar el 100%.")
+);
+
+const walkInBaseSchema = {
+  customerMode: z.enum(["manual", "associated"]),
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),
-  clientName: z
-    .string()
-    .trim()
-    .min(2, "El nombre del huesped debe tener al menos 2 caracteres."),
   nights: z
     .number()
     .int()
     .min(1, "Debe ser al menos 1 noche")
     .max(30, "Maximo 30 noches por reserva."),
-});
+};
 
-export const createReservationSchema = z
-  .object({
-    roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
+  z.object({
+    ...walkInBaseSchema,
+    customerMode: z.literal("manual"),
     clientName: z
       .string()
       .trim()
       .min(2, "El nombre del huesped debe tener al menos 2 caracteres."),
-    clientDni: z
-      .string()
-      .trim()
-      .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
-    clientPhone: optionalPhoneSchema,
-    checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
-    checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
-  })
+  }),
+  z.object({
+    ...walkInBaseSchema,
+    customerMode: z.literal("associated"),
+    associatedClientId: associatedClientIdSchema,
+  }),
+]);
+
+export const createReservationSchema = z
+  .discriminatedUnion("customerMode", [
+    z.object({
+      customerMode: z.literal("manual"),
+      roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+      clientName: z
+        .string()
+        .trim()
+        .min(2, "El nombre del huesped debe tener al menos 2 caracteres."),
+      clientDni: z
+        .string()
+        .trim()
+        .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
+      clientPhone: optionalPhoneSchema,
+      checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
+      checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
+    }),
+    z.object({
+      customerMode: z.literal("associated"),
+      roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+      associatedClientId: associatedClientIdSchema,
+      checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
+      checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
+    }),
+  ])
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {
     message: "La fecha de salida debe ser posterior a la fecha de entrada.",
     path: ["checkOut"],
   });
+
+export const associatedClientSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(2, "El nombre del asociado debe tener al menos 2 caracteres."),
+  documentId: z
+    .string()
+    .trim()
+    .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
+  phone: optionalPhoneSchema,
+  discountPercent: percentageSchema,
+  notes: z
+    .preprocess(
+      (value) => {
+        if (typeof value !== "string") return value;
+        const trimmed = value.trim();
+        return trimmed === "" ? undefined : trimmed;
+      },
+      z.string().max(500, "Las notas no pueden superar los 500 caracteres.").optional()
+    ),
+});
 
 export const publicBookingSchema = z.object({
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),

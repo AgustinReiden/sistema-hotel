@@ -14,7 +14,7 @@ import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
 import { handleCancelReservation, handleCreateReservation } from "../actions";
-import type { Reservation, Room, UserRole } from "@/lib/types";
+import type { AssociatedClient, Reservation, Room, UserRole } from "@/lib/types";
 
 type CalendarClientProps = {
   rooms: Room[];
@@ -22,6 +22,7 @@ type CalendarClientProps = {
   startDate: string;
   daysCount: number;
   role: UserRole;
+  associatedClients: AssociatedClient[];
   standardCheckInTime: string;
   standardCheckOutTime: string;
 };
@@ -99,6 +100,7 @@ export default function CalendarClient({
   startDate,
   daysCount,
   role,
+  associatedClients,
   standardCheckInTime,
   standardCheckOutTime,
 }: CalendarClientProps) {
@@ -354,6 +356,7 @@ export default function CalendarClient({
         isOpen={Boolean(createDraft)}
         onClose={() => setCreateDraft(null)}
         rooms={rooms}
+        associatedClients={associatedClients}
         initialValues={createDraft ?? undefined}
         title="Nueva Reserva desde Calendario"
         onSubmit={async (data) => {

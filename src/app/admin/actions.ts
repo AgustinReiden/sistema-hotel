@@ -18,17 +18,13 @@ import {
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import { notifyReservationWebhook } from "@/lib/webhook";
-import type { ActionResult, PaymentMethod } from "@/lib/types";
+import type {
+  ActionResult,
+  AssignWalkInPayload,
+  CreateReservationPayload,
+  PaymentMethod,
+} from "@/lib/types";
 import { assignWalkInSchema, createReservationSchema } from "@/lib/validations";
-
-type CreateReservationPayload = {
-  roomId: number;
-  clientName: string;
-  clientDni: string;
-  clientPhone?: string;
-  checkIn: string;
-  checkOut: string;
-};
 
 type CheckoutPayload = {
   reservationId: string;
@@ -121,17 +117,11 @@ export async function handleMarkAvailable(roomId: number): Promise<ActionResult>
 }
 
 export async function handleAssignWalkIn(
-  roomId: number,
-  clientName: string,
-  nights: number
+  data: AssignWalkInPayload
 ): Promise<ActionResult<{ reservationId: string }>> {
   try {
-    const validated = assignWalkInSchema.parse({ roomId, clientName, nights });
-    const reservationId = await assignWalkIn(
-      validated.roomId,
-      validated.clientName,
-      validated.nights
-    );
+    const validated = assignWalkInSchema.parse(data);
+    const reservationId = await assignWalkIn(validated);
 
     revalidatePath("/admin");
     revalidateCalendarViews();

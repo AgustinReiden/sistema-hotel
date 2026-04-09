@@ -31,6 +31,7 @@ export type Room = {
 
 export type Reservation = {
   id: string;
+  associated_client_id: string | null;
   client_name: string;
   client_phone: string | null;
   client_dni: string | null;
@@ -40,6 +41,9 @@ export type Reservation = {
   status: ReservationStatus;
   actual_check_in: string | null;
   actual_check_out: string | null;
+  base_total_price: number;
+  discount_percent: number;
+  discount_amount: number;
   total_price: number;
   paid_amount: number;
   whatsapp_notified: boolean;
@@ -88,6 +92,52 @@ export type Guest = {
   total_price: number;
   paid_amount: number;
 };
+
+export type AssociatedClient = {
+  id: string;
+  display_name: string;
+  document_id: string;
+  phone: string | null;
+  discount_percent: number;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReservationCustomerMode = "manual" | "associated";
+
+export type CreateReservationPayload =
+  | {
+      customerMode: "manual";
+      roomId: number;
+      clientName: string;
+      clientDni: string;
+      clientPhone?: string;
+      checkIn: string;
+      checkOut: string;
+    }
+  | {
+      customerMode: "associated";
+      roomId: number;
+      associatedClientId: string;
+      checkIn: string;
+      checkOut: string;
+    };
+
+export type AssignWalkInPayload =
+  | {
+      customerMode: "manual";
+      roomId: number;
+      clientName: string;
+      nights: number;
+    }
+  | {
+      customerMode: "associated";
+      roomId: number;
+      nights: number;
+      associatedClientId: string;
+    };
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
 

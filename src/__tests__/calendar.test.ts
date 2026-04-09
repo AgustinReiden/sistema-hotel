@@ -7,6 +7,7 @@ function makeReservation(overrides: Partial<Reservation> & { id: string; room_id
   return {
     id: overrides.id,
     room_id: overrides.room_id,
+    associated_client_id: overrides.associated_client_id ?? null,
     client_name: overrides.client_name ?? "Test Guest",
     client_phone: overrides.client_phone ?? null,
     client_dni: overrides.client_dni ?? null,
@@ -15,6 +16,9 @@ function makeReservation(overrides: Partial<Reservation> & { id: string; room_id
     status: overrides.status ?? "confirmed",
     actual_check_in: overrides.actual_check_in ?? null,
     actual_check_out: overrides.actual_check_out ?? null,
+    base_total_price: overrides.base_total_price ?? 10000,
+    discount_percent: overrides.discount_percent ?? 0,
+    discount_amount: overrides.discount_amount ?? 0,
     total_price: overrides.total_price ?? 10000,
     paid_amount: overrides.paid_amount ?? 0,
     whatsapp_notified: overrides.whatsapp_notified ?? false,
