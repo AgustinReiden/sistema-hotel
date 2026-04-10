@@ -58,7 +58,7 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
             .filter((a) => a.length > 0);
 
         try {
-            const result = await createRoomAction({
+            const payload = {
                 room_number: roomNumber,
                 room_type: roomType,
                 capacity_adults: parsedAdults,
@@ -68,11 +68,20 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
                 image_url: imageUrl,
                 amenities: parsedAmenities,
                 base_price: parsedPrice,
+            };
+
+            const result = await createRoomAction({
+                ...payload,
             });
 
             if (result.success) {
                 onClose();
             } else {
+                console.error("Room creation failed:", {
+                    error: result.error,
+                    code: "code" in result ? result.code : undefined,
+                    payload,
+                });
                 setError(result.error);
             }
         } catch (error) {

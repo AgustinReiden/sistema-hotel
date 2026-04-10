@@ -9,6 +9,19 @@ function canManageRooms(role: string | null | undefined): boolean {
     return role === "admin" || role === "receptionist";
 }
 
+function calculateLegacyCapacity(roomData: Partial<Room>): number {
+    const adults =
+        typeof roomData.capacity_adults === "number" && Number.isFinite(roomData.capacity_adults)
+            ? roomData.capacity_adults
+            : 0;
+    const children =
+        typeof roomData.capacity_children === "number" && Number.isFinite(roomData.capacity_children)
+            ? roomData.capacity_children
+            : 0;
+
+    return Math.max(1, adults + children);
+}
+
 export async function updateRoomAction(roomId: number, roomData: Partial<Room>): Promise<ActionResult> {
     const supabase = await createClient();
 
@@ -23,10 +36,14 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
     // Prevent overriding the room ID from client state.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...updateData } = roomData;
+    const normalizedUpdateData = {
+        ...updateData,
+        capacity: calculateLegacyCapacity(roomData),
+    };
 
     const { error } = await supabase
         .from("rooms")
-        .update(updateData)
+        .update(normalizedUpdateData)
         .eq("id", roomId);
 
     if (error) {
@@ -61,6 +78,7 @@ export async function createRoomAction(roomData: Partial<Room>): Promise<ActionR
         ...roomData,
         room_number: roomData.room_number?.trim(),
         room_type: roomData.room_type?.trim(),
+        capacity: calculateLegacyCapacity(roomData),
         beds_configuration: roomData.beds_configuration?.trim(),
         description: roomData.description?.trim() || null,
         image_url: roomData.image_url?.trim() || null,
