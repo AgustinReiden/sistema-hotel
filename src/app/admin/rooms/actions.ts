@@ -1,19 +1,26 @@
 "use server";
 
+import { parseActionError } from "@/lib/error-utils";
 import { createClient } from "@/lib/supabase/server";
 import { ActionResult, Room } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
+function canManageRooms(role: string | null | undefined): boolean {
+    return role === "admin" || role === "receptionist";
+}
+
 export async function updateRoomAction(roomId: number, roomData: Partial<Room>): Promise<ActionResult> {
     const supabase = await createClient();
 
-    // Auth check (same as createRoomAction / deleteRoomAction)
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "No autorizado." };
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    if (!["admin", "staff"].includes(profile?.role)) return { success: false, error: "Permisos insuficientes para modificar habitaciones." };
 
-    // Basic validation to prevent overriding ID
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (!canManageRooms(profile?.role)) {
+        return { success: false, error: "Permisos insuficientes para modificar habitaciones." };
+    }
+
+    // Prevent overriding the room ID from client state.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...updateData } = roomData;
 
@@ -24,7 +31,8 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
 
     if (error) {
         console.error("Error updating room:", error);
-        return { success: false, error: "Hubo un error al actualizar la habitación." };
+        const parsed = parseActionError(error, "Hubo un error al actualizar la habitacion.");
+        return { success: false, error: parsed.error, code: parsed.code };
     }
 
     revalidatePath("/admin/rooms");
@@ -36,22 +44,46 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
 export async function createRoomAction(roomData: Partial<Room>): Promise<ActionResult> {
     const supabase = await createClient();
 
-    // Auth Check
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "No autorizado." };
+
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    if (!["admin", "staff"].includes(profile?.role)) return { success: false, error: "Permisos insuficientes para crear habitaciones." };
+    if (!canManageRooms(profile?.role)) {
+        return { success: false, error: "Permisos insuficientes para crear habitaciones." };
+    }
+
+    const normalizedBasePrice =
+        typeof roomData.base_price === "number" && Number.isFinite(roomData.base_price)
+            ? roomData.base_price
+            : 0;
+
+    const insertData = {
+        ...roomData,
+        room_number: roomData.room_number?.trim(),
+        room_type: roomData.room_type?.trim(),
+        beds_configuration: roomData.beds_configuration?.trim(),
+        description: roomData.description?.trim() || null,
+        image_url: roomData.image_url?.trim() || null,
+        amenities: Array.isArray(roomData.amenities)
+            ? roomData.amenities.map((amenity) => amenity.trim()).filter(Boolean)
+            : [],
+        base_price: normalizedBasePrice,
+        half_day_price:
+            typeof roomData.half_day_price === "number" && Number.isFinite(roomData.half_day_price)
+                ? roomData.half_day_price
+                : normalizedBasePrice,
+        is_active: roomData.is_active ?? true,
+        status: roomData.status ?? "available",
+    };
 
     const { error } = await supabase
         .from("rooms")
-        .insert({
-            ...roomData,
-            status: 'available', // initial status
-        });
+        .insert(insertData);
 
     if (error) {
         console.error("Error creating room:", error);
-        return { success: false, error: "Hubo un error al crear la habitación." };
+        const parsed = parseActionError(error, "Hubo un error al crear la habitacion.");
+        return { success: false, error: parsed.error, code: parsed.code };
     }
 
     revalidatePath("/admin/rooms");
@@ -63,11 +95,13 @@ export async function createRoomAction(roomData: Partial<Room>): Promise<ActionR
 export async function deleteRoomAction(roomId: number): Promise<ActionResult> {
     const supabase = await createClient();
 
-    // Auth Check
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "No autorizado." };
+
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    if (!["admin", "staff"].includes(profile?.role)) return { success: false, error: "Permisos insuficientes para borrar habitaciones." };
+    if (!canManageRooms(profile?.role)) {
+        return { success: false, error: "Permisos insuficientes para borrar habitaciones." };
+    }
 
     const { error } = await supabase
         .from("rooms")
@@ -76,7 +110,8 @@ export async function deleteRoomAction(roomId: number): Promise<ActionResult> {
 
     if (error) {
         console.error("Error deleting room:", error);
-        return { success: false, error: "Hubo un error al borrar la habitación." };
+        const parsed = parseActionError(error, "Hubo un error al borrar la habitacion.");
+        return { success: false, error: parsed.error, code: parsed.code };
     }
 
     revalidatePath("/admin/rooms");

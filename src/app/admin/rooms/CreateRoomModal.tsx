@@ -57,24 +57,29 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
             .map((a) => a.trim())
             .filter((a) => a.length > 0);
 
-        const result = await createRoomAction({
-            room_number: roomNumber,
-            room_type: roomType,
-            capacity_adults: parsedAdults,
-            capacity_children: isNaN(parsedChildren) ? 0 : parsedChildren,
-            beds_configuration: bedsConfiguration,
-            description: description,
-            image_url: imageUrl,
-            amenities: parsedAmenities,
-            base_price: parsedPrice,
-        });
+        try {
+            const result = await createRoomAction({
+                room_number: roomNumber,
+                room_type: roomType,
+                capacity_adults: parsedAdults,
+                capacity_children: isNaN(parsedChildren) ? 0 : parsedChildren,
+                beds_configuration: bedsConfiguration,
+                description: description,
+                image_url: imageUrl,
+                amenities: parsedAmenities,
+                base_price: parsedPrice,
+            });
 
-        setLoading(false);
-
-        if (result.success) {
-            onClose();
-        } else {
-            setError(result.error);
+            if (result.success) {
+                onClose();
+            } else {
+                setError(result.error);
+            }
+        } catch (error) {
+            console.error("Unexpected error creating room:", error);
+            setError("Ocurrio un error inesperado al crear la habitacion.");
+        } finally {
+            setLoading(false);
         }
     };
 
