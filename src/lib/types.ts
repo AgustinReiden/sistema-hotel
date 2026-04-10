@@ -18,6 +18,7 @@ export type Room = {
   room_number: string;
   room_type: string;
   status: RoomStatus;
+  capacity: number;
   capacity_adults: number;
   capacity_children: number;
   beds_configuration: string;

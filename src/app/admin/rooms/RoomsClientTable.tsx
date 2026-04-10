@@ -1,28 +1,33 @@
 "use client";
 
 import { useState } from "react";
-import { Room } from "@/lib/types";
 import { Edit, Trash2, Plus, BedDouble, Users, Image as ImageIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { getRoomCapacity } from "@/lib/rooms";
+import { Room } from "@/lib/types";
 import EditRoomModal from "./EditRoomModal";
 import CreateRoomModal from "./CreateRoomModal";
 import { deleteRoomAction } from "./actions";
 
-export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRooms: Room[], isAdmin: boolean }) {
+export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRooms: Room[]; isAdmin: boolean }) {
     const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
 
     const handleDelete = async (id: number) => {
-        if (!confirm("¿Seguro que deseas eliminar esta habitación? ¡Esta acción es irreversible y podría causar errores si tiene reservas vinculadas!")) return;
+        if (!confirm("Seguro que deseas eliminar esta habitacion? Esta accion es irreversible y podria causar errores si tiene reservas vinculadas.")) {
+            return;
+        }
 
         setDeletingId(id);
         const result = await deleteRoomAction(id);
+
         if (result.success) {
-            toast.success("Habitación eliminada exitosamente.");
+            toast.success("Habitacion eliminada exitosamente.");
         } else {
             toast.error(result.error);
         }
+
         setDeletingId(null);
     };
 
@@ -35,10 +40,11 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                         className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors shadow-sm"
                     >
                         <Plus size={18} className="mr-2" />
-                        Añadir Habitación
+                        Anadir Habitacion
                     </button>
                 </div>
             )}
+
             <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                     <thead>
@@ -54,12 +60,8 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                     <tbody className="divide-y divide-slate-100">
                         {initialRooms.map((room) => (
                             <tr key={room.id} className="hover:bg-slate-50/80 transition-colors group">
-                                <td className="px-6 py-4 font-bold text-slate-800">
-                                    {room.room_number}
-                                </td>
-                                <td className="px-6 py-4 text-slate-600 capitalize">
-                                    {room.room_type}
-                                </td>
+                                <td className="px-6 py-4 font-bold text-slate-800">{room.room_number}</td>
+                                <td className="px-6 py-4 text-slate-600 capitalize">{room.room_type}</td>
                                 <td className="px-6 py-4">
                                     <div className="flex items-center text-slate-600 text-sm">
                                         <BedDouble size={16} className="mr-2 text-slate-400" />
@@ -69,7 +71,7 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                                 <td className="px-6 py-4">
                                     <div className="flex items-center text-slate-600 text-sm">
                                         <Users size={16} className="mr-2 text-slate-400" />
-                                        {room.capacity_adults} Adult. {room.capacity_children > 0 && `+ ${room.capacity_children} Niñ.`}
+                                        {getRoomCapacity(room)} personas
                                     </div>
                                 </td>
                                 <td className="px-6 py-4 text-center">
@@ -88,7 +90,7 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                                         <button
                                             onClick={() => setSelectedRoom(room)}
                                             className="inline-flex items-center justify-center p-2 text-brand-600 hover:bg-brand-50 rounded-lg transition-colors cursor-pointer"
-                                            title="Editar Habitación"
+                                            title="Editar Habitacion"
                                         >
                                             <Edit size={18} />
                                         </button>
@@ -98,7 +100,7 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                                                 onClick={() => handleDelete(room.id)}
                                                 disabled={deletingId === room.id}
                                                 className="inline-flex items-center justify-center p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                                                title="Eliminar Habitación"
+                                                title="Eliminar Habitacion"
                                             >
                                                 {deletingId === room.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
                                             </button>

@@ -1,6 +1,7 @@
 "use server";
 
 import { parseActionError } from "@/lib/error-utils";
+import { getRoomCapacity } from "@/lib/rooms";
 import { createClient } from "@/lib/supabase/server";
 import { ActionResult, Room } from "@/lib/types";
 import { revalidatePath } from "next/cache";
@@ -9,17 +10,24 @@ function canManageRooms(role: string | null | undefined): boolean {
     return role === "admin" || role === "receptionist";
 }
 
-function calculateLegacyCapacity(roomData: Partial<Room>): number {
-    const adults =
-        typeof roomData.capacity_adults === "number" && Number.isFinite(roomData.capacity_adults)
-            ? roomData.capacity_adults
-            : 0;
-    const children =
-        typeof roomData.capacity_children === "number" && Number.isFinite(roomData.capacity_children)
-            ? roomData.capacity_children
-            : 0;
+function normalizeCapacityFields(roomData: Partial<Room>) {
+    const capacity = getRoomCapacity({
+        capacity: roomData.capacity ?? 0,
+        capacity_adults: roomData.capacity_adults ?? 0,
+        capacity_children: roomData.capacity_children ?? 0,
+    });
 
-    return Math.max(1, adults + children);
+    return {
+        capacity,
+        capacity_adults:
+            typeof roomData.capacity_adults === "number" && Number.isFinite(roomData.capacity_adults)
+                ? roomData.capacity_adults
+                : capacity,
+        capacity_children:
+            typeof roomData.capacity_children === "number" && Number.isFinite(roomData.capacity_children)
+                ? roomData.capacity_children
+                : 0,
+    };
 }
 
 export async function updateRoomAction(roomId: number, roomData: Partial<Room>): Promise<ActionResult> {
@@ -38,7 +46,7 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
     const { id, ...updateData } = roomData;
     const normalizedUpdateData = {
         ...updateData,
-        capacity: calculateLegacyCapacity(roomData),
+        ...normalizeCapacityFields(roomData),
     };
 
     const { error } = await supabase
@@ -78,7 +86,7 @@ export async function createRoomAction(roomData: Partial<Room>): Promise<ActionR
         ...roomData,
         room_number: roomData.room_number?.trim(),
         room_type: roomData.room_type?.trim(),
-        capacity: calculateLegacyCapacity(roomData),
+        ...normalizeCapacityFields(roomData),
         beds_configuration: roomData.beds_configuration?.trim(),
         description: roomData.description?.trim() || null,
         image_url: roomData.image_url?.trim() || null,

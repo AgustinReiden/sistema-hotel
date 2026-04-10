@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { Users, BedDouble } from "lucide-react";
+import { getRoomCapacity } from "@/lib/rooms";
 import { Room } from "@/lib/types";
 import BookingModal from "./BookingModal";
 
@@ -36,7 +37,7 @@ export default function RoomCard({ room, checkIn, checkOut, isAvailable, checkIn
 
     const defaultImageUrl = defaultLocalImage;
     const validImageSrc = isAllowedHost(room.image_url) ? room.image_url! : defaultImageUrl;
-    const totalCapacity = room.capacity_adults + room.capacity_children;
+    const totalCapacity = getRoomCapacity(room);
 
     return (
         <>

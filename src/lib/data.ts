@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "./supabase/server";
+import { getRoomCapacity } from "./rooms";
 import type {
   AssignWalkInPayload,
   AssociatedClient,
@@ -485,7 +486,7 @@ export async function getAvailableRooms(
 export function determineSmarterAvailableRooms(availableRooms: Room[], targetGuests: number): Room[] {
   const capMap = new Map<number, Room[]>();
   for (const r of availableRooms) {
-    const cap = r.capacity_adults + r.capacity_children;
+    const cap = getRoomCapacity(r);
     if (!capMap.has(cap)) capMap.set(cap, []);
     capMap.get(cap)!.push(r);
   }

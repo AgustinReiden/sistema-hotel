@@ -18,6 +18,7 @@ import { differenceInDays } from "date-fns";
 
 import { handlePublicBooking } from "../actions";
 import { localToISO } from "@/lib/format";
+import { getRoomCapacity } from "@/lib/rooms";
 import { Room } from "@/lib/types";
 
 interface BookingModalProps {
@@ -198,7 +199,7 @@ export default function BookingModal({
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-[0.18em] mb-3">Detalles</div>
                         <div className="text-lg font-semibold text-slate-900 mb-1">Camas: {room.beds_configuration}</div>
                         <div className="text-sm text-slate-600 flex items-center gap-2">
-                          <Users size={14} /> Hasta {room.capacity_adults + room.capacity_children} personas
+                          <Users size={14} /> Hasta {getRoomCapacity(room)} personas
                         </div>
                       </div>
                     </div>

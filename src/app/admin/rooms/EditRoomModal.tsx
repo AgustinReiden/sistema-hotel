@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X, Loader2, Save } from "lucide-react";
+import { getRoomCapacity } from "@/lib/rooms";
 import { Room } from "@/lib/types";
 import { updateRoomAction } from "./actions";
 
@@ -16,14 +17,11 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
     const [error, setError] = useState<string | null>(null);
 
     const [roomType, setRoomType] = useState(room.room_type);
-    const [capacityAdults, setCapacityAdults] = useState(room.capacity_adults.toString());
-    const [capacityChildren, setCapacityChildren] = useState(room.capacity_children.toString());
+    const [capacity, setCapacity] = useState(getRoomCapacity(room).toString());
     const [bedsConfiguration, setBedsConfiguration] = useState(room.beds_configuration);
     const [description, setDescription] = useState(room.description || "");
     const [imageUrl, setImageUrl] = useState(room.image_url || "");
     const [basePrice, setBasePrice] = useState(room.base_price ? room.base_price.toString() : "50");
-
-    // Handling JSONB array of strings as a comma-separated string for simplicity in UI
     const [amenities, setAmenities] = useState(room.amenities.join(", "));
 
     if (!isOpen) return null;
@@ -33,18 +31,17 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
         setLoading(true);
         setError(null);
 
-        const parsedAdults = parseInt(capacityAdults, 10);
-        const parsedChildren = parseInt(capacityChildren, 10);
+        const parsedCapacity = parseInt(capacity, 10);
 
-        if (isNaN(parsedAdults) || parsedAdults < 1) {
-            setError("La capacidad de adultos debe ser al menos 1.");
+        if (isNaN(parsedCapacity) || parsedCapacity < 1) {
+            setError("La capacidad debe ser al menos 1.");
             setLoading(false);
             return;
         }
 
         const parsedPrice = parseFloat(basePrice);
         if (isNaN(parsedPrice) || parsedPrice < 0) {
-            setError("El precio base debe ser un número positivo.");
+            setError("El precio base debe ser un numero positivo.");
             setLoading(false);
             return;
         }
@@ -56,10 +53,9 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
 
         const result = await updateRoomAction(room.id, {
             room_type: roomType,
-            capacity_adults: parsedAdults,
-            capacity_children: isNaN(parsedChildren) ? 0 : parsedChildren,
+            capacity: parsedCapacity,
             beds_configuration: bedsConfiguration,
-            description: description,
+            description,
             image_url: imageUrl,
             amenities: parsedAmenities,
             base_price: parsedPrice,
@@ -78,9 +74,7 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden relative max-h-[90vh] flex flex-col">
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0">
-                    <h2 className="text-2xl font-bold text-slate-800">
-                        Editar Habitación {room.room_number}
-                    </h2>
+                    <h2 className="text-2xl font-bold text-slate-800">Editar Habitacion {room.room_number}</h2>
                     <button
                         onClick={onClose}
                         className="text-slate-400 hover:text-slate-600 transition-colors"
@@ -102,51 +96,39 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
                                     required
                                 />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Cap. Adultos</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        value={capacityAdults}
-                                        onChange={(e) => setCapacityAdults(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Cap. Niños</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={capacityChildren}
-                                        onChange={(e) => setCapacityChildren(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                    />
-                                </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Capacidad</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={capacity}
+                                    onChange={(e) => setCapacity(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
+                                    required
+                                />
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-1">Configuración de Camas</label>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Configuracion de Camas</label>
                             <input
                                 type="text"
                                 value={bedsConfiguration}
                                 onChange={(e) => setBedsConfiguration(e.target.value)}
                                 className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                placeholder="Ej. 1 Cama King + 1 Sofá Cama"
+                                placeholder="Ej. 1 Cama King + 1 Sofa Cama"
                                 required
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-1">Descripción</label>
+                            <label className="block text-sm font-bold text-slate-700 mb-1">Descripcion</label>
                             <textarea
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
                                 rows={3}
                                 className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all resize-none"
-                                placeholder="Descripción pública de la habitación."
+                                placeholder="Descripcion publica de la habitacion."
                             />
                         </div>
 
@@ -170,7 +152,7 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
                                 value={amenities}
                                 onChange={(e) => setAmenities(e.target.value)}
                                 className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                placeholder="wifi, tv, minibar, ocean_view"
+                                placeholder="wifi, tv, minibar"
                             />
                         </div>
 
