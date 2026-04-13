@@ -83,7 +83,7 @@ export default function BookingModal({
     const checkOutDateTime = localToISO(checkOut, checkOutTime, timezone);
 
     const result = await handlePublicBooking(
-      room.id,
+      room.room_type,
       clientName,
       checkInDateTime,
       checkOutDateTime,
@@ -158,7 +158,7 @@ export default function BookingModal({
                     ) : (
                       <Image
                         src={imageSrc}
-                        alt={`Habitacion ${room.room_number}`}
+                        alt={`Categoria ${room.room_type}`}
                         fill
                         className="object-cover"
                       />

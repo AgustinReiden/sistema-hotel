@@ -5,14 +5,25 @@ import { X, Loader2, Save } from "lucide-react";
 import { getRoomCapacity } from "@/lib/rooms";
 import { Room } from "@/lib/types";
 import { updateRoomAction } from "./actions";
+import RoomTypeSelector from "./RoomTypeSelector";
 
 interface EditRoomModalProps {
     isOpen: boolean;
     onClose: () => void;
     room: Room;
+    roomTypes: string[];
+    onAddCategory: (value: string) => void;
+    onSaved: () => void;
 }
 
-export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalProps) {
+export default function EditRoomModal({
+    isOpen,
+    onClose,
+    room,
+    roomTypes,
+    onAddCategory,
+    onSaved,
+}: EditRoomModalProps) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +41,12 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
         e.preventDefault();
         setLoading(true);
         setError(null);
+
+        if (!roomType.trim()) {
+            setError("La categoria es obligatoria.");
+            setLoading(false);
+            return;
+        }
 
         const parsedCapacity = parseInt(capacity, 10);
 
@@ -64,6 +81,7 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
         setLoading(false);
 
         if (result.success) {
+            onSaved();
             onClose();
         } else {
             setError(result.error);
@@ -87,13 +105,12 @@ export default function EditRoomModal({ isOpen, onClose, room }: EditRoomModalPr
                     <form id="edit-room-form" onSubmit={handleSubmit} className="space-y-6">
                         <div className="grid grid-cols-2 gap-6">
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Nombre / Tipo</label>
-                                <input
-                                    type="text"
+                                <RoomTypeSelector
                                     value={roomType}
-                                    onChange={(e) => setRoomType(e.target.value)}
-                                    className="w-full px-4 py-3 bg-white text-slate-800 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                    required
+                                    roomTypes={roomTypes}
+                                    onChange={setRoomType}
+                                    onAddCategory={onAddCategory}
+                                    label="Categoria"
                                 />
                             </div>
                             <div>

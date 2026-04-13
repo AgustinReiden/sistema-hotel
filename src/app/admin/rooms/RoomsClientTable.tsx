@@ -1,18 +1,42 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Edit, Trash2, Plus, BedDouble, Users, Image as ImageIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { getRoomCapacity } from "@/lib/rooms";
+import { getRoomCapacity, getUniqueRoomTypes, sortRoomTypes } from "@/lib/rooms";
 import { Room } from "@/lib/types";
 import EditRoomModal from "./EditRoomModal";
 import CreateRoomModal from "./CreateRoomModal";
 import { deleteRoomAction } from "./actions";
 
 export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRooms: Room[]; isAdmin: boolean }) {
+    const router = useRouter();
     const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [roomTypes, setRoomTypes] = useState<string[]>(() => {
+        const existingRoomTypes = getUniqueRoomTypes(initialRooms);
+        return existingRoomTypes.length > 0 ? existingRoomTypes : ["Standard"];
+    });
+
+    const handleAddCategory = (value: string) => {
+        setRoomTypes((current) => {
+            const alreadyExists = current.some(
+                (roomType) => roomType.toLowerCase() === value.trim().toLowerCase()
+            );
+
+            if (alreadyExists) {
+                return current;
+            }
+
+            return sortRoomTypes([...current, value.trim()]);
+        });
+    };
+
+    const handleSaved = () => {
+        router.refresh();
+    };
 
     const handleDelete = async (id: number) => {
         if (!confirm("Seguro que deseas eliminar esta habitacion? Esta accion es irreversible y podria causar errores si tiene reservas vinculadas.")) {
@@ -24,6 +48,7 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
 
         if (result.success) {
             toast.success("Habitacion eliminada exitosamente.");
+            router.refresh();
         } else {
             toast.error(result.error);
         }
@@ -118,6 +143,9 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                     isOpen={!!selectedRoom}
                     onClose={() => setSelectedRoom(null)}
                     room={selectedRoom}
+                    roomTypes={roomTypes}
+                    onAddCategory={handleAddCategory}
+                    onSaved={handleSaved}
                 />
             )}
 
@@ -125,6 +153,9 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                 <CreateRoomModal
                     isOpen={isCreateModalOpen}
                     onClose={() => setIsCreateModalOpen(false)}
+                    roomTypes={roomTypes}
+                    onAddCategory={handleAddCategory}
+                    onSaved={handleSaved}
                 />
             )}
         </>

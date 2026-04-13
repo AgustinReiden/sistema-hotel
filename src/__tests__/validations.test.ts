@@ -210,7 +210,7 @@ describe("associatedClientSchema", () => {
 
 describe("publicBookingSchema", () => {
   const validInput = {
-    roomId: 2,
+    roomType: "Doble",
     clientName: "Ana Garcia",
     clientDni: "12345678",
     clientPhone: "+54 381 4123456",
@@ -220,6 +220,7 @@ describe("publicBookingSchema", () => {
 
   it("accepts valid public booking data", () => {
     const result = publicBookingSchema.parse(validInput);
+    expect(result.roomType).toBe("Doble");
     expect(result.clientName).toBe("Ana Garcia");
     expect(result.clientDni).toBe("12345678");
   });

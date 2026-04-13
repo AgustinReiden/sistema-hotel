@@ -1,12 +1,12 @@
 "use server";
 
-import { publicCreateReservation } from "@/lib/data";
+import { publicCreateReservationByType } from "@/lib/data";
 import { ActionResult } from "@/lib/types";
 import { publicBookingSchema } from "@/lib/validations";
 import { revalidatePath } from "next/cache";
 
 export async function handlePublicBooking(
-    roomId: number,
+    roomType: string,
     clientName: string,
     checkIn: string,
     checkOut: string,
@@ -15,7 +15,7 @@ export async function handlePublicBooking(
 ): Promise<ActionResult> {
     try {
         const validated = publicBookingSchema.parse({
-            roomId,
+            roomType,
             clientName,
             clientDni,
             clientPhone,
@@ -29,8 +29,8 @@ export async function handlePublicBooking(
             return { success: false, error: "La fecha de salida debe ser posterior a la de llegada." };
         }
 
-        await publicCreateReservation({
-            roomId: validated.roomId,
+        await publicCreateReservationByType({
+            roomType: validated.roomType,
             clientName: validated.clientName,
             checkIn,
             checkOut,

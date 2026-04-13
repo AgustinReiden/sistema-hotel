@@ -110,7 +110,10 @@ export const associatedClientSchema = z.object({
 });
 
 export const publicBookingSchema = z.object({
-  roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+  roomType: z
+    .string()
+    .trim()
+    .min(1, "La categoria de habitacion es obligatoria."),
   clientName: z
     .string()
     .trim()

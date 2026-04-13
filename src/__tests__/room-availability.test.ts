@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { determineSmarterAvailableRooms } from "@/lib/data";
+import { buildPublicRoomOffers, compareRoomNumbers, sortRoomsByNumber } from "@/lib/rooms";
 import type { Room } from "@/lib/types";
 
 function mockRoom(overrides: Partial<Room> & { id: number; capacity: number }): Room {
@@ -111,5 +112,65 @@ describe("determineSmarterAvailableRooms", () => {
         const result = determineSmarterAvailableRooms(rooms, 1);
         expect(result).toHaveLength(1);
         expect(result[0].id).toBe(1);
+    });
+});
+
+describe("compareRoomNumbers", () => {
+    it("sorts numeric room numbers correctly", () => {
+        expect(compareRoomNumbers("2", "10")).toBeLessThan(0);
+        expect(compareRoomNumbers("101", "20")).toBeGreaterThan(0);
+    });
+});
+
+describe("sortRoomsByNumber", () => {
+    it("orders rooms using numeric comparison instead of lexicographic text", () => {
+        const rooms = [
+            mockRoom({ id: 1, room_number: "10", capacity: 2 }),
+            mockRoom({ id: 2, room_number: "2", capacity: 2 }),
+            mockRoom({ id: 3, room_number: "1", capacity: 2 }),
+        ];
+
+        expect(sortRoomsByNumber(rooms).map((room) => room.room_number)).toEqual(["1", "2", "10"]);
+    });
+});
+
+describe("buildPublicRoomOffers", () => {
+    it("groups rooms by type and keeps the cheapest room as representative", () => {
+        const offers = buildPublicRoomOffers([
+            mockRoom({
+                id: 1,
+                room_number: "10",
+                room_type: "Doble",
+                base_price: 25000,
+                capacity: 2,
+                beds_configuration: "1 doble",
+                amenities: ["wifi"],
+            }),
+            mockRoom({
+                id: 2,
+                room_number: "2",
+                room_type: "Doble",
+                base_price: 22000,
+                capacity: 2,
+                beds_configuration: "2 simples",
+                amenities: ["tv"],
+            }),
+            mockRoom({
+                id: 3,
+                room_number: "5",
+                room_type: "Suite",
+                base_price: 40000,
+                capacity: 4,
+                beds_configuration: "1 king",
+                amenities: ["frigobar"],
+            }),
+        ], "catalog");
+
+        expect(offers).toHaveLength(2);
+        expect(offers[0].roomType).toBe("Doble");
+        expect(offers[0].roomCount).toBe(2);
+        expect(offers[0].priceFrom).toBe(22000);
+        expect(offers[0].representativeRoom.id).toBe(2);
+        expect(offers[0].amenities).toEqual(["tv", "wifi"]);
     });
 });

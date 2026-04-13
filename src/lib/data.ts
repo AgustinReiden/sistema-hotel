@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createClient } from "./supabase/server";
-import { getRoomCapacity } from "./rooms";
+import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import type {
   AssignWalkInPayload,
   AssociatedClient,
@@ -182,7 +182,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   if (reservationsResult.error) throw reservationsResult.error;
   if (settingsResult.error) throw settingsResult.error;
 
-  const rooms = (roomsResult.data ?? []) as Room[];
+  const rooms = sortRoomsByNumber((roomsResult.data ?? []) as Room[]);
   const reservations = (reservationsResult.data ?? []).map((r: {
     id: string;
     room_id: number;
@@ -256,7 +256,7 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
   })) as Reservation[];
 
   return {
-    rooms: (roomsResult.data ?? []) as Room[],
+    rooms: sortRoomsByNumber((roomsResult.data ?? []) as Room[]),
     reservations,
     startDate: today,
     endDate: end,
@@ -412,6 +412,30 @@ export async function publicCreateReservation({
   return String(data);
 }
 
+export async function publicCreateReservationByType(
+  input: Omit<CreateReservationInput, "roomId"> & { roomType: string }
+): Promise<string> {
+  const availableRooms = await getAvailableRooms(input.checkIn, input.checkOut);
+  const matchingRoom = availableRooms.find(
+    (room) => room.room_type.trim().toLowerCase() === input.roomType.trim().toLowerCase()
+  );
+
+  if (!matchingRoom) {
+    throw new Error(
+      "Ya no quedan habitaciones disponibles en esa categoria para las fechas seleccionadas."
+    );
+  }
+
+  return publicCreateReservation({
+    roomId: matchingRoom.id,
+    clientName: input.clientName,
+    checkIn: input.checkIn,
+    checkOut: input.checkOut,
+    clientPhone: input.clientPhone,
+    clientDni: input.clientDni,
+  });
+}
+
 export async function staffCreateReservation(
   input: CreateReservationPayload
 ): Promise<string> {
@@ -434,15 +458,14 @@ export async function staffCreateReservation(
 
 export async function getAllRooms(): Promise<Room[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("rooms").select("*").order("room_number");
+  const { data, error } = await supabase.from("rooms").select("*");
   if (error) throw error;
-  return data as Room[];
+  return sortRoomsByNumber((data ?? []) as Room[]);
 }
 
 export async function getAvailableRooms(
   checkInTarget: string,
-  checkOutTarget: string,
-  guestsStr?: string
+  checkOutTarget: string
 ): Promise<Room[]> {
   const supabase = await createClient();
 
@@ -461,8 +484,7 @@ export async function getAvailableRooms(
   let query = supabase
     .from("rooms")
     .select("*")
-    .eq("is_active", true)
-    .order("room_number");
+    .eq("is_active", true);
 
   if (occupiedRoomIds.length > 0) {
     query = query.not("id", "in", `(${occupiedRoomIds.join(",")})`);
@@ -471,16 +493,7 @@ export async function getAvailableRooms(
   const { data, error } = await query;
   if (error) throw error;
 
-  let rooms = data as Room[];
-
-  if (guestsStr) {
-    const requestedGuests = parseInt(guestsStr, 10);
-    if (!isNaN(requestedGuests) && requestedGuests > 0) {
-      rooms = determineSmarterAvailableRooms(rooms, requestedGuests);
-    }
-  }
-
-  return rooms;
+  return sortRoomsByNumber((data ?? []) as Room[]);
 }
 
 export function determineSmarterAvailableRooms(availableRooms: Room[], targetGuests: number): Room[] {

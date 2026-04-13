@@ -30,6 +30,22 @@ export type Room = {
   is_active: boolean;
 };
 
+export type PublicRoomOfferMode = "catalog" | "available" | "combination";
+
+export type PublicRoomOffer = {
+  id: string;
+  roomType: string;
+  mode: PublicRoomOfferMode;
+  representativeRoom: Room;
+  roomCount: number;
+  priceFrom: number;
+  maxCapacity: number;
+  bedsSummary: string;
+  description: string | null;
+  imageUrl: string | null;
+  amenities: string[];
+};
+
 export type Reservation = {
   id: string;
   associated_client_id: string | null;

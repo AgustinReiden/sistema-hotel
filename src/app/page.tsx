@@ -4,7 +4,8 @@ import { Star, MapPin, UtensilsCrossed, BedDouble, Fuel, Instagram, Phone, Mail 
 import PublicSearchForm from "./components/PublicSearchForm";
 import RoomCarousel from "./components/RoomCarousel";
 import ScrollToResults from "./components/ScrollToResults";
-import { getAllRooms, getAvailableRooms, getHotelSettings } from "@/lib/data";
+import { determineSmarterAvailableRooms, getAllRooms, getAvailableRooms, getHotelSettings } from "@/lib/data";
+import { buildPublicRoomOffers, getRoomCapacity } from "@/lib/rooms";
 
 type PageProps = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -19,24 +20,37 @@ export default async function Home({ searchParams }: PageProps) {
   const isSearching = !!checkin && !!checkout;
 
   const allRooms = await getAllRooms();
-  const availableRooms = isSearching ? await getAvailableRooms(checkin, checkout, guestsParam) : [];
-  const availableRoomIds = new Set(availableRooms.map((r) => r.id));
+  const publicRooms = allRooms.filter((room) => room.is_active);
+  const availableRooms = isSearching ? await getAvailableRooms(checkin, checkout) : [];
   const settings = await getHotelSettings();
 
-  let comboMessage: string | null = null;
   const searchGuests = guestsParam ? parseInt(guestsParam, 10) : 0;
+  const catalogOffers = buildPublicRoomOffers(publicRooms, "catalog");
+  const directAvailableRooms =
+    isSearching && searchGuests > 0
+      ? availableRooms.filter((room) => getRoomCapacity(room) >= searchGuests)
+      : availableRooms;
+  const availableOffers = buildPublicRoomOffers(directAvailableRooms, "available");
+  const comboRooms =
+    isSearching && searchGuests > 0 && availableOffers.length === 0
+      ? determineSmarterAvailableRooms(availableRooms, searchGuests)
+      : [];
+  const comboOffers = buildPublicRoomOffers(comboRooms, "combination");
+  const visibleOffers = isSearching
+    ? availableOffers.length > 0
+      ? availableOffers
+      : comboOffers
+    : catalogOffers;
+  const hasVisibleOffers = visibleOffers.length > 0;
 
-  if (isSearching && availableRooms.length > 1 && searchGuests > 0) {
-    const typeCounts = new Map<string, number>();
-    for (const room of availableRooms) {
-      const typeName = room.room_type;
-      typeCounts.set(typeName, (typeCounts.get(typeName) || 0) + 1);
-    }
-    const parts: string[] = [];
-    for (const [type, count] of typeCounts.entries()) {
-      parts.push(`${count} habitaci\u00f3n ${type}`);
-    }
-    comboMessage = `No tenemos disponible una sola habitaci\u00f3n para ${searchGuests} personas, pero le podemos ofrecer la siguiente opci\u00f3n combinada: \u00a1${parts.join(" y ")}!`;
+  let comboMessage: string | null = null;
+
+  if (isSearching && availableOffers.length === 0 && comboOffers.length > 0 && searchGuests > 0) {
+    const parts = comboOffers.map(
+      (offer) =>
+        `${offer.roomCount} ${offer.roomCount === 1 ? "habitaci\u00f3n" : "habitaciones"} ${offer.roomType}`
+    );
+    comboMessage = `No encontramos una sola categor\u00eda para ${searchGuests} personas, pero s\u00ed esta combinaci\u00f3n disponible: ${parts.join(" y ")}.`;
   }
 
   return (
@@ -100,7 +114,7 @@ export default async function Home({ searchParams }: PageProps) {
               {settings?.hero_title || "Tu refugio en el camino"}
             </h1>
 
-            <div className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
+            <div id="buscar-fechas" className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
               <PublicSearchForm />
             </div>
           </div>
@@ -112,41 +126,31 @@ export default async function Home({ searchParams }: PageProps) {
             <div className="text-center mb-16">
               <p className="text-xs font-bold tracking-[0.3em] text-brand-400 uppercase mb-3">Alojamiento</p>
               <h2 className="text-4xl md:text-5xl font-serif text-white mb-6">
-                {isSearching ? "Disponibilidad" : "Nuestras Habitaciones"}
+                {isSearching ? "Disponibilidad por Categor\u00eda" : "Nuestras Categor\u00edas"}
               </h2>
               <div className="w-16 h-[2px] bg-brand-400 mx-auto mb-6"></div>
               <p className="text-white/70 max-w-2xl mx-auto text-lg font-light leading-relaxed">
                 {isSearching
-                  ? `Mostrando opciones del ${new Date(`${checkin}T12:00:00Z`).toLocaleDateString("es-AR")} al ${new Date(`${checkout}T12:00:00Z`).toLocaleDateString("es-AR")}`
-                  : "Habitaciones c\u00f3modas y silenciosas, pensadas para que descanses de verdad despu\u00e9s de la ruta."}
+                  ? `Mostrando tipos disponibles del ${new Date(`${checkin}T12:00:00Z`).toLocaleDateString("es-AR")} al ${new Date(`${checkout}T12:00:00Z`).toLocaleDateString("es-AR")}`
+                  : "Tipos de habitaci\u00f3n c\u00f3modos y silenciosos, pensados para que descanses de verdad despu\u00e9s de la ruta."}
               </p>
             </div>
 
             {comboMessage && (
               <div className="max-w-3xl mx-auto mb-10 p-6 bg-white/10 backdrop-blur-sm border border-white/20 text-white rounded-xl text-center shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
                 <p className="text-lg font-medium">{comboMessage}</p>
+                <p className="text-sm text-white/70 mt-2">
+                  Esta opci\u00f3n requiere coordinar m\u00e1s de una habitaci\u00f3n.
+                </p>
               </div>
             )}
 
             <div className="md:px-8">
-              {isSearching ? (
-                availableRooms.length > 0 ? (
-                  <RoomCarousel
-                    rooms={availableRooms}
-                    checkIn={checkin || ""}
-                    checkOut={checkout || ""}
-                    availableRoomIds={availableRooms.map((r) => r.id)}
-                    checkInTime={settings.standard_check_in_time?.substring(0, 5)}
-                    checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
-                    timezone={settings.timezone}
-                  />
-                ) : null
-              ) : (
+              {hasVisibleOffers && (
                 <RoomCarousel
-                  rooms={allRooms}
+                  offers={visibleOffers}
                   checkIn={checkin || ""}
                   checkOut={checkout || ""}
-                  availableRoomIds={Array.from(availableRoomIds)}
                   checkInTime={settings.standard_check_in_time?.substring(0, 5)}
                   checkOutTime={settings.standard_check_out_time?.substring(0, 5)}
                   timezone={settings.timezone}
@@ -154,11 +158,11 @@ export default async function Home({ searchParams }: PageProps) {
               )}
             </div>
 
-            {isSearching && availableRooms.length === 0 && (
+            {isSearching && !hasVisibleOffers && (
               <div className="mt-16 max-w-2xl mx-auto p-12 bg-white/10 backdrop-blur-sm border border-white/20 text-center rounded-2xl shadow-sm">
                 <h3 className="text-2xl font-serif text-white mb-3">Sin disponibilidad</h3>
                 <p className="text-white/70 font-light leading-relaxed">
-                  Lamentablemente, nuestras habitaciones est&aacute;n completamente reservadas para las fechas seleccionadas.
+                  Lamentablemente, no encontramos tipos de habitaci&oacute;n disponibles para las fechas y cantidad de hu&eacute;spedes seleccionadas.
                   Le invitamos a probar con otro rango de fechas.
                 </p>
               </div>

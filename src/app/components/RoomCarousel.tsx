@@ -1,26 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Room } from "@/lib/types";
+import { PublicRoomOffer } from "@/lib/types";
 import RoomCard from "./RoomCard";
 
 interface RoomCarouselProps {
-  rooms: Room[];
+  offers: PublicRoomOffer[];
   checkIn: string;
   checkOut: string;
-  availableRoomIds: number[];
   checkInTime?: string;
   checkOutTime?: string;
   timezone?: string;
 }
 
 export default function RoomCarousel({
-  rooms,
+  offers,
   checkIn,
   checkOut,
-  availableRoomIds,
   checkInTime,
   checkOutTime,
   timezone,
@@ -34,8 +32,6 @@ export default function RoomCarousel({
 
   const [canScrollPrev, setCanScrollPrev] = useState(false);
   const [canScrollNext, setCanScrollNext] = useState(false);
-
-  const availableSet = useMemo(() => new Set(availableRoomIds), [availableRoomIds]);
 
   useEffect(() => {
     if (!emblaApi) return;
@@ -54,23 +50,22 @@ export default function RoomCarousel({
     };
   }, [emblaApi]);
 
-  const showArrows = rooms.length > 3;
+  const showArrows = offers.length > 3;
 
   return (
     <div className="relative">
       {/* Embla viewport */}
       <div className="overflow-hidden" ref={emblaRef}>
         <div className="flex gap-8">
-          {rooms.map((room) => (
+          {offers.map((offer) => (
             <div
-              key={room.id}
+              key={offer.id}
               className="min-w-0 flex-shrink-0 basis-full md:basis-[calc(50%-1rem)] lg:basis-[calc(33.333%-1.334rem)]"
             >
               <RoomCard
-                room={room}
+                offer={offer}
                 checkIn={checkIn}
                 checkOut={checkOut}
-                isAvailable={availableSet.has(room.id)}
                 checkInTime={checkInTime}
                 checkOutTime={checkOutTime}
                 timezone={timezone}

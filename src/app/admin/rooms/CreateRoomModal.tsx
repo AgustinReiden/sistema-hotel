@@ -3,18 +3,28 @@
 import { useState } from "react";
 import { X, Loader2, Save } from "lucide-react";
 import { createRoomAction } from "./actions";
+import RoomTypeSelector from "./RoomTypeSelector";
 
 interface CreateRoomModalProps {
     isOpen: boolean;
     onClose: () => void;
+    roomTypes: string[];
+    onAddCategory: (value: string) => void;
+    onSaved: () => void;
 }
 
-export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProps) {
+export default function CreateRoomModal({
+    isOpen,
+    onClose,
+    roomTypes,
+    onAddCategory,
+    onSaved,
+}: CreateRoomModalProps) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const [roomNumber, setRoomNumber] = useState("");
-    const [roomType, setRoomType] = useState("Standard");
+    const [roomType, setRoomType] = useState(roomTypes[0] ?? "Standard");
     const [capacity, setCapacity] = useState("2");
     const [bedsConfiguration, setBedsConfiguration] = useState("1 Cama King");
     const [description, setDescription] = useState("");
@@ -31,6 +41,12 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
 
         if (!roomNumber) {
             setError("El numero de habitacion es obligatorio.");
+            setLoading(false);
+            return;
+        }
+
+        if (!roomType.trim()) {
+            setError("La categoria es obligatoria.");
             setLoading(false);
             return;
         }
@@ -70,6 +86,7 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
             const result = await createRoomAction(payload);
 
             if (result.success) {
+                onSaved();
                 onClose();
             } else {
                 console.error("Room creation failed:", {
@@ -115,14 +132,12 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Tipo</label>
-                                <input
-                                    type="text"
+                                <RoomTypeSelector
                                     value={roomType}
-                                    onChange={(e) => setRoomType(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                    placeholder="Ej. standard, suite, matrimonial"
-                                    required
+                                    roomTypes={roomTypes}
+                                    onChange={setRoomType}
+                                    onAddCategory={onAddCategory}
+                                    label="Categoria"
                                 />
                             </div>
                         </div>
