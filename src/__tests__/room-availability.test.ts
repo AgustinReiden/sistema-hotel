@@ -8,6 +8,7 @@ function mockRoom(overrides: Partial<Room> & { id: number; capacity: number }): 
 
     return {
         id,
+        category_id: 1,
         room_number: `${id}`,
         room_type: "TEST",
         status: "available",

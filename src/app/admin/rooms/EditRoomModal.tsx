@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { X, Loader2, Save } from "lucide-react";
+import type { Room, RoomCategory } from "@/lib/types";
 import { getRoomCapacity } from "@/lib/rooms";
-import { Room } from "@/lib/types";
 import { updateRoomAction } from "./actions";
 import RoomTypeSelector from "./RoomTypeSelector";
 
@@ -11,22 +11,48 @@ interface EditRoomModalProps {
     isOpen: boolean;
     onClose: () => void;
     room: Room;
-    roomTypes: string[];
-    onAddCategory: (value: string) => void;
+    categories: RoomCategory[];
     onSaved: () => void;
+}
+
+type CategoryOption = Omit<RoomCategory, "id"> & {
+    id: number | null;
+};
+
+function getDefaultCategoryOption(name = "Standard"): CategoryOption {
+    return {
+        id: null,
+        name,
+        capacity: 2,
+        capacity_adults: 2,
+        capacity_children: 0,
+        beds_configuration: "1 Cama King",
+        amenities: ["wifi", "tv"],
+        description: "",
+        image_url: "",
+        base_price: 50,
+        half_day_price: 50,
+        is_active: true,
+    };
+}
+
+function toCategoryOption(category: RoomCategory): CategoryOption {
+    return { ...category };
 }
 
 export default function EditRoomModal({
     isOpen,
     onClose,
     room,
-    roomTypes,
-    onAddCategory,
+    categories,
     onSaved,
 }: EditRoomModalProps) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    const initialCategoryOptions = categories.length > 0 ? categories.map(toCategoryOption) : [getDefaultCategoryOption()];
+
+    const [categoryOptions, setCategoryOptions] = useState<CategoryOption[]>(initialCategoryOptions);
     const [roomType, setRoomType] = useState(room.room_type);
     const [capacity, setCapacity] = useState(getRoomCapacity(room).toString());
     const [bedsConfiguration, setBedsConfiguration] = useState(room.beds_configuration);
@@ -36,6 +62,41 @@ export default function EditRoomModal({
     const [amenities, setAmenities] = useState(room.amenities.join(", "));
 
     if (!isOpen) return null;
+
+    const applyCategory = (categoryName: string) => {
+        const selectedCategory = categoryOptions.find((category) => category.name === categoryName);
+        if (!selectedCategory) {
+            setRoomType(categoryName);
+            return;
+        }
+
+        setRoomType(selectedCategory.name);
+        setCapacity(String(selectedCategory.capacity || 2));
+        setBedsConfiguration(selectedCategory.beds_configuration || "1 Cama King");
+        setDescription(selectedCategory.description || "");
+        setImageUrl(selectedCategory.image_url || "");
+        setAmenities(selectedCategory.amenities.join(", ") || "");
+        setBasePrice(String(selectedCategory.base_price || 0));
+    };
+
+    const handleAddCategory = (categoryName: string) => {
+        setCategoryOptions((current) => [
+            ...current,
+            {
+                ...getDefaultCategoryOption(categoryName),
+                capacity: parseInt(capacity, 10) || 2,
+                beds_configuration: bedsConfiguration || "1 Cama King",
+                description,
+                image_url: imageUrl,
+                amenities: amenities
+                    .split(",")
+                    .map((amenity) => amenity.trim())
+                    .filter(Boolean),
+                base_price: parseFloat(basePrice) || 50,
+                half_day_price: parseFloat(basePrice) || 50,
+            },
+        ]);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -65,8 +126,8 @@ export default function EditRoomModal({
 
         const parsedAmenities = amenities
             .split(",")
-            .map((a) => a.trim())
-            .filter((a) => a.length > 0);
+            .map((amenity) => amenity.trim())
+            .filter((amenity) => amenity.length > 0);
 
         const result = await updateRoomAction(room.id, {
             room_type: roomType,
@@ -103,16 +164,24 @@ export default function EditRoomModal({
 
                 <div className="p-6 overflow-y-auto flex-1">
                     <form id="edit-room-form" onSubmit={handleSubmit} className="space-y-6">
+                        <div>
+                            <RoomTypeSelector
+                                value={roomType}
+                                roomTypes={categoryOptions.map((category) => category.name)}
+                                onChange={applyCategory}
+                                onAddCategory={handleAddCategory}
+                                label="Categoria"
+                            />
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                            <p className="text-sm font-semibold text-slate-800 mb-1">Datos heredados de la categoria</p>
+                            <p className="text-xs text-slate-500">
+                                Si cambias estos datos, se actualizara la categoria y heredaran el cambio todas las habitaciones asignadas a ella.
+                            </p>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-6">
-                            <div>
-                                <RoomTypeSelector
-                                    value={roomType}
-                                    roomTypes={roomTypes}
-                                    onChange={setRoomType}
-                                    onAddCategory={onAddCategory}
-                                    label="Categoria"
-                                />
-                            </div>
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Capacidad</label>
                                 <input
@@ -120,6 +189,18 @@ export default function EditRoomModal({
                                     min="1"
                                     value={capacity}
                                     onChange={(e) => setCapacity(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Precio x Noche (Base $)</label>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={basePrice}
+                                    onChange={(e) => setBasePrice(e.target.value)}
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />
@@ -145,20 +226,7 @@ export default function EditRoomModal({
                                 onChange={(e) => setDescription(e.target.value)}
                                 rows={3}
                                 className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all resize-none"
-                                placeholder="Descripcion publica de la habitacion."
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-1">Precio x Noche (Base $)</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={basePrice}
-                                onChange={(e) => setBasePrice(e.target.value)}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
-                                required
+                                placeholder="Descripcion publica de la categoria."
                             />
                         </div>
 

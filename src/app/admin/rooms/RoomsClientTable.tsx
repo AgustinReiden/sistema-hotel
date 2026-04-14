@@ -4,35 +4,25 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Edit, Trash2, Plus, BedDouble, Users, Image as ImageIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { getRoomCapacity, getUniqueRoomTypes, sortRoomTypes } from "@/lib/rooms";
-import { Room } from "@/lib/types";
+import { getRoomCapacity } from "@/lib/rooms";
+import { Room, RoomCategory } from "@/lib/types";
 import EditRoomModal from "./EditRoomModal";
 import CreateRoomModal from "./CreateRoomModal";
 import { deleteRoomAction } from "./actions";
 
-export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRooms: Room[]; isAdmin: boolean }) {
+export default function RoomsClientTable({
+    initialRooms,
+    initialCategories,
+    isAdmin,
+}: {
+    initialRooms: Room[];
+    initialCategories: RoomCategory[];
+    isAdmin: boolean;
+}) {
     const router = useRouter();
     const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
-    const [roomTypes, setRoomTypes] = useState<string[]>(() => {
-        const existingRoomTypes = getUniqueRoomTypes(initialRooms);
-        return existingRoomTypes.length > 0 ? existingRoomTypes : ["Standard"];
-    });
-
-    const handleAddCategory = (value: string) => {
-        setRoomTypes((current) => {
-            const alreadyExists = current.some(
-                (roomType) => roomType.toLowerCase() === value.trim().toLowerCase()
-            );
-
-            if (alreadyExists) {
-                return current;
-            }
-
-            return sortRoomTypes([...current, value.trim()]);
-        });
-    };
 
     const handleSaved = () => {
         router.refresh();
@@ -143,8 +133,7 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                     isOpen={!!selectedRoom}
                     onClose={() => setSelectedRoom(null)}
                     room={selectedRoom}
-                    roomTypes={roomTypes}
-                    onAddCategory={handleAddCategory}
+                    categories={initialCategories}
                     onSaved={handleSaved}
                 />
             )}
@@ -153,8 +142,7 @@ export default function RoomsClientTable({ initialRooms, isAdmin }: { initialRoo
                 <CreateRoomModal
                     isOpen={isCreateModalOpen}
                     onClose={() => setIsCreateModalOpen(false)}
-                    roomTypes={roomTypes}
-                    onAddCategory={handleAddCategory}
+                    categories={initialCategories}
                     onSaved={handleSaved}
                 />
             )}

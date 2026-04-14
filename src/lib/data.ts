@@ -12,6 +12,8 @@ import type {
   PaymentMethod,
   Reservation,
   ReservationStatus,
+  RoomCategory,
+  RoomCategoryUsage,
   Room,
   UserRole,
 } from "./types";
@@ -461,6 +463,49 @@ export async function getAllRooms(): Promise<Room[]> {
   const { data, error } = await supabase.from("rooms").select("*");
   if (error) throw error;
   return sortRoomsByNumber((data ?? []) as Room[]);
+}
+
+export async function getRoomCategories(): Promise<RoomCategory[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("room_categories")
+    .select("*")
+    .order("name");
+
+  if (error) throw error;
+
+  return (data ?? []).map((category) => ({
+    ...category,
+    capacity: Number(category.capacity) || 0,
+    capacity_adults: Number(category.capacity_adults) || 0,
+    capacity_children: Number(category.capacity_children) || 0,
+    base_price: Number(category.base_price) || 0,
+    half_day_price: Number(category.half_day_price) || 0,
+    amenities: Array.isArray(category.amenities)
+      ? (category.amenities as string[])
+      : [],
+  })) as RoomCategory[];
+}
+
+export async function getRoomCategoriesWithUsage(): Promise<RoomCategoryUsage[]> {
+  const supabase = await createClient();
+  const [categories, roomsResult] = await Promise.all([
+    getRoomCategories(),
+    supabase.from("rooms").select("category_id"),
+  ]);
+
+  if (roomsResult.error) throw roomsResult.error;
+
+  const roomCounts = new Map<number, number>();
+  for (const room of roomsResult.data ?? []) {
+    if (typeof room.category_id !== "number") continue;
+    roomCounts.set(room.category_id, (roomCounts.get(room.category_id) || 0) + 1);
+  }
+
+  return categories.map((category) => ({
+    ...category,
+    room_count: roomCounts.get(category.id) || 0,
+  }));
 }
 
 export async function getAvailableRooms(

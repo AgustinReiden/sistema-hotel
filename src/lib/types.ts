@@ -13,8 +13,28 @@ export type ActionResult<T = void> =
   | { success: true; data?: T }
   | { success: false; error: string; code?: string };
 
+export type RoomCategory = {
+  id: number;
+  name: string;
+  capacity: number;
+  capacity_adults: number;
+  capacity_children: number;
+  beds_configuration: string;
+  amenities: string[];
+  description: string | null;
+  image_url: string | null;
+  base_price: number;
+  half_day_price: number;
+  is_active: boolean;
+};
+
+export type RoomCategoryUsage = RoomCategory & {
+  room_count: number;
+};
+
 export type Room = {
   id: number;
+  category_id: number | null;
   room_number: string;
   room_type: string;
   status: RoomStatus;
