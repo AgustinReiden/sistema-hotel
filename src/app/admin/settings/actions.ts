@@ -9,6 +9,20 @@ import { hotelSettingsSchema } from "@/lib/validations";
 
 export async function updateHotelSettings(formData: FormData): Promise<ActionResult> {
   try {
+    const supabaseCheck = await createClient();
+    const {
+      data: { user },
+    } = await supabaseCheck.auth.getUser();
+    if (!user) return { success: false, error: "No autorizado." };
+    const { data: profileRow } = await supabaseCheck
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profileRow?.role !== "admin") {
+      return { success: false, error: "Solo admin puede modificar los ajustes." };
+    }
+
     const rawData = {
       name: String(formData.get("name") ?? ""),
       standard_check_in_time: String(formData.get("standard_check_in_time") ?? ""),

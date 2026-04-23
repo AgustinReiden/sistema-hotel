@@ -538,16 +538,16 @@ export async function getAvailableRooms(
 ): Promise<Room[]> {
   const supabase = await createClient();
 
-  // Find reservations that overlap with the requested dates
+  // Usamos la vista pública `reservations_availability` que sólo expone
+  // room_id + rangos, sin datos PII. Funciona para anon (landing) y staff.
   const { data: overlappingReservations, error: resError } = await supabase
-    .from("reservations")
+    .from("reservations_availability")
     .select("room_id")
-    .in("status", ACTIVE_RESERVATION_STATUSES)
     .or(`and(check_in_target.lt.${checkOutTarget},check_out_target.gt.${checkInTarget})`);
 
   if (resError) throw resError;
 
-  const occupiedRoomIds = overlappingReservations.map((r) => r.room_id);
+  const occupiedRoomIds = (overlappingReservations ?? []).map((r) => r.room_id);
 
   // Only filter by is_active, not by current status (cleaning/maintenance are temporary)
   let query = supabase
