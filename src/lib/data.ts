@@ -17,6 +17,7 @@ import type {
   RoomCategory,
   RoomCategoryUsage,
   Room,
+  RoomCleaningLogEntry,
   ShiftPaymentRow,
   ShiftSummary,
   UserRole,
@@ -367,12 +368,13 @@ export async function doCheckout({
 }
 
 export async function markRoomAsAvailable(roomId: number): Promise<void> {
+  // Se rutea por el RPC que valida rol (admin o maintenance) y registra
+  // la limpieza en room_cleaning_log para auditoría.
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("rooms")
-    .update({ status: "available" })
-    .eq("id", roomId);
-
+  const { error } = await supabase.rpc("rpc_mark_room_clean", {
+    p_room_id: roomId,
+    p_notes: null,
+  });
   if (error) throw error;
 }
 
@@ -1475,4 +1477,144 @@ export async function closeCashShift(
     actual_cash: Number(result.actual_cash) || 0,
     discrepancy: Number(result.discrepancy) || 0,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mantenimiento de habitaciones
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Lista habitaciones que requieren limpieza o están en mantenimiento,
+ * más datos de la última reserva si aplica (para que el rol maintenance
+ * sepa qué huésped dejó la habitación y cuándo).
+ */
+export async function getRoomsNeedingCleaning(): Promise<
+  Array<
+    Room & {
+      last_checkout_client: string | null;
+      last_checkout_at: string | null;
+    }
+  >
+> {
+  const supabase = await createClient();
+
+  const { data: rooms, error } = await supabase
+    .from("rooms")
+    .select("*")
+    .in("status", ["cleaning", "maintenance"])
+    .eq("is_active", true)
+    .order("room_number");
+
+  if (error) throw error;
+
+  const list = sortRoomsByNumber((rooms ?? []) as Room[]);
+  if (list.length === 0) return [];
+
+  const roomIds = list.map((r) => r.id);
+  // Buscamos la última reserva checked_out por habitación (aunque hay que
+  // tomar la más reciente por actual_check_out).
+  const { data: lastReservations } = await supabase
+    .from("reservations")
+    .select("room_id, client_name, actual_check_out")
+    .in("room_id", roomIds)
+    .eq("status", "checked_out")
+    .order("actual_check_out", { ascending: false });
+
+  const lastByRoom = new Map<
+    number,
+    { client: string; checkout: string | null }
+  >();
+  for (const r of (lastReservations ?? []) as {
+    room_id: number;
+    client_name: string;
+    actual_check_out: string | null;
+  }[]) {
+    if (!lastByRoom.has(r.room_id)) {
+      lastByRoom.set(r.room_id, {
+        client: r.client_name,
+        checkout: r.actual_check_out,
+      });
+    }
+  }
+
+  return list.map((r) => {
+    const last = lastByRoom.get(r.id);
+    return {
+      ...r,
+      last_checkout_client: last?.client ?? null,
+      last_checkout_at: last?.checkout ?? null,
+    };
+  });
+}
+
+export async function markRoomClean(
+  roomId: number,
+  notes?: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_mark_room_clean", {
+    p_room_id: roomId,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function getRoomCleaningLog(
+  limit = 60
+): Promise<RoomCleaningLogEntry[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("room_cleaning_log")
+    .select(
+      `
+      id,
+      room_id,
+      cleaned_at,
+      cleaned_by,
+      cleaner_name,
+      previous_status,
+      notes,
+      rooms ( room_number )
+      `
+    )
+    .order("cleaned_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  return ((data ?? []) as Array<{
+    id: number;
+    room_id: number;
+    cleaned_at: string;
+    cleaned_by: string;
+    cleaner_name: string | null;
+    previous_status: string;
+    notes: string | null;
+    rooms: { room_number: string } | { room_number: string }[] | null;
+  }>).map((r) => {
+    const rel = r.rooms;
+    const room_number = Array.isArray(rel)
+      ? rel[0]?.room_number ?? "—"
+      : rel?.room_number ?? "—";
+    return {
+      id: r.id,
+      room_id: r.room_id,
+      room_number,
+      cleaned_at: r.cleaned_at,
+      cleaned_by: r.cleaned_by,
+      cleaner_name: r.cleaner_name,
+      previous_status: r.previous_status,
+      notes: r.notes,
+    };
+  });
+}
+
+export async function getPendingSolicitudesCount(): Promise<number> {
+  const supabase = await createClient();
+  const { count, error } = await supabase
+    .from("reservations")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+  if (error) return 0;
+  return count ?? 0;
 }

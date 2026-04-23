@@ -365,13 +365,15 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 >
                   Hacer Check-In
                 </button>
-                <button
-                  onClick={onSetMaintenance}
-                  disabled={isPending}
-                  className="w-full text-xs font-bold text-slate-400 hover:text-slate-600 hover:underline transition-colors text-center mt-1"
-                >
-                  Poner en Mantenimiento
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={onSetMaintenance}
+                    disabled={isPending}
+                    className="w-full text-xs font-bold text-slate-400 hover:text-slate-600 hover:underline transition-colors text-center mt-1"
+                  >
+                    Poner en Mantenimiento
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -380,15 +382,21 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
         {room.status === "cleaning" && (
           <div className="flex flex-col items-center justify-center py-6">
             <p className="text-sm text-slate-500 font-medium text-center px-4">
-              En proceso de aseo por el personal.
+              En proceso de aseo por mantenimiento.
             </p>
-            <button
-              onClick={onMarkAvailable}
-              disabled={isPending}
-              className="mt-4 w-full bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
-            >
-              Marcar Lista
-            </button>
+            {isAdmin ? (
+              <button
+                onClick={onMarkAvailable}
+                disabled={isPending}
+                className="mt-4 w-full bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
+              >
+                Marcar Lista
+              </button>
+            ) : (
+              <p className="mt-4 text-xs text-slate-400 text-center italic px-4">
+                Esperando a que mantenimiento la marque como lista.
+              </p>
+            )}
           </div>
         )}
 
@@ -397,13 +405,19 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
             <p className="text-sm text-slate-500 font-medium text-center px-4">
               Habitación fuera de servicio por mantenimiento.
             </p>
-            <button
-              onClick={onMarkAvailable}
-              disabled={isPending}
-              className="mt-4 w-full bg-white hover:bg-slate-50 disabled:opacity-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
-            >
-              Marcar Disponible
-            </button>
+            {isAdmin ? (
+              <button
+                onClick={onMarkAvailable}
+                disabled={isPending}
+                className="mt-4 w-full bg-white hover:bg-slate-50 disabled:opacity-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
+              >
+                Marcar Disponible
+              </button>
+            ) : (
+              <p className="mt-4 text-xs text-slate-400 text-center italic px-4">
+                Esperando a que mantenimiento la habilite.
+              </p>
+            )}
           </div>
         )}
       </div>

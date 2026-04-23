@@ -1,4 +1,15 @@
-export type UserRole = "admin" | "receptionist" | "client";
+export type UserRole = "admin" | "receptionist" | "client" | "maintenance";
+
+export type RoomCleaningLogEntry = {
+  id: number;
+  room_id: number;
+  room_number: string;
+  cleaned_at: string;
+  cleaned_by: string;
+  cleaner_name: string | null;
+  previous_status: string;
+  notes: string | null;
+};
 
 export type RoomStatus = "available" | "occupied" | "maintenance" | "cleaning";
 

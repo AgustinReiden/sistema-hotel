@@ -1,4 +1,5 @@
-import { AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ClipboardList } from "lucide-react";
 import { format, isAfter } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -8,6 +9,7 @@ import {
   getActiveAssociatedClients,
   getCurrentUserRole,
   getDashboardData,
+  getPendingSolicitudesCount,
 } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
@@ -57,10 +59,11 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, hotelSettings }, associatedClients, role] = await Promise.all([
+  const [{ rooms, reservations, hotelSettings }, associatedClients, role, pendingSolicitudesCount] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
     getCurrentUserRole(),
+    getPendingSolicitudesCount(),
   ]);
   const isAdmin = role === "admin";
   const now = new Date();
@@ -167,6 +170,30 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 overflow-auto p-8">
+        {pendingSolicitudesCount > 0 && (
+          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <ClipboardList size={20} />
+              </div>
+              <div>
+                <p className="font-bold text-blue-900">
+                  Tenés {pendingSolicitudesCount} solicitud{pendingSolicitudesCount === 1 ? "" : "es"} pendiente{pendingSolicitudesCount === 1 ? "" : "s"}
+                </p>
+                <p className="text-sm text-blue-700">
+                  Reservas web esperando que las confirmes o rechaces.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/admin/solicitudes"
+              className="shrink-0 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center gap-2"
+            >
+              <ClipboardList size={16} />
+              Ir a Solicitudes
+            </Link>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <p className="text-sm font-medium text-slate-500 mb-1">Total Habitaciones</p>

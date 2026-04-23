@@ -9,7 +9,7 @@ export async function login(formData: FormData) {
 
     const supabase = await createClient();
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error, data } = await supabase.auth.signInWithPassword({
         email,
         password,
     });
@@ -18,8 +18,19 @@ export async function login(formData: FormData) {
         return { error: error.message };
     }
 
-    // Si fue exitoso, vamos al admin
-    redirect('/admin');
+    // Determinar destino según rol
+    let target = "/forbidden";
+    if (data?.user) {
+        const { data: profile } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", data.user.id)
+            .maybeSingle();
+        const role = profile?.role as string | undefined;
+        if (role === "admin" || role === "receptionist") target = "/admin";
+        else if (role === "maintenance") target = "/maintenance";
+    }
+    redirect(target);
 }
 
 export async function logout() {
