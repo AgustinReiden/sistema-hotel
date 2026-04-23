@@ -3,6 +3,7 @@ import "server-only";
 import { createClient } from "./supabase/server";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import type {
+  AdminAlert,
   AssignWalkInPayload,
   AssociatedClient,
   CashShift,
@@ -355,9 +356,9 @@ export async function doCheckout({
   paymentAmount,
   paymentMethod,
   paymentNotes,
-}: CheckoutReservationInput): Promise<void> {
+}: CheckoutReservationInput): Promise<{ paymentId: string | null }> {
   const supabase = await createClient();
-  const { error } = await supabase.rpc("rpc_staff_checkout_reservation", {
+  const { data, error } = await supabase.rpc("rpc_staff_checkout_reservation", {
     p_reservation_id: reservationId,
     p_payment_amount: paymentAmount ?? null,
     p_payment_method: paymentMethod ?? null,
@@ -365,6 +366,8 @@ export async function doCheckout({
   });
 
   if (error) throw error;
+  const result = (data ?? {}) as { payment_id?: string | null };
+  return { paymentId: result.payment_id ?? null };
 }
 
 export async function markRoomAsAvailable(roomId: number): Promise<void> {
@@ -1607,6 +1610,91 @@ export async function getRoomCleaningLog(
       notes: r.notes,
     };
   });
+}
+
+/**
+ * Todas las habitaciones activas, con info de si requieren limpieza o no.
+ * Para el dashboard de maintenance que ahora muestra todas (verde = OK,
+ * rojo = necesita limpieza) y les permite limpiar cualquiera.
+ */
+export async function getAllActiveRoomsForMaintenance(): Promise<
+  Array<
+    Room & {
+      last_checkout_client: string | null;
+      last_checkout_at: string | null;
+    }
+  >
+> {
+  const supabase = await createClient();
+
+  const { data: rooms, error } = await supabase
+    .from("rooms")
+    .select("*")
+    .eq("is_active", true)
+    .order("room_number");
+
+  if (error) throw error;
+
+  const list = sortRoomsByNumber((rooms ?? []) as Room[]);
+  if (list.length === 0) return [];
+
+  const roomIds = list.map((r) => r.id);
+  const { data: lastReservations } = await supabase
+    .from("reservations")
+    .select("room_id, client_name, actual_check_out")
+    .in("room_id", roomIds)
+    .eq("status", "checked_out")
+    .order("actual_check_out", { ascending: false });
+
+  const lastByRoom = new Map<number, { client: string; checkout: string | null }>();
+  for (const r of (lastReservations ?? []) as {
+    room_id: number;
+    client_name: string;
+    actual_check_out: string | null;
+  }[]) {
+    if (!lastByRoom.has(r.room_id)) {
+      lastByRoom.set(r.room_id, {
+        client: r.client_name,
+        checkout: r.actual_check_out,
+      });
+    }
+  }
+
+  return list.map((r) => {
+    const last = lastByRoom.get(r.id);
+    return {
+      ...r,
+      last_checkout_client: last?.client ?? null,
+      last_checkout_at: last?.checkout ?? null,
+    };
+  });
+}
+
+export async function listAdminAlerts(onlyUnresolved = true): Promise<AdminAlert[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_admin_alerts", {
+    p_only_unresolved: onlyUnresolved,
+  });
+  if (error) throw error;
+  return (data ?? []) as AdminAlert[];
+}
+
+export async function resolveAdminAlert(alertId: number, notes?: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_resolve_admin_alert", {
+    p_alert_id: alertId,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function getUnresolvedAdminAlertsCount(): Promise<number> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_admin_alerts", {
+    p_only_unresolved: true,
+  });
+  if (error) return 0;
+  return (data ?? []).length;
 }
 
 export async function getPendingSolicitudesCount(): Promise<number> {

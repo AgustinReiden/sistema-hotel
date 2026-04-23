@@ -94,9 +94,9 @@ export async function handleCheckOut({
   paymentAmount,
   paymentMethod,
   paymentNotes,
-}: CheckoutPayload): Promise<ActionResult> {
+}: CheckoutPayload): Promise<ActionResult<{ paymentId: string | null }>> {
   try {
-    await doCheckout({
+    const result = await doCheckout({
       reservationId,
       paymentAmount,
       paymentMethod,
@@ -107,7 +107,7 @@ export async function handleCheckOut({
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/caja");
-    return { success: true };
+    return { success: true, data: { paymentId: result.paymentId } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ejecutar check-out.");
     return { success: false, error: parsed.error, code: parsed.code };

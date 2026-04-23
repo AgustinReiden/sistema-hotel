@@ -9,15 +9,13 @@ export async function registerPaymentAction(
     amount: number,
     paymentMethod: string,
     notes?: string
-): Promise<ActionResult> {
+): Promise<ActionResult<{ paymentId: string | null }>> {
     const supabase = await createClient();
 
-    // The RPC will handle staff permissions internally 
-    // but Next.js Action should ideally catch if no user quickly
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "No autorizado." };
 
-    const { error: rpcError } = await supabase.rpc("rpc_register_payment", {
+    const { data, error: rpcError } = await supabase.rpc("rpc_register_payment", {
         p_reservation_id: reservationId,
         p_amount: amount,
         p_payment_method: paymentMethod,
@@ -25,9 +23,10 @@ export async function registerPaymentAction(
     });
 
     if (rpcError) {
-        console.error("Payment registration failed", rpcError);
-        return { success: false, error: rpcError.message || "Fallo al registrar el pago." };
+        return { success: false, error: rpcError.message || "Fallo al registrar el pago.", code: rpcError.code };
     }
+
+    const result = (data ?? {}) as { payment_id?: string | null };
 
     revalidatePath("/admin");
     revalidatePath("/admin/finances");
@@ -36,5 +35,5 @@ export async function registerPaymentAction(
     revalidatePath("/admin/calendario");
     revalidatePath("/admin/timeline");
 
-    return { success: true };
+    return { success: true, data: { paymentId: result.payment_id ?? null } };
 }

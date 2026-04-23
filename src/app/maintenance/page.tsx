@@ -1,11 +1,11 @@
-import { getHotelSettings, getRoomsNeedingCleaning } from "@/lib/data";
+import { getAllActiveRoomsForMaintenance, getHotelSettings } from "@/lib/data";
 import MaintenanceDashboard from "./MaintenanceDashboard";
 
 export const dynamic = "force-dynamic";
 
 export default async function MaintenancePage() {
   const [rooms, hotelSettings] = await Promise.all([
-    getRoomsNeedingCleaning(),
+    getAllActiveRoomsForMaintenance(),
     getHotelSettings().catch(() => null),
   ]);
   return (

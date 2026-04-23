@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ClipboardList } from "lucide-react";
+import { AlertTriangle, ClipboardList, Sparkles } from "lucide-react";
 import { format, isAfter } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -10,6 +10,7 @@ import {
   getCurrentUserRole,
   getDashboardData,
   getPendingSolicitudesCount,
+  getUnresolvedAdminAlertsCount,
 } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
@@ -59,11 +60,12 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, hotelSettings }, associatedClients, role, pendingSolicitudesCount] = await Promise.all([
+  const [{ rooms, reservations, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
     getCurrentUserRole(),
     getPendingSolicitudesCount(),
+    getUnresolvedAdminAlertsCount().catch(() => 0),
   ]);
   const isAdmin = role === "admin";
   const now = new Date();
@@ -170,6 +172,30 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 overflow-auto p-8">
+        {isAdmin && unresolvedAlertsCount > 0 && (
+          <div className="mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <p className="font-bold text-amber-900">
+                  Tenés {unresolvedAlertsCount} alerta{unresolvedAlertsCount === 1 ? "" : "s"} de mantenimiento
+                </p>
+                <p className="text-sm text-amber-700">
+                  Habitaciones limpiadas sin check-out previo. Revisá el panel.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/admin/mantenimiento"
+              className="shrink-0 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center gap-2"
+            >
+              <Sparkles size={16} />
+              Ver alertas
+            </Link>
+          </div>
+        )}
         {pendingSolicitudesCount > 0 && (
           <div className="mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-3">

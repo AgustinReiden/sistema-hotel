@@ -11,6 +11,19 @@ export type RoomCleaningLogEntry = {
   notes: string | null;
 };
 
+export type AdminAlert = {
+  id: number;
+  kind: string;
+  message: string;
+  related_room_id: number | null;
+  related_room_number: string | null;
+  related_cleaning_log_id: number | null;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolved_notes: string | null;
+};
+
 export type RoomStatus = "available" | "occupied" | "maintenance" | "cleaning";
 
 export type ReservationStatus =

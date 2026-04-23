@@ -8,6 +8,17 @@ import { toast } from "sonner";
 import { registerPaymentAction } from "@/app/admin/finances/actions";
 import type { ActionResult, PaymentMethod } from "@/lib/types";
 
+function openReceipt(paymentId: string) {
+  // Abre el recibo imprimible en una ventana nueva con auto-print.
+  // En Chrome con --kiosk-printing imprime sin diálogo.
+  if (typeof window === "undefined") return;
+  window.open(
+    `/admin/recibo/${paymentId}?autoprint=1`,
+    "recibo-" + paymentId,
+    "width=420,height=720"
+  );
+}
+
 // Mensaje exacto que emite el RPC cuando falta turno abierto (errcode P0003).
 function isNoOpenShiftError(error: string | undefined, code: string | undefined): boolean {
   if (!error) return false;
@@ -29,7 +40,7 @@ interface PaymentModalProps {
   onSubmitPayment?: (payload: {
     amount: number;
     paymentMethod: PaymentMethod;
-  }) => Promise<ActionResult>;
+  }) => Promise<ActionResult<{ paymentId: string | null }>>;
 }
 
 export default function PaymentModal({
@@ -77,7 +88,7 @@ export default function PaymentModal({
       return;
     }
 
-    let result: ActionResult;
+    let result: ActionResult<{ paymentId: string | null }>;
 
     if (onSubmitPayment) {
       result = await onSubmitPayment({
@@ -98,6 +109,11 @@ export default function PaymentModal({
 
     if (result.success) {
       toast.success(isCheckoutMode ? "Pago registrado y check-out realizado." : "Pago registrado exitosamente.");
+      // Abrir recibo imprimible (si el RPC devolvió payment_id)
+      const paymentId = (result.data as { paymentId?: string | null } | undefined)?.paymentId;
+      if (paymentId) {
+        openReceipt(paymentId);
+      }
       onSuccess?.();
       onClose();
     } else {

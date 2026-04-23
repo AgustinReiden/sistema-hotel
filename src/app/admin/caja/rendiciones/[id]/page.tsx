@@ -8,7 +8,7 @@ import PrintButton from "./PrintButton";
 
 export const revalidate = 0;
 
-function formatMoney(n: number | null) {
+function money(n: number | null) {
   if (n === null) return "—";
   return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -17,12 +17,177 @@ const METHOD_LABELS: Record<string, string> = {
   cash: "Efectivo",
   mercado_pago: "Mercado Pago",
   bank_transfer: "Transferencia",
-  credit_card: "Tarjeta Crédito",
-  debit_card: "Tarjeta Débito",
+  credit_card: "T. Crédito",
+  debit_card: "T. Débito",
   vale_blanco: "Vale Blanco",
   cuenta_corriente: "Cta. Corriente",
   other: "Otro",
 };
+
+type ShiftCopyProps = {
+  title: string;
+  hotelName: string;
+  hotelAddress: string;
+  shiftIdShort: string;
+  openedAt: string;
+  closedAt: string;
+  openedBy: string | null;
+  closedBy: string | null;
+  cashIncome: number;
+  expectedCash: number | null;
+  actualCash: number | null;
+  discrepancy: number | null;
+  otherMethods: Array<[string, number]>;
+  otherIncome: number;
+  totalIncome: number;
+  paymentsList: Array<{
+    id: string;
+    time: string;
+    methodLabel: string;
+    amount: number;
+    clientName: string;
+    roomNumber: string | null;
+  }>;
+  notes: string | null;
+  printedAt: string;
+};
+
+function ShiftCopy(props: ShiftCopyProps) {
+  const {
+    title,
+    hotelName,
+    hotelAddress,
+    shiftIdShort,
+    openedAt,
+    closedAt,
+    openedBy,
+    closedBy,
+    cashIncome,
+    expectedCash,
+    actualCash,
+    discrepancy,
+    otherMethods,
+    otherIncome,
+    totalIncome,
+    paymentsList,
+    notes,
+    printedAt,
+  } = props;
+
+  const diffClass =
+    discrepancy === null
+      ? ""
+      : discrepancy === 0
+        ? "ok"
+        : discrepancy > 0
+          ? "over"
+          : "under";
+
+  return (
+    <div className="thermal-page">
+      <h1>{hotelName}</h1>
+      <p className="addr">{hotelAddress}</p>
+      <hr />
+      <h2>RENDICIÓN DE CAJA</h2>
+      <p className="sub">{title}</p>
+      <p className="row">
+        <span>Turno #</span>
+        <span>{shiftIdShort}</span>
+      </p>
+      <p className="row">
+        <span>Abierto:</span>
+        <span>{openedAt}</span>
+      </p>
+      {openedBy && <p className="row small indent">por {openedBy}</p>}
+      <p className="row">
+        <span>Cerrado:</span>
+        <span>{closedAt}</span>
+      </p>
+      {closedBy && closedBy !== openedBy && (
+        <p className="row small indent">por {closedBy}</p>
+      )}
+
+      <hr />
+      <p className="section">RECONCILIACIÓN EFECTIVO</p>
+      <p className="row">
+        <span>Cobros efectivo:</span>
+        <span>{money(cashIncome)}</span>
+      </p>
+      <p className="row bold">
+        <span>Esperado:</span>
+        <span>{money(expectedCash)}</span>
+      </p>
+      <p className="row">
+        <span>Contado:</span>
+        <span>{money(actualCash)}</span>
+      </p>
+      <p className={`row big ${diffClass}`}>
+        <span>DIFERENCIA:</span>
+        <span>
+          {discrepancy === null
+            ? "—"
+            : (discrepancy > 0 ? "+" : "") + money(discrepancy)}
+        </span>
+      </p>
+
+      {otherMethods.length > 0 && (
+        <>
+          <hr />
+          <p className="section">TAMBIÉN SE RINDE</p>
+          {otherMethods.map(([method, amount]) => (
+            <p className="row" key={method}>
+              <span>{METHOD_LABELS[method] ?? method}:</span>
+              <span>{money(amount)}</span>
+            </p>
+          ))}
+          <p className="row bold">
+            <span>Subtotal otros:</span>
+            <span>{money(otherIncome)}</span>
+          </p>
+        </>
+      )}
+
+      <hr />
+      <p className="section">TOTAL COBRADO</p>
+      <p className="row big">
+        <span>TOTAL:</span>
+        <span>{money(totalIncome)}</span>
+      </p>
+
+      {paymentsList.length > 0 && (
+        <>
+          <hr />
+          <p className="section">DETALLE ({paymentsList.length})</p>
+          {paymentsList.map((p) => (
+            <div key={p.id} className="payment-line">
+              <p className="row small">
+                <span>
+                  {p.time} · {p.methodLabel}
+                </span>
+                <span>{money(p.amount)}</span>
+              </p>
+              <p className="row small muted indent">
+                {p.clientName}
+                {p.roomNumber ? ` (Hab. ${p.roomNumber})` : ""}
+              </p>
+            </div>
+          ))}
+        </>
+      )}
+
+      {notes && (
+        <>
+          <hr />
+          <p className="small">Notas: {notes}</p>
+        </>
+      )}
+
+      <hr />
+      <p className="sign">Firma: _____________________</p>
+      <p className="sign muted">Impreso: {printedAt}</p>
+    </div>
+  );
+}
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -37,11 +202,40 @@ export default async function ShiftReportPage({ params }: PageProps) {
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
   const { shift, totalsByMethod, totalIncome, cashIncome, payments, openedByEmail, closedByEmail } = summary;
   const otherIncome = totalIncome - cashIncome;
+  const otherMethods = (Object.entries(totalsByMethod) as Array<[string, number]>)
+    .filter(([method, v]) => method !== "cash" && v > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  const copyProps: Omit<ShiftCopyProps, "title"> = {
+    hotelName: hotelSettings?.name || "Hotel El Refugio",
+    hotelAddress: hotelSettings?.address ?? "",
+    shiftIdShort: shift.id.slice(0, 8),
+    openedAt: formatHotelDateTime(shift.opened_at, tz),
+    closedAt: formatHotelDateTime(shift.closed_at, tz),
+    openedBy: openedByEmail ?? null,
+    closedBy: closedByEmail ?? null,
+    cashIncome,
+    expectedCash: shift.expected_cash,
+    actualCash: shift.actual_cash,
+    discrepancy: shift.discrepancy,
+    otherMethods,
+    otherIncome,
+    totalIncome,
+    paymentsList: payments.map((p) => ({
+      id: p.id,
+      time: formatHotelTime(p.created_at, tz),
+      methodLabel: METHOD_LABELS[p.payment_method] ?? p.payment_method,
+      amount: p.amount,
+      clientName: p.client_name,
+      roomNumber: p.room_number,
+    })),
+    notes: shift.notes,
+    printedAt: formatHotelDateTime(new Date().toISOString(), tz),
+  };
 
   return (
-    <div className="p-8 pb-20 overflow-y-auto w-full max-w-3xl mx-auto print:p-0 print:max-w-none">
-      {/* Header (oculto al imprimir) */}
-      <div className="mb-6 flex items-center justify-between print:hidden">
+    <>
+      <div className="no-print p-6 max-w-3xl mx-auto flex items-center justify-between">
         <Link
           href="/admin/caja/rendiciones"
           className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"
@@ -52,151 +246,52 @@ export default async function ShiftReportPage({ params }: PageProps) {
         <PrintButton />
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 print:border-none print:shadow-none print:rounded-none">
-        <div className="text-center mb-6 pb-6 border-b border-slate-200">
-          <h1 className="text-2xl font-bold text-slate-900">Rendición de Caja</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Hotel El Refugio · Turno #{shift.id.slice(0, 8)}
-          </p>
-        </div>
+      <div className="thermal">
+        <ShiftCopy title="ORIGINAL" {...copyProps} />
+        <ShiftCopy title="DUPLICADO" {...copyProps} />
 
-        <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Abierto</p>
-            <p className="text-slate-800 font-semibold">{formatHotelDateTime(shift.opened_at, tz)}</p>
-            <p className="text-xs text-slate-500 mt-0.5">por {openedByEmail ?? "—"}</p>
-          </div>
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cerrado</p>
-            <p className="text-slate-800 font-semibold">{formatHotelDateTime(shift.closed_at, tz)}</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              por {closedByEmail ?? (shift.status === "open" ? "— (abierto)" : "—")}
-            </p>
-          </div>
-        </div>
-
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6">
-          <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">
-            Reconciliación de Efectivo
-          </h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Cobros en efectivo del turno</span>
-              <span className="font-semibold text-emerald-600">{formatMoney(cashIncome)}</span>
-            </div>
-            <div className="border-t border-slate-300 pt-2 flex justify-between">
-              <span className="font-bold text-slate-700">Esperado en caja</span>
-              <span className="font-bold text-slate-900">
-                {formatMoney(shift.expected_cash)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">Efectivo contado</span>
-              <span className="font-semibold text-slate-800">{formatMoney(shift.actual_cash)}</span>
-            </div>
-            <div
-              className={`border-t border-slate-300 pt-2 flex justify-between text-base ${
-                shift.discrepancy === null
-                  ? "text-slate-500"
-                  : shift.discrepancy === 0
-                    ? "text-emerald-700"
-                    : shift.discrepancy > 0
-                      ? "text-blue-700"
-                      : "text-red-700"
-              }`}
-            >
-              <span className="font-bold">Diferencia</span>
-              <span className="font-bold">
-                {shift.discrepancy === null
-                  ? "—"
-                  : (shift.discrepancy > 0 ? "+" : "") + formatMoney(shift.discrepancy)}
-              </span>
-            </div>
-          </div>
-          {shift.notes && (
-            <p className="mt-4 text-xs text-slate-600 border-t border-slate-200 pt-3">
-              <span className="font-bold">Notas:</span> {shift.notes}
-            </p>
-          )}
-        </div>
-
-        <div className="mb-6">
-          <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">
-            Desglose por Método
-          </h2>
-          <table className="w-full text-sm">
-            <tbody className="divide-y divide-slate-100">
-              {Object.entries(totalsByMethod)
-                .filter(([, v]) => v > 0)
-                .map(([method, amount]) => (
-                  <tr key={method}>
-                    <td className="py-2 text-slate-600">
-                      {METHOD_LABELS[method] ?? method}
-                    </td>
-                    <td className="py-2 text-right font-semibold text-slate-800">
-                      {formatMoney(amount)}
-                    </td>
-                  </tr>
-                ))}
-              <tr className="border-t-2 border-slate-300">
-                <td className="py-2 font-bold text-slate-900">Total cobrado</td>
-                <td className="py-2 text-right font-bold text-slate-900">
-                  {formatMoney(totalIncome)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          {otherIncome > 0 && (
-            <p className="mt-3 text-xs text-slate-600 italic">
-              Además del efectivo, tenés que rendir {formatMoney(otherIncome)} cobrados por otros medios.
-              Verificá los comprobantes/transferencias.
-            </p>
-          )}
-        </div>
-
-        <div>
-          <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">
-            Detalle de Pagos ({payments.length})
-          </h2>
-          {payments.length === 0 ? (
-            <p className="text-sm text-slate-500 italic">Sin pagos en este turno.</p>
-          ) : (
-            <table className="w-full text-xs">
-              <thead className="text-slate-500">
-                <tr className="border-b border-slate-200">
-                  <th className="text-left py-2 font-semibold">Hora</th>
-                  <th className="text-left py-2 font-semibold">Huésped</th>
-                  <th className="text-left py-2 font-semibold">Hab.</th>
-                  <th className="text-left py-2 font-semibold">Método</th>
-                  <th className="text-right py-2 font-semibold">Monto</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {payments.map((p) => (
-                  <tr key={p.id}>
-                    <td className="py-2 text-slate-600">
-                      {formatHotelTime(p.created_at, tz)}
-                    </td>
-                    <td className="py-2 text-slate-700 font-medium">{p.client_name}</td>
-                    <td className="py-2 text-slate-600">{p.room_number ?? "—"}</td>
-                    <td className="py-2 text-slate-600">
-                      {METHOD_LABELS[p.payment_method] ?? p.payment_method}
-                    </td>
-                    <td className="py-2 text-right font-semibold text-slate-800">
-                      {formatMoney(p.amount)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div className="mt-10 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 print:mt-16">
-          <p>Firma recepcionista: ___________________________</p>
-          <p className="mt-4">Impreso: {formatHotelDateTime(new Date().toISOString(), tz)}</p>
-        </div>
+        <style>{`
+          @page { size: 75mm auto; margin: 2mm; }
+          @media print {
+            body { background: white !important; }
+            .no-print { display: none !important; }
+          }
+          .thermal {
+            font-family: 'Courier New', monospace;
+            background: white;
+            color: #000;
+            max-width: 75mm;
+            margin: 0 auto;
+          }
+          .thermal-page {
+            page-break-after: always;
+            break-after: page;
+            padding: 4mm 2mm;
+          }
+          .thermal-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
+          }
+          .thermal h1 { font-size: 13pt; font-weight: 800; margin: 0 0 2px; text-align: center; }
+          .thermal .addr { font-size: 8pt; text-align: center; margin: 0 0 4px; }
+          .thermal h2 { font-size: 11pt; font-weight: 800; margin: 6px 0 0; text-align: center; }
+          .thermal .sub { font-size: 10pt; font-weight: 700; text-align: center; margin: 0 0 6px; letter-spacing: 2px; }
+          .thermal .section { font-size: 9pt; font-weight: 800; text-align: center; margin: 6px 0 3px; letter-spacing: 1px; }
+          .thermal hr { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+          .thermal .row { display: flex; justify-content: space-between; font-size: 10pt; margin: 1px 0; }
+          .thermal .row.small { font-size: 9pt; }
+          .thermal .row.bold { font-weight: 800; }
+          .thermal .row.big { font-size: 12pt; font-weight: 900; margin: 4px 0; }
+          .thermal .row.big.ok { color: #065f46; }
+          .thermal .row.big.over { color: #1e3a8a; }
+          .thermal .row.big.under { color: #991b1b; }
+          .thermal .indent { padding-left: 6px; color: #555; }
+          .thermal .muted { color: #555; }
+          .thermal .payment-line { margin-bottom: 2px; }
+          .thermal .small { font-size: 9pt; }
+          .thermal .sign { font-size: 9pt; text-align: center; margin: 8px 0 2px; }
+        `}</style>
       </div>
-    </div>
+    </>
   );
 }
