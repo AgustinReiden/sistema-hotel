@@ -48,6 +48,7 @@ export default function BookingModal({
   const [clientName, setClientName] = useState("");
   const [clientDni, setClientDni] = useState("");
   const [clientPhone, setClientPhone] = useState("");
+  const [guestCount, setGuestCount] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -88,7 +89,8 @@ export default function BookingModal({
       checkInDateTime,
       checkOutDateTime,
       clientPhone.trim(),
-      clientDni.trim()
+      clientDni.trim(),
+      guestCount
     );
 
     setLoading(false);
@@ -275,6 +277,29 @@ export default function BookingModal({
                             required
                           />
                         </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="guestCount" className="block text-sm font-bold tracking-wide uppercase text-slate-700">
+                          <span className="flex items-center gap-2">
+                            <Users size={14} />
+                            Cantidad de pasajeros
+                          </span>
+                        </label>
+                        <input
+                          id="guestCount"
+                          type="number"
+                          min={1}
+                          max={getRoomCapacity(room)}
+                          value={guestCount}
+                          onChange={(e) =>
+                            setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))
+                          }
+                          className="w-full md:w-48 px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                        />
+                        <p className="text-xs text-slate-500">
+                          Capacidad maxima: {getRoomCapacity(room)} pasajero(s).
+                        </p>
                       </div>
 
                       {error && (

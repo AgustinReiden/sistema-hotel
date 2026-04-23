@@ -11,7 +11,8 @@ export async function handlePublicBooking(
     checkIn: string,
     checkOut: string,
     clientPhone: string,
-    clientDni: string
+    clientDni: string,
+    guestCount?: number
 ): Promise<ActionResult> {
     try {
         const validated = publicBookingSchema.parse({
@@ -36,6 +37,7 @@ export async function handlePublicBooking(
             checkOut,
             clientPhone: validated.clientPhone,
             clientDni: validated.clientDni,
+            guestCount: guestCount && guestCount >= 1 ? Math.floor(guestCount) : 1,
         });
         revalidatePath("/");
         revalidatePath("/admin");

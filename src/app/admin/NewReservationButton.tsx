@@ -8,9 +8,16 @@ import type { AssociatedClient, Room } from "@/lib/types";
 type NewReservationButtonProps = {
     rooms: Room[];
     associatedClients: AssociatedClient[];
+    standardCheckInTime?: string;
+    standardCheckOutTime?: string;
 };
 
-export default function NewReservationButton({ rooms, associatedClients }: NewReservationButtonProps) {
+export default function NewReservationButton({
+    rooms,
+    associatedClients,
+    standardCheckInTime,
+    standardCheckOutTime,
+}: NewReservationButtonProps) {
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     return (
@@ -27,6 +34,8 @@ export default function NewReservationButton({ rooms, associatedClients }: NewRe
                 onClose={() => setIsModalOpen(false)}
                 rooms={rooms}
                 associatedClients={associatedClients}
+                standardCheckInTime={standardCheckInTime}
+                standardCheckOutTime={standardCheckOutTime}
                 onSubmit={async (data) => {
                     return await handleCreateReservation(data);
                 }}

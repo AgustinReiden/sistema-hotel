@@ -1,28 +1,24 @@
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { ArrowLeft, CheckCircle2, AlertTriangle, Clock, User } from "lucide-react";
 
-import { listShifts } from "@/lib/data";
+import { getCurrentUserRole, getHotelSettings, listShifts } from "@/lib/data";
+import { formatHotelDateTime } from "@/lib/time";
 
 export const revalidate = 0;
-
-function formatDateTime(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function formatMoney(n: number | null) {
   if (n === null) return "—";
   return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export default async function CajaReportesPage() {
-  const shifts = await listShifts({ limit: 60 });
+export default async function CajaRendicionesPage() {
+  const [shifts, role, hotelSettings] = await Promise.all([
+    listShifts({ limit: 60 }),
+    getCurrentUserRole(),
+    getHotelSettings().catch(() => null),
+  ]);
+  const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
+  const isAdmin = role === "admin";
 
   return (
     <div className="p-8 pb-20 overflow-y-auto w-full">
@@ -35,8 +31,12 @@ export default async function CajaReportesPage() {
             <ArrowLeft size={14} />
             Volver a Caja
           </Link>
-          <h1 className="text-3xl font-bold text-slate-900 mb-1">Reportes de Caja</h1>
-          <p className="text-slate-500">Historial de turnos abiertos y cerrados.</p>
+          <h1 className="text-3xl font-bold text-slate-900 mb-1">Rendiciones de Caja</h1>
+          <p className="text-slate-500">
+            {isAdmin
+              ? "Historial de todos los turnos abiertos y cerrados por el personal."
+              : "Historial de tus turnos."}
+          </p>
         </div>
       </div>
 
@@ -51,6 +51,9 @@ export default async function CajaReportesPage() {
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-3 font-semibold">Estado</th>
+                  {isAdmin && (
+                    <th className="text-left px-4 py-3 font-semibold">Recepcionista</th>
+                  )}
                   <th className="text-left px-4 py-3 font-semibold">Abierto</th>
                   <th className="text-left px-4 py-3 font-semibold">Cerrado</th>
                   <th className="text-right px-4 py-3 font-semibold">Esperado</th>
@@ -82,11 +85,24 @@ export default async function CajaReportesPage() {
                           </span>
                         )}
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1.5 text-slate-700 font-semibold">
+                            <User size={12} className="text-slate-400" />
+                            {s.opened_by_name ?? "—"}
+                          </span>
+                          {s.closed_by_name && s.closed_by_name !== s.opened_by_name && (
+                            <p className="text-[11px] text-slate-400 mt-0.5 ml-5">
+                              Cerró: {s.closed_by_name}
+                            </p>
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-slate-700">
-                        {formatDateTime(s.opened_at)}
+                        {formatHotelDateTime(s.opened_at, tz)}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
-                        {formatDateTime(s.closed_at)}
+                        {formatHotelDateTime(s.closed_at, tz)}
                       </td>
                       <td className="px-4 py-3 text-right font-medium text-slate-700">
                         {formatMoney(s.expected_cash)}
@@ -109,7 +125,7 @@ export default async function CajaReportesPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <Link
-                          href={`/admin/caja/reportes/${s.id}`}
+                          href={`/admin/caja/rendiciones/${s.id}`}
                           className="text-brand-600 hover:text-brand-700 font-bold text-xs"
                         >
                           Ver / Imprimir

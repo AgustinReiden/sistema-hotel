@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DollarSign, Loader2, X } from "lucide-react";
+import { DollarSign, Info, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { openShiftAction } from "./actions";
@@ -13,24 +13,15 @@ export default function OpenShiftModal({
   isOpen: boolean;
   onClose: () => void;
 }) {
-  const [openingCash, setOpeningCash] = useState("0");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleOpen = async () => {
     setError(null);
-
-    const parsed = parseFloat(openingCash.replace(",", "."));
-    if (isNaN(parsed) || parsed < 0) {
-      setError("Ingresa un monto valido (cero o mayor).");
-      return;
-    }
-
     setLoading(true);
-    const result = await openShiftAction({ openingCash: parsed });
+    const result = await openShiftAction();
     setLoading(false);
 
     if (!result.success) {
@@ -52,7 +43,7 @@ export default function OpenShiftModal({
             <div>
               <h2 className="text-xl font-bold text-slate-800">Abrir Caja</h2>
               <p className="text-slate-500 text-sm font-medium">
-                Empieza tu turno para registrar pagos.
+                Empeza tu turno para registrar pagos.
               </p>
             </div>
           </div>
@@ -61,25 +52,13 @@ export default function OpenShiftModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div>
-            <label htmlFor="opening-cash" className="block text-sm font-bold text-slate-700 mb-2">
-              Efectivo inicial en caja ($)
-            </label>
-            <input
-              id="opening-cash"
-              type="number"
-              step="0.01"
-              min="0"
-              value={openingCash}
-              onChange={(e) => setOpeningCash(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none text-xl font-bold text-slate-800"
-              required
-              autoFocus
-            />
-            <p className="mt-2 text-xs text-slate-500">
-              Conta el efectivo que tenes fisicamente antes de empezar. Si arrancas con caja vacia, deja en 0.
-            </p>
+        <div className="p-6 space-y-5">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3">
+            <Info size={18} className="text-slate-400 shrink-0 mt-0.5" />
+            <div className="text-sm text-slate-600">
+              La caja abre <strong>en cero</strong>. El turno anterior debe haber rendido todo el efectivo antes de este cambio.
+              Al cerrar, contas el efectivo real que quedo y el sistema calcula la diferencia.
+            </div>
           </div>
 
           {error && (
@@ -96,7 +75,8 @@ export default function OpenShiftModal({
               Cancelar
             </button>
             <button
-              type="submit"
+              type="button"
+              onClick={handleOpen}
               disabled={loading}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center gap-2"
             >
@@ -104,7 +84,7 @@ export default function OpenShiftModal({
               Abrir Caja
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

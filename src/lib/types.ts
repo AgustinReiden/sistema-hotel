@@ -83,6 +83,7 @@ export type Reservation = {
   discount_amount: number;
   total_price: number;
   paid_amount: number;
+  guest_count: number;
   whatsapp_notified: boolean;
 };
 
@@ -153,6 +154,7 @@ export type CreateReservationPayload =
       clientPhone?: string;
       checkIn: string;
       checkOut: string;
+      guestCount?: number;
     }
   | {
       customerMode: "associated";
@@ -160,6 +162,7 @@ export type CreateReservationPayload =
       associatedClientId: string;
       checkIn: string;
       checkOut: string;
+      guestCount?: number;
     };
 
 export type AssignWalkInPayload =
@@ -168,12 +171,14 @@ export type AssignWalkInPayload =
       roomId: number;
       clientName: string;
       nights: number;
+      guestCount?: number;
     }
   | {
       customerMode: "associated";
       roomId: number;
       nights: number;
       associatedClientId: string;
+      guestCount?: number;
     };
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
@@ -202,6 +207,16 @@ export type CashShift = {
   discrepancy: number | null;
   notes: string | null;
   status: CashShiftStatus;
+  opened_by_name?: string | null;
+  closed_by_name?: string | null;
+};
+
+export type ManageableProfile = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: UserRole;
+  created_at: string;
 };
 
 export type ShiftPaymentRow = {
@@ -226,5 +241,4 @@ export type ShiftSummary = {
   closedByEmail: string | null;
 };
 
-export type OpenShiftPayload = { openingCash: number };
 export type CloseShiftPayload = { shiftId: string; actualCash: number; notes?: string };

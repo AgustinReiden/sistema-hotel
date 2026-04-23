@@ -31,6 +31,7 @@ export default function WalkInModal({
   const [clientName, setClientName] = useState("");
   const [associatedClientId, setAssociatedClientId] = useState("");
   const [nights, setNights] = useState(1);
+  const [guestCount, setGuestCount] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export default function WalkInModal({
     setClientName("");
     setAssociatedClientId("");
     setNights(1);
+    setGuestCount(1);
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -74,12 +76,14 @@ export default function WalkInModal({
               roomId: 0,
               clientName: clientName.trim(),
               nights,
+              guestCount,
             }
           : {
               customerMode: "associated",
               roomId: 0,
               associatedClientId,
               nights,
+              guestCount,
             };
 
       const result = await onSubmit(payload);
@@ -201,19 +205,36 @@ export default function WalkInModal({
             </div>
           )}
 
-          <div>
-            <label htmlFor="nights" className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Cantidad de Noches
-            </label>
-            <input
-              id="nights"
-              type="number"
-              min="1"
-              required
-              value={nights}
-              onChange={(e) => setNights(parseInt(e.target.value, 10) || 1)}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="nights" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Cantidad de Noches
+              </label>
+              <input
+                id="nights"
+                type="number"
+                min="1"
+                required
+                value={nights}
+                onChange={(e) => setNights(parseInt(e.target.value, 10) || 1)}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label htmlFor="guestCount" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Cantidad de pasajeros
+              </label>
+              <input
+                id="guestCount"
+                type="number"
+                min="1"
+                max="20"
+                value={guestCount}
+                onChange={(e) => setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              />
+              <p className="text-xs text-slate-500 mt-1">Opcional (default 1).</p>
+            </div>
           </div>
 
           {pricing && (

@@ -6,24 +6,11 @@ import { Wallet, DollarSign, Banknote, CreditCard, Landmark, FileText, Clock, Ci
 
 import OpenShiftModal from "./OpenShiftModal";
 import CloseShiftModal from "./CloseShiftModal";
+import { formatHotelTime, formatHotelDateTime } from "@/lib/time";
 import type { ShiftSummary } from "@/lib/types";
 
 function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 const METHOD_META: Record<string, { label: string; icon: React.ReactNode }> = {
@@ -39,9 +26,11 @@ const METHOD_META: Record<string, { label: string; icon: React.ReactNode }> = {
 
 type Props = {
   summary: ShiftSummary | null;
+  isAdmin: boolean;
+  hotelTimezone: string;
 };
 
-export default function CajaClient({ summary }: Props) {
+export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
   const [openModalOpen, setOpenModalOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
 
@@ -56,11 +45,15 @@ export default function CajaClient({ summary }: Props) {
         </div>
         <div className="flex gap-2 shrink-0">
           <Link
-            href="/admin/caja/reportes"
-            className="px-4 py-2 text-sm font-bold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors flex items-center gap-2"
+            href="/admin/caja/rendiciones"
+            className={
+              isAdmin
+                ? "px-5 py-3 text-sm font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                : "px-4 py-2 text-sm font-bold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition-colors flex items-center gap-2"
+            }
           >
-            <FileText size={16} />
-            Reportes
+            <FileText size={isAdmin ? 18 : 16} />
+            {isAdmin ? "Ver Rendiciones" : "Mis Rendiciones"}
           </Link>
         </div>
       </div>
@@ -95,9 +88,9 @@ export default function CajaClient({ summary }: Props) {
                   Turno Abierto
                 </p>
                 <p className="text-lg font-bold text-slate-800">
-                  Desde {formatTime(summary.shift.opened_at)}
+                  Desde {formatHotelTime(summary.shift.opened_at, hotelTimezone)}
                   <span className="text-slate-500 font-normal text-sm ml-2">
-                    ({formatDateTime(summary.shift.opened_at)})
+                    ({formatHotelDateTime(summary.shift.opened_at, hotelTimezone)})
                   </span>
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -137,20 +130,20 @@ export default function CajaClient({ summary }: Props) {
                 ${formatMoney(summary.cashIncome)}
               </p>
               <p className="text-xs text-slate-500 mt-2">
-                Inicial ${formatMoney(summary.shift.opening_cash)} + cobros efvo.
+                Lo que hay que rendir en efectivo.
               </p>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">
                 <Wallet size={14} />
-                Esperado en caja
+                Otros medios
               </div>
               <p className="text-3xl font-bold text-slate-900">
-                ${formatMoney(summary.shift.opening_cash + summary.cashIncome)}
+                ${formatMoney(summary.totalIncome - summary.cashIncome)}
               </p>
               <p className="text-xs text-slate-500 mt-2">
-                Lo que deberias contar al cerrar.
+                Tarjetas, transferencias, vales, etc.
               </p>
             </div>
           </div>
@@ -212,7 +205,7 @@ export default function CajaClient({ summary }: Props) {
                                 )}
                               </p>
                               <p className="text-xs text-slate-500">
-                                {formatTime(p.created_at)} · {meta.label}
+                                {formatHotelTime(p.created_at, hotelTimezone)} · {meta.label}
                               </p>
                             </div>
                           </div>
@@ -232,8 +225,8 @@ export default function CajaClient({ summary }: Props) {
             isOpen={closeModalOpen}
             onClose={() => setCloseModalOpen(false)}
             shiftId={summary.shift.id}
-            openingCash={summary.shift.opening_cash}
             cashIncome={summary.cashIncome}
+            totalsByMethod={summary.totalsByMethod}
           />
         </>
       )}

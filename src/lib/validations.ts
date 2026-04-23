@@ -31,6 +31,14 @@ const percentageSchema = z.preprocess(
     .max(100, "El descuento no puede superar el 100%.")
 );
 
+const guestCountSchema = z
+  .preprocess((v) => {
+    if (v === "" || v === null || v === undefined) return undefined;
+    if (typeof v === "string") return Number(v);
+    return v;
+  }, z.number().int().min(1, "La cantidad de pasajeros debe ser al menos 1.").max(20, "Maximo 20 pasajeros por reserva."))
+  .optional();
+
 const walkInBaseSchema = {
   customerMode: z.enum(["manual", "associated"]),
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),
@@ -39,6 +47,7 @@ const walkInBaseSchema = {
     .int()
     .min(1, "Debe ser al menos 1 noche")
     .max(30, "Maximo 30 noches por reserva."),
+  guestCount: guestCountSchema,
 };
 
 export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
@@ -73,6 +82,7 @@ export const createReservationSchema = z
       clientPhone: optionalPhoneSchema,
       checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
       checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
+      guestCount: guestCountSchema,
     }),
     z.object({
       customerMode: z.literal("associated"),
@@ -80,6 +90,7 @@ export const createReservationSchema = z
       associatedClientId: associatedClientIdSchema,
       checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
       checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
+      guestCount: guestCountSchema,
     }),
   ])
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {
@@ -123,10 +134,6 @@ const currencyAmount = z.preprocess(
     .refine((v) => !Number.isNaN(v), { message: "El monto debe ser numerico." })
     .min(0, "El monto no puede ser negativo.")
 );
-
-export const openShiftSchema = z.object({
-  openingCash: currencyAmount,
-});
 
 export const closeShiftSchema = z.object({
   shiftId: z.string().uuid("El identificador del turno es invalido."),

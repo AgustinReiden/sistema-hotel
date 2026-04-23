@@ -30,10 +30,6 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                     <ClipboardList size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                     <span className="font-medium">Solicitudes</span>
                 </Link>
-                <Link href="/admin/guests" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                    <Users size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                    <span className="font-medium">Huéspedes</span>
-                </Link>
                 <Link href="/admin/caja" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                     <CircleDollarSign size={18} className={`mr-3 transition-colors ${hasOpenShift ? 'text-emerald-400' : 'group-hover:text-emerald-400'}`} />
                     <span className="font-medium flex-1">Caja</span>
@@ -47,6 +43,10 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                 {isAdmin && (
                     <>
                         <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-6">Administración</p>
+                        <Link href="/admin/guests" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                            <Users size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
+                            <span className="font-medium">Huéspedes</span>
+                        </Link>
                         <Link href="/admin/finances" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Wallet size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                             <span className="font-medium">Finanzas</span>

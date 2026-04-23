@@ -1,5 +1,6 @@
 import { getHotelSettings } from "@/lib/data";
 import SettingsForm from "./SettingsForm";
+import UsersPanel from "./UsersPanel";
 import { Settings } from "lucide-react";
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,7 @@ export default async function SettingsPage() {
                     </div>
 
                     <SettingsForm settings={settings} />
+                    <UsersPanel />
                 </div>
             </div>
         </div>

@@ -2,21 +2,11 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
-import { getShiftSummary } from "@/lib/data";
+import { getHotelSettings, getShiftSummary } from "@/lib/data";
+import { formatHotelDateTime, formatHotelTime } from "@/lib/time";
 import PrintButton from "./PrintButton";
 
 export const revalidate = 0;
-
-function formatDateTime(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function formatMoney(n: number | null) {
   if (n === null) return "—";
@@ -38,17 +28,22 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export default async function ShiftReportPage({ params }: PageProps) {
   const { id } = await params;
-  const summary = await getShiftSummary(id);
+  const [summary, hotelSettings] = await Promise.all([
+    getShiftSummary(id),
+    getHotelSettings().catch(() => null),
+  ]);
   if (!summary) notFound();
 
+  const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
   const { shift, totalsByMethod, totalIncome, cashIncome, payments, openedByEmail, closedByEmail } = summary;
+  const otherIncome = totalIncome - cashIncome;
 
   return (
     <div className="p-8 pb-20 overflow-y-auto w-full max-w-3xl mx-auto print:p-0 print:max-w-none">
       {/* Header (oculto al imprimir) */}
       <div className="mb-6 flex items-center justify-between print:hidden">
         <Link
-          href="/admin/caja/reportes"
+          href="/admin/caja/rendiciones"
           className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"
         >
           <ArrowLeft size={14} />
@@ -59,7 +54,7 @@ export default async function ShiftReportPage({ params }: PageProps) {
 
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 print:border-none print:shadow-none print:rounded-none">
         <div className="text-center mb-6 pb-6 border-b border-slate-200">
-          <h1 className="text-2xl font-bold text-slate-900">Cierre de Caja</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Rendición de Caja</h1>
           <p className="text-sm text-slate-500 mt-1">
             Hotel El Refugio · Turno #{shift.id.slice(0, 8)}
           </p>
@@ -68,12 +63,12 @@ export default async function ShiftReportPage({ params }: PageProps) {
         <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Abierto</p>
-            <p className="text-slate-800 font-semibold">{formatDateTime(shift.opened_at)}</p>
+            <p className="text-slate-800 font-semibold">{formatHotelDateTime(shift.opened_at, tz)}</p>
             <p className="text-xs text-slate-500 mt-0.5">por {openedByEmail ?? "—"}</p>
           </div>
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cerrado</p>
-            <p className="text-slate-800 font-semibold">{formatDateTime(shift.closed_at)}</p>
+            <p className="text-slate-800 font-semibold">{formatHotelDateTime(shift.closed_at, tz)}</p>
             <p className="text-xs text-slate-500 mt-0.5">
               por {closedByEmail ?? (shift.status === "open" ? "— (abierto)" : "—")}
             </p>
@@ -86,17 +81,11 @@ export default async function ShiftReportPage({ params }: PageProps) {
           </h2>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-600">Efectivo inicial</span>
-              <span className="font-semibold text-slate-800">
-                {formatMoney(shift.opening_cash)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-600">+ Cobros en efectivo</span>
+              <span className="text-slate-600">Cobros en efectivo del turno</span>
               <span className="font-semibold text-emerald-600">{formatMoney(cashIncome)}</span>
             </div>
             <div className="border-t border-slate-300 pt-2 flex justify-between">
-              <span className="font-bold text-slate-700">Esperado</span>
+              <span className="font-bold text-slate-700">Esperado en caja</span>
               <span className="font-bold text-slate-900">
                 {formatMoney(shift.expected_cash)}
               </span>
@@ -157,6 +146,12 @@ export default async function ShiftReportPage({ params }: PageProps) {
               </tr>
             </tbody>
           </table>
+          {otherIncome > 0 && (
+            <p className="mt-3 text-xs text-slate-600 italic">
+              Además del efectivo, tenés que rendir {formatMoney(otherIncome)} cobrados por otros medios.
+              Verificá los comprobantes/transferencias.
+            </p>
+          )}
         </div>
 
         <div>
@@ -180,10 +175,7 @@ export default async function ShiftReportPage({ params }: PageProps) {
                 {payments.map((p) => (
                   <tr key={p.id}>
                     <td className="py-2 text-slate-600">
-                      {new Date(p.created_at).toLocaleTimeString("es-AR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatHotelTime(p.created_at, tz)}
                     </td>
                     <td className="py-2 text-slate-700 font-medium">{p.client_name}</td>
                     <td className="py-2 text-slate-600">{p.room_number ?? "—"}</td>
@@ -202,7 +194,7 @@ export default async function ShiftReportPage({ params }: PageProps) {
 
         <div className="mt-10 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 print:mt-16">
           <p>Firma recepcionista: ___________________________</p>
-          <p className="mt-4">Impreso: {formatDateTime(new Date().toISOString())}</p>
+          <p className="mt-4">Impreso: {formatHotelDateTime(new Date().toISOString(), tz)}</p>
         </div>
       </div>
     </div>

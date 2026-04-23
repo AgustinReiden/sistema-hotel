@@ -41,6 +41,7 @@ export default function EditReservationModal({
   const [notes, setNotes] = useState("");
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
+  const [guestCount, setGuestCount] = useState(1);
   const [overrideEnabled, setOverrideEnabled] = useState(false);
   const [overrideValue, setOverrideValue] = useState("");
 
@@ -67,6 +68,7 @@ export default function EditReservationModal({
       setNotes(row.notes ?? "");
       setCheckIn(toDateTimeLocal(row.check_in_target));
       setCheckOut(toDateTimeLocal(row.check_out_target));
+      setGuestCount(row.guest_count ?? 1);
       setOverrideEnabled(false);
       setOverrideValue(row.total_price.toString());
     });
@@ -123,6 +125,7 @@ export default function EditReservationModal({
       checkIn: inDate.toISOString(),
       checkOut: outDate.toISOString(),
       overrideTotalPrice: override,
+      guestCount,
     });
     setSubmitting(false);
 
@@ -228,6 +231,24 @@ export default function EditReservationModal({
                     onChange={(e) => setCheckOut(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none"
                     required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">
+                    Cantidad de pasajeros
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={guestCount}
+                    onChange={(e) =>
+                      setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))
+                    }
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none"
                   />
                 </div>
               </div>

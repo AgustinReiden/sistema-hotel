@@ -75,6 +75,7 @@ type CreateReservationInput = {
   checkOut: string;
   clientDni: string;
   clientPhone?: string;
+  guestCount?: number;
 };
 
 type AssociatedClientRow = {
@@ -252,6 +253,7 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
     discount_amount: number | string | null;
     total_price: number | string;
     paid_amount: number | string;
+    guest_count?: number | string | null;
   }) => ({
     ...reservation,
     base_total_price: Number(reservation.base_total_price) || 0,
@@ -259,6 +261,7 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
     discount_amount: Number(reservation.discount_amount) || 0,
     total_price: Number(reservation.total_price) || 0,
     paid_amount: Number(reservation.paid_amount) || 0,
+    guest_count: Number(reservation.guest_count ?? 1) || 1,
   })) as Reservation[];
 
   return {
@@ -270,9 +273,14 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
   };
 }
 
-export async function getGuestsData(searchTerm = "", statusFilter = ""): Promise<Guest[]> {
+export async function getGuestsData(
+  searchTerm = "",
+  statusFilter = "",
+  options: { includeCancelled?: boolean } = {}
+): Promise<Guest[]> {
   const supabase = await createClient();
   const normalizedSearch = searchTerm.trim();
+  const includeCancelled = options.includeCancelled ?? false;
 
   let query = supabase
     .from("reservations")
@@ -296,6 +304,9 @@ export async function getGuestsData(searchTerm = "", statusFilter = ""): Promise
 
   if (statusFilter) {
     query = query.eq("status", statusFilter);
+  } else if (!includeCancelled) {
+    // Sin filtro explícito: ocultar cancelled por default
+    query = query.neq("status", "cancelled");
   }
 
   const { data, error } = await query;
@@ -390,6 +401,7 @@ export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> 
     p_nights: input.nights,
     p_associated_client_id:
       input.customerMode === "associated" ? input.associatedClientId : null,
+    p_guest_count: input.guestCount ?? 1,
   });
 
   if (error) throw error;
@@ -403,6 +415,7 @@ export async function publicCreateReservation({
   checkOut,
   clientPhone,
   clientDni,
+  guestCount,
 }: CreateReservationInput): Promise<string> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_public_create_reservation", {
@@ -412,6 +425,9 @@ export async function publicCreateReservation({
     p_check_out: checkOut,
     p_client_phone: clientPhone || null,
     p_client_dni: clientDni || null,
+    // NOTE: rpc_public_create_reservation aún no acepta guest_count. Cuando
+    // se agregue la migración, se lo pasamos acá. Por ahora queda 1 por default.
+    ...(guestCount ? { p_guest_count: guestCount } : {}),
   });
 
   if (error) throw error;
@@ -439,6 +455,7 @@ export async function publicCreateReservationByType(
     checkOut: input.checkOut,
     clientPhone: input.clientPhone,
     clientDni: input.clientDni,
+    guestCount: input.guestCount,
   });
 }
 
@@ -456,6 +473,7 @@ export async function staffCreateReservation(
       input.customerMode === "manual" ? input.clientPhone || null : null,
     p_associated_client_id:
       input.customerMode === "associated" ? input.associatedClientId : null,
+    p_guest_count: input.guestCount ?? 1,
   });
 
   if (error) throw error;
@@ -638,6 +656,7 @@ export type ReservationEditableRow = {
   paid_amount: number;
   room_number: string;
   associated_client_id: string | null;
+  guest_count: number;
 };
 
 export async function getReservationForEdit(
@@ -651,7 +670,7 @@ export async function getReservationForEdit(
       id, client_name, client_dni, client_phone, notes,
       check_in_target, check_out_target, status,
       total_price, base_total_price, discount_percent, discount_amount,
-      paid_amount, associated_client_id,
+      paid_amount, associated_client_id, guest_count,
       rooms ( room_number )
       `
     )
@@ -676,6 +695,7 @@ export async function getReservationForEdit(
     discount_amount: number | string;
     paid_amount: number | string;
     associated_client_id: string | null;
+    guest_count: number | string | null;
     rooms: { room_number: string } | { room_number: string }[] | null;
   };
   const raw = data as unknown as Raw;
@@ -700,6 +720,7 @@ export async function getReservationForEdit(
     paid_amount: Number(raw.paid_amount) || 0,
     room_number: roomNumber ?? "—",
     associated_client_id: raw.associated_client_id,
+    guest_count: Number(raw.guest_count ?? 1) || 1,
   };
 }
 
@@ -712,6 +733,7 @@ export type UpdateReservationInput = {
   checkIn: string;
   checkOut: string;
   overrideTotalPrice?: number | null;
+  guestCount?: number | null;
 };
 
 export async function updateReservation(input: UpdateReservationInput): Promise<{
@@ -721,6 +743,7 @@ export async function updateReservation(input: UpdateReservationInput): Promise<
   discount_amount: number;
   dates_changed: boolean;
   price_overridden: boolean;
+  guest_count?: number;
 }> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_update_reservation", {
@@ -732,6 +755,7 @@ export async function updateReservation(input: UpdateReservationInput): Promise<
     p_check_out: input.checkOut,
     p_notes: input.notes ?? null,
     p_override_total_price: input.overrideTotalPrice ?? null,
+    p_guest_count: input.guestCount ?? null,
   });
   if (error) throw error;
   const result = data as {
@@ -914,29 +938,49 @@ type PendingReservationRow = {
   rooms: { room_number: string; room_type: string } | { room_number: string; room_type: string }[] | null;
 };
 
+/**
+ * Lista pendientes (sin límite) + procesadas (confirmed/cancelled) de los
+ * últimos 7 días. La UI separa pending vs procesadas client-side.
+ */
 export async function getSolicitudesData(): Promise<PendingReservation[]> {
   const supabase = await createClient();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data, error } = await supabase
-    .from("reservations")
-    .select(`
-      id,
-      client_name,
-      client_phone,
-      client_dni,
-      status,
-      check_in_target,
-      check_out_target,
-      total_price,
-      whatsapp_notified,
-      rooms ( room_number, room_type )
-    `)
-    .in("status", ["pending", "confirmed", "cancelled"])
-    .order("created_at", { ascending: false });
+  const baseSelect = `
+    id,
+    client_name,
+    client_phone,
+    client_dni,
+    status,
+    check_in_target,
+    check_out_target,
+    total_price,
+    whatsapp_notified,
+    rooms ( room_number, room_type )
+  `;
 
-  if (error) throw error;
+  const [pendingResult, processedResult] = await Promise.all([
+    supabase
+      .from("reservations")
+      .select(baseSelect)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("reservations")
+      .select(baseSelect)
+      .in("status", ["confirmed", "cancelled"])
+      .gte("created_at", sevenDaysAgo)
+      .order("created_at", { ascending: false }),
+  ]);
 
-  const rows = (data ?? []) as PendingReservationRow[];
+  if (pendingResult.error) throw pendingResult.error;
+  if (processedResult.error) throw processedResult.error;
+
+  const rows = [
+    ...((pendingResult.data ?? []) as PendingReservationRow[]),
+    ...((processedResult.data ?? []) as PendingReservationRow[]),
+  ];
+
   return rows.map((r) => {
     const roomRelation = r.rooms;
     const room = Array.isArray(roomRelation) ? roomRelation[0] : roomRelation;
@@ -1340,9 +1384,29 @@ type ListShiftsFilters = {
   limit?: number;
 };
 
+/**
+ * Lista de turnos con el nombre del recepcionista que abrió/cerró.
+ * Si el usuario actual es `receptionist`, filtra a sus propios turnos.
+ * Si es `admin`, devuelve todos. (También hay RLS policy por dueño.)
+ *
+ * Usamos una query aparte a profiles porque cash_shifts.opened_by referencia
+ * auth.users, no profiles, y PostgREST no puede embeber sin FK directo.
+ */
 export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashShift[]> {
   const supabase = await createClient();
-  let query = supabase.from("cash_shifts").select("*").order("opened_at", { ascending: false });
+  const role = await getCurrentUserRole();
+
+  let query = supabase
+    .from("cash_shifts")
+    .select("*")
+    .order("opened_at", { ascending: false });
+
+  if (role !== "admin") {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) query = query.eq("opened_by", user.id);
+  }
 
   if (filters.from) query = query.gte("opened_at", filters.from);
   if (filters.to) query = query.lte("opened_at", filters.to);
@@ -1352,14 +1416,36 @@ export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashS
 
   const { data, error } = await query;
   if (error) throw error;
-  return ((data ?? []) as CashShiftRow[]).map(toCashShift);
+
+  const shifts = ((data ?? []) as CashShiftRow[]).map(toCashShift);
+  if (shifts.length === 0) return shifts;
+
+  const userIds = new Set<string>();
+  for (const s of shifts) {
+    userIds.add(s.opened_by);
+    if (s.closed_by) userIds.add(s.closed_by);
+  }
+
+  const { data: profilesData } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .in("id", Array.from(userIds));
+
+  const nameById = new Map<string, string | null>();
+  for (const p of (profilesData ?? []) as { id: string; full_name: string | null }[]) {
+    nameById.set(p.id, p.full_name);
+  }
+
+  return shifts.map((s) => ({
+    ...s,
+    opened_by_name: nameById.get(s.opened_by) ?? null,
+    closed_by_name: s.closed_by ? nameById.get(s.closed_by) ?? null : null,
+  }));
 }
 
-export async function openCashShift(openingCash: number): Promise<string> {
+export async function openCashShift(): Promise<string> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_open_cash_shift", {
-    p_opening_cash: openingCash,
-  });
+  const { data, error } = await supabase.rpc("rpc_open_cash_shift");
   if (error) throw error;
   return data as string;
 }

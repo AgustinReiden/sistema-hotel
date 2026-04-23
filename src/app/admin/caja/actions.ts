@@ -5,21 +5,18 @@ import { revalidatePath } from "next/cache";
 import { closeCashShift, openCashShift } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import type { ActionResult } from "@/lib/types";
-import { closeShiftSchema, openShiftSchema } from "@/lib/validations";
+import { closeShiftSchema } from "@/lib/validations";
 
 function revalidateCajaViews() {
   revalidatePath("/admin");
   revalidatePath("/admin/caja");
-  revalidatePath("/admin/caja/reportes");
+  revalidatePath("/admin/caja/rendiciones");
   revalidatePath("/admin/finances");
 }
 
-export async function openShiftAction(input: {
-  openingCash: number;
-}): Promise<ActionResult<{ shiftId: string }>> {
+export async function openShiftAction(): Promise<ActionResult<{ shiftId: string }>> {
   try {
-    const { openingCash } = openShiftSchema.parse(input);
-    const shiftId = await openCashShift(openingCash);
+    const shiftId = await openCashShift();
     revalidateCajaViews();
     return { success: true, data: { shiftId } };
   } catch (error: unknown) {

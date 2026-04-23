@@ -9,7 +9,7 @@ import {
   startOfDay,
 } from "date-fns";
 import { es } from "date-fns/locale";
-import { CreditCard, Phone, UserRound, XCircle } from "lucide-react";
+import { CreditCard, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
@@ -412,6 +412,13 @@ export default function CalendarClient({
                       <div>
                         <p className="text-xs text-slate-400">Telefono</p>
                         <p className="font-medium text-slate-700">{selectedReservation.client_phone || "Sin dato"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <UsersIcon size={16} className="text-slate-400 mt-0.5" />
+                      <div>
+                        <p className="text-xs text-slate-400">Pasajeros</p>
+                        <p className="font-medium text-slate-700">{selectedReservation.guest_count ?? 1}</p>
                       </div>
                     </div>
                   </div>

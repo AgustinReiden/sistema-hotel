@@ -1,11 +1,12 @@
+import { redirect } from "next/navigation";
 import { Search, Users } from "lucide-react";
-import { getGuestsData } from "@/lib/data";
+import { getCurrentUserRole, getGuestsData } from "@/lib/data";
 import GuestsClientTable from "./GuestsClientTable";
 
 export const dynamic = "force-dynamic";
 
 type GuestsPageProps = {
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; cancelled?: string }>;
 };
 
 const STATUS_FILTERS = [
@@ -13,14 +14,29 @@ const STATUS_FILTERS = [
   { label: "Hospedados", value: "checked_in" },
   { label: "Por Llegar", value: "confirmed" },
   { label: "Finalizados", value: "checked_out" },
-  { label: "Cancelados", value: "cancelled" },
 ];
 
 export default async function GuestsPage({ searchParams }: GuestsPageProps) {
+  const role = await getCurrentUserRole();
+  if (role !== "admin") {
+    redirect("/forbidden");
+  }
+
   const params = await searchParams;
   const search = (params.q ?? "").trim();
   const statusFilter = params.status ?? "";
-  const guests = await getGuestsData(search, statusFilter);
+  const includeCancelled = params.cancelled === "1";
+  const guests = await getGuestsData(search, statusFilter, { includeCancelled });
+
+  const buildHref = (overrides: Partial<{ status: string; cancelled: string }>) => {
+    const parts: string[] = [];
+    if (search) parts.push(`q=${encodeURIComponent(search)}`);
+    const nextStatus = overrides.status !== undefined ? overrides.status : statusFilter;
+    if (nextStatus) parts.push(`status=${encodeURIComponent(nextStatus)}`);
+    const nextCancelled = overrides.cancelled !== undefined ? overrides.cancelled : includeCancelled ? "1" : "";
+    if (nextCancelled) parts.push(`cancelled=${nextCancelled}`);
+    return parts.length > 0 ? `/admin/guests?${parts.join("&")}` : "/admin/guests";
+  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -35,6 +51,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
 
           <form method="get" className="relative">
             {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+            {includeCancelled && <input type="hidden" name="cancelled" value="1" />}
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               size={16}
@@ -49,26 +66,36 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
           </form>
         </div>
 
-        {/* Status filter pills */}
-        <div className="flex gap-2 flex-wrap">
+        {/* Status filter pills + toggle cancelados */}
+        <div className="flex gap-2 flex-wrap items-center">
           {STATUS_FILTERS.map((f) => {
             const isActive = statusFilter === f.value;
-            const href = f.value
-              ? `/admin/guests?status=${f.value}${search ? `&q=${search}` : ""}`
-              : `/admin/guests${search ? `?q=${search}` : ""}`;
             return (
               <a
                 key={f.value}
-                href={href}
-                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${isActive
+                href={buildHref({ status: f.value })}
+                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+                  isActive
                     ? "bg-brand-600 text-white border-brand-600"
                     : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
-                  }`}
+                }`}
               >
                 {f.label}
               </a>
             );
           })}
+          <span className="mx-2 text-slate-300">|</span>
+          <a
+            href={buildHref({ cancelled: includeCancelled ? "" : "1" })}
+            className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors flex items-center gap-1.5 ${
+              includeCancelled
+                ? "bg-red-100 text-red-700 border-red-200"
+                : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+            }`}
+          >
+            <span className={`inline-block w-3 h-3 rounded border ${includeCancelled ? "bg-red-500 border-red-500" : "bg-white border-slate-300"}`} />
+            Ver cancelados
+          </a>
         </div>
       </header>
 

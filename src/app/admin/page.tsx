@@ -157,7 +157,12 @@ export default async function Dashboard() {
               {lateCheckoutsCount} Check-out Retrasado
             </div>
           )}
-          <NewReservationButton rooms={rooms} associatedClients={associatedClients} />
+          <NewReservationButton
+            rooms={rooms}
+            associatedClients={associatedClients}
+            standardCheckInTime={hotelSettings.standard_check_in_time}
+            standardCheckOutTime={hotelSettings.standard_check_out_time}
+          />
         </div>
       </header>
 

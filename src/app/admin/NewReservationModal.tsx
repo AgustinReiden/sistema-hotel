@@ -33,6 +33,7 @@ type InitialReservationValues = Partial<{
   associatedClientId: string;
   checkIn: string;
   checkOut: string;
+  guestCount: number;
 }>;
 
 type NewReservationModalProps = {
@@ -43,6 +44,9 @@ type NewReservationModalProps = {
   associatedClients: AssociatedClient[];
   initialValues?: InitialReservationValues;
   title?: string;
+  /** Horas configuradas por admin en /admin/settings (formato "HH:MM" o "HH:MM:SS"). */
+  standardCheckInTime?: string;
+  standardCheckOutTime?: string;
 };
 
 type ReservationFormState = {
@@ -54,15 +58,28 @@ type ReservationFormState = {
   roomId: number | "";
   checkIn: string;
   checkOut: string;
+  guestCount: number;
 };
 
-function buildDefaultDateValues() {
+function parseHour(value: string | undefined, fallbackH: number, fallbackM: number): { h: number; m: number } {
+  if (!value) return { h: fallbackH, m: fallbackM };
+  const [hh, mm] = value.split(":").map((p) => parseInt(p, 10));
+  return {
+    h: Number.isFinite(hh) ? hh : fallbackH,
+    m: Number.isFinite(mm) ? mm : fallbackM,
+  };
+}
+
+function buildDefaultDateValues(checkInTime?: string, checkOutTime?: string) {
+  const checkInH = parseHour(checkInTime, 14, 0);
+  const checkOutH = parseHour(checkOutTime, 10, 0);
+
   const defaultCheckIn = new Date();
-  defaultCheckIn.setHours(14, 0, 0, 0);
+  defaultCheckIn.setHours(checkInH.h, checkInH.m, 0, 0);
 
   const defaultCheckOut = new Date();
   defaultCheckOut.setDate(defaultCheckOut.getDate() + 1);
-  defaultCheckOut.setHours(10, 0, 0, 0);
+  defaultCheckOut.setHours(checkOutH.h, checkOutH.m, 0, 0);
 
   return {
     checkIn: format(defaultCheckIn, "yyyy-MM-dd'T'HH:mm"),
@@ -70,8 +87,12 @@ function buildDefaultDateValues() {
   };
 }
 
-function buildInitialState(initialValues?: InitialReservationValues): ReservationFormState {
-  const defaults = buildDefaultDateValues();
+function buildInitialState(
+  initialValues?: InitialReservationValues,
+  checkInTime?: string,
+  checkOutTime?: string
+): ReservationFormState {
+  const defaults = buildDefaultDateValues(checkInTime, checkOutTime);
 
   return {
     customerMode: initialValues?.customerMode ?? "manual",
@@ -82,6 +103,7 @@ function buildInitialState(initialValues?: InitialReservationValues): Reservatio
     roomId: initialValues?.roomId ?? "",
     checkIn: initialValues?.checkIn ?? defaults.checkIn,
     checkOut: initialValues?.checkOut ?? defaults.checkOut,
+    guestCount: initialValues?.guestCount ?? 1,
   };
 }
 
@@ -93,14 +115,18 @@ export default function NewReservationModal({
   associatedClients,
   initialValues,
   title = "Nueva Reserva",
+  standardCheckInTime,
+  standardCheckOutTime,
 }: NewReservationModalProps) {
-  const [form, setForm] = useState<ReservationFormState>(() => buildInitialState(initialValues));
+  const [form, setForm] = useState<ReservationFormState>(() =>
+    buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime)
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setForm(buildInitialState(initialValues));
-  }, [isOpen, initialValues]);
+    setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
+  }, [isOpen, initialValues, standardCheckInTime, standardCheckOutTime]);
 
   if (!isOpen) return null;
 
@@ -152,6 +178,7 @@ export default function NewReservationModal({
               clientPhone: form.clientPhone.trim() || undefined,
               checkIn: new Date(form.checkIn).toISOString(),
               checkOut: new Date(form.checkOut).toISOString(),
+              guestCount: form.guestCount,
             }
           : {
               customerMode: "associated",
@@ -159,6 +186,7 @@ export default function NewReservationModal({
               associatedClientId: form.associatedClientId,
               checkIn: new Date(form.checkIn).toISOString(),
               checkOut: new Date(form.checkOut).toISOString(),
+              guestCount: form.guestCount,
             };
 
       const result = await onSubmit(payload);
@@ -375,6 +403,29 @@ export default function NewReservationModal({
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
               />
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="guestCount" className="block text-sm font-semibold text-slate-700 mb-1.5">
+              Cantidad de pasajeros
+            </label>
+            <input
+              id="guestCount"
+              type="number"
+              min={1}
+              max={20}
+              value={form.guestCount}
+              onChange={(e) =>
+                setForm((current) => ({
+                  ...current,
+                  guestCount: Math.max(1, parseInt(e.target.value, 10) || 1),
+                }))
+              }
+              className="w-full md:w-40 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Opcional. No afecta el precio (se calcula por habitacion).
+            </p>
           </div>
 
           {pricePreview && selectedAssociatedClient && (
