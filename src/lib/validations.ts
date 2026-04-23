@@ -109,6 +109,39 @@ export const associatedClientSchema = z.object({
     ),
 });
 
+const currencyAmount = z.preprocess(
+  (value) => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") return undefined;
+      return Number(trimmed.replace(",", "."));
+    }
+    return value;
+  },
+  z
+    .number()
+    .refine((v) => !Number.isNaN(v), { message: "El monto debe ser numerico." })
+    .min(0, "El monto no puede ser negativo.")
+);
+
+export const openShiftSchema = z.object({
+  openingCash: currencyAmount,
+});
+
+export const closeShiftSchema = z.object({
+  shiftId: z.string().uuid("El identificador del turno es invalido."),
+  actualCash: currencyAmount,
+  notes: z
+    .preprocess(
+      (value) => {
+        if (typeof value !== "string") return value;
+        const trimmed = value.trim();
+        return trimmed === "" ? undefined : trimmed;
+      },
+      z.string().max(500, "Las notas no pueden superar los 500 caracteres.").optional()
+    ),
+});
+
 export const publicBookingSchema = z.object({
   roomType: z
     .string()

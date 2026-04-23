@@ -5,6 +5,8 @@ import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import type {
   AssignWalkInPayload,
   AssociatedClient,
+  CashShift,
+  CashShiftStatus,
   CreateReservationPayload,
   Guest,
   HotelSettings,
@@ -15,6 +17,8 @@ import type {
   RoomCategory,
   RoomCategoryUsage,
   Room,
+  ShiftPaymentRow,
+  ShiftSummary,
   UserRole,
 } from "./types";
 
@@ -541,6 +545,213 @@ export async function getAvailableRooms(
   return sortRoomsByNumber((data ?? []) as Room[]);
 }
 
+/**
+ * Habitaciones disponibles para mover una reserva activa.
+ * Excluye la habitacion actual de la reserva y cualquiera con otras reservas activas
+ * que se solapen con las fechas de esta reserva.
+ */
+export async function getRoomsAvailableForReservation(
+  reservationId: string
+): Promise<{ currentRoomId: number; checkIn: string; checkOut: string; rooms: Room[] }> {
+  const supabase = await createClient();
+
+  const { data: reservation, error: resError } = await supabase
+    .from("reservations")
+    .select("id, room_id, check_in_target, check_out_target, status")
+    .eq("id", reservationId)
+    .single();
+
+  if (resError) throw resError;
+  if (!reservation) throw new Error("Reserva no encontrada.");
+
+  const { data: overlapping, error: overlapError } = await supabase
+    .from("reservations")
+    .select("room_id")
+    .in("status", ACTIVE_RESERVATION_STATUSES)
+    .neq("id", reservationId)
+    .or(
+      `and(check_in_target.lt.${reservation.check_out_target},check_out_target.gt.${reservation.check_in_target})`
+    );
+
+  if (overlapError) throw overlapError;
+
+  const blockedRoomIds = new Set<number>((overlapping ?? []).map((r) => r.room_id));
+  blockedRoomIds.add(reservation.room_id);
+
+  let query = supabase.from("rooms").select("*").eq("is_active", true);
+  if (blockedRoomIds.size > 0) {
+    query = query.not("id", "in", `(${Array.from(blockedRoomIds).join(",")})`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return {
+    currentRoomId: reservation.room_id,
+    checkIn: reservation.check_in_target,
+    checkOut: reservation.check_out_target,
+    rooms: sortRoomsByNumber((data ?? []) as Room[]),
+  };
+}
+
+export async function addExtraCharge(
+  reservationId: string,
+  chargeType: string,
+  amount: number,
+  description?: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_add_extra_charge", {
+    p_reservation_id: reservationId,
+    p_charge_type: chargeType,
+    p_amount: amount,
+    p_description: description ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function changeReservationRoom(
+  reservationId: string,
+  newRoomId: number
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_change_reservation_room", {
+    p_reservation_id: reservationId,
+    p_new_room_id: newRoomId,
+  });
+  if (error) throw error;
+}
+
+export type ReservationEditableRow = {
+  id: string;
+  client_name: string;
+  client_dni: string | null;
+  client_phone: string | null;
+  notes: string | null;
+  check_in_target: string;
+  check_out_target: string;
+  status: ReservationStatus;
+  total_price: number;
+  base_total_price: number;
+  discount_percent: number;
+  discount_amount: number;
+  paid_amount: number;
+  room_number: string;
+  associated_client_id: string | null;
+};
+
+export async function getReservationForEdit(
+  reservationId: string
+): Promise<ReservationEditableRow | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("reservations")
+    .select(
+      `
+      id, client_name, client_dni, client_phone, notes,
+      check_in_target, check_out_target, status,
+      total_price, base_total_price, discount_percent, discount_amount,
+      paid_amount, associated_client_id,
+      rooms ( room_number )
+      `
+    )
+    .eq("id", reservationId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  type Raw = {
+    id: string;
+    client_name: string;
+    client_dni: string | null;
+    client_phone: string | null;
+    notes: string | null;
+    check_in_target: string;
+    check_out_target: string;
+    status: ReservationStatus;
+    total_price: number | string;
+    base_total_price: number | string;
+    discount_percent: number | string;
+    discount_amount: number | string;
+    paid_amount: number | string;
+    associated_client_id: string | null;
+    rooms: { room_number: string } | { room_number: string }[] | null;
+  };
+  const raw = data as unknown as Raw;
+  const roomsRel = raw.rooms;
+  const roomNumber = Array.isArray(roomsRel)
+    ? roomsRel[0]?.room_number
+    : roomsRel?.room_number;
+
+  return {
+    id: raw.id,
+    client_name: raw.client_name,
+    client_dni: raw.client_dni,
+    client_phone: raw.client_phone,
+    notes: raw.notes,
+    check_in_target: raw.check_in_target,
+    check_out_target: raw.check_out_target,
+    status: raw.status as ReservationStatus,
+    total_price: Number(raw.total_price) || 0,
+    base_total_price: Number(raw.base_total_price) || 0,
+    discount_percent: Number(raw.discount_percent) || 0,
+    discount_amount: Number(raw.discount_amount) || 0,
+    paid_amount: Number(raw.paid_amount) || 0,
+    room_number: roomNumber ?? "—",
+    associated_client_id: raw.associated_client_id,
+  };
+}
+
+export type UpdateReservationInput = {
+  reservationId: string;
+  clientName: string;
+  clientDni?: string | null;
+  clientPhone?: string | null;
+  notes?: string | null;
+  checkIn: string;
+  checkOut: string;
+  overrideTotalPrice?: number | null;
+};
+
+export async function updateReservation(input: UpdateReservationInput): Promise<{
+  total_price: number;
+  base_total_price: number;
+  discount_percent: number;
+  discount_amount: number;
+  dates_changed: boolean;
+  price_overridden: boolean;
+}> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_update_reservation", {
+    p_reservation_id: input.reservationId,
+    p_client_name: input.clientName,
+    p_client_dni: input.clientDni ?? null,
+    p_client_phone: input.clientPhone ?? null,
+    p_check_in: input.checkIn,
+    p_check_out: input.checkOut,
+    p_notes: input.notes ?? null,
+    p_override_total_price: input.overrideTotalPrice ?? null,
+  });
+  if (error) throw error;
+  const result = data as {
+    total_price: number | string;
+    base_total_price: number | string;
+    discount_percent: number | string;
+    discount_amount: number | string;
+    dates_changed: boolean;
+    price_overridden: boolean;
+  };
+  return {
+    total_price: Number(result.total_price) || 0,
+    base_total_price: Number(result.base_total_price) || 0,
+    discount_percent: Number(result.discount_percent) || 0,
+    discount_amount: Number(result.discount_amount) || 0,
+    dates_changed: result.dates_changed,
+    price_overridden: result.price_overridden,
+  };
+}
+
 export function determineSmarterAvailableRooms(availableRooms: Room[], targetGuests: number): Room[] {
   const capMap = new Map<number, Room[]>();
   for (const r of availableRooms) {
@@ -959,5 +1170,223 @@ export async function getAnalyticsData(
     roomTypeOccupancy,
     paymentMethods: paymentMethodsData,
     statusBreakdown,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Caja (cash shifts)
+// ═══════════════════════════════════════════════════════════════════════════
+
+type CashShiftRow = {
+  id: string;
+  opened_at: string;
+  closed_at: string | null;
+  opened_by: string;
+  closed_by: string | null;
+  opening_cash: number | string;
+  expected_cash: number | string | null;
+  actual_cash: number | string | null;
+  discrepancy: number | string | null;
+  notes: string | null;
+  status: CashShiftStatus;
+};
+
+function toCashShift(row: CashShiftRow): CashShift {
+  return {
+    id: row.id,
+    opened_at: row.opened_at,
+    closed_at: row.closed_at,
+    opened_by: row.opened_by,
+    closed_by: row.closed_by,
+    opening_cash: Number(row.opening_cash) || 0,
+    expected_cash: row.expected_cash === null ? null : Number(row.expected_cash) || 0,
+    actual_cash: row.actual_cash === null ? null : Number(row.actual_cash) || 0,
+    discrepancy: row.discrepancy === null ? null : Number(row.discrepancy) || 0,
+    notes: row.notes,
+    status: row.status,
+  };
+}
+
+export async function getOpenShiftForCurrentUser(): Promise<CashShift | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("cash_shifts")
+    .select("*")
+    .eq("opened_by", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return toCashShift(data as CashShiftRow);
+}
+
+type PaymentWithReservationRow = {
+  id: string;
+  amount: number | string;
+  payment_method: PaymentMethod;
+  notes: string | null;
+  created_at: string;
+  reservation_id: string;
+  reservations:
+    | { client_name: string; rooms: { room_number: string } | { room_number: string }[] | null }
+    | { client_name: string; rooms: { room_number: string } | { room_number: string }[] | null }[]
+    | null;
+};
+
+function normalizeShiftPayment(row: PaymentWithReservationRow): ShiftPaymentRow {
+  const reservation = Array.isArray(row.reservations)
+    ? row.reservations[0]
+    : row.reservations;
+  const rooms = reservation?.rooms;
+  const room = Array.isArray(rooms) ? rooms[0] : rooms;
+  return {
+    id: row.id,
+    amount: Number(row.amount) || 0,
+    payment_method: row.payment_method,
+    notes: row.notes,
+    created_at: row.created_at,
+    reservation_id: row.reservation_id,
+    client_name: reservation?.client_name ?? "Desconocido",
+    room_number: room?.room_number ?? null,
+  };
+}
+
+async function getAuthUserEmail(userId: string): Promise<string | null> {
+  // Para mostrar quien abrio/cerro el turno. profiles tiene full_name pero no email,
+  // y auth.users no es accesible por defecto. Usamos la RPC via SQL si existe, si no, null.
+  const supabase = await createClient();
+  const { data } = await supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
+  return (data as { full_name?: string } | null)?.full_name ?? null;
+}
+
+export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | null> {
+  const supabase = await createClient();
+
+  const { data: shiftData, error: shiftError } = await supabase
+    .from("cash_shifts")
+    .select("*")
+    .eq("id", shiftId)
+    .maybeSingle();
+
+  if (shiftError) throw shiftError;
+  if (!shiftData) return null;
+
+  const shift = toCashShift(shiftData as CashShiftRow);
+
+  const { data: paymentsData, error: paymentsError } = await supabase
+    .from("payments")
+    .select(
+      `
+      id, amount, payment_method, notes, created_at, reservation_id,
+      reservations ( client_name, rooms ( room_number ) )
+      `
+    )
+    .eq("cash_shift_id", shiftId)
+    .order("created_at", { ascending: false });
+
+  if (paymentsError) throw paymentsError;
+
+  const payments = ((paymentsData ?? []) as PaymentWithReservationRow[]).map(
+    normalizeShiftPayment
+  );
+
+  const totalsByMethod: Record<PaymentMethod, number> = {
+    cash: 0,
+    credit_card: 0,
+    debit_card: 0,
+    bank_transfer: 0,
+    mercado_pago: 0,
+    vale_blanco: 0,
+    cuenta_corriente: 0,
+    other: 0,
+  };
+
+  for (const p of payments) {
+    totalsByMethod[p.payment_method] =
+      (totalsByMethod[p.payment_method] ?? 0) + p.amount;
+  }
+
+  const totalIncome = payments.reduce((sum, p) => sum + p.amount, 0);
+  const cashIncome = totalsByMethod.cash;
+
+  const [openedByEmail, closedByEmail] = await Promise.all([
+    getAuthUserEmail(shift.opened_by),
+    shift.closed_by ? getAuthUserEmail(shift.closed_by) : Promise.resolve(null),
+  ]);
+
+  return {
+    shift,
+    paymentsCount: payments.length,
+    totalsByMethod,
+    totalIncome,
+    cashIncome,
+    payments,
+    openedByEmail,
+    closedByEmail,
+  };
+}
+
+type ListShiftsFilters = {
+  from?: string;
+  to?: string;
+  userId?: string;
+  status?: CashShiftStatus;
+  limit?: number;
+};
+
+export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashShift[]> {
+  const supabase = await createClient();
+  let query = supabase.from("cash_shifts").select("*").order("opened_at", { ascending: false });
+
+  if (filters.from) query = query.gte("opened_at", filters.from);
+  if (filters.to) query = query.lte("opened_at", filters.to);
+  if (filters.userId) query = query.eq("opened_by", filters.userId);
+  if (filters.status) query = query.eq("status", filters.status);
+  if (filters.limit) query = query.limit(filters.limit);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return ((data ?? []) as CashShiftRow[]).map(toCashShift);
+}
+
+export async function openCashShift(openingCash: number): Promise<string> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_open_cash_shift", {
+    p_opening_cash: openingCash,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function closeCashShift(
+  shiftId: string,
+  actualCash: number,
+  notes?: string
+): Promise<{ expected_cash: number; actual_cash: number; discrepancy: number }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_close_cash_shift", {
+    p_shift_id: shiftId,
+    p_actual_cash: actualCash,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
+  const result = data as {
+    shift_id: string;
+    opening_cash: number | string;
+    cash_income: number | string;
+    expected_cash: number | string;
+    actual_cash: number | string;
+    discrepancy: number | string;
+  };
+  return {
+    expected_cash: Number(result.expected_cash) || 0,
+    actual_cash: Number(result.actual_cash) || 0,
+    discrepancy: Number(result.discrepancy) || 0,
   };
 }

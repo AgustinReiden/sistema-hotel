@@ -65,3 +65,35 @@ html {
 .hero-title {
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.3);
 }
+
+/* Print styles: ocultar sidebar y chrome admin para cierres de caja imprimibles */
+@media print {
+  aside,
+  nav,
+  [role="navigation"],
+  .print\:hidden {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+  }
+  main,
+  .print\:p-0 {
+    padding: 0 !important;
+  }
+  .print\:max-w-none {
+    max-width: none !important;
+  }
+  .print\:border-none {
+    border: none !important;
+  }
+  .print\:shadow-none {
+    box-shadow: none !important;
+  }
+  .print\:rounded-none {
+    border-radius: 0 !important;
+  }
+  .print\:mt-16 {
+    margin-top: 4rem !important;
+  }
+}

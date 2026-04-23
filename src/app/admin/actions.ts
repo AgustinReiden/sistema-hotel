@@ -3,18 +3,25 @@
 import { revalidatePath } from "next/cache";
 
 import {
+  addExtraCharge,
   applyLateCheckOut,
   assignWalkIn,
-  staffCreateReservation,
-  doCheckout,
-  doCheckIn,
-  markRoomAsAvailable,
   cancelReservation,
-  extendReservation,
+  changeReservationRoom,
   confirmReservation,
-  getReservationWithRoom,
-  updateWhatsappStatus,
+  doCheckIn,
+  doCheckout,
+  extendReservation,
   getHotelSettings,
+  getReservationForEdit,
+  getReservationWithRoom,
+  getRoomsAvailableForReservation,
+  markRoomAsAvailable,
+  staffCreateReservation,
+  updateReservation,
+  updateWhatsappStatus,
+  type ReservationEditableRow,
+  type UpdateReservationInput,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import { notifyReservationWebhook } from "@/lib/webhook";
@@ -23,6 +30,7 @@ import type {
   AssignWalkInPayload,
   CreateReservationPayload,
   PaymentMethod,
+  Room,
 } from "@/lib/types";
 import { assignWalkInSchema, createReservationSchema } from "@/lib/validations";
 
@@ -45,6 +53,7 @@ export async function handleLateCheckOut(reservationId: string): Promise<ActionR
     revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cobrar medio dia.");
@@ -97,6 +106,7 @@ export async function handleCheckOut({
     revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ejecutar check-out.");
@@ -279,9 +289,111 @@ export async function handleExtendReservation(reservationId: string, nights: num
     revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ampliar la reserva.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleAddExtraCharge(
+  reservationId: string,
+  chargeType: string,
+  amount: number,
+  description?: string
+): Promise<ActionResult> {
+  try {
+    if (!reservationId) throw new Error("Reserva invalida.");
+    if (!chargeType) throw new Error("El tipo de cargo es obligatorio.");
+    if (!amount || amount <= 0) throw new Error("El monto debe ser mayor a 0.");
+    await addExtraCharge(reservationId, chargeType, amount, description);
+    revalidatePath("/admin");
+    revalidateCalendarViews();
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al cargar el extra.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleLoadAvailableRoomsForReservation(
+  reservationId: string
+): Promise<ActionResult<{ rooms: Room[]; currentRoomId: number }>> {
+  try {
+    if (!reservationId) throw new Error("Reserva invalida.");
+    const { rooms, currentRoomId } = await getRoomsAvailableForReservation(reservationId);
+    return { success: true, data: { rooms, currentRoomId } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudieron cargar las habitaciones disponibles.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleLoadReservationForEdit(
+  reservationId: string
+): Promise<ActionResult<ReservationEditableRow>> {
+  try {
+    if (!reservationId) throw new Error("Reserva invalida.");
+    const row = await getReservationForEdit(reservationId);
+    if (!row) throw new Error("Reserva no encontrada.");
+    return { success: true, data: row };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo cargar la reserva.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleUpdateReservation(
+  input: UpdateReservationInput
+): Promise<
+  ActionResult<{
+    total_price: number;
+    base_total_price: number;
+    discount_percent: number;
+    discount_amount: number;
+    dates_changed: boolean;
+    price_overridden: boolean;
+  }>
+> {
+  try {
+    if (!input.reservationId) throw new Error("Reserva invalida.");
+    if (!input.clientName?.trim()) throw new Error("El nombre es obligatorio.");
+    if (!input.checkIn || !input.checkOut) throw new Error("Fechas obligatorias.");
+    if (new Date(input.checkOut) <= new Date(input.checkIn))
+      throw new Error("La salida debe ser posterior a la entrada.");
+    const result = await updateReservation(input);
+    revalidatePath("/admin");
+    revalidateCalendarViews();
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
+    return { success: true, data: result };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo actualizar la reserva.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function handleChangeRoom(
+  reservationId: string,
+  newRoomId: number
+): Promise<ActionResult> {
+  try {
+    if (!reservationId) throw new Error("Reserva invalida.");
+    if (!Number.isInteger(newRoomId) || newRoomId <= 0)
+      throw new Error("Habitacion destino invalida.");
+    await changeReservationRoom(reservationId, newRoomId);
+    revalidatePath("/admin");
+    revalidateCalendarViews();
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/caja");
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al cambiar de habitacion.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

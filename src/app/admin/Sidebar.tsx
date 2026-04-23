@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags } from 'lucide-react';
+import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags, CircleDollarSign } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
-export default function Sidebar({ role, userEmail }: { role: string; userEmail: string }) {
+export default function Sidebar({ role, userEmail, hasOpenShift }: { role: string; userEmail: string; hasOpenShift?: boolean }) {
     const isAdmin = role === 'admin';
 
     return (
@@ -33,6 +33,15 @@ export default function Sidebar({ role, userEmail }: { role: string; userEmail: 
                 <Link href="/admin/guests" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                     <Users size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                     <span className="font-medium">Huéspedes</span>
+                </Link>
+                <Link href="/admin/caja" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                    <CircleDollarSign size={18} className={`mr-3 transition-colors ${hasOpenShift ? 'text-emerald-400' : 'group-hover:text-emerald-400'}`} />
+                    <span className="font-medium flex-1">Caja</span>
+                    {hasOpenShift ? (
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow shadow-emerald-500/50" title="Turno abierto" />
+                    ) : (
+                        <span className="text-[10px] font-bold text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded" title="Sin turno">CERRADA</span>
+                    )}
                 </Link>
 
                 {isAdmin && (

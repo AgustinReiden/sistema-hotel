@@ -1,5 +1,6 @@
 import Sidebar from './Sidebar';
 import { createClient } from "@/lib/supabase/server";
+import { getOpenShiftForCurrentUser } from "@/lib/data";
 
 export default async function AdminLayout({
     children,
@@ -18,9 +19,11 @@ export default async function AdminLayout({
         }
     }
 
+    const openShift = user ? await getOpenShiftForCurrentUser().catch(() => null) : null;
+
     return (
         <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
-            <Sidebar role={role} userEmail={userEmail} />
+            <Sidebar role={role} userEmail={userEmail} hasOpenShift={!!openShift} />
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
                 {children}
             </main>
