@@ -1,11 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { X, Loader2, DollarSign, CreditCard, Banknote, Landmark, Wallet } from "lucide-react";
+import Link from "next/link";
+import { X, Loader2, DollarSign, CreditCard, Banknote, Landmark, Wallet, CircleDollarSign } from "lucide-react";
 import { toast } from "sonner";
 
 import { registerPaymentAction } from "@/app/admin/finances/actions";
 import type { ActionResult, PaymentMethod } from "@/lib/types";
+
+// Mensaje exacto que emite el RPC cuando falta turno abierto (errcode P0003).
+function isNoOpenShiftError(error: string | undefined, code: string | undefined): boolean {
+  if (!error) return false;
+  if (code === "P0003") return true;
+  return /abrir\s+la\s+caja/i.test(error);
+}
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -50,6 +58,7 @@ export default function PaymentModal({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noOpenShift, setNoOpenShift] = useState(false);
   const [amount, setAmount] = useState(debt > 0 ? debt.toString() : "0");
   const [method, setMethod] = useState<PaymentMethod>("cash");
 
@@ -59,6 +68,7 @@ export default function PaymentModal({
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setNoOpenShift(false);
 
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
@@ -91,7 +101,12 @@ export default function PaymentModal({
       onSuccess?.();
       onClose();
     } else {
-      setError(result.error);
+      if (isNoOpenShiftError(result.error, result.code)) {
+        setNoOpenShift(true);
+        setError(null);
+      } else {
+        setError(result.error);
+      }
     }
   };
 
@@ -221,6 +236,25 @@ export default function PaymentModal({
               </div>
             </div>
 
+            {noOpenShift && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0">
+                  <CircleDollarSign size={18} />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-amber-900 text-sm">Caja cerrada</p>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    Necesitas abrir la caja antes de cobrar. Los pagos se asocian al turno abierto.
+                  </p>
+                  <Link
+                    href="/admin/caja"
+                    className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
+                  >
+                    Ir a Caja
+                  </Link>
+                </div>
+              </div>
+            )}
             {error && <p className="text-red-500 text-sm font-medium bg-red-50 p-3 rounded-lg">{error}</p>}
           </form>
         </div>

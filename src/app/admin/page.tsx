@@ -6,6 +6,7 @@ import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
 import {
   getActiveAssociatedClients,
+  getCurrentUserRole,
   getDashboardData,
 } from "@/lib/data";
 
@@ -56,10 +57,12 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, hotelSettings }, associatedClients] = await Promise.all([
+  const [{ rooms, reservations, hotelSettings }, associatedClients, role] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
+    getCurrentUserRole(),
   ]);
+  const isAdmin = role === "admin";
   const now = new Date();
   const todayKey = getDateKey(now, hotelSettings.timezone);
 
@@ -188,6 +191,7 @@ export default async function Dashboard() {
               key={room.id}
               room={room}
               associatedClients={associatedClients}
+              isAdmin={isAdmin}
             />
           ))}
         </div>

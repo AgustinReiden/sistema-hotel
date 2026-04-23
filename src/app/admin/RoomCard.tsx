@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { BedDouble, Clock } from "lucide-react";
+import { BedDouble, Clock, Pencil, Plus, Replace } from "lucide-react";
 import { toast } from "sonner";
 
 import WalkInModal from "./WalkInModal";
+import ExtraChargesModal from "./ExtraChargesModal";
+import ChangeRoomModal from "./ChangeRoomModal";
+import EditReservationModal from "./EditReservationModal";
 import {
   handleLateCheckOut,
   handleMarkAvailable,
@@ -39,15 +42,19 @@ type RoomCardProps = {
     hasArrivalToday: boolean;
   };
   associatedClients: AssociatedClient[];
+  isAdmin?: boolean;
 };
 
-export default function RoomCard({ room, associatedClients }: RoomCardProps) {
+export default function RoomCard({ room, associatedClients, isAdmin = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
   const [isCheckoutConfirmOpen, setIsCheckoutConfirmOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
+  const [isExtrasModalOpen, setIsExtrasModalOpen] = useState(false);
+  const [isChangeRoomModalOpen, setIsChangeRoomModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [extendNights, setExtendNights] = useState(1);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -287,6 +294,32 @@ export default function RoomCard({ room, associatedClients }: RoomCardProps) {
                 Hacer Check-Out
               </button>
             </div>
+            <div className="pt-1 grid grid-cols-3 gap-2">
+              <button
+                onClick={() => setIsExtrasModalOpen(true)}
+                disabled={isPending}
+                className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
+              >
+                <Plus size={14} />
+                Extra
+              </button>
+              <button
+                onClick={() => setIsChangeRoomModalOpen(true)}
+                disabled={isPending}
+                className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
+              >
+                <Replace size={14} />
+                Cambiar
+              </button>
+              <button
+                onClick={() => setIsEditModalOpen(true)}
+                disabled={isPending}
+                className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
+              >
+                <Pencil size={14} />
+                Editar
+              </button>
+            </div>
             <div className="pt-1 flex">
               <button
                 onClick={onCancelReservation}
@@ -466,6 +499,35 @@ export default function RoomCard({ room, associatedClients }: RoomCardProps) {
             </form>
           </div>
         </div>
+      )}
+
+      {isExtrasModalOpen && room.reservationId && (
+        <ExtraChargesModal
+          isOpen
+          onClose={() => setIsExtrasModalOpen(false)}
+          reservationId={room.reservationId}
+          clientName={room.client ?? "Reserva"}
+          currentTotal={room.totalPrice}
+        />
+      )}
+
+      {isChangeRoomModalOpen && room.reservationId && (
+        <ChangeRoomModal
+          isOpen
+          onClose={() => setIsChangeRoomModalOpen(false)}
+          reservationId={room.reservationId}
+          clientName={room.client ?? "Reserva"}
+          currentRoomNumber={room.number}
+        />
+      )}
+
+      {isEditModalOpen && room.reservationId && (
+        <EditReservationModal
+          isOpen
+          onClose={() => setIsEditModalOpen(false)}
+          reservationId={room.reservationId}
+          isAdmin={isAdmin}
+        />
       )}
 
       {isCancelConfirmOpen && (

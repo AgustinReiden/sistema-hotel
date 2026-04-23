@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark } from "lucide-react";
+import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { getOpenShiftForCurrentUser } from "@/lib/data";
 
 export const revalidate = 0; // Ensure fresh data on every load
 
@@ -82,9 +84,32 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
     const debts = (activeReservations || []).filter(r => Number(r.total_price) > Number(r.paid_amount));
     const totalDebtPending = debts.reduce((sum, r) => sum + (Number(r.total_price) - Number(r.paid_amount)), 0);
     const isToday = selectedDateStr === todayLocalStr;
+    const openShift = await getOpenShiftForCurrentUser().catch(() => null);
 
     return (
         <div className="p-8 pb-20 overflow-y-auto w-full">
+            {!openShift && isToday && (
+                <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0">
+                            <AlertCircle size={20} />
+                        </div>
+                        <div>
+                            <p className="font-bold text-amber-800">Caja cerrada</p>
+                            <p className="text-sm text-amber-700">
+                                No podes cobrar pagos ni cerrar checkouts hasta abrir la caja.
+                            </p>
+                        </div>
+                    </div>
+                    <Link
+                        href="/admin/caja"
+                        className="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg flex items-center gap-2"
+                    >
+                        <CircleDollarSign size={16} />
+                        Ir a Caja
+                    </Link>
+                </div>
+            )}
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">Resumen Financiero</h1>

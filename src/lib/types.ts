@@ -187,3 +187,44 @@ export type Payment = {
   notes: string | null;
   created_at: string;
 };
+
+export type CashShiftStatus = "open" | "closed";
+
+export type CashShift = {
+  id: string;
+  opened_at: string;
+  closed_at: string | null;
+  opened_by: string;
+  closed_by: string | null;
+  opening_cash: number;
+  expected_cash: number | null;
+  actual_cash: number | null;
+  discrepancy: number | null;
+  notes: string | null;
+  status: CashShiftStatus;
+};
+
+export type ShiftPaymentRow = {
+  id: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  notes: string | null;
+  created_at: string;
+  reservation_id: string;
+  client_name: string;
+  room_number: string | null;
+};
+
+export type ShiftSummary = {
+  shift: CashShift;
+  paymentsCount: number;
+  totalsByMethod: Record<PaymentMethod, number>;
+  totalIncome: number;
+  cashIncome: number;
+  payments: ShiftPaymentRow[];
+  openedByEmail: string | null;
+  closedByEmail: string | null;
+};
+
+export type OpenShiftPayload = { openingCash: number };
+export type CloseShiftPayload = { shiftId: string; actualCash: number; notes?: string };
