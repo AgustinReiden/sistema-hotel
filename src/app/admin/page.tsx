@@ -24,6 +24,8 @@ type DashboardRoom = {
   checkout: string | null;
   check_out_target: string | null;
   isLate: boolean;
+  hasLateCheckout: boolean;
+  canChargeLateCheckout: boolean;
   reservationId: string | null;
   reservationStatus: string | null;
   baseTotalPrice: number;
@@ -78,7 +80,7 @@ export default async function Dashboard() {
     const activeReservation = roomReservations.find((reservation) =>
       isRoomOccupiedNow(reservation)
     );
-    const confirmedReservation = !activeReservation
+    const confirmedReservation = !activeReservation && room.status === "available"
       ? roomReservations.find((reservation) =>
         isRoomConfirmedToday(reservation, todayKey, hotelSettings.timezone)
       )
@@ -86,6 +88,8 @@ export default async function Dashboard() {
 
     let status = room.status;
     let isLate = false;
+    let hasLateCheckout = false;
+    let canChargeLateCheckout = false;
     let checkout: string | null = null;
     let client: string | null = null;
     let reservationId: string | null = null;
@@ -98,8 +102,11 @@ export default async function Dashboard() {
 
     if (activeReservation) {
       status = "occupied";
+      hasLateCheckout = Boolean(activeReservation.late_check_out_until);
+      const effectiveCheckOut =
+        activeReservation.late_check_out_until ?? activeReservation.check_out_target;
       client = activeReservation.client_name;
-      checkout = format(new Date(activeReservation.check_out_target), "dd MMM HH:mm", {
+      checkout = format(new Date(effectiveCheckOut), "dd MMM HH:mm", {
         locale: es,
       });
       reservationId = activeReservation.id;
@@ -110,7 +117,10 @@ export default async function Dashboard() {
       totalPrice = activeReservation.total_price;
       paidAmount = activeReservation.paid_amount;
 
-      if (isAfter(now, new Date(activeReservation.check_out_target))) {
+      canChargeLateCheckout =
+        isAfter(now, new Date(activeReservation.check_out_target)) &&
+        !activeReservation.late_check_out_until;
+      if (isAfter(now, new Date(effectiveCheckOut))) {
         isLate = true;
         lateCheckoutsCount++;
       }
@@ -137,6 +147,8 @@ export default async function Dashboard() {
       checkout,
       check_out_target: activeReservation?.check_out_target ?? null,
       isLate,
+      hasLateCheckout,
+      canChargeLateCheckout,
       reservationId,
       reservationStatus,
       baseTotalPrice,
@@ -183,7 +195,7 @@ export default async function Dashboard() {
                   Tenés {unresolvedAlertsCount} alerta{unresolvedAlertsCount === 1 ? "" : "s"} de mantenimiento
                 </p>
                 <p className="text-sm text-amber-700">
-                  Habitaciones limpiadas sin check-out previo. Revisá el panel.
+                  Limpiezas no esperadas registradas por mantenimiento. Revisa el panel.
                 </p>
               </div>
             </div>

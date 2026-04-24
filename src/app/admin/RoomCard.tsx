@@ -31,6 +31,8 @@ type RoomCardProps = {
     checkout: string | null;
     check_out_target: string | null;
     isLate: boolean;
+    hasLateCheckout: boolean;
+    canChargeLateCheckout: boolean;
     reservationId: string | null;
     reservationStatus: string | null;
     baseTotalPrice: number;
@@ -96,7 +98,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
         return;
       }
 
-      toast.success("Medio dia cobrado y checkout extendido.");
+      toast.success("Medio dia cobrado.");
     });
   };
 
@@ -234,7 +236,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
             }`}
         >
           {room.status === "available" && "Disponible"}
-          {room.status === "occupied" && (room.isLate ? "Retraso Check-out" : "Ocupada")}
+          {room.status === "occupied" &&
+            (room.isLate
+              ? "Retraso Check-out"
+              : room.hasLateCheckout
+                ? "Late Check-out"
+                : "Ocupada")}
           {room.status === "cleaning" && "Limpieza"}
           {room.status === "maintenance" && "Mantenimiento"}
         </div>
@@ -250,7 +257,9 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
 
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div>
-                <p className="text-xs text-slate-500 mb-0.5">Check-out Target</p>
+                <p className="text-xs text-slate-500 mb-0.5">
+                  {room.hasLateCheckout ? "Check-out efectivo" : "Check-out Target"}
+                </p>
                 <p
                   className={`text-sm font-bold flex items-center ${room.isLate ? "text-amber-600" : "text-slate-800"}`}
                 >
@@ -267,7 +276,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
             </div>
 
             <div className="pt-1 flex gap-2">
-              {room.isLate && (
+              {room.canChargeLateCheckout && (
                 <button
                   onClick={onLateCheckout}
                   disabled={isPending}

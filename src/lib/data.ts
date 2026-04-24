@@ -8,9 +8,11 @@ import type {
   AssociatedClient,
   CashShift,
   CashShiftStatus,
+  CleaningType,
   CreateReservationPayload,
   Guest,
   HotelSettings,
+  MaintenanceRoom,
   PendingReservation,
   PaymentMethod,
   Reservation,
@@ -39,6 +41,7 @@ type DashboardData = {
     status: ReservationStatus;
     check_in_target: string;
     check_out_target: string;
+    late_check_out_until: string | null;
     actual_check_in: string | null;
     actual_check_out: string | null;
     base_total_price: number;
@@ -199,6 +202,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     status: ReservationStatus;
     check_in_target: string;
     check_out_target: string;
+    late_check_out_until: string | null;
     actual_check_in: string | null;
     actual_check_out: string | null;
     base_total_price: number | string | null;
@@ -213,6 +217,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     status: r.status,
     check_in_target: r.check_in_target,
     check_out_target: r.check_out_target,
+    late_check_out_until: r.late_check_out_until,
     actual_check_in: r.actual_check_in,
     actual_check_out: r.actual_check_out,
     base_total_price: Number(r.base_total_price) || 0,
@@ -377,6 +382,7 @@ export async function markRoomAsAvailable(roomId: number): Promise<void> {
   const { error } = await supabase.rpc("rpc_mark_room_clean", {
     p_room_id: roomId,
     p_notes: null,
+    p_cleaning_type: null,
   });
   if (error) throw error;
 }
@@ -1554,14 +1560,18 @@ export async function getRoomsNeedingCleaning(): Promise<
 
 export async function markRoomClean(
   roomId: number,
-  notes?: string
-): Promise<void> {
+  notes?: string,
+  cleaningType?: CleaningType
+): Promise<{ alertGenerated: boolean }> {
   const supabase = await createClient();
-  const { error } = await supabase.rpc("rpc_mark_room_clean", {
+  const { data, error } = await supabase.rpc("rpc_mark_room_clean", {
     p_room_id: roomId,
     p_notes: notes ?? null,
+    p_cleaning_type: cleaningType ?? null,
   });
   if (error) throw error;
+  const result = (data ?? {}) as { alert_generated?: boolean };
+  return { alertGenerated: Boolean(result.alert_generated) };
 }
 
 export async function getRoomCleaningLog(
@@ -1578,6 +1588,7 @@ export async function getRoomCleaningLog(
       cleaned_by,
       cleaner_name,
       previous_status,
+      cleaning_type,
       notes,
       rooms ( room_number )
       `
@@ -1594,6 +1605,7 @@ export async function getRoomCleaningLog(
     cleaned_by: string;
     cleaner_name: string | null;
     previous_status: string;
+    cleaning_type: CleaningType | null;
     notes: string | null;
     rooms: { room_number: string } | { room_number: string }[] | null;
   }>).map((r) => {
@@ -1609,6 +1621,7 @@ export async function getRoomCleaningLog(
       cleaned_by: r.cleaned_by,
       cleaner_name: r.cleaner_name,
       previous_status: r.previous_status,
+      cleaning_type: r.cleaning_type,
       notes: r.notes,
     };
   });
@@ -1620,56 +1633,12 @@ export async function getRoomCleaningLog(
  * rojo = necesita limpieza) y les permite limpiar cualquiera.
  */
 export async function getAllActiveRoomsForMaintenance(): Promise<
-  Array<
-    Room & {
-      last_checkout_client: string | null;
-      last_checkout_at: string | null;
-    }
-  >
+  MaintenanceRoom[]
 > {
   const supabase = await createClient();
-
-  const { data: rooms, error } = await supabase
-    .from("rooms")
-    .select("*")
-    .eq("is_active", true)
-    .order("room_number");
-
+  const { data, error } = await supabase.rpc("rpc_list_maintenance_rooms");
   if (error) throw error;
-
-  const list = sortRoomsByNumber((rooms ?? []) as Room[]);
-  if (list.length === 0) return [];
-
-  const roomIds = list.map((r) => r.id);
-  const { data: lastReservations } = await supabase
-    .from("reservations")
-    .select("room_id, client_name, actual_check_out")
-    .in("room_id", roomIds)
-    .eq("status", "checked_out")
-    .order("actual_check_out", { ascending: false });
-
-  const lastByRoom = new Map<number, { client: string; checkout: string | null }>();
-  for (const r of (lastReservations ?? []) as {
-    room_id: number;
-    client_name: string;
-    actual_check_out: string | null;
-  }[]) {
-    if (!lastByRoom.has(r.room_id)) {
-      lastByRoom.set(r.room_id, {
-        client: r.client_name,
-        checkout: r.actual_check_out,
-      });
-    }
-  }
-
-  return list.map((r) => {
-    const last = lastByRoom.get(r.id);
-    return {
-      ...r,
-      last_checkout_client: last?.client ?? null,
-      last_checkout_at: last?.checkout ?? null,
-    };
-  });
+  return sortRoomsByNumber((data ?? []) as MaintenanceRoom[]) as MaintenanceRoom[];
 }
 
 export async function listAdminAlerts(onlyUnresolved = true): Promise<AdminAlert[]> {

@@ -13,6 +13,7 @@ function makeReservation(overrides: Partial<Reservation> & { id: string; room_id
     client_dni: overrides.client_dni ?? null,
     check_in_target: overrides.check_in_target ?? "2026-04-07T14:00:00-03:00",
     check_out_target: overrides.check_out_target ?? "2026-04-08T10:00:00-03:00",
+    late_check_out_until: overrides.late_check_out_until ?? null,
     status: overrides.status ?? "confirmed",
     actual_check_in: overrides.actual_check_in ?? null,
     actual_check_out: overrides.actual_check_out ?? null,

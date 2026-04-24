@@ -118,6 +118,8 @@ export async function handleMarkAvailable(roomId: number): Promise<ActionResult>
   try {
     await markRoomAsAvailable(roomId);
     revalidatePath("/admin");
+    revalidatePath("/maintenance");
+    revalidatePath("/admin/mantenimiento");
     revalidateCalendarViews();
     return { success: true };
   } catch (error: unknown) {

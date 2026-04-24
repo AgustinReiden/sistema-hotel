@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Sparkles, Wrench } from "lucide-react";
+import { CheckCircle2, Sparkles, Wrench } from "lucide-react";
 
 import {
   getHotelSettings,
@@ -6,6 +6,7 @@ import {
   listAdminAlerts,
 } from "@/lib/data";
 import { formatHotelDateTime } from "@/lib/time";
+import type { CleaningType } from "@/lib/types";
 import AlertsPanel from "./AlertsPanel";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +27,9 @@ function statusLabel(raw: string): { label: string; color: string; icon: React.R
       };
     case "available":
       return {
-        label: "Sin checkout previo",
-        color: "bg-orange-100 text-orange-800 border-orange-300",
-        icon: <AlertTriangle size={12} />,
+        label: "Disponible",
+        color: "bg-emerald-100 text-emerald-700 border-emerald-200",
+        icon: <CheckCircle2 size={12} />,
       };
     case "occupied":
       return {
@@ -42,6 +43,19 @@ function statusLabel(raw: string): { label: string; color: string; icon: React.R
         color: "bg-slate-100 text-slate-700 border-slate-200",
         icon: <CheckCircle2 size={12} />,
       };
+  }
+}
+
+function cleaningTypeLabel(type: CleaningType | null): { label: string; color: string } {
+  switch (type) {
+    case "limpia_ocupada":
+      return { label: "Limpia Ocupada", color: "bg-orange-100 text-orange-800 border-orange-300" };
+    case "limpia_vacia":
+      return { label: "Limpia Vacia", color: "bg-orange-100 text-orange-800 border-orange-300" };
+    case "limpia_repaso":
+      return { label: "Limpia Repaso", color: "bg-slate-100 text-slate-700 border-slate-200" };
+    default:
+      return { label: "Esperada", color: "bg-emerald-100 text-emerald-700 border-emerald-200" };
   }
 }
 
@@ -74,17 +88,17 @@ export default async function MantenimientoAdminPage() {
                 <Sparkles size={18} />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-slate-800">Histórico de limpiezas</h2>
+                <h2 className="text-lg font-bold text-slate-800">Historico de limpiezas</h2>
                 <p className="text-xs text-slate-500">
-                  Últimas {log.length} limpiezas registradas. Las marcadas en naranja son
-                  habitaciones que se limpiaron sin haber tenido check-out previo (anomalía).
+                  Ultimas {log.length} limpiezas registradas. Las marcadas en naranja son
+                  limpiezas no esperadas que pueden requerir revision.
                 </p>
               </div>
             </div>
 
             {log.length === 0 ? (
               <div className="p-10 text-center text-slate-500 font-medium text-sm">
-                Todavía no hay limpiezas registradas.
+                Todavia no hay limpiezas registradas.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -92,16 +106,20 @@ export default async function MantenimientoAdminPage() {
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       <th className="text-left px-4 py-3 font-semibold">Fecha/Hora</th>
-                      <th className="text-left px-4 py-3 font-semibold">Habitación</th>
+                      <th className="text-left px-4 py-3 font-semibold">Habitacion</th>
                       <th className="text-left px-4 py-3 font-semibold">Estado anterior</th>
-                      <th className="text-left px-4 py-3 font-semibold">Limpió</th>
+                      <th className="text-left px-4 py-3 font-semibold">Tipo</th>
+                      <th className="text-left px-4 py-3 font-semibold">Limpio</th>
                       <th className="text-left px-4 py-3 font-semibold">Notas</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {log.map((entry) => {
                       const prev = statusLabel(entry.previous_status);
-                      const isAnomaly = entry.previous_status === "available";
+                      const type = cleaningTypeLabel(entry.cleaning_type);
+                      const isAnomaly =
+                        entry.cleaning_type === "limpia_ocupada" ||
+                        entry.cleaning_type === "limpia_vacia";
                       return (
                         <tr
                           key={entry.id}
@@ -121,8 +139,15 @@ export default async function MantenimientoAdminPage() {
                               {prev.label}
                             </span>
                           </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border ${type.color}`}
+                            >
+                              {type.label}
+                            </span>
+                          </td>
                           <td className="px-4 py-3 text-slate-700">
-                            {entry.cleaner_name ?? "—"}
+                            {entry.cleaner_name ?? "-"}
                           </td>
                           <td className="px-4 py-3 text-slate-600 text-xs max-w-xs truncate">
                             {entry.notes ?? ""}

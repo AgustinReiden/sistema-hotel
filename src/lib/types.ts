@@ -8,6 +8,7 @@ export type RoomCleaningLogEntry = {
   cleaned_by: string;
   cleaner_name: string | null;
   previous_status: string;
+  cleaning_type: CleaningType | null;
   notes: string | null;
 };
 
@@ -25,6 +26,13 @@ export type AdminAlert = {
 };
 
 export type RoomStatus = "available" | "occupied" | "maintenance" | "cleaning";
+
+export type CleaningType = "limpia_ocupada" | "limpia_vacia" | "limpia_repaso";
+
+export type CleaningRequiredReason =
+  | "status_cleaning"
+  | "status_maintenance"
+  | "overnight_stay";
 
 export type ReservationStatus =
   | "pending"
@@ -98,6 +106,7 @@ export type Reservation = {
   client_dni: string | null;
   check_in_target: string;
   check_out_target: string;
+  late_check_out_until: string | null;
   room_id: number;
   status: ReservationStatus;
   actual_check_in: string | null;
@@ -109,6 +118,17 @@ export type Reservation = {
   paid_amount: number;
   guest_count: number;
   whatsapp_notified: boolean;
+};
+
+export type MaintenanceRoom = Room & {
+  requires_cleaning: boolean;
+  cleaning_required_reason: CleaningRequiredReason | null;
+  cleaned_today: boolean;
+  active_client: string | null;
+  active_check_out_target: string | null;
+  active_late_check_out_until: string | null;
+  last_checkout_client: string | null;
+  last_checkout_at: string | null;
 };
 
 export type PendingReservation = {
