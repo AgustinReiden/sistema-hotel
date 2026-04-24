@@ -55,36 +55,34 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
     const dayStartUTC = new Date(localMidnight.getTime() - utcOffsetMs);
     const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
 
-    const { data: paymentsData } = await supabase
-        .from('payments')
-        .select(`
-            id, amount, payment_method, created_at, notes,
-            reservation:reservations(id, client_name, rooms(room_number))
-        `)
-        .gte('created_at', dayStartUTC.toISOString())
-        .lt('created_at', dayEndUTC.toISOString())
-        .order('created_at', { ascending: false });
+    const [paymentsResult, reservationsResult, extraIncomeResult, openShift] = await Promise.all([
+        supabase
+            .from('payments')
+            .select(`
+                id, amount, payment_method, created_at, notes,
+                reservation:reservations(id, client_name, rooms(room_number))
+            `)
+            .gte('created_at', dayStartUTC.toISOString())
+            .lt('created_at', dayEndUTC.toISOString())
+            .order('created_at', { ascending: false }),
+        supabase
+            .from('reservations')
+            .select(`
+                id, client_name, total_price, paid_amount, status, check_out_target,
+                rooms(room_number)
+            `)
+            .in('status', ['confirmed', 'checked_in'])
+            .order('check_out_target', { ascending: true }),
+        supabase.rpc('get_today_extra_income'),
+        getOpenShiftForCurrentUser().catch(() => null),
+    ]);
 
-    const payments = paymentsData || [];
+    const payments = paymentsResult.data || [];
     const todayIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-
-    // Fetch active reservations with debt
-    const { data: activeReservations } = await supabase
-        .from('reservations')
-        .select(`
-            id, client_name, total_price, paid_amount, status, check_out_target,
-            rooms(room_number)
-        `)
-        .in('status', ['confirmed', 'checked_in'])
-        .order('check_out_target', { ascending: true });
-
-    const { data: extraIncomeData } = await supabase.rpc('get_today_extra_income');
-    const todayExtraIncome = Number(extraIncomeData || 0);
-
-    const debts = (activeReservations || []).filter(r => Number(r.total_price) > Number(r.paid_amount));
+    const todayExtraIncome = Number(extraIncomeResult.data || 0);
+    const debts = (reservationsResult.data || []).filter(r => Number(r.total_price) > Number(r.paid_amount));
     const totalDebtPending = debts.reduce((sum, r) => sum + (Number(r.total_price) - Number(r.paid_amount)), 0);
     const isToday = selectedDateStr === todayLocalStr;
-    const openShift = await getOpenShiftForCurrentUser().catch(() => null);
 
     return (
         <div className="p-8 pb-20 overflow-y-auto w-full">
