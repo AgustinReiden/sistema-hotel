@@ -9,17 +9,21 @@ export default async function AdminLayout({
 }) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
+    const userEmail = user?.email || "";
 
     let role = "receptionist";
-    const userEmail = user?.email || "";
-    if (user) {
-        const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-        if (profile?.role) {
-            role = profile.role;
-        }
-    }
+    let openShift: Awaited<ReturnType<typeof getOpenShiftForCurrentUser>> | null = null;
 
-    const openShift = user ? await getOpenShiftForCurrentUser().catch(() => null) : null;
+    if (user) {
+        const [profileResult, shiftResult] = await Promise.all([
+            supabase.from('profiles').select('role').eq('id', user.id).single(),
+            getOpenShiftForCurrentUser().catch(() => null),
+        ]);
+        if (profileResult.data?.role) {
+            role = profileResult.data.role;
+        }
+        openShift = shiftResult;
+    }
 
     return (
         <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">

@@ -39,76 +39,90 @@ export default function PublicSearchForm() {
         router.push(`/?${params.toString()}#habitaciones`);
     };
 
+    const formatDisplayDate = (iso: string) =>
+        new Date(`${iso}T12:00:00Z`).toLocaleDateString("es-AR", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+        });
+
     return (
         <div className="max-w-4xl mx-auto bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl shadow-black/10 p-2 md:p-3 border border-white/80 flex flex-col md:flex-row gap-2">
             {/* Check-in */}
-            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors cursor-pointer relative">
-                <Calendar className="text-brand-500 mr-3 shrink-0" size={20} />
-                <div className="text-left w-full">
-                    <label htmlFor="checkIn" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block cursor-pointer">
+            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors relative">
+                <Calendar className="text-brand-500 mr-3 shrink-0 pointer-events-none" size={20} />
+                <div className="text-left w-full pointer-events-none">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block">
                         Llegada
-                    </label>
-                    <input
-                        id="checkIn"
-                        type="date"
-                        value={checkIn}
-                        onChange={(e) => handleCheckInChange(e.target.value)}
-                        className="w-full bg-transparent text-slate-800 font-semibold text-sm outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                        max="9999-12-31"
-                        min={format(new Date(), "yyyy-MM-dd")}
-                    />
+                    </div>
+                    <div className="text-slate-800 font-semibold text-sm">
+                        {formatDisplayDate(checkIn)}
+                    </div>
                 </div>
+                <input
+                    aria-label="Fecha de llegada"
+                    type="date"
+                    value={checkIn}
+                    onChange={(e) => handleCheckInChange(e.target.value)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    max="9999-12-31"
+                    min={format(new Date(), "yyyy-MM-dd")}
+                />
             </div>
 
             {/* Separador vertical */}
             <div className="hidden md:block w-px bg-slate-200 my-3"></div>
 
             {/* Check-out */}
-            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors cursor-pointer relative">
-                <Calendar className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3 shrink-0" size={20} />
-                <div className="text-left w-full">
-                    <label htmlFor="checkOut" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block cursor-pointer">
+            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors relative">
+                <Calendar className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3 shrink-0 pointer-events-none" size={20} />
+                <div className="text-left w-full pointer-events-none">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block">
                         Salida
-                    </label>
-                    <input
-                        id="checkOut"
-                        type="date"
-                        value={checkOut}
-                        max="9999-12-31"
-                        onChange={(e) => setCheckOut(e.target.value)}
-                        className="w-full bg-transparent text-slate-800 font-semibold text-sm outline-none cursor-pointer relative z-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                        min={format(addDays(new Date(checkIn), 1), "yyyy-MM-dd")}
-                    />
+                    </div>
+                    <div className="text-slate-800 font-semibold text-sm">
+                        {formatDisplayDate(checkOut)}
+                    </div>
                 </div>
+                <input
+                    aria-label="Fecha de salida"
+                    type="date"
+                    value={checkOut}
+                    max="9999-12-31"
+                    onChange={(e) => setCheckOut(e.target.value)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    min={format(addDays(new Date(checkIn), 1), "yyyy-MM-dd")}
+                />
             </div>
 
             {/* Separador vertical */}
             <div className="hidden md:block w-px bg-slate-200 my-3"></div>
 
             {/* Huespedes */}
-            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors cursor-pointer relative">
-                <Users className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3 shrink-0" size={20} />
-                <div className="text-left w-full relative">
-                    <label htmlFor="guests" className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block cursor-pointer">
+            <div className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl group hover:bg-brand-50/50 transition-colors relative">
+                <Users className="text-slate-400 group-hover:text-brand-500 transition-colors mr-3 shrink-0 pointer-events-none" size={20} />
+                <div className="text-left w-full pointer-events-none">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5 block">
                         Hu&eacute;spedes
-                    </label>
-                    <div className="relative">
-                        <select
-                            id="guests"
-                            value={guests}
-                            onChange={(e) => setGuests(e.target.value)}
-                            className="w-full bg-transparent text-slate-800 font-semibold text-sm outline-none cursor-pointer appearance-none pr-8 relative z-10"
-                        >
-                            <option value="1">1 Persona</option>
-                            <option value="2">2 Personas</option>
-                            <option value="3">3 Personas</option>
-                            <option value="4">4 Personas</option>
-                            <option value="5">5 Personas</option>
-                            <option value="6">6 Personas</option>
-                        </select>
-                        <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-0" size={14} />
+                    </div>
+                    <div className="text-slate-800 font-semibold text-sm flex items-center gap-2">
+                        {guests} {Number(guests) === 1 ? "Persona" : "Personas"}
+                        <ChevronDown className="text-slate-400" size={14} />
                     </div>
                 </div>
+                <select
+                    aria-label="Cantidad de huespedes"
+                    value={guests}
+                    onChange={(e) => setGuests(e.target.value)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                >
+                    <option value="1">1 Persona</option>
+                    <option value="2">2 Personas</option>
+                    <option value="3">3 Personas</option>
+                    <option value="4">4 Personas</option>
+                    <option value="5">5 Personas</option>
+                    <option value="6">6 Personas</option>
+                </select>
             </div>
 
             {/* Boton buscar */}

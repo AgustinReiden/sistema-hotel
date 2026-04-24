@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -63,7 +64,17 @@ export default function BookingModal({
     { code: "591", flag: "🇧🇴", label: "Bolivia" },
   ];
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
+  if (typeof document === "undefined") return null;
 
   const nights = Math.max(1, differenceInDays(new Date(checkOut), new Date(checkIn)));
   const totalAmount = nights * room.base_price;
@@ -115,22 +126,21 @@ export default function BookingModal({
     setError(result.error || "Ocurrio un error inesperado al procesar tu reserva. Es posible que ya no este disponible.");
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/65 backdrop-blur-md overflow-y-auto">
-      <div className="min-h-full flex items-start md:items-center justify-center p-0 md:p-6">
-        <div className="w-full md:max-w-6xl md:my-6">
-          <div className="bg-white rounded-none md:rounded-[32px] shadow-2xl overflow-hidden md:max-h-[calc(100vh-48px)]">
-            {!success && (
-              <button
-                onClick={onClose}
-                className="absolute top-6 right-6 z-30 w-10 h-10 rounded-full bg-white/90 hover:bg-white text-slate-500 hover:text-slate-900 flex items-center justify-center shadow-lg transition-colors"
-              >
-                <X size={20} />
-              </button>
-            )}
+  return createPortal(
+    <div className="fixed inset-0 z-50 bg-white">
+      <div className="relative w-full h-full bg-white overflow-hidden">
+        {!success && (
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="fixed top-4 right-4 md:top-6 md:right-6 z-50 w-11 h-11 rounded-full bg-white/95 hover:bg-white text-slate-600 hover:text-slate-900 flex items-center justify-center shadow-lg border border-slate-200 transition-colors"
+          >
+            <X size={22} />
+          </button>
+        )}
 
-            {success ? (
-              <div className="px-8 py-14 md:px-16 md:py-20 text-center w-full flex flex-col items-center justify-center animate-in zoom-in-95 duration-500">
+        {success ? (
+          <div className="w-full h-full flex flex-col items-center justify-center px-8 py-14 md:px-16 md:py-20 text-center animate-in zoom-in-95 duration-500">
                 <div className="w-24 h-24 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-inner border border-emerald-100">
                   <CheckCircle2 size={48} />
                 </div>
@@ -162,10 +172,10 @@ export default function BookingModal({
                   Volver al Inicio
                 </button>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-[0.92fr_1.08fr]">
-                <div className="bg-slate-50 md:max-h-[calc(100vh-48px)] overflow-y-auto">
-                  <div className="relative h-64 md:h-72 w-full">
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-[0.92fr_1.08fr] w-full h-full">
+            <div className="bg-slate-50 md:h-full overflow-y-auto">
+              <div className="relative h-64 md:h-72 w-full">
                     {showPlaceholder ? (
                       <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
                         <span className="text-slate-500 font-bold uppercase tracking-widest">{room.room_type}</span>
@@ -232,7 +242,7 @@ export default function BookingModal({
                   </div>
                 </div>
 
-                <div className="bg-white md:max-h-[calc(100vh-48px)] overflow-y-auto">
+                <div className="bg-white md:h-full overflow-y-auto">
                   <div className="max-w-xl mx-auto px-8 py-10 md:px-12 md:py-12">
                     <h3 className="text-xs font-bold text-brand-500 uppercase tracking-[0.22em] mb-4">Paso Final</h3>
                     <h2 className="text-3xl md:text-5xl font-serif text-slate-900 mb-8 leading-[1.05]">
@@ -255,55 +265,54 @@ export default function BookingModal({
                         />
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label htmlFor="clientDni" className="block text-sm font-bold tracking-wide uppercase text-slate-700">
-                            <span className="flex items-center gap-2">
-                              <CreditCard size={14} />
-                              DNI o CUIT
-                            </span>
-                          </label>
+                      <div className="space-y-2">
+                        <label htmlFor="clientDni" className="block text-sm font-bold tracking-wide uppercase text-slate-700">
+                          <span className="flex items-center gap-2">
+                            <CreditCard size={14} />
+                            DNI o CUIT
+                          </span>
+                        </label>
+                        <input
+                          id="clientDni"
+                          type="text"
+                          value={clientDni}
+                          onChange={(e) => setClientDni(e.target.value)}
+                          className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                          placeholder="20-12345678-3"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="clientPhone" className="block text-sm font-bold tracking-wide uppercase text-slate-700">
+                          <span className="flex items-center gap-2">
+                            <Phone size={14} />
+                            Telefono
+                          </span>
+                        </label>
+                        <div className="flex gap-2">
+                          <select
+                            aria-label="Prefijo de pais"
+                            value={phoneCountryCode}
+                            onChange={(e) => setPhoneCountryCode(e.target.value)}
+                            className="px-3 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800 cursor-pointer"
+                          >
+                            {COUNTRY_OPTIONS.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.flag} +{c.code}
+                              </option>
+                            ))}
+                          </select>
                           <input
-                            id="clientDni"
-                            type="text"
-                            value={clientDni}
-                            onChange={(e) => setClientDni(e.target.value)}
-                            className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
-                            placeholder="20-12345678-3"
+                            id="clientPhone"
+                            type="tel"
+                            value={phoneLocal}
+                            onChange={(e) => setPhoneLocal(e.target.value)}
+                            className="flex-1 min-w-0 px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                            placeholder="3814XXXXXX"
+                            inputMode="numeric"
                             required
                           />
-                        </div>
-                        <div className="space-y-2">
-                          <label htmlFor="clientPhone" className="block text-sm font-bold tracking-wide uppercase text-slate-700">
-                            <span className="flex items-center gap-2">
-                              <Phone size={14} />
-                              Telefono
-                            </span>
-                          </label>
-                          <div className="flex gap-2">
-                            <select
-                              aria-label="Prefijo de pais"
-                              value={phoneCountryCode}
-                              onChange={(e) => setPhoneCountryCode(e.target.value)}
-                              className="px-3 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800 cursor-pointer"
-                            >
-                              {COUNTRY_OPTIONS.map((c) => (
-                                <option key={c.code} value={c.code}>
-                                  {c.flag} +{c.code}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              id="clientPhone"
-                              type="tel"
-                              value={phoneLocal}
-                              onChange={(e) => setPhoneLocal(e.target.value)}
-                              className="flex-1 min-w-0 px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
-                              placeholder="3814XXXXXX"
-                              inputMode="numeric"
-                              required
-                            />
-                          </div>
                         </div>
                       </div>
 
@@ -355,14 +364,13 @@ export default function BookingModal({
                           Proceso 100% Seguro
                         </p>
                       </div>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            )}
+            </form>
           </div>
         </div>
       </div>
-    </div>
+    )}
+      </div>
+    </div>,
+    document.body
   );
 }
