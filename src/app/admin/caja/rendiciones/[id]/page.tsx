@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { getHotelSettings, getShiftSummary } from "@/lib/data";
 import { formatAmount, formatShiftCode, formatSignedAmount } from "@/lib/format";
 import { formatHotelDateTime, formatHotelTime } from "@/lib/time";
+import ThermalAutoPrint from "@/app/admin/components/ThermalAutoPrint";
 import PrintButton from "./PrintButton";
 
 export const revalidate = 0;
@@ -163,10 +164,18 @@ function ShiftCopy(props: ShiftCopyProps) {
   );
 }
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ autoprint?: string; copy?: string }>;
+};
 
-export default async function ShiftReportPage({ params }: PageProps) {
+export default async function ShiftReportPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const sp = await searchParams;
+  const autoPrint = sp.autoprint === "1";
+  const requestedCopy =
+    sp.copy === "duplicate" ? "duplicate" : sp.copy === "original" ? "original" : null;
+  const copyMode = autoPrint ? requestedCopy ?? "original" : requestedCopy ?? "both";
   const [summary, hotelSettings] = await Promise.all([
     getShiftSummary(id),
     getHotelSettings().catch(() => null),
@@ -203,6 +212,17 @@ export default async function ShiftReportPage({ params }: PageProps) {
     notes: shift.notes,
     printedAt: formatHotelDateTime(new Date().toISOString(), tz),
   };
+  const nextUrl =
+    autoPrint && copyMode === "original"
+      ? `/admin/caja/rendiciones/${id}?autoprint=1&copy=duplicate`
+      : undefined;
+  const copies =
+    copyMode === "both"
+      ? [
+          { key: "original", title: "ORIGINAL" },
+          { key: "duplicate", title: "DUPLICADO" },
+        ]
+      : [{ key: copyMode, title: copyMode === "original" ? "ORIGINAL" : "DUPLICADO" }];
 
   return (
     <>
@@ -218,8 +238,10 @@ export default async function ShiftReportPage({ params }: PageProps) {
       </div>
 
       <div className="thermal">
-        <ShiftCopy title="ORIGINAL" {...copyProps} />
-        <ShiftCopy title="DUPLICADO" {...copyProps} />
+        {copies.map((copy) => (
+          <ShiftCopy key={copy.key} title={copy.title} {...copyProps} />
+        ))}
+        {autoPrint && <ThermalAutoPrint nextUrl={nextUrl} closeOnDone={!nextUrl} />}
 
         <style>{`
           @page { size: 75mm auto; margin: 2mm; }

@@ -126,13 +126,16 @@ function ReceiptCopy(props: ReceiptCopyProps) {
 
 type PageProps = {
   params: Promise<{ paymentId: string }>;
-  searchParams: Promise<{ autoprint?: string }>;
+  searchParams: Promise<{ autoprint?: string; copy?: string }>;
 };
 
 export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const { paymentId } = await params;
   const sp = await searchParams;
   const autoPrint = sp.autoprint === "1";
+  const requestedCopy =
+    sp.copy === "duplicate" ? "duplicate" : sp.copy === "original" ? "original" : null;
+  const copyMode = autoPrint ? requestedCopy ?? "original" : requestedCopy ?? "both";
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -204,11 +207,24 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     notes: raw.notes,
   };
 
+  const nextUrl =
+    autoPrint && copyMode === "original"
+      ? `/admin/recibo/${paymentId}?autoprint=1&copy=duplicate`
+      : undefined;
+  const copies =
+    copyMode === "both"
+      ? [
+          { key: "original", title: "ORIGINAL" },
+          { key: "duplicate", title: "DUPLICADO" },
+        ]
+      : [{ key: copyMode, title: copyMode === "original" ? "ORIGINAL" : "DUPLICADO" }];
+
   return (
     <div className="thermal">
-      <ReceiptCopy title="ORIGINAL" {...receiptData} />
-      <ReceiptCopy title="DUPLICADO" {...receiptData} />
-      {autoPrint && <ReceiptAutoPrint />}
+      {copies.map((copy) => (
+        <ReceiptCopy key={copy.key} title={copy.title} {...receiptData} />
+      ))}
+      {autoPrint && <ReceiptAutoPrint nextUrl={nextUrl} closeOnDone={!nextUrl} />}
 
       <style>{`
         @page { size: 75mm auto; margin: 2mm; }

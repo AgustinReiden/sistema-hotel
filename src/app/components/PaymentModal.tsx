@@ -13,7 +13,7 @@ function openReceipt(paymentId: string) {
   // En Chrome con --kiosk-printing imprime sin diálogo.
   if (typeof window === "undefined") return;
   window.open(
-    `/admin/recibo/${paymentId}?autoprint=1`,
+    `/admin/recibo/${paymentId}?autoprint=1&copy=original`,
     "recibo-" + paymentId,
     "width=420,height=720"
   );
