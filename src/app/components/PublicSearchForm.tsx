@@ -64,7 +64,7 @@ export default function PublicSearchForm() {
                     type="date"
                     value={checkIn}
                     onChange={(e) => handleCheckInChange(e.target.value)}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    className="absolute inset-0 w-full h-full appearance-none bg-transparent text-transparent cursor-pointer focus:outline-none [&::-webkit-date-and-time-value]:text-transparent [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                     max="9999-12-31"
                     min={format(new Date(), "yyyy-MM-dd")}
                 />
@@ -90,7 +90,7 @@ export default function PublicSearchForm() {
                     value={checkOut}
                     max="9999-12-31"
                     onChange={(e) => setCheckOut(e.target.value)}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    className="absolute inset-0 w-full h-full appearance-none bg-transparent text-transparent cursor-pointer focus:outline-none [&::-webkit-date-and-time-value]:text-transparent [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                     min={format(addDays(new Date(checkIn), 1), "yyyy-MM-dd")}
                 />
             </div>
@@ -114,7 +114,7 @@ export default function PublicSearchForm() {
                     aria-label="Cantidad de huespedes"
                     value={guests}
                     onChange={(e) => setGuests(e.target.value)}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    className="absolute inset-0 w-full h-full appearance-none bg-transparent text-transparent cursor-pointer focus:outline-none [&::-webkit-date-and-time-value]:text-transparent [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 >
                     <option value="1">1 Persona</option>
                     <option value="2">2 Personas</option>
