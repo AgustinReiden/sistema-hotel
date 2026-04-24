@@ -19,6 +19,11 @@ import {
 
 import { handleConfirmReservation, handleCancelReservation, handleResendWhatsapp } from "../actions";
 import type { PendingReservation } from "@/lib/types";
+import {
+  CANCEL_REASON_OPTIONS,
+  CANCEL_REASON_LABELS,
+  type CancelReasonKey,
+} from "@/lib/cancel-reasons";
 
 type Props = {
   solicitudes: PendingReservation[];
@@ -42,7 +47,15 @@ export default function SolicitudesClient({ solicitudes }: Props) {
   const [result, setResult] = useState<ResultState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [cancelReason, setCancelReason] = useState("");
+  const [cancelReasonKey, setCancelReasonKey] = useState<CancelReasonKey>("fechas_no_disponibles");
+  const [cancelReasonCustom, setCancelReasonCustom] = useState("");
+
+  const resolvedCancelReason =
+    cancelReasonKey === "otro"
+      ? cancelReasonCustom.trim()
+      : CANCEL_REASON_LABELS[cancelReasonKey].es;
+  const cancelReasonValid =
+    cancelReasonKey !== "otro" || cancelReasonCustom.trim().length > 0;
 
   const pending = solicitudes.filter((s) => s.status === "pending");
   const processed = solicitudes.filter((s) => s.status !== "pending");
@@ -59,7 +72,7 @@ export default function SolicitudesClient({ solicitudes }: Props) {
         if (type === "confirm") {
           res = await handleConfirmReservation(id);
         } else if (type === "cancel") {
-          res = await handleCancelReservation(id, cancelReason.trim());
+          res = await handleCancelReservation(id, resolvedCancelReason);
         } else {
           res = await handleResendWhatsapp(id);
         }
@@ -77,7 +90,8 @@ export default function SolicitudesClient({ solicitudes }: Props) {
       } catch {
         setActionError("Error inesperado al procesar la solicitud.");
       } finally {
-        setCancelReason("");
+        setCancelReasonKey("fechas_no_disponibles");
+        setCancelReasonCustom("");
         setLoadingId(null);
         router.refresh();
       }
@@ -137,18 +151,42 @@ export default function SolicitudesClient({ solicitudes }: Props) {
             </p>
 
             {confirmDialog.type === "cancel" && (
-              <div className="mb-6">
-                <label htmlFor="solicitud-cancel-reason" className="block text-sm font-semibold text-slate-700 mb-2">
-                  Motivo de cancelacion
-                </label>
-                <textarea
-                  id="solicitud-cancel-reason"
-                  rows={4}
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-red-400 focus:ring outline-none resize-none"
-                  placeholder="Ej. No hay disponibilidad real para esas fechas."
-                />
+              <div className="mb-6 space-y-3">
+                <div>
+                  <label htmlFor="solicitud-cancel-reason-key" className="block text-sm font-semibold text-slate-700 mb-2">
+                    Motivo de cancelacion
+                  </label>
+                  <select
+                    id="solicitud-cancel-reason-key"
+                    value={cancelReasonKey}
+                    onChange={(e) => setCancelReasonKey(e.target.value as CancelReasonKey)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-red-400 focus:ring outline-none bg-white cursor-pointer"
+                  >
+                    {CANCEL_REASON_OPTIONS.map((opt) => (
+                      <option key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {cancelReasonKey === "otro" && (
+                  <div>
+                    <label htmlFor="solicitud-cancel-reason-custom" className="block text-xs font-semibold text-slate-500 mb-1">
+                      Describi el motivo
+                    </label>
+                    <textarea
+                      id="solicitud-cancel-reason-custom"
+                      rows={3}
+                      value={cancelReasonCustom}
+                      onChange={(e) => setCancelReasonCustom(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-red-400 focus:ring outline-none resize-none"
+                      placeholder="Ej. No hay disponibilidad real para esas fechas."
+                    />
+                  </div>
+                )}
+                <p className="text-xs text-slate-500">
+                  El cliente recibira este motivo y la invitacion a comunicarse para reprogramar.
+                </p>
               </div>
             )}
 
@@ -156,7 +194,8 @@ export default function SolicitudesClient({ solicitudes }: Props) {
               <button
                 onClick={() => {
                   setConfirmDialog(null);
-                  setCancelReason("");
+                  setCancelReasonKey("fechas_no_disponibles");
+                  setCancelReasonCustom("");
                 }}
                 className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors cursor-pointer"
               >
@@ -164,7 +203,7 @@ export default function SolicitudesClient({ solicitudes }: Props) {
               </button>
               <button
                 onClick={() => executeAction(confirmDialog.id, confirmDialog.type)}
-                disabled={confirmDialog.type === "cancel" && !cancelReason.trim()}
+                disabled={confirmDialog.type === "cancel" && !cancelReasonValid}
                 className={`flex-1 py-3 px-4 font-semibold rounded-xl transition-colors cursor-pointer text-white disabled:opacity-50 ${
                   confirmDialog.type === "confirm"
                     ? "bg-green-600 hover:bg-green-700"
@@ -306,7 +345,8 @@ export default function SolicitudesClient({ solicitudes }: Props) {
                         <button
                           onClick={() => {
                             setConfirmDialog({ id: s.id, type: "cancel" });
-                            setCancelReason("");
+                            setCancelReasonKey("fechas_no_disponibles");
+                            setCancelReasonCustom("");
                           }}
                           disabled={isPending}
                           className="flex items-center gap-1.5 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-bold rounded-xl transition-colors border border-red-200 cursor-pointer disabled:opacity-50"

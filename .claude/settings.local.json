@@ -56,7 +56,13 @@
       "Bash(git add src/app/components/RoomCarousel.tsx src/app/page.tsx package.json package-lock.json)",
       "Bash(grep -r \"cliente\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)",
       "Bash(grep -h \"CREATE TABLE\\\\|DROP TABLE\\\\|CREATE VIEW\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)",
-      "Bash(grep -h \"CREATE TABLE\\\\|ALTER TABLE\\\\|ADD COLUMN\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)"
+      "Bash(grep -h \"CREATE TABLE\\\\|ALTER TABLE\\\\|ADD COLUMN\" /c/Users/jorge/Desktop/sistema-hotel/supabase_migrations/*.sql)",
+      "mcp__n8n__list_workflows",
+      "mcp__n8n__get_workflow",
+      "mcp__n8n__list_executions",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "mcp__n8n__update_workflow"
     ]
   }
 }

@@ -3,6 +3,7 @@
 import { publicCreateReservationByType } from "@/lib/data";
 import { ActionResult } from "@/lib/types";
 import { publicBookingSchema } from "@/lib/validations";
+import { formatPhoneForWhatsapp } from "@/lib/webhook";
 import { revalidatePath } from "next/cache";
 
 export async function handlePublicBooking(
@@ -10,7 +11,8 @@ export async function handlePublicBooking(
     clientName: string,
     checkIn: string,
     checkOut: string,
-    clientPhone: string,
+    phoneCountryCode: string,
+    phoneLocal: string,
     clientDni: string,
     guestCount?: number
 ): Promise<ActionResult> {
@@ -19,7 +21,8 @@ export async function handlePublicBooking(
             roomType,
             clientName,
             clientDni,
-            clientPhone,
+            phoneCountryCode,
+            phoneLocal,
             checkIn,
             checkOut,
         });
@@ -30,12 +33,17 @@ export async function handlePublicBooking(
             return { success: false, error: "La fecha de salida debe ser posterior a la de llegada." };
         }
 
+        const formattedPhone = formatPhoneForWhatsapp(
+            validated.phoneLocal,
+            validated.phoneCountryCode
+        );
+
         await publicCreateReservationByType({
             roomType: validated.roomType,
             clientName: validated.clientName,
             checkIn,
             checkOut,
-            clientPhone: validated.clientPhone,
+            clientPhone: formattedPhone ?? validated.phoneLocal,
             clientDni: validated.clientDni,
             guestCount: guestCount && guestCount >= 1 ? Math.floor(guestCount) : 1,
         });

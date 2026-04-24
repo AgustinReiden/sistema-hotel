@@ -12,6 +12,7 @@ import {
   doCheckIn,
   doCheckout,
   extendReservation,
+  getCancellationReason,
   getHotelSettings,
   getReservationForEdit,
   getReservationWithRoom,
@@ -25,6 +26,12 @@ import {
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import { notifyReservationWebhook } from "@/lib/webhook";
+import {
+  buildCancellationMessage,
+  buildConfirmationMessage,
+  deriveLanguageFromPhone,
+  type ReservationMessageData,
+} from "@/lib/whatsapp-messages";
 import type {
   ActionResult,
   AssignWalkInPayload,
@@ -179,18 +186,20 @@ export async function handleCancelReservation(
     // 3. Enviar notificación WhatsApp
     let whatsappSent = false;
     if (reservation.client_phone) {
-      const result = await notifyReservationWebhook({
-        reservation_id: reservationId,
-        status: "cancelled",
+      const lang = deriveLanguageFromPhone(reservation.client_phone);
+      const data: ReservationMessageData = {
         client_name: reservation.client_name,
-        client_phone: reservation.client_phone,
-        client_dni: reservation.client_dni,
         room_type: reservation.room_type,
         room_number: reservation.room_number,
         check_in: reservation.check_in_target,
         check_out: reservation.check_out_target,
         total_price: Number(reservation.total_price) || 0,
         hotel_phone: settings.contact_phone || "",
+      };
+      const text = buildCancellationMessage(lang, data, reason);
+      const result = await notifyReservationWebhook({
+        number: reservation.client_phone,
+        text,
       });
       whatsappSent = result.success;
       await updateWhatsappStatus(reservationId, whatsappSent);
@@ -220,18 +229,20 @@ export async function handleConfirmReservation(
     let whatsappSent = false;
     const clientPhone = data.client_phone as string | null;
     if (clientPhone) {
-      const result = await notifyReservationWebhook({
-        reservation_id: reservationId,
-        status: "confirmed",
+      const lang = deriveLanguageFromPhone(clientPhone);
+      const msgData: ReservationMessageData = {
         client_name: (data.client_name as string) || "",
-        client_phone: clientPhone,
-        client_dni: (data.client_dni as string) || null,
         room_type: (data.room_type as string) || "",
         room_number: (data.room_number as string) || "",
         check_in: (data.check_in_target as string) || "",
         check_out: (data.check_out_target as string) || "",
         total_price: Number(data.total_price) || 0,
         hotel_phone: settings.contact_phone || "",
+      };
+      const text = buildConfirmationMessage(lang, msgData);
+      const result = await notifyReservationWebhook({
+        number: clientPhone,
+        text,
       });
       whatsappSent = result.success;
       await updateWhatsappStatus(reservationId, whatsappSent);
@@ -259,18 +270,33 @@ export async function handleResendWhatsapp(
       return { success: false, error: "La reserva no tiene teléfono registrado." };
     }
 
-    const result = await notifyReservationWebhook({
-      reservation_id: reservationId,
-      status: reservation.status,
+    const lang = deriveLanguageFromPhone(reservation.client_phone);
+    const msgData: ReservationMessageData = {
       client_name: reservation.client_name,
-      client_phone: reservation.client_phone,
-      client_dni: reservation.client_dni,
       room_type: reservation.room_type,
       room_number: reservation.room_number,
       check_in: reservation.check_in_target,
       check_out: reservation.check_out_target,
       total_price: Number(reservation.total_price) || 0,
       hotel_phone: settings.contact_phone || "",
+    };
+
+    let text: string;
+    if (reservation.status === "cancelled") {
+      const reason = (await getCancellationReason(reservationId)) || "Sin motivo registrado";
+      text = buildCancellationMessage(lang, msgData, reason);
+    } else if (reservation.status === "confirmed") {
+      text = buildConfirmationMessage(lang, msgData);
+    } else {
+      return {
+        success: false,
+        error: "Solo se puede reenviar para reservas confirmadas o canceladas.",
+      };
+    }
+
+    const result = await notifyReservationWebhook({
+      number: reservation.client_phone,
+      text,
     });
 
     await updateWhatsappStatus(reservationId, result.success);
