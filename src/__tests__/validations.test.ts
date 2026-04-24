@@ -268,6 +268,8 @@ describe("hotelSettingsSchema", () => {
     currency: "ars",
     contact_email: "info@hotel.com",
     contact_phone: "+54 381 4000000",
+    contact_whatsapp_phone: "+54 381 4000000",
+    contact_fixed_phone: "+54 381 4000001",
     address: "Ruta Nacional 16, Taco Pozo",
     hero_title: "Tu refugio en el camino",
     hero_subtitle: "Descanso y servicios de ruta",

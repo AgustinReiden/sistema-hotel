@@ -23,6 +23,9 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
       return { success: false, error: "Solo admin puede modificar los ajustes." };
     }
 
+    const contactWhatsappPhone = String(formData.get("contact_whatsapp_phone") ?? "");
+    const contactFixedPhone = String(formData.get("contact_fixed_phone") ?? "");
+
     const rawData = {
       name: String(formData.get("name") ?? ""),
       standard_check_in_time: String(formData.get("standard_check_in_time") ?? ""),
@@ -31,7 +34,9 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
       timezone: String(formData.get("timezone") ?? "America/Argentina/Tucuman"),
       currency: String(formData.get("currency") ?? ""),
       contact_email: String(formData.get("contact_email") ?? ""),
-      contact_phone: String(formData.get("contact_phone") ?? ""),
+      contact_phone: contactWhatsappPhone || contactFixedPhone,
+      contact_whatsapp_phone: contactWhatsappPhone,
+      contact_fixed_phone: contactFixedPhone,
       contact_instagram: String(formData.get("contact_instagram") ?? "") || null,
       address: String(formData.get("address") ?? ""),
       hero_title: String(formData.get("hero_title") ?? ""),

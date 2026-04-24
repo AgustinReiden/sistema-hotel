@@ -155,6 +155,8 @@ export type HotelSettings = {
   currency: string;
   contact_email: string;
   contact_phone: string;
+  contact_whatsapp_phone?: string | null;
+  contact_fixed_phone?: string | null;
   address: string;
   hero_title: string;
   hero_subtitle: string;

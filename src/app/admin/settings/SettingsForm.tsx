@@ -7,6 +7,8 @@ import type { HotelSettings } from "@/lib/types";
 
 export default function SettingsForm({ settings }: { settings: HotelSettings }) {
     const [isPending, startTransition] = useTransition();
+    const whatsappPhone = settings?.contact_whatsapp_phone || settings?.contact_phone || "";
+    const fixedPhone = settings?.contact_fixed_phone || "";
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -127,8 +129,12 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
                         <input type="text" name="contact_instagram" defaultValue={settings?.contact_instagram || ""} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Teléfono</label>
-                        <input type="text" name="contact_phone" defaultValue={settings?.contact_phone || ""} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
+                        <label className="block text-sm font-medium text-slate-700 mb-1">WhatsApp (horario comercial)</label>
+                        <input type="text" name="contact_whatsapp_phone" defaultValue={whatsappPhone} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="+54 381 4000000" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Telefono fijo (24 horas)</label>
+                        <input type="text" name="contact_fixed_phone" defaultValue={fixedPhone} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="+54 381 4000001" />
                     </div>
                 </div>
                 <div>

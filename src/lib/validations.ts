@@ -206,6 +206,14 @@ export const hotelSettingsSchema = z.object({
     .transform((value) => value.toUpperCase()),
   contact_email: z.string().optional().nullable(),
   contact_phone: z.string().min(5, "El telefono debe tener al menos 5 caracteres."),
+  contact_whatsapp_phone: z
+    .string()
+    .trim()
+    .min(5, "El WhatsApp comercial debe tener al menos 5 caracteres."),
+  contact_fixed_phone: z
+    .string()
+    .trim()
+    .min(5, "El telefono fijo 24 horas debe tener al menos 5 caracteres."),
   contact_instagram: z.string().optional().nullable(),
   address: z.string().min(5, "La direccion debe tener al menos 5 caracteres."),
   hero_title: z.string().min(5, "El titulo principal debe tener al menos 5 caracteres."),

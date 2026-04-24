@@ -1580,11 +1580,17 @@ export async function markRoomClean(
   cleaningType?: CleaningType
 ): Promise<{ alertGenerated: boolean }> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_mark_room_clean", {
+  const params: {
+    p_room_id: number;
+    p_notes: string | null;
+    p_cleaning_type?: CleaningType;
+  } = {
     p_room_id: roomId,
     p_notes: notes ?? null,
-    p_cleaning_type: cleaningType ?? null,
-  });
+  };
+  if (cleaningType) params.p_cleaning_type = cleaningType;
+
+  const { data, error } = await supabase.rpc("rpc_mark_room_clean", params);
   if (error) throw error;
   const result = (data ?? {}) as { alert_generated?: boolean };
   return { alertGenerated: Boolean(result.alert_generated) };
@@ -1653,8 +1659,39 @@ export async function getAllActiveRoomsForMaintenance(): Promise<
 > {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_list_maintenance_rooms");
-  if (error) throw error;
-  return sortRoomsByNumber((data ?? []) as MaintenanceRoom[]) as MaintenanceRoom[];
+  if (!error) {
+    return sortRoomsByNumber((data ?? []) as MaintenanceRoom[]) as MaintenanceRoom[];
+  }
+
+  console.error("[Maintenance] rpc_list_maintenance_rooms failed:", {
+    code: error.code,
+    message: error.message,
+  });
+
+  const { data: fallbackRooms, error: fallbackError } = await supabase
+    .from("rooms")
+    .select("*")
+    .eq("is_active", true)
+    .order("room_number");
+
+  if (fallbackError) throw error;
+
+  return sortRoomsByNumber((fallbackRooms ?? []) as Room[]).map((room) => ({
+    ...room,
+    requires_cleaning: room.status === "cleaning" || room.status === "maintenance",
+    cleaning_required_reason:
+      room.status === "cleaning"
+        ? "status_cleaning"
+        : room.status === "maintenance"
+          ? "status_maintenance"
+          : null,
+    cleaned_today: false,
+    active_client: null,
+    active_check_out_target: null,
+    active_late_check_out_until: null,
+    last_checkout_client: null,
+    last_checkout_at: null,
+  })) as MaintenanceRoom[];
 }
 
 export async function listAdminAlerts(onlyUnresolved = true): Promise<AdminAlert[]> {

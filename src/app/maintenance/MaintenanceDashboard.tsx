@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   BedDouble,
   CheckCircle2,
   Loader2,
@@ -19,6 +20,7 @@ import type { CleaningType, MaintenanceRoom } from "@/lib/types";
 type Props = {
   rooms: MaintenanceRoom[];
   hotelTimezone: string;
+  loadError?: string;
 };
 
 const CLEANING_TYPES: { value: CleaningType; label: string }[] = [
@@ -46,7 +48,7 @@ function reasonText(room: MaintenanceRoom): string {
   }
 }
 
-export default function MaintenanceDashboard({ rooms, hotelTimezone }: Props) {
+export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [selected, setSelected] = useState<MaintenanceRoom | null>(null);
@@ -235,6 +237,13 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone }: Props) {
             : `${pending.length} habitacion${pending.length === 1 ? "" : "es"} necesita${pending.length === 1 ? "" : "n"} limpieza.`}
         </p>
       </div>
+
+      {loadError && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 flex items-start gap-3">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <p className="text-sm font-medium">{loadError}</p>
+        </div>
+      )}
 
       {pending.length > 0 && (
         <section className="mb-8">

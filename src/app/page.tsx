@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Star, MapPin, UtensilsCrossed, BedDouble, Fuel, Instagram, Phone, Mail } from "lucide-react";
+import { Star, MapPin, UtensilsCrossed, BedDouble, Fuel, Instagram, PhoneCall, Mail, MessageCircle } from "lucide-react";
 import PublicSearchForm from "./components/PublicSearchForm";
 import RoomCarousel from "./components/RoomCarousel";
 import ScrollToResults from "./components/ScrollToResults";
@@ -10,6 +10,16 @@ import { buildPublicRoomOffers, getRoomCapacity } from "@/lib/rooms";
 type PageProps = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
+
+function getTelHref(phone?: string | null): string | undefined {
+  const normalized = phone?.replace(/[^\d+]/g, "");
+  return normalized ? `tel:${normalized}` : undefined;
+}
+
+function getWhatsappHref(phone?: string | null): string | undefined {
+  const digits = phone?.replace(/\D/g, "");
+  return digits ? `https://wa.me/${digits}` : undefined;
+}
 
 export default async function Home({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -41,6 +51,8 @@ export default async function Home({ searchParams }: PageProps) {
       ? availableOffers
       : comboOffers
     : catalogOffers;
+  const whatsappPhone = settings?.contact_whatsapp_phone || settings?.contact_phone || "";
+  const fixedPhone = settings?.contact_fixed_phone || "";
   const hasVisibleOffers = visibleOffers.length > 0;
 
   let comboMessage: string | null = null;
@@ -271,9 +283,34 @@ export default async function Home({ searchParams }: PageProps) {
                   <Instagram size={16} className="shrink-0" /> {settings.contact_instagram}
                 </li>
               )}
-              <li className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors">
-                <Phone size={16} className="shrink-0" /> {settings?.contact_phone || "+54 (000) 000-0000"}
-              </li>
+              {whatsappPhone && (
+                <li>
+                  <a
+                    href={getWhatsappHref(whatsappPhone)}
+                    className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
+                  >
+                    <MessageCircle size={16} className="shrink-0" />
+                    <span>
+                      <span className="block text-[11px] uppercase tracking-wide text-slate-500">WhatsApp comercial</span>
+                      {whatsappPhone}
+                    </span>
+                  </a>
+                </li>
+              )}
+              {fixedPhone && (
+                <li>
+                  <a
+                    href={getTelHref(fixedPhone)}
+                    className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
+                  >
+                    <PhoneCall size={16} className="shrink-0" />
+                    <span>
+                      <span className="block text-[11px] uppercase tracking-wide text-slate-500">Telefono 24 horas</span>
+                      {fixedPhone}
+                    </span>
+                  </a>
+                </li>
+              )}
             </ul>
           </div>
         </div>
