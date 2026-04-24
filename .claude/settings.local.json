@@ -63,7 +63,10 @@
       "Bash(npm run *)",
       "Bash(npm test *)",
       "mcp__n8n__update_workflow",
-      "Bash(gh pr create --title 'WhatsApp bilingue \\(ES/PT\\) + dropdown motivos cancelacion + prefijo pais' --body ' *)"
+      "Bash(gh pr create --title 'WhatsApp bilingue \\(ES/PT\\) + dropdown motivos cancelacion + prefijo pais' --body ' *)",
+      "Bash(gh pr create --title 'Fix: BookingModal fullscreen + calendario en un solo click' --body ' *)",
+      "mcp__supabase-sistema-hotel__sql_query",
+      "mcp__261fd064-3c3d-4985-9770-d22ee93274b2__list_projects"
     ]
   }
 }

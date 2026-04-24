@@ -15,11 +15,16 @@ export default async function MaintenanceLayout({
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("role, full_name")
     .eq("id", user.id)
     .maybeSingle();
+
+  if (profileError) {
+    console.error("[MaintenanceLayout] profile query failed:", profileError);
+    throw new Error(`No pudimos cargar tu perfil: ${profileError.message}`);
+  }
 
   const role = profile?.role as string | undefined;
   if (role !== "admin" && role !== "maintenance") {
