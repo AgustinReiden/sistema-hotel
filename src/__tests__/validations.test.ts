@@ -213,7 +213,8 @@ describe("publicBookingSchema", () => {
     roomType: "Doble",
     clientName: "Ana Garcia",
     clientDni: "12345678",
-    clientPhone: "+54 381 4123456",
+    phoneCountryCode: "54",
+    phoneLocal: "3814123456",
     checkIn: "2026-05-01",
     checkOut: "2026-05-03",
   };
@@ -223,19 +224,36 @@ describe("publicBookingSchema", () => {
     expect(result.roomType).toBe("Doble");
     expect(result.clientName).toBe("Ana Garcia");
     expect(result.clientDni).toBe("12345678");
+    expect(result.phoneCountryCode).toBe("54");
+    expect(result.phoneLocal).toBe("3814123456");
+  });
+
+  it("accepts brazilian country code", () => {
+    const result = publicBookingSchema.parse({
+      ...validInput,
+      phoneCountryCode: "55",
+      phoneLocal: "11987654321",
+    });
+    expect(result.phoneCountryCode).toBe("55");
   });
 
   it("rejects short DNI", () => {
     expect(() => publicBookingSchema.parse({ ...validInput, clientDni: "123" })).toThrow();
   });
 
-  it("rejects short phone", () => {
-    expect(() => publicBookingSchema.parse({ ...validInput, clientPhone: "123" })).toThrow();
+  it("rejects short phone local part", () => {
+    expect(() => publicBookingSchema.parse({ ...validInput, phoneLocal: "123" })).toThrow();
   });
 
-  it("rejects phone with letters", () => {
+  it("rejects phone with non-digit chars", () => {
     expect(() =>
-      publicBookingSchema.parse({ ...validInput, clientPhone: "abc12345678" })
+      publicBookingSchema.parse({ ...validInput, phoneLocal: "abc12345678" })
+    ).toThrow();
+  });
+
+  it("rejects unsupported country code", () => {
+    expect(() =>
+      publicBookingSchema.parse({ ...validInput, phoneCountryCode: "1" })
     ).toThrow();
   });
 });

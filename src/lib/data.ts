@@ -870,6 +870,22 @@ export async function cancelReservation(reservationId: string, reason: string): 
   if (error) throw error;
 }
 
+export async function getCancellationReason(
+  reservationId: string
+): Promise<string | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("reservation_cancellations")
+    .select("reason")
+    .eq("reservation_id", reservationId)
+    .order("cancelled_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data?.reason as string | null) ?? null;
+}
+
 export async function extendReservation(reservationId: string, extraNights: number): Promise<void> {
   const supabase = await createClient();
 

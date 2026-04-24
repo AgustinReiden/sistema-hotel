@@ -1,27 +1,16 @@
 import "server-only";
 
-type WebhookPayload = {
-  reservation_id: string;
-  status: string;
-  client_name: string;
-  client_phone: string | null;
-  client_dni: string | null;
-  room_type: string;
-  room_number: string;
-  check_in: string;
-  check_out: string;
-  total_price: number;
-  hotel_phone: string;
-};
+const SUPPORTED_COUNTRY_CODES = ["54", "55", "598", "56", "595", "591"] as const;
+export type CountryCode = (typeof SUPPORTED_COUNTRY_CODES)[number];
 
 /**
- * Envía notificación al webhook de n8n para disparar el mensaje de WhatsApp.
- * El teléfono se envía con prefijo 549 (Argentina) si no lo tiene.
- * No lanza errores - retorna { success: false } si falla para no romper el flujo principal.
+ * Envía al webhook de n8n el mensaje ya armado. El workflow sólo hace forward a Evolution API.
+ * No lanza errores — retorna { success: false } si falla para no romper el flujo principal.
  */
-export async function notifyReservationWebhook(
-  payload: WebhookPayload
-): Promise<{ success: boolean }> {
+export async function notifyReservationWebhook(payload: {
+  number: string;
+  text: string;
+}): Promise<{ success: boolean }> {
   const webhookUrl = process.env.N8N_WEBHOOK_URL;
 
   if (!webhookUrl) {
@@ -29,18 +18,12 @@ export async function notifyReservationWebhook(
     return { success: false };
   }
 
-  // Formatear teléfono: agregar 549 si es número local argentino
-  const formattedPhone = formatPhoneForWhatsapp(payload.client_phone);
-
   try {
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...payload,
-        client_phone: formattedPhone,
-      }),
-      signal: AbortSignal.timeout(10000), // 10s timeout
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!response.ok) {
@@ -57,28 +40,41 @@ export async function notifyReservationWebhook(
 }
 
 /**
- * Formatea un número de teléfono local argentino al formato internacional
- * que necesita Evolution API (sin + ni espacios).
- * Ej: "3814123456" → "5493814123456"
+ * Formatea un número local al formato internacional que Evolution API requiere
+ * (sólo dígitos, con prefijo país). Para Argentina inserta el "9" de móvil.
+ *
+ * - phone: número tal como lo tipeó el cliente (puede tener espacios, guiones, etc.)
+ * - countryCode: prefijo de país explícito ("54" Arg, "55" Brasil, etc.)
  */
-export function formatPhoneForWhatsapp(phone: string | null): string | null {
+export function formatPhoneForWhatsapp(
+  phone: string | null | undefined,
+  countryCode: string
+): string | null {
   if (!phone) return null;
-
-  // Limpiar caracteres no numéricos
   const cleaned = phone.replace(/\D/g, "");
-
   if (!cleaned) return null;
 
-  // Si ya tiene código de país (549...), dejarlo
-  if (cleaned.startsWith("549") && cleaned.length >= 12) {
-    return cleaned;
+  let normalized = cleaned;
+
+  // Remove leading country code if already present (any of the supported ones).
+  // Sort by length desc so "598" is tried before "59"/"5".
+  const sortedPrefixes = [...SUPPORTED_COUNTRY_CODES].sort(
+    (a, b) => b.length - a.length
+  );
+  for (const prefix of sortedPrefixes) {
+    if (normalized.startsWith(prefix)) {
+      normalized = normalized.slice(prefix.length);
+      break;
+    }
   }
 
-  // Si empieza con 54 pero sin 9 (formato fijo), agregar 9
-  if (cleaned.startsWith("54") && !cleaned.startsWith("549")) {
-    return "549" + cleaned.slice(2);
+  // Argentina: Evolution API exige el "9" de móvil tras el 54.
+  if (countryCode === "54") {
+    if (normalized.startsWith("9")) {
+      return `54${normalized}`;
+    }
+    return `549${normalized}`;
   }
 
-  // Número local: agregar 549
-  return "549" + cleaned;
+  return `${countryCode}${normalized}`;
 }

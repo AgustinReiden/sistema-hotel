@@ -149,6 +149,15 @@ export const closeShiftSchema = z.object({
     ),
 });
 
+export const SUPPORTED_PHONE_COUNTRY_CODES = [
+  "54",
+  "55",
+  "598",
+  "56",
+  "595",
+  "591",
+] as const;
+
 export const publicBookingSchema = z.object({
   roomType: z
     .string()
@@ -162,11 +171,13 @@ export const publicBookingSchema = z.object({
     .string()
     .trim()
     .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
-  clientPhone: z
+  phoneCountryCode: z.enum(SUPPORTED_PHONE_COUNTRY_CODES, {
+    message: "Selecciona un prefijo de pais valido.",
+  }),
+  phoneLocal: z
     .string()
     .trim()
-    .min(8, "El telefono debe tener al menos 8 digitos.")
-    .regex(/^[\d\s\-+()]+$/, "El telefono contiene caracteres invalidos."),
+    .regex(/^\d{6,14}$/, "El telefono debe tener entre 6 y 14 digitos."),
   checkIn: z.string().min(1, "La fecha de entrada es requerida."),
   checkOut: z.string().min(1, "La fecha de salida es requerida."),
 });

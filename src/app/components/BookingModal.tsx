@@ -47,11 +47,21 @@ export default function BookingModal({
   const router = useRouter();
   const [clientName, setClientName] = useState("");
   const [clientDni, setClientDni] = useState("");
-  const [clientPhone, setClientPhone] = useState("");
+  const [phoneCountryCode, setPhoneCountryCode] = useState("54");
+  const [phoneLocal, setPhoneLocal] = useState("");
   const [guestCount, setGuestCount] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const COUNTRY_OPTIONS = [
+    { code: "54", flag: "🇦🇷", label: "Argentina" },
+    { code: "55", flag: "🇧🇷", label: "Brasil" },
+    { code: "598", flag: "🇺🇾", label: "Uruguay" },
+    { code: "56", flag: "🇨🇱", label: "Chile" },
+    { code: "595", flag: "🇵🇾", label: "Paraguay" },
+    { code: "591", flag: "🇧🇴", label: "Bolivia" },
+  ];
 
   if (!isOpen) return null;
 
@@ -72,8 +82,9 @@ export default function BookingModal({
       return;
     }
 
-    if (!clientPhone.trim() || clientPhone.trim().length < 8) {
-      setError("Por favor ingresa un numero de telefono valido.");
+    const phoneDigits = phoneLocal.replace(/\D/g, "");
+    if (phoneDigits.length < 6) {
+      setError("Por favor ingresa un numero de telefono valido (minimo 6 digitos).");
       return;
     }
 
@@ -88,7 +99,8 @@ export default function BookingModal({
       clientName,
       checkInDateTime,
       checkOutDateTime,
-      clientPhone.trim(),
+      phoneCountryCode,
+      phoneDigits,
       clientDni.trim(),
       guestCount
     );
@@ -141,7 +153,8 @@ export default function BookingModal({
                     setSuccess(false);
                     setClientName("");
                     setClientDni("");
-                    setClientPhone("");
+                    setPhoneLocal("");
+                    setPhoneCountryCode("54");
                     router.refresh();
                   }}
                   className="px-10 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl tracking-wide uppercase text-sm transition-all shadow-xl shadow-slate-900/20"
@@ -267,15 +280,30 @@ export default function BookingModal({
                               Telefono
                             </span>
                           </label>
-                          <input
-                            id="clientPhone"
-                            type="tel"
-                            value={clientPhone}
-                            onChange={(e) => setClientPhone(e.target.value)}
-                            className="w-full px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
-                            placeholder="3814XXXXXX"
-                            required
-                          />
+                          <div className="flex gap-2">
+                            <select
+                              aria-label="Prefijo de pais"
+                              value={phoneCountryCode}
+                              onChange={(e) => setPhoneCountryCode(e.target.value)}
+                              className="px-3 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800 cursor-pointer"
+                            >
+                              {COUNTRY_OPTIONS.map((c) => (
+                                <option key={c.code} value={c.code}>
+                                  {c.flag} +{c.code}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              id="clientPhone"
+                              type="tel"
+                              value={phoneLocal}
+                              onChange={(e) => setPhoneLocal(e.target.value)}
+                              className="flex-1 min-w-0 px-5 py-4 bg-slate-50 rounded-2xl border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all outline-none font-medium text-slate-800"
+                              placeholder="3814XXXXXX"
+                              inputMode="numeric"
+                              required
+                            />
+                          </div>
                         </div>
                       </div>
 
