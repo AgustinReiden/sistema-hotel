@@ -1228,6 +1228,7 @@ export async function getAnalyticsData(
 
 type CashShiftRow = {
   id: string;
+  shift_number: number | string;
   opened_at: string;
   closed_at: string | null;
   opened_by: string;
@@ -1243,6 +1244,7 @@ type CashShiftRow = {
 function toCashShift(row: CashShiftRow): CashShift {
   return {
     id: row.id,
+    shift_number: Number(row.shift_number) || 0,
     opened_at: row.opened_at,
     closed_at: row.closed_at,
     opened_by: row.opened_by,

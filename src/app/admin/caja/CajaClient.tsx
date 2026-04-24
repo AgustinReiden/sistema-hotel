@@ -1,11 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Wallet, DollarSign, Banknote, CreditCard, Landmark, FileText, Clock, CircleDollarSign } from "lucide-react";
+import {
+  Wallet,
+  DollarSign,
+  Banknote,
+  CreditCard,
+  Landmark,
+  FileText,
+  Clock,
+  CircleDollarSign,
+} from "lucide-react";
 
 import OpenShiftModal from "./OpenShiftModal";
 import CloseShiftModal from "./CloseShiftModal";
+import { formatShiftCode } from "@/lib/format";
 import { formatHotelTime, formatHotelDateTime } from "@/lib/time";
 import type { ShiftSummary } from "@/lib/types";
 
@@ -13,14 +23,17 @@ function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const METHOD_META: Record<string, { label: string; icon: React.ReactNode }> = {
+const METHOD_META: Record<string, { label: string; icon: ReactNode }> = {
   cash: { label: "Efectivo", icon: <Banknote size={16} /> },
   mercado_pago: { label: "Mercado Pago", icon: <Wallet size={16} className="text-blue-500" /> },
   bank_transfer: { label: "Transferencia", icon: <Landmark size={16} /> },
-  credit_card: { label: "T. Crédito", icon: <CreditCard size={16} /> },
-  debit_card: { label: "T. Débito", icon: <CreditCard size={16} /> },
+  credit_card: { label: "Tarjeta credito", icon: <CreditCard size={16} /> },
+  debit_card: { label: "Tarjeta debito", icon: <CreditCard size={16} /> },
   vale_blanco: { label: "Vale Blanco", icon: <Banknote size={16} className="text-slate-400" /> },
-  cuenta_corriente: { label: "Cta. Cte.", icon: <Wallet size={16} className="text-purple-500" /> },
+  cuenta_corriente: {
+    label: "Cta. Cte.",
+    icon: <Wallet size={16} className="text-purple-500" />,
+  },
   other: { label: "Otro", icon: <Wallet size={16} /> },
 };
 
@@ -85,7 +98,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
               </div>
               <div>
                 <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">
-                  Turno Abierto
+                  Turno Abierto #{formatShiftCode(summary.shift.shift_number)}
                 </p>
                 <p className="text-lg font-bold text-slate-800">
                   Desde {formatHotelTime(summary.shift.opened_at, hotelTimezone)}
@@ -94,7 +107,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
                   </span>
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Abrio: {summary.openedByEmail ?? "—"}
+                  Abrio: {summary.openedByEmail ?? "---"}
                 </p>
               </div>
             </div>
@@ -150,7 +163,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-800 mb-4">Desglose por método</h3>
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Desglose por metodo</h3>
               <ul className="space-y-3">
                 {Object.entries(summary.totalsByMethod).map(([method, amount]) => {
                   const meta = METHOD_META[method] ?? METHOD_META.other;
@@ -161,14 +174,12 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
                         {meta.icon}
                         {meta.label}
                       </span>
-                      <span className="font-bold text-slate-800">
-                        ${formatMoney(amount)}
-                      </span>
+                      <span className="font-bold text-slate-800">${formatMoney(amount)}</span>
                     </li>
                   );
                 })}
                 {summary.totalIncome === 0 && (
-                  <li className="text-sm text-slate-500 italic">Sin cobros todavía.</li>
+                  <li className="text-sm text-slate-500 italic">Sin cobros todavia.</li>
                 )}
               </ul>
             </div>
@@ -180,7 +191,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
               <div className="max-h-[500px] overflow-y-auto">
                 {summary.payments.length === 0 ? (
                   <div className="p-8 text-center text-slate-500 font-medium text-sm">
-                    Todavía no se registraron pagos en este turno.
+                    Todavia no se registraron pagos en este turno.
                   </div>
                 ) : (
                   <ul className="divide-y divide-slate-100">
@@ -205,7 +216,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
                                 )}
                               </p>
                               <p className="text-xs text-slate-500">
-                                {formatHotelTime(p.created_at, hotelTimezone)} · {meta.label}
+                                {formatHotelTime(p.created_at, hotelTimezone)} - {meta.label}
                               </p>
                             </div>
                           </div>

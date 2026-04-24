@@ -14,6 +14,27 @@ export function formatMoney(amount: number, currency: string): string {
   }
 }
 
+const LOCAL_AMOUNT_FORMATTER = new Intl.NumberFormat("es-AR", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+export function formatAmount(amount: number): string {
+  const sign = amount < 0 ? "-" : "";
+  return `${sign}$${LOCAL_AMOUNT_FORMATTER.format(Math.abs(amount))}`;
+}
+
+export function formatSignedAmount(amount: number | null): string {
+  if (amount === null) return "---";
+
+  const sign = amount > 0 ? "+" : amount < 0 ? "-" : "";
+  return `${sign}${formatAmount(Math.abs(amount))}`;
+}
+
+export function formatShiftCode(shiftNumber: number, minDigits = 6): string {
+  return String(Math.trunc(shiftNumber)).padStart(minDigits, "0");
+}
+
 /**
  * Converts a local date + time in a given IANA timezone to an ISO 8601 string
  * with the correct UTC offset (e.g. "2024-01-15T14:00:00-03:00").

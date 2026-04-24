@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import {
   AlertTriangle,
   Banknote,
@@ -28,14 +28,17 @@ function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const METHOD_META: Record<PaymentMethod, { label: string; icon: React.ReactNode }> = {
+const METHOD_META: Record<PaymentMethod, { label: string; icon: ReactNode }> = {
   cash: { label: "Efectivo", icon: <Banknote size={14} /> },
   mercado_pago: { label: "Mercado Pago", icon: <Wallet size={14} className="text-blue-500" /> },
   bank_transfer: { label: "Transferencia", icon: <Landmark size={14} /> },
-  credit_card: { label: "Tarjeta Crédito", icon: <CreditCard size={14} /> },
-  debit_card: { label: "Tarjeta Débito", icon: <CreditCard size={14} /> },
+  credit_card: { label: "Tarjeta credito", icon: <CreditCard size={14} /> },
+  debit_card: { label: "Tarjeta debito", icon: <CreditCard size={14} /> },
   vale_blanco: { label: "Vale Blanco", icon: <Banknote size={14} className="text-slate-400" /> },
-  cuenta_corriente: { label: "Cta. Corriente", icon: <Wallet size={14} className="text-purple-500" /> },
+  cuenta_corriente: {
+    label: "Cta. Corriente",
+    icon: <Wallet size={14} className="text-purple-500" />,
+  },
   other: { label: "Otro", icon: <Wallet size={14} /> },
 };
 
@@ -56,17 +59,15 @@ export default function CloseShiftModal({
   const expected = cashIncome;
   const parsedActual = parseFloat(actualCash.replace(",", "."));
   const diff = !isNaN(parsedActual) ? parsedActual - expected : null;
-
-  // Otros métodos (no efectivo) que el recepcionista también debe declarar/rendir
   const otherMethods = (Object.entries(totalsByMethod) as [PaymentMethod, number][])
     .filter(([method, amount]) => method !== "cash" && amount > 0);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (isNaN(parsedActual) || parsedActual < 0) {
-      setError("Ingresa el efectivo contado (cero o mayor).");
+      setError("Ingresa el efectivo declarado (cero o mayor).");
       return;
     }
 
@@ -82,13 +83,16 @@ export default function CloseShiftModal({
       setError(result.error);
       return;
     }
-    const d = result.data!.discrepancy;
-    if (d === 0) {
+
+    const discrepancy = result.data!.discrepancy;
+    if (discrepancy === 0) {
       toast.success("Turno cerrado: caja cuadra.");
-    } else if (d > 0) {
-      toast.success(`Turno cerrado con sobrante de $${formatMoney(d)}.`);
+    } else if (discrepancy > 0) {
+      toast.success(`Turno cerrado con sobrante de $${formatMoney(discrepancy)}.`);
     } else {
-      toast.warning(`Turno cerrado con faltante de $${formatMoney(Math.abs(d))}.`);
+      toast.warning(
+        `Turno cerrado con faltante de $${formatMoney(Math.abs(discrepancy))}.`
+      );
     }
     onClose();
   };
@@ -128,7 +132,7 @@ export default function CloseShiftModal({
           {otherMethods.length > 0 && (
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
               <p className="text-xs font-bold text-indigo-800 uppercase tracking-wider mb-2">
-                También debes rendir por otros medios
+                Otros medios a controlar
               </p>
               <ul className="space-y-1.5 text-sm">
                 {otherMethods.map(([method, amount]) => {
@@ -145,14 +149,14 @@ export default function CloseShiftModal({
                 })}
               </ul>
               <p className="text-[11px] text-indigo-600 mt-2">
-                Verificá que lo cobrado por cada medio coincida con los comprobantes/transferencias.
+                Verifica que lo cobrado por cada medio coincida con sus comprobantes.
               </p>
             </div>
           )}
 
           <div>
             <label htmlFor="actual-cash" className="block text-sm font-bold text-slate-700 mb-2">
-              Efectivo contado ($)
+              Efectivo declarado ($)
             </label>
             <input
               id="actual-cash"
@@ -167,7 +171,7 @@ export default function CloseShiftModal({
               autoFocus
             />
             <p className="mt-1 text-xs text-slate-500">
-              Si no hubo cobros en efectivo, puede ser 0.
+              Aca registras cuanto efectivo hay fisicamente en caja al cierre.
             </p>
           </div>
 
@@ -192,7 +196,7 @@ export default function CloseShiftModal({
                 </p>
                 {diff !== 0 && (
                   <p className="text-xs opacity-80">
-                    Esta diferencia queda registrada en la rendición del turno.
+                    Esta diferencia queda registrada en la rendicion del turno.
                   </p>
                 )}
               </div>
@@ -230,7 +234,7 @@ export default function CloseShiftModal({
           </button>
           <button
             type="button"
-            onClick={(e) => handleSubmit(e as unknown as React.FormEvent)}
+            onClick={(e) => handleSubmit(e as unknown as FormEvent)}
             disabled={loading}
             className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center gap-2"
           >

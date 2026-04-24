@@ -221,6 +221,7 @@ export type CashShiftStatus = "open" | "closed";
 
 export type CashShift = {
   id: string;
+  shift_number: number;
   opened_at: string;
   closed_at: string | null;
   opened_by: string;

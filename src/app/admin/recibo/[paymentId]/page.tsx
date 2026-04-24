@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { getHotelSettings } from "@/lib/data";
+import { formatAmount } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
 import ReceiptAutoPrint from "./ReceiptAutoPrint";
 
@@ -11,15 +12,15 @@ const METHOD_LABEL: Record<string, string> = {
   cash: "Efectivo",
   mercado_pago: "Mercado Pago",
   bank_transfer: "Transferencia",
-  credit_card: "Tarjeta Crédito",
-  debit_card: "Tarjeta Débito",
+  credit_card: "Tarjeta credito",
+  debit_card: "Tarjeta debito",
   vale_blanco: "Vale Blanco",
   cuenta_corriente: "Cta. Corriente",
   other: "Otro",
 };
 
 function money(n: number) {
-  return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatAmount(n);
 }
 
 type ReceiptCopyProps = {
@@ -64,7 +65,7 @@ function ReceiptCopy(props: ReceiptCopyProps) {
       <h2>RECIBO DE PAGO</h2>
       <p className="sub">{title}</p>
       <p className="row">
-        <span>N°:</span>
+        <span>Nro:</span>
         <span>{paymentIdShort}</span>
       </p>
       <p className="row">
@@ -73,7 +74,7 @@ function ReceiptCopy(props: ReceiptCopyProps) {
       </p>
       <hr />
       <p className="row">
-        <span>Huésped:</span>
+        <span>Huesped:</span>
         <span>{clientName}</span>
       </p>
       {clientDni && (
@@ -84,13 +85,13 @@ function ReceiptCopy(props: ReceiptCopyProps) {
       )}
       {roomNumber && (
         <p className="row">
-          <span>Habitación:</span>
+          <span>Habitacion:</span>
           <span>{roomNumber}</span>
         </p>
       )}
       <hr />
       <p className="row">
-        <span>Método:</span>
+        <span>Metodo:</span>
         <span>{paymentMethod}</span>
       </p>
       <p className="total">
@@ -99,7 +100,7 @@ function ReceiptCopy(props: ReceiptCopyProps) {
       </p>
       <hr />
       <p className="row small">
-        <span>Total estadía:</span>
+        <span>Total estadia:</span>
         <span>{money(totalPrice)}</span>
       </p>
       <p className="row small">
@@ -123,7 +124,10 @@ function ReceiptCopy(props: ReceiptCopyProps) {
   );
 }
 
-type PageProps = { params: Promise<{ paymentId: string }>; searchParams: Promise<{ autoprint?: string }> };
+type PageProps = {
+  params: Promise<{ paymentId: string }>;
+  searchParams: Promise<{ autoprint?: string }>;
+};
 
 export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const { paymentId } = await params;
@@ -153,13 +157,29 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     reservation: unknown;
   };
   const raw = data as Raw;
-  const r = raw.reservation as
-    | { client_name: string; client_dni: string | null; total_price: number | string; paid_amount: number | string; rooms: { room_number: string } | { room_number: string }[] | null }
-    | Array<{ client_name: string; client_dni: string | null; total_price: number | string; paid_amount: number | string; rooms: { room_number: string } | { room_number: string }[] | null }>
+  const reservationRelation = raw.reservation as
+    | {
+        client_name: string;
+        client_dni: string | null;
+        total_price: number | string;
+        paid_amount: number | string;
+        rooms: { room_number: string } | { room_number: string }[] | null;
+      }
+    | Array<{
+        client_name: string;
+        client_dni: string | null;
+        total_price: number | string;
+        paid_amount: number | string;
+        rooms: { room_number: string } | { room_number: string }[] | null;
+      }>
     | null;
-  const reservation = Array.isArray(r) ? r[0] : r;
-  const roomsRel = reservation?.rooms;
-  const roomNumber = Array.isArray(roomsRel) ? roomsRel[0]?.room_number : roomsRel?.room_number;
+  const reservation = Array.isArray(reservationRelation)
+    ? reservationRelation[0]
+    : reservationRelation;
+  const roomsRelation = reservation?.rooms;
+  const roomNumber = Array.isArray(roomsRelation)
+    ? roomsRelation[0]?.room_number
+    : roomsRelation?.room_number;
 
   const hotelSettings = await getHotelSettings().catch(() => null);
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
@@ -174,7 +194,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     paymentIdShort: raw.id.slice(0, 8),
     paymentMethod: METHOD_LABEL[raw.payment_method] ?? raw.payment_method,
     createdAtFormatted: formatHotelDateTime(raw.created_at, tz),
-    clientName: reservation?.client_name ?? "—",
+    clientName: reservation?.client_name ?? "---",
     clientDni: reservation?.client_dni ?? null,
     roomNumber: roomNumber ?? null,
     amount,
@@ -193,38 +213,46 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
       <style>{`
         @page { size: 75mm auto; margin: 2mm; }
         @media print {
-          body { background: white !important; }
+          body {
+            background: white !important;
+            color: #000 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
           .thermal { padding: 0 !important; }
         }
         .thermal {
-          font-family: 'Courier New', monospace;
+          font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
           background: white;
           color: #000;
           max-width: 75mm;
           margin: 0 auto;
-          padding: 8px;
+          padding: 6px;
+          line-height: 1.25;
+          word-break: break-word;
         }
         .thermal-page {
           page-break-after: always;
           break-after: page;
-          padding: 4mm 2mm;
+          padding: 4mm 2.5mm;
         }
         .thermal-page:last-child {
           page-break-after: auto;
           break-after: auto;
         }
-        .thermal h1 { font-size: 14pt; font-weight: 800; margin: 0 0 4px; text-align: center; }
-        .thermal .addr { font-size: 8pt; text-align: center; margin: 0 0 6px; }
-        .thermal h2 { font-size: 12pt; font-weight: 800; margin: 8px 0 2px; text-align: center; }
-        .thermal .sub { font-size: 10pt; font-weight: 700; text-align: center; margin: 0 0 6px; letter-spacing: 2px; }
-        .thermal hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
-        .thermal .row { display: flex; justify-content: space-between; font-size: 10pt; margin: 2px 0; }
-        .thermal .row span:first-child { font-weight: 700; margin-right: 6px; }
-        .thermal .row.small { font-size: 9pt; }
-        .thermal .total { display: flex; justify-content: space-between; font-size: 13pt; font-weight: 900; margin: 8px 0 4px; }
-        .thermal .note { font-size: 9pt; margin: 4px 0; }
-        .thermal .footer { font-size: 9pt; text-align: center; margin: 10px 0 0; }
-        .thermal .footer.muted { color: #555; margin-top: 4px; }
+        .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
+        .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
+        .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 2px; text-align: center; letter-spacing: 0.6px; }
+        .thermal .sub { font-size: 10pt; font-weight: 800; text-align: center; margin: 0 0 6px; letter-spacing: 1.5px; }
+        .thermal hr { border: none; border-top: 1.5px solid #000; margin: 6px 0; }
+        .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 2px 0; }
+        .thermal .row span:first-child { font-weight: 800; margin-right: 6px; }
+        .thermal .row span:last-child { text-align: right; }
+        .thermal .row.small { font-size: 9.5pt; font-weight: 700; }
+        .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 13pt; font-weight: 900; margin: 8px 0 4px; }
+        .thermal .note { font-size: 9.5pt; font-weight: 700; margin: 4px 0; }
+        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 10px 0 0; }
+        .thermal .footer.muted { color: #000; margin-top: 4px; }
       `}</style>
     </div>
   );

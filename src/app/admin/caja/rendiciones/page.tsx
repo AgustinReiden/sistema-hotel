@@ -2,13 +2,14 @@ import Link from "next/link";
 import { ArrowLeft, CheckCircle2, AlertTriangle, Clock, User } from "lucide-react";
 
 import { getCurrentUserRole, getHotelSettings, listShifts } from "@/lib/data";
+import { formatAmount, formatShiftCode, formatSignedAmount } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
 
 export const revalidate = 0;
 
 function formatMoney(n: number | null) {
-  if (n === null) return "—";
-  return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (n === null) return "---";
+  return formatAmount(n);
 }
 
 export default async function CajaRendicionesPage() {
@@ -43,7 +44,7 @@ export default async function CajaRendicionesPage() {
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         {shifts.length === 0 ? (
           <div className="p-10 text-center text-slate-500 font-medium">
-            Todavía no hay turnos registrados.
+            Todavia no hay turnos registrados.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -51,24 +52,25 @@ export default async function CajaRendicionesPage() {
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-3 font-semibold">Estado</th>
+                  <th className="text-left px-4 py-3 font-semibold">Turno</th>
                   {isAdmin && (
                     <th className="text-left px-4 py-3 font-semibold">Recepcionista</th>
                   )}
                   <th className="text-left px-4 py-3 font-semibold">Abierto</th>
                   <th className="text-left px-4 py-3 font-semibold">Cerrado</th>
                   <th className="text-right px-4 py-3 font-semibold">Esperado</th>
-                  <th className="text-right px-4 py-3 font-semibold">Contado</th>
+                  <th className="text-right px-4 py-3 font-semibold">Efectivo</th>
                   <th className="text-right px-4 py-3 font-semibold">Diferencia</th>
                   <th className="text-right px-4 py-3 font-semibold">Detalle</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {shifts.map((s) => {
-                  const diff = s.discrepancy;
+                {shifts.map((shift) => {
+                  const diff = shift.discrepancy;
                   return (
-                    <tr key={s.id} className="hover:bg-slate-50">
+                    <tr key={shift.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
-                        {s.status === "open" ? (
+                        {shift.status === "open" ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full">
                             <Clock size={12} />
                             Abierto
@@ -85,30 +87,34 @@ export default async function CajaRendicionesPage() {
                           </span>
                         )}
                       </td>
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-700">
+                        #{formatShiftCode(shift.shift_number)}
+                      </td>
                       {isAdmin && (
                         <td className="px-4 py-3">
                           <span className="inline-flex items-center gap-1.5 text-slate-700 font-semibold">
                             <User size={12} className="text-slate-400" />
-                            {s.opened_by_name ?? "—"}
+                            {shift.opened_by_name ?? "---"}
                           </span>
-                          {s.closed_by_name && s.closed_by_name !== s.opened_by_name && (
-                            <p className="text-[11px] text-slate-400 mt-0.5 ml-5">
-                              Cerró: {s.closed_by_name}
-                            </p>
-                          )}
+                          {shift.closed_by_name &&
+                            shift.closed_by_name !== shift.opened_by_name && (
+                              <p className="text-[11px] text-slate-400 mt-0.5 ml-5">
+                                Cerro: {shift.closed_by_name}
+                              </p>
+                            )}
                         </td>
                       )}
                       <td className="px-4 py-3 text-slate-700">
-                        {formatHotelDateTime(s.opened_at, tz)}
+                        {formatHotelDateTime(shift.opened_at, tz)}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
-                        {formatHotelDateTime(s.closed_at, tz)}
+                        {shift.closed_at ? formatHotelDateTime(shift.closed_at, tz) : "---"}
                       </td>
                       <td className="px-4 py-3 text-right font-medium text-slate-700">
-                        {formatMoney(s.expected_cash)}
+                        {formatMoney(shift.expected_cash)}
                       </td>
                       <td className="px-4 py-3 text-right font-medium text-slate-700">
-                        {formatMoney(s.actual_cash)}
+                        {formatMoney(shift.actual_cash)}
                       </td>
                       <td
                         className={`px-4 py-3 text-right font-bold ${
@@ -121,11 +127,11 @@ export default async function CajaRendicionesPage() {
                                 : "text-red-600"
                         }`}
                       >
-                        {diff === null ? "—" : (diff > 0 ? "+" : "") + formatMoney(diff)}
+                        {formatSignedAmount(diff)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <Link
-                          href={`/admin/caja/rendiciones/${s.id}`}
+                          href={`/admin/caja/rendiciones/${shift.id}`}
                           className="text-brand-600 hover:text-brand-700 font-bold text-xs"
                         >
                           Ver / Imprimir
