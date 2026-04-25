@@ -29,10 +29,12 @@ export default async function Home({ searchParams }: PageProps) {
 
   const isSearching = !!checkin && !!checkout;
 
-  const allRooms = await getAllRooms();
-  const publicRooms = allRooms.filter((room) => room.is_active);
-  const availableRooms = isSearching ? await getAvailableRooms(checkin, checkout) : [];
-  const settings = await getHotelSettings();
+  const [settings, roomsForDisplay] = await Promise.all([
+    getHotelSettings(),
+    isSearching ? getAvailableRooms(checkin, checkout) : getAllRooms(),
+  ]);
+  const publicRooms = isSearching ? [] : roomsForDisplay.filter((room) => room.is_active);
+  const availableRooms = isSearching ? roomsForDisplay : [];
 
   const searchGuests = guestsParam ? parseInt(guestsParam, 10) : 0;
   const catalogOffers = buildPublicRoomOffers(publicRooms, "catalog");
@@ -127,7 +129,7 @@ export default async function Home({ searchParams }: PageProps) {
             </h1>
 
             <div id="buscar-fechas" className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
-              <PublicSearchForm />
+              <PublicSearchForm key={`${checkin ?? ""}-${checkout ?? ""}-${guestsParam ?? ""}`} />
             </div>
           </div>
         </section>
