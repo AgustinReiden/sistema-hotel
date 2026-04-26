@@ -24,9 +24,8 @@ type Props = {
 };
 
 const CLEANING_TYPES: { value: CleaningType; label: string }[] = [
-  { value: "limpia_ocupada", label: "Limpia Ocupada" },
-  { value: "limpia_vacia", label: "Limpia Vacia" },
-  { value: "limpia_repaso", label: "Limpia Repaso" },
+  { value: "habitacion_ocupada", label: "Habitacion estaba ocupada" },
+  { value: "limpieza_mantenimiento", label: "Limpieza de mantenimiento" },
 ];
 
 function activeCheckout(room: MaintenanceRoom): string | null {
@@ -100,11 +99,7 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
         return;
       }
 
-      if (result.data?.alertGenerated) {
-        toast.warning(`Hab. ${selected.room_number} registrada. Se notifico a admin.`);
-      } else {
-        toast.success(`Limpieza de Hab. ${selected.room_number} registrada.`);
-      }
+      toast.success(`Limpieza de Hab. ${selected.room_number} registrada.`);
 
       closeModal();
       router.refresh();

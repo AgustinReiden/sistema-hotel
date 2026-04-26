@@ -1620,7 +1620,7 @@ export async function getRoomCleaningLog(
 
   if (error) throw error;
 
-  return ((data ?? []) as Array<{
+  const rows = (data ?? []) as Array<{
     id: number;
     room_id: number;
     cleaned_at: string;
@@ -1630,7 +1630,24 @@ export async function getRoomCleaningLog(
     cleaning_type: CleaningType | null;
     notes: string | null;
     rooms: { room_number: string } | { room_number: string }[] | null;
-  }>).map((r) => {
+  }>;
+
+  const alertLogIds = new Set<number>();
+  const logIds = rows.map((r) => r.id);
+  if (logIds.length > 0) {
+    const { data: alertsData } = await supabase
+      .from("admin_alerts")
+      .select("related_cleaning_log_id")
+      .in("related_cleaning_log_id", logIds);
+
+    for (const alert of (alertsData ?? []) as Array<{ related_cleaning_log_id: number | null }>) {
+      if (alert.related_cleaning_log_id !== null) {
+        alertLogIds.add(Number(alert.related_cleaning_log_id));
+      }
+    }
+  }
+
+  return rows.map((r) => {
     const rel = r.rooms;
     const room_number = Array.isArray(rel)
       ? rel[0]?.room_number ?? "—"
@@ -1645,6 +1662,7 @@ export async function getRoomCleaningLog(
       previous_status: r.previous_status,
       cleaning_type: r.cleaning_type,
       notes: r.notes,
+      has_admin_alert: alertLogIds.has(r.id),
     };
   });
 }

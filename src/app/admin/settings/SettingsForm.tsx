@@ -121,7 +121,7 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
                 <h3 className="text-lg font-semibold text-slate-800 border-b pb-2">Información de Contacto</h3>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Email de Contacto</label>
-                    <input type="email" name="contact_email" defaultValue={settings?.contact_email || ""} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="contacto@hotel.com" />
+                    <input type="email" name="contact_email" defaultValue={settings?.contact_email || ""} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="contacto@hotel.com" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -130,16 +130,16 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">WhatsApp (horario comercial)</label>
-                        <input type="text" name="contact_whatsapp_phone" defaultValue={whatsappPhone} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="+54 381 4000000" />
+                        <input type="text" name="contact_whatsapp_phone" defaultValue={whatsappPhone} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="+54 381 4000000" />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Telefono fijo (24 horas)</label>
-                        <input type="text" name="contact_fixed_phone" defaultValue={fixedPhone} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="+54 381 4000001" />
+                        <input type="text" name="contact_fixed_phone" defaultValue={fixedPhone} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="+54 381 4000001" />
                     </div>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Dirección Física</label>
-                    <input type="text" name="address" defaultValue={settings?.address || ""} required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
+                    <input type="text" name="address" defaultValue={settings?.address || ""} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
                 </div>
             </div>
 

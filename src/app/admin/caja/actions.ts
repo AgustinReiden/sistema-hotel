@@ -30,13 +30,29 @@ export async function closeShiftAction(input: {
   actualCash: number;
   notes?: string;
 }): Promise<
-  ActionResult<{ expected_cash: number; actual_cash: number; discrepancy: number }>
+  ActionResult<{
+    expected_cash: number;
+    actual_cash: number;
+    discrepancy: number;
+    newShiftId: string | null;
+    autoOpenError?: string;
+  }>
 > {
   try {
     const { shiftId, actualCash, notes } = closeShiftSchema.parse(input);
     const result = await closeCashShift(shiftId, actualCash, notes);
+    let newShiftId: string | null = null;
+    let autoOpenError: string | undefined;
+
+    try {
+      newShiftId = await openCashShift();
+    } catch (error: unknown) {
+      const parsed = parseActionError(error, "El turno cerro, pero no se pudo abrir uno nuevo.");
+      autoOpenError = parsed.error;
+    }
+
     revalidateCajaViews();
-    return { success: true, data: result };
+    return { success: true, data: { ...result, newShiftId, autoOpenError } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cerrar la caja.");
     return { success: false, error: parsed.error, code: parsed.code };

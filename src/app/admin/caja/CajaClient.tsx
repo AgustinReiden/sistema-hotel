@@ -236,7 +236,6 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
             isOpen={closeModalOpen}
             onClose={() => setCloseModalOpen(false)}
             shiftId={summary.shift.id}
-            cashIncome={summary.cashIncome}
             totalsByMethod={summary.totalsByMethod}
           />
         </>

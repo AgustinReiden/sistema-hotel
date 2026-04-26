@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import {
-  AlertTriangle,
   Banknote,
-  CheckCircle2,
   CreditCard,
+  EyeOff,
   Landmark,
   Loader2,
   Wallet,
@@ -20,7 +20,6 @@ type Props = {
   isOpen: boolean;
   onClose: () => void;
   shiftId: string;
-  cashIncome: number;
   totalsByMethod: Record<PaymentMethod, number>;
 };
 
@@ -46,9 +45,9 @@ export default function CloseShiftModal({
   isOpen,
   onClose,
   shiftId,
-  cashIncome,
   totalsByMethod,
 }: Props) {
+  const router = useRouter();
   const [actualCash, setActualCash] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
@@ -56,9 +55,7 @@ export default function CloseShiftModal({
 
   if (!isOpen) return null;
 
-  const expected = cashIncome;
   const parsedActual = parseFloat(actualCash.replace(",", "."));
-  const diff = !isNaN(parsedActual) ? parsedActual - expected : null;
   const otherMethods = (Object.entries(totalsByMethod) as [PaymentMethod, number][])
     .filter(([method, amount]) => method !== "cash" && amount > 0);
 
@@ -84,17 +81,23 @@ export default function CloseShiftModal({
       return;
     }
 
-    const discrepancy = result.data!.discrepancy;
+    const data = result.data!;
+    const discrepancy = data.discrepancy;
+    const suffix = data.autoOpenError ? "" : " Nuevo turno abierto.";
     if (discrepancy === 0) {
-      toast.success("Turno cerrado: caja cuadra.");
+      toast.success(`Turno cerrado: caja cuadra.${suffix}`);
     } else if (discrepancy > 0) {
-      toast.success(`Turno cerrado con sobrante de $${formatMoney(discrepancy)}.`);
+      toast.success(`Turno cerrado con sobrante de $${formatMoney(discrepancy)}.${suffix}`);
     } else {
       toast.warning(
-        `Turno cerrado con faltante de $${formatMoney(Math.abs(discrepancy))}.`
+        `Turno cerrado con faltante de $${formatMoney(Math.abs(discrepancy))}.${suffix}`
       );
     }
+    if (data.autoOpenError) {
+      toast.warning(data.autoOpenError);
+    }
     onClose();
+    router.refresh();
   };
 
   return (
@@ -118,14 +121,11 @@ export default function CloseShiftModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
-          <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">Cobros en efectivo del turno</span>
-              <span className="font-semibold text-emerald-600">${formatMoney(cashIncome)}</span>
-            </div>
-            <div className="border-t border-slate-200 pt-2 flex justify-between">
-              <span className="font-bold text-slate-700">= Esperado en caja</span>
-              <span className="font-bold text-slate-900 text-lg">${formatMoney(expected)}</span>
+          <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-start gap-3">
+            <EyeOff size={18} className="text-slate-400 shrink-0 mt-0.5" />
+            <div className="text-sm text-slate-600">
+              El efectivo esperado se mantiene oculto hasta que declares cuanto hay
+              fisicamente en caja. La diferencia saldra en la rendicion final.
             </div>
           </div>
 
@@ -174,34 +174,6 @@ export default function CloseShiftModal({
               Aca registras cuanto efectivo hay fisicamente en caja al cierre.
             </p>
           </div>
-
-          {diff !== null && (
-            <div
-              className={`rounded-xl p-4 flex items-center gap-3 border ${
-                diff === 0
-                  ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                  : diff > 0
-                    ? "bg-blue-50 border-blue-200 text-blue-700"
-                    : "bg-red-50 border-red-200 text-red-700"
-              }`}
-            >
-              {diff === 0 ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
-              <div className="flex-1">
-                <p className="text-sm font-bold">
-                  {diff === 0
-                    ? "Caja cuadra"
-                    : diff > 0
-                      ? `Sobrante: +$${formatMoney(diff)}`
-                      : `Faltante: -$${formatMoney(Math.abs(diff))}`}
-                </p>
-                {diff !== 0 && (
-                  <p className="text-xs opacity-80">
-                    Esta diferencia queda registrada en la rendicion del turno.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
 
           <div>
             <label htmlFor="close-notes" className="block text-sm font-bold text-slate-700 mb-2">

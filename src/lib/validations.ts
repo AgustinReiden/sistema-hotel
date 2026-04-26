@@ -14,6 +14,41 @@ const optionalPhoneSchema = z.preprocess(
     .optional()
 );
 
+const optionalTextAsNull = (maxLength = 500) =>
+  z.preprocess(
+    (value) => {
+      if (value === null || value === undefined) return null;
+      if (typeof value !== "string") return value;
+      const trimmed = value.trim();
+      return trimmed === "" ? null : trimmed;
+    },
+    z.string().max(maxLength, `No puede superar los ${maxLength} caracteres.`).nullable()
+  );
+
+const optionalEmailAsNull = z.preprocess(
+  (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  },
+  z.string().email("El email de contacto no es valido.").nullable()
+);
+
+const optionalContactPhoneAsNull = z.preprocess(
+  (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? null : trimmed;
+  },
+  z
+    .string()
+    .min(5, "El telefono debe tener al menos 5 caracteres.")
+    .regex(/^[\d\s\-+()]+$/, "El telefono contiene caracteres invalidos.")
+    .nullable()
+);
+
 const associatedClientIdSchema = z.string().uuid("El asociado seleccionado es invalido.");
 
 const percentageSchema = z.preprocess(
@@ -204,18 +239,15 @@ export const hotelSettingsSchema = z.object({
     .trim()
     .regex(/^[A-Za-z]{3}$/, "La moneda debe ser un codigo ISO de 3 letras (ej. USD, ARS).")
     .transform((value) => value.toUpperCase()),
-  contact_email: z.string().optional().nullable(),
-  contact_phone: z.string().min(5, "El telefono debe tener al menos 5 caracteres."),
-  contact_whatsapp_phone: z
-    .string()
-    .trim()
-    .min(5, "El WhatsApp comercial debe tener al menos 5 caracteres."),
-  contact_fixed_phone: z
-    .string()
-    .trim()
-    .min(5, "El telefono fijo 24 horas debe tener al menos 5 caracteres."),
-  contact_instagram: z.string().optional().nullable(),
-  address: z.string().min(5, "La direccion debe tener al menos 5 caracteres."),
+  contact_email: optionalEmailAsNull,
+  contact_phone: optionalContactPhoneAsNull,
+  contact_whatsapp_phone: optionalContactPhoneAsNull,
+  contact_fixed_phone: optionalContactPhoneAsNull,
+  contact_instagram: optionalTextAsNull(120),
+  address: optionalTextAsNull(250).refine(
+    (value) => value === null || value.length >= 5,
+    "La direccion debe tener al menos 5 caracteres."
+  ),
   hero_title: z.string().min(5, "El titulo principal debe tener al menos 5 caracteres."),
   hero_subtitle: z.string().min(5, "El subtitulo debe tener al menos 5 caracteres."),
   hero_image_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),

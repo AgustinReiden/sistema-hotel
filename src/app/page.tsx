@@ -56,6 +56,9 @@ export default async function Home({ searchParams }: PageProps) {
   const whatsappPhone = settings?.contact_whatsapp_phone || settings?.contact_phone || "";
   const fixedPhone = settings?.contact_fixed_phone || "";
   const hasVisibleOffers = visibleOffers.length > 0;
+  const hasContactInfo = Boolean(
+    settings?.contact_email || settings?.contact_instagram || whatsappPhone || fixedPhone
+  );
 
   let comboMessage: string | null = null;
 
@@ -97,12 +100,6 @@ export default async function Home({ searchParams }: PageProps) {
             <a href="#ubicacion" className="hover:text-white transition-colors relative after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-brand-400 after:transition-all hover:after:w-full">
               Ubicaci&oacute;n
             </a>
-            <Link
-              href="/admin"
-              className="ml-2 px-5 py-2.5 rounded-lg bg-white/10 backdrop-blur-md text-white border border-white/20 hover:bg-white hover:text-slate-900 transition-all duration-300"
-            >
-              Acceso Staff
-            </Link>
           </div>
         </div>
       </nav>
@@ -271,50 +268,51 @@ export default async function Home({ searchParams }: PageProps) {
             )}
           </div>
 
-          {/* Contacto */}
-          <div className="text-left md:text-right flex flex-col items-start md:items-end">
-            <h4 className="text-white font-bold tracking-[0.2em] uppercase text-xs mb-6">Contacto</h4>
-            <ul className="space-y-4 font-light text-sm">
-              {settings?.contact_email && (
-                <li className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors">
-                  <Mail size={16} className="shrink-0" /> {settings.contact_email}
-                </li>
-              )}
-              {settings?.contact_instagram && (
-                <li className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors">
-                  <Instagram size={16} className="shrink-0" /> {settings.contact_instagram}
-                </li>
-              )}
-              {whatsappPhone && (
-                <li>
-                  <a
-                    href={getWhatsappHref(whatsappPhone)}
-                    className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
-                  >
-                    <MessageCircle size={16} className="shrink-0" />
-                    <span>
-                      <span className="block text-[11px] uppercase tracking-wide text-slate-500">WhatsApp comercial</span>
-                      {whatsappPhone}
-                    </span>
-                  </a>
-                </li>
-              )}
-              {fixedPhone && (
-                <li>
-                  <a
-                    href={getTelHref(fixedPhone)}
-                    className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
-                  >
-                    <PhoneCall size={16} className="shrink-0" />
-                    <span>
-                      <span className="block text-[11px] uppercase tracking-wide text-slate-500">Telefono 24 horas</span>
-                      {fixedPhone}
-                    </span>
-                  </a>
-                </li>
-              )}
-            </ul>
-          </div>
+          {hasContactInfo && (
+            <div className="text-left md:text-right flex flex-col items-start md:items-end">
+              <h4 className="text-white font-bold tracking-[0.2em] uppercase text-xs mb-6">Contacto</h4>
+              <ul className="space-y-4 font-light text-sm">
+                {settings?.contact_email && (
+                  <li className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors">
+                    <Mail size={16} className="shrink-0" /> {settings.contact_email}
+                  </li>
+                )}
+                {settings?.contact_instagram && (
+                  <li className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors">
+                    <Instagram size={16} className="shrink-0" /> {settings.contact_instagram}
+                  </li>
+                )}
+                {whatsappPhone && (
+                  <li>
+                    <a
+                      href={getWhatsappHref(whatsappPhone)}
+                      className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
+                    >
+                      <MessageCircle size={16} className="shrink-0" />
+                      <span>
+                        <span className="block text-[11px] uppercase tracking-wide text-slate-500">WhatsApp comercial</span>
+                        {whatsappPhone}
+                      </span>
+                    </a>
+                  </li>
+                )}
+                {fixedPhone && (
+                  <li>
+                    <a
+                      href={getTelHref(fixedPhone)}
+                      className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
+                    >
+                      <PhoneCall size={16} className="shrink-0" />
+                      <span>
+                        <span className="block text-[11px] uppercase tracking-wide text-slate-500">Telefono 24 horas</span>
+                        {fixedPhone}
+                      </span>
+                    </a>
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="max-w-7xl mx-auto px-6 mt-16 pt-8 border-t border-slate-800/50 text-xs font-light flex justify-between items-center text-slate-600">

@@ -1,6 +1,7 @@
 import Sidebar from './Sidebar';
 import { createClient } from "@/lib/supabase/server";
 import { getOpenShiftForCurrentUser } from "@/lib/data";
+import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 
 export default async function AdminLayout({
     children,
@@ -29,6 +30,7 @@ export default async function AdminLayout({
         <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
             <Sidebar role={role} userEmail={userEmail} hasOpenShift={!!openShift} />
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
                 {children}
             </main>
         </div>

@@ -294,4 +294,35 @@ describe("hotelSettingsSchema", () => {
     });
     expect(result.standard_check_in_time).toBe("14:00:00");
   });
+
+  it("accepts empty public contact fields as null", () => {
+    const result = hotelSettingsSchema.parse({
+      ...validSettings,
+      contact_email: "",
+      contact_phone: "",
+      contact_whatsapp_phone: "",
+      contact_fixed_phone: "",
+      contact_instagram: "",
+      address: "",
+    });
+
+    expect(result.contact_email).toBeNull();
+    expect(result.contact_phone).toBeNull();
+    expect(result.contact_whatsapp_phone).toBeNull();
+    expect(result.contact_fixed_phone).toBeNull();
+    expect(result.contact_instagram).toBeNull();
+    expect(result.address).toBeNull();
+  });
+
+  it("rejects invalid contact email when provided", () => {
+    expect(() =>
+      hotelSettingsSchema.parse({ ...validSettings, contact_email: "info-hotel" })
+    ).toThrow();
+  });
+
+  it("rejects invalid contact phone when provided", () => {
+    expect(() =>
+      hotelSettingsSchema.parse({ ...validSettings, contact_whatsapp_phone: "abcde" })
+    ).toThrow();
+  });
 });

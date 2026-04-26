@@ -10,6 +10,7 @@ export type RoomCleaningLogEntry = {
   previous_status: string;
   cleaning_type: CleaningType | null;
   notes: string | null;
+  has_admin_alert: boolean;
 };
 
 export type AdminAlert = {
@@ -27,7 +28,12 @@ export type AdminAlert = {
 
 export type RoomStatus = "available" | "occupied" | "maintenance" | "cleaning";
 
-export type CleaningType = "limpia_ocupada" | "limpia_vacia" | "limpia_repaso";
+export type CleaningType =
+  | "habitacion_ocupada"
+  | "limpieza_mantenimiento"
+  | "limpia_ocupada"
+  | "limpia_vacia"
+  | "limpia_repaso";
 
 export type CleaningRequiredReason =
   | "status_cleaning"
@@ -153,11 +159,11 @@ export type HotelSettings = {
   late_check_out_time: string;
   timezone: string;
   currency: string;
-  contact_email: string;
-  contact_phone: string;
+  contact_email: string | null;
+  contact_phone: string | null;
   contact_whatsapp_phone?: string | null;
   contact_fixed_phone?: string | null;
-  address: string;
+  address: string | null;
   hero_title: string;
   hero_subtitle: string;
   hero_image_url?: string | null;

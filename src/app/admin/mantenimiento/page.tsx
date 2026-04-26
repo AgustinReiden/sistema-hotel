@@ -48,6 +48,16 @@ function statusLabel(raw: string): { label: string; color: string; icon: React.R
 
 function cleaningTypeLabel(type: CleaningType | null): { label: string; color: string } {
   switch (type) {
+    case "habitacion_ocupada":
+      return {
+        label: "Habitacion estaba ocupada",
+        color: "bg-orange-100 text-orange-800 border-orange-300",
+      };
+    case "limpieza_mantenimiento":
+      return {
+        label: "Limpieza de mantenimiento",
+        color: "bg-slate-100 text-slate-700 border-slate-200",
+      };
     case "limpia_ocupada":
       return { label: "Limpia Ocupada", color: "bg-orange-100 text-orange-800 border-orange-300" };
     case "limpia_vacia":
@@ -118,8 +128,8 @@ export default async function MantenimientoAdminPage() {
                       const prev = statusLabel(entry.previous_status);
                       const type = cleaningTypeLabel(entry.cleaning_type);
                       const isAnomaly =
-                        entry.cleaning_type === "limpia_ocupada" ||
-                        entry.cleaning_type === "limpia_vacia";
+                        entry.cleaning_type === "habitacion_ocupada" &&
+                        entry.has_admin_alert;
                       return (
                         <tr
                           key={entry.id}

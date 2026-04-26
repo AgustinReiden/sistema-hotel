@@ -56,7 +56,12 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
         hero_image_url: validated.hero_image_url || null,
         services_image_url: validated.services_image_url || null,
         logo_url: validated.logo_url || null,
-        contact_instagram: validated.contact_instagram || null
+        contact_email: validated.contact_email ?? null,
+        contact_phone: validated.contact_phone ?? null,
+        contact_whatsapp_phone: validated.contact_whatsapp_phone ?? null,
+        contact_fixed_phone: validated.contact_fixed_phone ?? null,
+        contact_instagram: validated.contact_instagram ?? null,
+        address: validated.address ?? null
       })
       .eq("id", 1);
 
