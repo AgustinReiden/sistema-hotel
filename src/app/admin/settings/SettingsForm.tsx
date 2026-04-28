@@ -1,14 +1,44 @@
 "use client";
 
-import { useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { updateHotelSettings } from "./actions";
 import type { HotelSettings } from "@/lib/types";
+import {
+    CONFIRMATION_MESSAGE_PLACEHOLDERS,
+    DEFAULT_CONFIRMATION_MESSAGE_TEMPLATE,
+    renderConfirmationMessageTemplate,
+} from "@/lib/message-templates";
+
+const PREVIEW_RESERVATION = {
+    client_name: "María García",
+    room_type: "Doble superior",
+    room_number: "204",
+    check_in: "2026-05-10",
+    check_out: "2026-05-12",
+    total_price: 125000,
+    hotel_phone: "+54 9 364 438-6455",
+};
 
 export default function SettingsForm({ settings }: { settings: HotelSettings }) {
     const [isPending, startTransition] = useTransition();
     const whatsappPhone = settings?.contact_whatsapp_phone || settings?.contact_phone || "";
     const fixedPhone = settings?.contact_fixed_phone || "";
+    const initialConfirmationTemplate =
+        settings?.confirmation_message_template || DEFAULT_CONFIRMATION_MESSAGE_TEMPLATE;
+    const [confirmationTemplate, setConfirmationTemplate] = useState(initialConfirmationTemplate);
+    const confirmationPreview = useMemo(
+        () =>
+            renderConfirmationMessageTemplate(
+                "es",
+                {
+                    ...PREVIEW_RESERVATION,
+                    hotel_phone: whatsappPhone || PREVIEW_RESERVATION.hotel_phone,
+                },
+                confirmationTemplate
+            ),
+        [confirmationTemplate, whatsappPhone]
+    );
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -25,7 +55,7 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
     };
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
+        <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
             <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-slate-800 border-b pb-2">Información General</h3>
 
@@ -140,6 +170,54 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Dirección Física</label>
                     <input type="text" name="address" defaultValue={settings?.address || ""} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
+                </div>
+            </div>
+
+            <div className="space-y-4 pt-4">
+                <div className="flex items-start justify-between gap-4 border-b pb-2">
+                    <div>
+                        <h3 className="text-lg font-semibold text-slate-800">Mensajes automáticos</h3>
+                        <p className="text-sm text-slate-500">Confirmación de reserva enviada por WhatsApp.</p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setConfirmationTemplate(DEFAULT_CONFIRMATION_MESSAGE_TEMPLATE)}
+                        className="shrink-0 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                    >
+                        Restaurar sugerido
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] gap-5">
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Mensaje de confirmación</label>
+                            <textarea
+                                name="confirmation_message_template"
+                                value={confirmationTemplate}
+                                onChange={(event) => setConfirmationTemplate(event.target.value)}
+                                rows={12}
+                                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all resize-y font-mono text-sm leading-6"
+                            />
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                            {CONFIRMATION_MESSAGE_PLACEHOLDERS.map((placeholder) => (
+                                <span
+                                    key={placeholder.token}
+                                    className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700"
+                                    title={placeholder.label}
+                                >
+                                    <code>{placeholder.token}</code>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <p className="text-sm font-medium text-slate-700">Vista previa</p>
+                        <pre className="min-h-[290px] whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700 font-sans">{confirmationPreview}</pre>
+                    </div>
                 </div>
             </div>
 

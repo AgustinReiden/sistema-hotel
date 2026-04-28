@@ -253,4 +253,5 @@ export const hotelSettingsSchema = z.object({
   hero_image_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
   services_image_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
   logo_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
+  confirmation_message_template: optionalTextAsNull(2000).optional(),
 });

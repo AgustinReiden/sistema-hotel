@@ -273,6 +273,7 @@ describe("hotelSettingsSchema", () => {
     address: "Ruta Nacional 16, Taco Pozo",
     hero_title: "Tu refugio en el camino",
     hero_subtitle: "Descanso y servicios de ruta",
+    confirmation_message_template: "Hola {nombre}, tu reserva está confirmada.",
   };
 
   it("accepts valid settings and uppercases currency", () => {
@@ -304,6 +305,7 @@ describe("hotelSettingsSchema", () => {
       contact_fixed_phone: "",
       contact_instagram: "",
       address: "",
+      confirmation_message_template: "",
     });
 
     expect(result.contact_email).toBeNull();
@@ -312,6 +314,7 @@ describe("hotelSettingsSchema", () => {
     expect(result.contact_fixed_phone).toBeNull();
     expect(result.contact_instagram).toBeNull();
     expect(result.address).toBeNull();
+    expect(result.confirmation_message_template).toBeNull();
   });
 
   it("rejects invalid contact email when provided", () => {

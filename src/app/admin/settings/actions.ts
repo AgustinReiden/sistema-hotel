@@ -44,6 +44,9 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
       hero_image_url: String(formData.get("hero_image_url") ?? "") || null,
       services_image_url: String(formData.get("services_image_url") ?? "") || null,
       logo_url: String(formData.get("logo_url") ?? "") || null,
+      confirmation_message_template: String(
+        formData.get("confirmation_message_template") ?? ""
+      ),
     };
 
     const validated = hotelSettingsSchema.parse(rawData);
@@ -61,7 +64,8 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
         contact_whatsapp_phone: validated.contact_whatsapp_phone ?? null,
         contact_fixed_phone: validated.contact_fixed_phone ?? null,
         contact_instagram: validated.contact_instagram ?? null,
-        address: validated.address ?? null
+        address: validated.address ?? null,
+        confirmation_message_template: validated.confirmation_message_template ?? null,
       })
       .eq("id", 1);
 

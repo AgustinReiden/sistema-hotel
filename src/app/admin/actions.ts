@@ -239,7 +239,11 @@ export async function handleConfirmReservation(
         total_price: Number(data.total_price) || 0,
         hotel_phone: settings.contact_phone || "",
       };
-      const text = buildConfirmationMessage(lang, msgData);
+      const text = buildConfirmationMessage(
+        lang,
+        msgData,
+        settings.confirmation_message_template
+      );
       const result = await notifyReservationWebhook({
         number: clientPhone,
         text,
@@ -286,7 +290,11 @@ export async function handleResendWhatsapp(
       const reason = (await getCancellationReason(reservationId)) || "Sin motivo registrado";
       text = buildCancellationMessage(lang, msgData, reason);
     } else if (reservation.status === "confirmed") {
-      text = buildConfirmationMessage(lang, msgData);
+      text = buildConfirmationMessage(
+        lang,
+        msgData,
+        settings.confirmation_message_template
+      );
     } else {
       return {
         success: false,

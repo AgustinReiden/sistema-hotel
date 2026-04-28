@@ -170,6 +170,7 @@ export type HotelSettings = {
   services_image_url?: string | null;
   logo_url?: string | null;
   contact_instagram?: string | null;
+  confirmation_message_template?: string | null;
 };
 
 export type Guest = {
