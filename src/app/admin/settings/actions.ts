@@ -70,7 +70,8 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
       .eq("id", 1);
 
     if (error) {
-      return { success: false, error: error.message, code: error.code };
+      const parsed = parseActionError(error, "Error al actualizar ajustes.");
+      return { success: false, error: parsed.error, code: parsed.code };
     }
 
     revalidatePath("/admin/settings");
@@ -112,7 +113,7 @@ export async function updateProfileAction(
   try {
     if (!userId) throw new Error("Usuario invalido.");
     if (!fullName || !fullName.trim()) throw new Error("El nombre es obligatorio.");
-    if (role !== "admin" && role !== "receptionist" && role !== "client")
+    if (role !== "admin" && role !== "receptionist" && role !== "client" && role !== "maintenance")
       throw new Error("Rol invalido.");
 
     const supabase = await createClient();
