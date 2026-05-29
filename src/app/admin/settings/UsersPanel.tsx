@@ -155,6 +155,7 @@ export default function UsersPanel() {
                       >
                         <option value="admin">Admin</option>
                         <option value="receptionist">Recepcionista</option>
+                        <option value="maintenance">Mantenimiento</option>
                         <option value="client">Cliente</option>
                       </select>
                     </td>

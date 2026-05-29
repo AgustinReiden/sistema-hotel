@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseActionError } from '@/lib/error-utils';
 
 // We import ZodError to simulate validation failures
@@ -57,5 +57,45 @@ describe('parseActionError', () => {
     it('returns fallback for number error', () => {
         const result = parseActionError(42, 'Fallback');
         expect(result.error).toBe('Fallback');
+    });
+
+    it('genericiza un error técnico de Postgres (unique_violation) sin filtrar el detalle', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const dbError = {
+            message: 'duplicate key value violates unique constraint "rooms_room_number_key"',
+            code: '23505',
+        };
+        const result = parseActionError(dbError, 'Fallback');
+        expect(result.code).toBe('23505');
+        expect(result.error).not.toContain('constraint');
+        expect(result.error).toContain('error inesperado');
+        expect(spy).toHaveBeenCalled();
+        spy.mockRestore();
+    });
+
+    it('genericiza otros SQLSTATEs técnicos (FK, not-null, check, invalid-text, internal)', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        for (const code of ['23503', '23502', '23514', '22P02', 'XX000']) {
+            const result = parseActionError({ message: 'detalle técnico crudo', code }, 'Fallback');
+            expect(result.error).toContain('error inesperado');
+            expect(result.error).not.toContain('crudo');
+            expect(result.code).toBe(code);
+        }
+        spy.mockRestore();
+    });
+
+    it('conserva el mensaje en español de las RPC (exclusion_violation 23P01)', () => {
+        const rpcError = {
+            message: 'La habitacion no esta disponible para ese rango horario.',
+            code: '23P01',
+        };
+        const result = parseActionError(rpcError, 'Fallback');
+        expect(result.error).toBe('La habitacion no esta disponible para ese rango horario.');
+        expect(result.code).toBe('23P01');
+    });
+
+    it('conserva el mensaje "No autorizado" (42501)', () => {
+        const result = parseActionError({ message: 'No autorizado.', code: '42501' }, 'Fallback');
+        expect(result.error).toBe('No autorizado.');
     });
 });
