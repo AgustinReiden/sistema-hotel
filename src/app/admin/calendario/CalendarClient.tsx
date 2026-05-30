@@ -9,7 +9,7 @@ import {
   startOfDay,
 } from "date-fns";
 import { es } from "date-fns/locale";
-import { CreditCard, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
+import { CreditCard, FileText, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
@@ -202,7 +202,7 @@ export default function CalendarClient({
         </p>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-auto shadow-sm max-h-[calc(100vh-13rem)]">
         <div className="min-w-max">
           <div className="flex border-b border-slate-200 sticky top-0 z-30 bg-slate-50">
             <div
@@ -421,6 +421,17 @@ export default function CalendarClient({
                         <p className="font-medium text-slate-700">{selectedReservation.guest_count ?? 1}</p>
                       </div>
                     </div>
+                    {selectedReservation.notes && (
+                      <div className="flex items-start gap-3">
+                        <FileText size={16} className="text-slate-400 mt-0.5" />
+                        <div>
+                          <p className="text-xs text-slate-400">Observaciones</p>
+                          <p className="font-medium text-slate-700 whitespace-pre-wrap">
+                            {selectedReservation.notes}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

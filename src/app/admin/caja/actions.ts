@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { closeCashShift, openCashShift } from "@/lib/data";
+import { closeCashShift, getCurrentUserRole, openCashShift } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import type { ActionResult } from "@/lib/types";
 import { closeShiftSchema } from "@/lib/validations";
@@ -34,25 +34,20 @@ export async function closeShiftAction(input: {
     expected_cash: number;
     actual_cash: number;
     discrepancy: number;
-    newShiftId: string | null;
-    autoOpenError?: string;
+    shouldLogout: boolean;
   }>
 > {
   try {
     const { shiftId, actualCash, notes } = closeShiftSchema.parse(input);
+    const role = await getCurrentUserRole();
     const result = await closeCashShift(shiftId, actualCash, notes);
-    let newShiftId: string | null = null;
-    let autoOpenError: string | undefined;
 
-    try {
-      newShiftId = await openCashShift();
-    } catch (error: unknown) {
-      const parsed = parseActionError(error, "El turno cerro, pero no se pudo abrir uno nuevo.");
-      autoOpenError = parsed.error;
-    }
+    // El recepcionista cierra su propia caja y luego cierra sesion. El admin que
+    // rinde la caja de un recepcionista permanece logueado. Ya no se reabre turno.
+    const shouldLogout = role !== "admin";
 
     revalidateCajaViews();
-    return { success: true, data: { ...result, newShiftId, autoOpenError } };
+    return { success: true, data: { ...result, shouldLogout } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cerrar la caja.");
     return { success: false, error: parsed.error, code: parsed.code };

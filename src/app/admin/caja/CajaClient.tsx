@@ -76,18 +76,27 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
           <div className="inline-flex w-16 h-16 rounded-full bg-slate-100 text-slate-400 items-center justify-center mb-4">
             <Wallet size={32} />
           </div>
-          <h2 className="text-xl font-bold text-slate-800 mb-2">No hay turno abierto</h2>
-          <p className="text-slate-500 mb-6 max-w-md mx-auto">
-            Para poder cobrar pagos y checkouts necesitas abrir la caja primero.
-          </p>
-          <button
-            onClick={() => setOpenModalOpen(true)}
-            className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-colors inline-flex items-center gap-2"
-          >
-            <DollarSign size={18} />
-            Abrir Caja
-          </button>
-          <OpenShiftModal isOpen={openModalOpen} onClose={() => setOpenModalOpen(false)} />
+          <h2 className="text-xl font-bold text-slate-800 mb-2">No hay caja abierta</h2>
+          {isAdmin ? (
+            <p className="text-slate-500 max-w-md mx-auto">
+              Cuando un recepcionista abra la caja vas a verla aca y vas a poder cerrarla o
+              rendirla vos mismo.
+            </p>
+          ) : (
+            <>
+              <p className="text-slate-500 mb-6 max-w-md mx-auto">
+                Para poder cobrar pagos y checkouts necesitas abrir la caja primero.
+              </p>
+              <button
+                onClick={() => setOpenModalOpen(true)}
+                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition-colors inline-flex items-center gap-2"
+              >
+                <DollarSign size={18} />
+                Abrir Caja
+              </button>
+              <OpenShiftModal isOpen={openModalOpen} onClose={() => setOpenModalOpen(false)} />
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -237,6 +246,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
             onClose={() => setCloseModalOpen(false)}
             shiftId={summary.shift.id}
             totalsByMethod={summary.totalsByMethod}
+            isAdmin={isAdmin}
           />
         </>
       )}

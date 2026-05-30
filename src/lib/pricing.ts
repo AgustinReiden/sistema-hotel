@@ -58,3 +58,27 @@ export function calculateWalkInPriceBreakdown({
     finalTotalPrice,
   };
 }
+
+/**
+ * Media estadia / siesta (12 a 17 hs): se cobra un precio fijo de medio dia
+ * (rooms.half_day_price), con el descuento del asociado si corresponde.
+ */
+export function calculateHalfDayPriceBreakdown({
+  halfDayPrice,
+  discountPercent = 0,
+}: {
+  halfDayPrice: number;
+  discountPercent?: number;
+}) {
+  const baseTotalPrice = roundCurrency(halfDayPrice);
+  const normalizedDiscountPercent = roundCurrency(discountPercent);
+  const discountAmount = roundCurrency((baseTotalPrice * normalizedDiscountPercent) / 100);
+  const finalTotalPrice = roundCurrency(baseTotalPrice - discountAmount);
+
+  return {
+    baseTotalPrice,
+    discountPercent: normalizedDiscountPercent,
+    discountAmount,
+    finalTotalPrice,
+  };
+}

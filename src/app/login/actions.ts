@@ -29,6 +29,12 @@ export async function login(formData: FormData) {
         const role = profile?.role as string | undefined;
         if (role === "admin" || role === "receptionist") target = "/admin";
         else if (role === "maintenance") target = "/maintenance";
+
+        // El recepcionista trabaja con la caja abierta: al iniciar sesion se abre
+        // automaticamente. Si ya tenia una abierta, el RPC devuelve error y se ignora.
+        if (role === "receptionist") {
+            await supabase.rpc("rpc_open_cash_shift");
+        }
     }
     redirect(target);
 }

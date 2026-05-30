@@ -123,6 +123,7 @@ export type Reservation = {
   total_price: number;
   paid_amount: number;
   guest_count: number;
+  notes: string | null;
   whatsapp_notified: boolean;
 };
 
@@ -198,6 +199,8 @@ export type AssociatedClient = {
 
 export type ReservationCustomerMode = "manual" | "associated";
 
+export type WalkInStayType = "night" | "half_day";
+
 export type CreateReservationPayload =
   | {
       customerMode: "manual";
@@ -216,6 +219,9 @@ export type CreateReservationPayload =
       checkIn: string;
       checkOut: string;
       guestCount?: number;
+      /** Pasajero real que se hospeda (la empresa asociada es el huesped facturable). */
+      guestName?: string;
+      guestDni?: string;
     };
 
 export type AssignWalkInPayload =
@@ -225,6 +231,7 @@ export type AssignWalkInPayload =
       clientName: string;
       nights: number;
       guestCount?: number;
+      stayType?: WalkInStayType;
     }
   | {
       customerMode: "associated";
@@ -232,6 +239,10 @@ export type AssignWalkInPayload =
       nights: number;
       associatedClientId: string;
       guestCount?: number;
+      stayType?: WalkInStayType;
+      /** Pasajero real que se hospeda (la empresa asociada es el huesped facturable). */
+      guestName?: string;
+      guestDni?: string;
     };
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";

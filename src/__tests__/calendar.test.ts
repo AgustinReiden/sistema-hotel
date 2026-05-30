@@ -23,6 +23,7 @@ function makeReservation(overrides: Partial<Reservation> & { id: string; room_id
     total_price: overrides.total_price ?? 10000,
     paid_amount: overrides.paid_amount ?? 0,
     guest_count: overrides.guest_count ?? 1,
+    notes: overrides.notes ?? null,
     whatsapp_notified: overrides.whatsapp_notified ?? false,
   };
 }

@@ -4,16 +4,18 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Banknote,
+  CheckCircle2,
   CreditCard,
   EyeOff,
   Landmark,
   Loader2,
+  LogOut,
   Wallet,
   X,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { closeShiftAction } from "./actions";
+import { logout } from "@/app/login/actions";
 import type { PaymentMethod } from "@/lib/types";
 
 type Props = {
@@ -21,6 +23,14 @@ type Props = {
   onClose: () => void;
   shiftId: string;
   totalsByMethod: Record<PaymentMethod, number>;
+  isAdmin: boolean;
+};
+
+type CloseResult = {
+  expected_cash: number;
+  actual_cash: number;
+  discrepancy: number;
+  shouldLogout: boolean;
 };
 
 function formatMoney(n: number) {
@@ -46,12 +56,15 @@ export default function CloseShiftModal({
   onClose,
   shiftId,
   totalsByMethod,
+  isAdmin,
 }: Props) {
   const router = useRouter();
   const [actualCash, setActualCash] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [closed, setClosed] = useState<CloseResult | null>(null);
+  const [finishing, setFinishing] = useState(false);
 
   if (!isOpen) return null;
 
@@ -81,24 +94,72 @@ export default function CloseShiftModal({
       return;
     }
 
-    const data = result.data!;
-    const discrepancy = data.discrepancy;
-    const suffix = data.autoOpenError ? "" : " Nuevo turno abierto.";
-    if (discrepancy === 0) {
-      toast.success(`Turno cerrado: caja cuadra.${suffix}`);
-    } else if (discrepancy > 0) {
-      toast.success(`Turno cerrado con sobrante de $${formatMoney(discrepancy)}.${suffix}`);
-    } else {
-      toast.warning(
-        `Turno cerrado con faltante de $${formatMoney(Math.abs(discrepancy))}.${suffix}`
-      );
-    }
-    if (data.autoOpenError) {
-      toast.warning(data.autoOpenError);
+    setClosed(result.data!);
+  };
+
+  const handleFinish = async () => {
+    if (closed?.shouldLogout) {
+      setFinishing(true);
+      await logout(); // cierra sesion y redirige a /login
+      return;
     }
     onClose();
     router.refresh();
   };
+
+  // Vista de resultado: se muestra la rendicion una vez cerrada la caja.
+  if (closed) {
+    const d = closed.discrepancy;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+          <div className="p-6 text-center">
+            <div className="inline-flex w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 items-center justify-center mb-3">
+              <CheckCircle2 size={28} />
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 mb-1">Caja cerrada</h2>
+            <p className="text-sm text-slate-500 mb-5">
+              {d === 0
+                ? "La caja cuadra perfecto."
+                : d > 0
+                  ? `Quedo un sobrante de $${formatMoney(d)}.`
+                  : `Quedo un faltante de $${formatMoney(Math.abs(d))}.`}
+            </p>
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="rounded-xl border border-slate-200 p-3 text-left">
+                <p className="text-xs text-slate-500">Efectivo esperado</p>
+                <p className="font-bold text-slate-800">${formatMoney(closed.expected_cash)}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 p-3 text-left">
+                <p className="text-xs text-slate-500">Efectivo declarado</p>
+                <p className="font-bold text-slate-800">${formatMoney(closed.actual_cash)}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleFinish}
+              disabled={finishing}
+              className="w-full px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {finishing ? (
+                <Loader2 className="animate-spin" size={18} />
+              ) : closed.shouldLogout ? (
+                <LogOut size={18} />
+              ) : (
+                <CheckCircle2 size={18} />
+              )}
+              {closed.shouldLogout ? "Finalizar y cerrar sesion" : "Listo"}
+            </button>
+            {!isAdmin && (
+              <p className="text-[11px] text-slate-400 mt-3">
+                Al finalizar se cierra tu sesion. La proxima vez que ingreses se abre la caja de nuevo.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">

@@ -135,7 +135,9 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const autoPrint = sp.autoprint === "1";
   const requestedCopy =
     sp.copy === "duplicate" ? "duplicate" : sp.copy === "original" ? "original" : null;
-  const copyMode = autoPrint ? requestedCopy ?? "original" : requestedCopy ?? "both";
+  // En autoimpresion se imprimen las dos copias (original + duplicado) en un unico
+  // trabajo de impresion; luego la ventana se cierra sola (ver ReceiptAutoPrint).
+  const copyMode = autoPrint ? "both" : requestedCopy ?? "both";
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -207,10 +209,6 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     notes: raw.notes,
   };
 
-  const nextUrl =
-    autoPrint && copyMode === "original"
-      ? `/admin/recibo/${paymentId}?autoprint=1&copy=duplicate`
-      : undefined;
   const copies =
     copyMode === "both"
       ? [
@@ -224,7 +222,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
       {copies.map((copy) => (
         <ReceiptCopy key={copy.key} title={copy.title} {...receiptData} />
       ))}
-      {autoPrint && <ReceiptAutoPrint nextUrl={nextUrl} closeOnDone={!nextUrl} />}
+      {autoPrint && <ReceiptAutoPrint closeOnDone />}
 
       <style>{`
         @page { size: 75mm auto; margin: 2mm; }
@@ -236,6 +234,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
             print-color-adjust: exact;
           }
           .thermal { padding: 0 !important; }
+          .no-print { display: none !important; }
         }
         .thermal {
           font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;

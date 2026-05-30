@@ -1,6 +1,7 @@
 import Sidebar from './Sidebar';
 import { createClient } from "@/lib/supabase/server";
-import { getOpenShiftForCurrentUser } from "@/lib/data";
+import { getActiveOpenShift } from "@/lib/data";
+import type { UserRole } from "@/lib/types";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 
 export default async function AdminLayout({
@@ -13,17 +14,18 @@ export default async function AdminLayout({
     const userEmail = user?.email || "";
 
     let role = "receptionist";
-    let openShift: Awaited<ReturnType<typeof getOpenShiftForCurrentUser>> | null = null;
+    let openShift: Awaited<ReturnType<typeof getActiveOpenShift>> | null = null;
 
     if (user) {
-        const [profileResult, shiftResult] = await Promise.all([
-            supabase.from('profiles').select('role').eq('id', user.id).single(),
-            getOpenShiftForCurrentUser().catch(() => null),
-        ]);
-        if (profileResult.data?.role) {
-            role = profileResult.data.role;
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single();
+        if (profile?.role) {
+            role = profile.role;
         }
-        openShift = shiftResult;
+        openShift = await getActiveOpenShift(role as UserRole).catch(() => null);
     }
 
     return (

@@ -34,7 +34,7 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                     <CircleDollarSign size={18} className={`mr-3 transition-colors ${hasOpenShift ? 'text-emerald-400' : 'group-hover:text-emerald-400'}`} />
                     <span className="font-medium flex-1">Caja</span>
                     {hasOpenShift ? (
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow shadow-emerald-500/50" title="Turno abierto" />
+                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded" title="Turno abierto">ABIERTA</span>
                     ) : (
                         <span className="text-[10px] font-bold text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded" title="Sin turno">CERRADA</span>
                     )}

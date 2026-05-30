@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Percent, Phone, UserRound, X } from "lucide-react";
+import { CreditCard, Moon, Percent, Phone, Sun, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
 import AssociatedClientSelector from "./AssociatedClientSelector";
-import { calculateWalkInPriceBreakdown } from "@/lib/pricing";
-import type { AssignWalkInPayload, AssociatedClient } from "@/lib/types";
+import {
+  calculateHalfDayPriceBreakdown,
+  calculateWalkInPriceBreakdown,
+} from "@/lib/pricing";
+import type { AssignWalkInPayload, AssociatedClient, WalkInStayType } from "@/lib/types";
 
 type WalkInModalProps = {
   isOpen: boolean;
@@ -14,6 +17,7 @@ type WalkInModalProps = {
   onSubmit: (data: AssignWalkInPayload) => Promise<{ success: boolean; error?: string }>;
   roomNumber: string;
   basePrice?: number;
+  halfDayPrice?: number;
   associatedClients: AssociatedClient[];
 };
 
@@ -25,11 +29,15 @@ export default function WalkInModal({
   onSubmit,
   roomNumber,
   basePrice = 0,
+  halfDayPrice = 0,
   associatedClients,
 }: WalkInModalProps) {
   const [customerMode, setCustomerMode] = useState<CustomerMode>("manual");
+  const [stayType, setStayType] = useState<WalkInStayType>("night");
   const [clientName, setClientName] = useState("");
   const [associatedClientId, setAssociatedClientId] = useState("");
+  const [guestName, setGuestName] = useState("");
+  const [guestDni, setGuestDni] = useState("");
   const [nights, setNights] = useState(1);
   const [guestCount, setGuestCount] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,30 +45,36 @@ export default function WalkInModal({
   useEffect(() => {
     if (!isOpen) return;
     setCustomerMode("manual");
+    setStayType("night");
     setClientName("");
     setAssociatedClientId("");
+    setGuestName("");
+    setGuestDni("");
     setNights(1);
     setGuestCount(1);
   }, [isOpen]);
 
   if (!isOpen) return null;
 
+  const isHalfDay = stayType === "half_day";
   const selectedAssociatedClient =
     associatedClients.find((client) => client.id === associatedClientId) ?? null;
-  const pricing =
-    customerMode === "associated" && selectedAssociatedClient && basePrice > 0
-      ? calculateWalkInPriceBreakdown({
-          basePrice,
-          nights,
-          discountPercent: selectedAssociatedClient.discount_percent,
-        })
-      : customerMode === "manual" && basePrice > 0
-        ? calculateWalkInPriceBreakdown({ basePrice, nights })
-        : null;
+  const discountPercent =
+    customerMode === "associated" && selectedAssociatedClient
+      ? selectedAssociatedClient.discount_percent
+      : 0;
+
+  const pricing = isHalfDay
+    ? halfDayPrice > 0
+      ? calculateHalfDayPriceBreakdown({ halfDayPrice, discountPercent })
+      : null
+    : basePrice > 0
+      ? calculateWalkInPriceBreakdown({ basePrice, nights, discountPercent })
+      : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (nights < 1) return;
+    if (!isHalfDay && nights < 1) return;
     if (customerMode === "manual" && !clientName.trim()) return;
     if (customerMode === "associated" && !associatedClientId) {
       toast.error("Selecciona un asociado para continuar.");
@@ -75,15 +89,19 @@ export default function WalkInModal({
               customerMode: "manual",
               roomId: 0,
               clientName: clientName.trim(),
-              nights,
+              nights: isHalfDay ? 1 : nights,
               guestCount,
+              stayType,
             }
           : {
               customerMode: "associated",
               roomId: 0,
               associatedClientId,
-              nights,
+              nights: isHalfDay ? 1 : nights,
               guestCount,
+              stayType,
+              guestName: guestName.trim() || undefined,
+              guestDni: guestDni.trim() || undefined,
             };
 
       const result = await onSubmit(payload);
@@ -138,6 +156,42 @@ export default function WalkInModal({
               >
                 <p className="font-semibold text-slate-800">Asociado</p>
                 <p className="text-sm text-slate-500">Usa el padrón y aplica el descuento al total.</p>
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-slate-700">Tipo de estadía</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setStayType("night")}
+                className={`rounded-xl border px-4 py-3 text-left transition-colors flex items-center gap-3 ${
+                  stayType === "night"
+                    ? "border-emerald-500 bg-emerald-50"
+                    : "border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                <Moon size={18} className="text-slate-500 shrink-0" />
+                <span>
+                  <span className="block font-semibold text-slate-800">Noche(s)</span>
+                  <span className="block text-sm text-slate-500">Estadía normal por noche.</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStayType("half_day")}
+                className={`rounded-xl border px-4 py-3 text-left transition-colors flex items-center gap-3 ${
+                  stayType === "half_day"
+                    ? "border-emerald-500 bg-emerald-50"
+                    : "border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                <Sun size={18} className="text-amber-500 shrink-0" />
+                <span>
+                  <span className="block font-semibold text-slate-800">Media estadía (siesta)</span>
+                  <span className="block text-sm text-slate-500">Jornada de 12 a 17 hs.</span>
+                </span>
               </button>
             </div>
           </div>
@@ -202,24 +256,63 @@ export default function WalkInModal({
                   Selecciona un asociado activo para usar sus datos y descuento en este check-in.
                 </div>
               )}
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Pasajero que se hospeda (opcional)
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="walkinGuestName" className="block text-xs font-semibold text-slate-600 mb-1">
+                      Nombre del pasajero
+                    </label>
+                    <input
+                      id="walkinGuestName"
+                      type="text"
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      placeholder="Ej. María López"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="walkinGuestDni" className="block text-xs font-semibold text-slate-600 mb-1">
+                      DNI del pasajero
+                    </label>
+                    <input
+                      id="walkinGuestDni"
+                      type="text"
+                      value={guestDni}
+                      onChange={(e) => setGuestDni(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      placeholder="Ej. 30123456"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  La empresa queda como huésped facturable; estos datos se guardan como observación.
+                </p>
+              </div>
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="nights" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Cantidad de Noches
-              </label>
-              <input
-                id="nights"
-                type="number"
-                min="1"
-                required
-                value={nights}
-                onChange={(e) => setNights(parseInt(e.target.value, 10) || 1)}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-              />
-            </div>
+            {!isHalfDay && (
+              <div>
+                <label htmlFor="nights" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Cantidad de Noches
+                </label>
+                <input
+                  id="nights"
+                  type="number"
+                  min="1"
+                  required
+                  value={nights}
+                  onChange={(e) => setNights(parseInt(e.target.value, 10) || 1)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                />
+              </div>
+            )}
             <div>
               <label htmlFor="guestCount" className="block text-sm font-semibold text-slate-700 mb-1.5">
                 Cantidad de pasajeros
@@ -237,6 +330,13 @@ export default function WalkInModal({
             </div>
           </div>
 
+          {isHalfDay && halfDayPrice <= 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              Esta habitación no tiene precio de media estadía (siesta) configurado. Cargalo en
+              Categorías/Habitaciones antes de usar esta opción.
+            </div>
+          )}
+
           {pricing && (
             <div
               className={`rounded-xl border p-4 ${
@@ -251,9 +351,9 @@ export default function WalkInModal({
                     Total estimado
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {pricing.nights} noche{pricing.nights !== 1 ? "s" : ""}
-                    {" × "}
-                    ${basePrice.toLocaleString("es-AR")}
+                    {isHalfDay
+                      ? `Media estadía (12 a 17 hs) · $${halfDayPrice.toLocaleString("es-AR")}`
+                      : `${nights} noche${nights !== 1 ? "s" : ""} × $${basePrice.toLocaleString("es-AR")}`}
                   </p>
                 </div>
                 <div className="text-right">
@@ -296,6 +396,7 @@ export default function WalkInModal({
               type="submit"
               disabled={
                 isSubmitting ||
+                (isHalfDay && halfDayPrice <= 0) ||
                 (customerMode === "manual" ? !clientName.trim() : !associatedClientId)
               }
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"

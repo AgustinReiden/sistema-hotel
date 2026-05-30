@@ -91,6 +91,46 @@ describe("assignWalkInSchema", () => {
       })
     ).toThrow();
   });
+
+  it("accepts half_day (siesta) stay type", () => {
+    const result = assignWalkInSchema.parse({
+      customerMode: "manual",
+      roomId: 1,
+      clientName: "Cliente Siesta",
+      nights: 1,
+      stayType: "half_day",
+    });
+
+    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
+    expect(result.stayType).toBe("half_day");
+  });
+
+  it("rejects an invalid stay type", () => {
+    expect(() =>
+      assignWalkInSchema.parse({
+        customerMode: "manual",
+        roomId: 1,
+        clientName: "Test",
+        nights: 1,
+        stayType: "weekly",
+      })
+    ).toThrow();
+  });
+
+  it("keeps passenger data on associated walk-in", () => {
+    const result = assignWalkInSchema.parse({
+      customerMode: "associated",
+      roomId: 1,
+      nights: 1,
+      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+      guestName: "  Maria Lopez  ",
+      guestDni: "30123456",
+    });
+
+    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
+    expect(result.guestName).toBe("Maria Lopez");
+    expect(result.guestDni).toBe("30123456");
+  });
 });
 
 describe("createReservationSchema", () => {
@@ -180,6 +220,22 @@ describe("createReservationSchema", () => {
     expect(() =>
       createReservationSchema.parse({ ...validManualInput, checkIn: "not-a-date" })
     ).toThrow();
+  });
+
+  it("keeps passenger data on associated reservation", () => {
+    const result = createReservationSchema.parse({
+      customerMode: "associated",
+      roomId: 1,
+      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+      checkIn: "2026-04-01T14:00:00.000Z",
+      checkOut: "2026-04-03T10:00:00.000Z",
+      guestName: "Maria Lopez",
+      guestDni: "30123456",
+    });
+
+    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
+    expect(result.guestName).toBe("Maria Lopez");
+    expect(result.guestDni).toBe("30123456");
   });
 });
 
