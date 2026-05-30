@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 
 import AssociatedClientSelector from "./AssociatedClientSelector";
+import DateTimePickerField from "./DateTimePickerField";
 import { calculateReservationPriceBreakdown } from "@/lib/pricing";
 import type {
   AssociatedClient,
@@ -55,6 +56,8 @@ type ReservationFormState = {
   clientDni: string;
   clientPhone: string;
   associatedClientId: string;
+  guestName: string;
+  guestDni: string;
   roomId: number | "";
   checkIn: string;
   checkOut: string;
@@ -100,6 +103,8 @@ function buildInitialState(
     clientDni: initialValues?.clientDni ?? "",
     clientPhone: initialValues?.clientPhone ?? "",
     associatedClientId: initialValues?.associatedClientId ?? "",
+    guestName: "",
+    guestDni: "",
     roomId: initialValues?.roomId ?? "",
     checkIn: initialValues?.checkIn ?? defaults.checkIn,
     checkOut: initialValues?.checkOut ?? defaults.checkOut,
@@ -187,6 +192,8 @@ export default function NewReservationModal({
               checkIn: new Date(form.checkIn).toISOString(),
               checkOut: new Date(form.checkOut).toISOString(),
               guestCount: form.guestCount,
+              guestName: form.guestName.trim() || undefined,
+              guestDni: form.guestDni.trim() || undefined,
             };
 
       const result = await onSubmit(payload);
@@ -347,6 +354,43 @@ export default function NewReservationModal({
                   Selecciona un asociado activo para usar sus datos y descuento en esta reserva.
                 </div>
               )}
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Pasajero que se hospeda (opcional)
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="resGuestName" className="block text-xs font-semibold text-slate-600 mb-1">
+                      Nombre del pasajero
+                    </label>
+                    <input
+                      id="resGuestName"
+                      type="text"
+                      value={form.guestName}
+                      onChange={(e) => setForm((current) => ({ ...current, guestName: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      placeholder="Ej. María López"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="resGuestDni" className="block text-xs font-semibold text-slate-600 mb-1">
+                      DNI del pasajero
+                    </label>
+                    <input
+                      id="resGuestDni"
+                      type="text"
+                      value={form.guestDni}
+                      onChange={(e) => setForm((current) => ({ ...current, guestDni: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      placeholder="Ej. 30123456"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  La empresa queda como huésped facturable; estos datos se guardan como observación.
+                </p>
+              </div>
             </div>
           )}
 
@@ -377,32 +421,20 @@ export default function NewReservationModal({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="checkIn" className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center">
-                <CalendarIcon size={14} className="mr-1" /> Entrada
-              </label>
-              <input
-                id="checkIn"
-                type="datetime-local"
-                required
-                value={form.checkIn}
-                onChange={(e) => setForm((current) => ({ ...current, checkIn: e.target.value }))}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
-              />
-            </div>
-            <div>
-              <label htmlFor="checkOut" className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center">
-                <ClockIcon size={14} className="mr-1" /> Salida Target
-              </label>
-              <input
-                id="checkOut"
-                type="datetime-local"
-                required
-                value={form.checkOut}
-                onChange={(e) => setForm((current) => ({ ...current, checkOut: e.target.value }))}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
-              />
-            </div>
+            <DateTimePickerField
+              id="checkIn"
+              label="Entrada"
+              icon={<CalendarIcon size={14} className="mr-1" />}
+              value={form.checkIn}
+              onChange={(value) => setForm((current) => ({ ...current, checkIn: value }))}
+            />
+            <DateTimePickerField
+              id="checkOut"
+              label="Salida Target"
+              icon={<ClockIcon size={14} className="mr-1" />}
+              value={form.checkOut}
+              onChange={(value) => setForm((current) => ({ ...current, checkOut: value }))}
+            />
           </div>
 
           <div>

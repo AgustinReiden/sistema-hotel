@@ -74,6 +74,11 @@ const guestCountSchema = z
   }, z.number().int().min(1, "La cantidad de pasajeros debe ser al menos 1.").max(20, "Maximo 20 pasajeros por reserva."))
   .optional();
 
+const optionalGuestText = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().trim().max(120, "Maximo 120 caracteres.").optional()
+);
+
 const walkInBaseSchema = {
   customerMode: z.enum(["manual", "associated"]),
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),
@@ -83,6 +88,7 @@ const walkInBaseSchema = {
     .min(1, "Debe ser al menos 1 noche")
     .max(30, "Maximo 30 noches por reserva."),
   guestCount: guestCountSchema,
+  stayType: z.enum(["night", "half_day"]).optional(),
 };
 
 export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
@@ -98,6 +104,8 @@ export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
     ...walkInBaseSchema,
     customerMode: z.literal("associated"),
     associatedClientId: associatedClientIdSchema,
+    guestName: optionalGuestText,
+    guestDni: optionalGuestText,
   }),
 ]);
 
@@ -126,6 +134,8 @@ export const createReservationSchema = z
       checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
       checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
       guestCount: guestCountSchema,
+      guestName: optionalGuestText,
+      guestDni: optionalGuestText,
     }),
   ])
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {

@@ -406,14 +406,25 @@ export async function checkRoomAvailability(
 
 export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_staff_assign_walk_in", {
+  // Los parametros nuevos (siesta / pasajero) se envian solo cuando hacen falta,
+  // para seguir funcionando aunque todavia no se haya aplicado la migracion 50.
+  const params: Record<string, string | number | boolean | null> = {
     p_room_id: input.roomId,
     p_client_name: input.customerMode === "manual" ? input.clientName : null,
     p_nights: input.nights,
     p_associated_client_id:
       input.customerMode === "associated" ? input.associatedClientId : null,
     p_guest_count: input.guestCount ?? 1,
-  });
+  };
+  if (input.stayType === "half_day") {
+    params.p_half_day = true;
+  }
+  if (input.customerMode === "associated") {
+    if (input.guestName) params.p_guest_name = input.guestName;
+    if (input.guestDni) params.p_guest_dni = input.guestDni;
+  }
+
+  const { data, error } = await supabase.rpc("rpc_staff_assign_walk_in", params);
 
   if (error) throw error;
   return String(data);
@@ -474,7 +485,9 @@ export async function staffCreateReservation(
   input: CreateReservationPayload
 ): Promise<string> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_staff_create_reservation", {
+  // Los datos de pasajero se envian solo cuando se cargan, para seguir funcionando
+  // aunque todavia no se haya aplicado la migracion 51.
+  const params: Record<string, string | number | null> = {
     p_room_id: input.roomId,
     p_check_in: input.checkIn,
     p_check_out: input.checkOut,
@@ -485,7 +498,13 @@ export async function staffCreateReservation(
     p_associated_client_id:
       input.customerMode === "associated" ? input.associatedClientId : null,
     p_guest_count: input.guestCount ?? 1,
-  });
+  };
+  if (input.customerMode === "associated") {
+    if (input.guestName) params.p_guest_name = input.guestName;
+    if (input.guestDni) params.p_guest_dni = input.guestDni;
+  }
+
+  const { data, error } = await supabase.rpc("rpc_staff_create_reservation", params);
 
   if (error) throw error;
   return String(data);
@@ -1292,6 +1311,31 @@ export async function getOpenShiftForCurrentUser(): Promise<CashShift | null> {
     .select("*")
     .eq("opened_by", user.id)
     .eq("status", "open")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return toCashShift(data as CashShiftRow);
+}
+
+/**
+ * Turno abierto vigente segun el rol del que mira:
+ * - recepcionista: su propio turno abierto.
+ * - admin: el turno abierto del hotel (el mas reciente), aunque lo haya abierto
+ *   un recepcionista. El RLS ya permite al admin leer todas las cajas.
+ */
+export async function getActiveOpenShift(role: UserRole): Promise<CashShift | null> {
+  if (role !== "admin") {
+    return getOpenShiftForCurrentUser();
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("cash_shifts")
+    .select("*")
+    .eq("status", "open")
+    .order("opened_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;

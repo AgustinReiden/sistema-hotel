@@ -8,6 +8,7 @@ import {
   handleLoadReservationForEdit,
   handleUpdateReservation,
 } from "./actions";
+import DateTimePickerField from "./DateTimePickerField";
 import type { ReservationEditableRow } from "@/lib/data";
 
 type Props = {
@@ -213,26 +214,18 @@ export default function EditReservationModal({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">Check-in</label>
-                  <input
-                    type="datetime-local"
-                    value={checkIn}
-                    onChange={(e) => setCheckIn(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">Check-out</label>
-                  <input
-                    type="datetime-local"
-                    value={checkOut}
-                    onChange={(e) => setCheckOut(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none"
-                    required
-                  />
-                </div>
+                <DateTimePickerField
+                  id="edit-check-in"
+                  label="Check-in"
+                  value={checkIn}
+                  onChange={setCheckIn}
+                />
+                <DateTimePickerField
+                  id="edit-check-out"
+                  label="Check-out"
+                  value={checkOut}
+                  onChange={setCheckOut}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

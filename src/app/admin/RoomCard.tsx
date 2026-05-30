@@ -41,6 +41,7 @@ type RoomCardProps = {
     totalPrice: number;
     paidAmount: number;
     basePrice: number;
+    halfDayPrice: number;
     hasArrivalToday: boolean;
   };
   associatedClients: AssociatedClient[];
@@ -303,7 +304,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 Hacer Check-Out
               </button>
             </div>
-            <div className="pt-1 grid grid-cols-3 gap-2">
+            <div className={`pt-1 grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
               <button
                 onClick={() => setIsExtrasModalOpen(true)}
                 disabled={isPending}
@@ -320,14 +321,16 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 <Replace size={14} />
                 Cambiar
               </button>
-              <button
-                onClick={() => setIsEditModalOpen(true)}
-                disabled={isPending}
-                className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
-              >
-                <Pencil size={14} />
-                Editar
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setIsEditModalOpen(true)}
+                  disabled={isPending}
+                  className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
+                >
+                  <Pencil size={14} />
+                  Editar
+                </button>
+              )}
             </div>
             <div className="pt-1 flex">
               <button
@@ -436,6 +439,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
         onClose={() => setIsWalkInModalOpen(false)}
         roomNumber={room.number}
         basePrice={room.basePrice}
+        halfDayPrice={room.halfDayPrice}
         associatedClients={associatedClients}
         onSubmit={(data) => handleAssignWalkIn({ ...data, roomId: room.id })}
       />

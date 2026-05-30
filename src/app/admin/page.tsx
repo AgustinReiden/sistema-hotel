@@ -34,6 +34,7 @@ type DashboardRoom = {
   totalPrice: number;
   paidAmount: number;
   basePrice: number;
+  halfDayPrice: number;
   hasArrivalToday: boolean;
 };
 
@@ -157,6 +158,7 @@ export default async function Dashboard() {
       totalPrice,
       paidAmount,
       basePrice: room.base_price,
+      halfDayPrice: room.half_day_price,
       hasArrivalToday: Boolean(confirmedReservation),
     };
   });
