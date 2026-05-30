@@ -79,6 +79,22 @@ const optionalGuestText = z.preprocess(
   z.string().trim().max(120, "Maximo 120 caracteres.").optional()
 );
 
+const optionalDateText = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().trim().max(20).optional()
+);
+
+/** Campos opcionales del registro de huespedes (libro de pasajeros). */
+const guestRegistrySchemaFields = {
+  guestProfession: optionalGuestText,
+  guestAddress: optionalGuestText,
+  guestLocality: optionalGuestText,
+  guestNationality: optionalGuestText,
+  guestDocType: optionalGuestText,
+  guestBirthDate: optionalDateText,
+  guestVehicle: optionalGuestText,
+};
+
 const walkInBaseSchema = {
   customerMode: z.enum(["manual", "associated"]),
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),
@@ -89,6 +105,7 @@ const walkInBaseSchema = {
     .max(30, "Maximo 30 noches por reserva."),
   guestCount: guestCountSchema,
   stayType: z.enum(["night", "half_day"]).optional(),
+  ...guestRegistrySchemaFields,
 };
 
 export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
@@ -126,6 +143,7 @@ export const createReservationSchema = z
       checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
       checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
       guestCount: guestCountSchema,
+      ...guestRegistrySchemaFields,
     }),
     z.object({
       customerMode: z.literal("associated"),
@@ -136,6 +154,7 @@ export const createReservationSchema = z
       guestCount: guestCountSchema,
       guestName: optionalGuestText,
       guestDni: optionalGuestText,
+      ...guestRegistrySchemaFields,
     }),
   ])
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {
