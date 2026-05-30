@@ -177,12 +177,20 @@ export type HotelSettings = {
 export type Guest = {
   id: string;
   client_name: string;
+  client_dni: string | null;
   status: ReservationStatus;
   check_in_target: string;
   check_out_target: string;
   room_number: string;
   total_price: number;
   paid_amount: number;
+  guest_profession: string | null;
+  guest_address: string | null;
+  guest_locality: string | null;
+  guest_nationality: string | null;
+  guest_doc_type: string | null;
+  guest_birth_date: string | null;
+  guest_vehicle: string | null;
 };
 
 export type AssociatedClient = {
@@ -201,8 +209,19 @@ export type ReservationCustomerMode = "manual" | "associated";
 
 export type WalkInStayType = "night" | "half_day";
 
+/** Campos opcionales del registro de huespedes (libro de pasajeros). */
+export type GuestRegistryInput = {
+  guestProfession?: string;
+  guestAddress?: string;
+  guestLocality?: string;
+  guestNationality?: string;
+  guestDocType?: string;
+  guestBirthDate?: string;
+  guestVehicle?: string;
+};
+
 export type CreateReservationPayload =
-  | {
+  | ({
       customerMode: "manual";
       roomId: number;
       clientName: string;
@@ -211,8 +230,8 @@ export type CreateReservationPayload =
       checkIn: string;
       checkOut: string;
       guestCount?: number;
-    }
-  | {
+    } & GuestRegistryInput)
+  | ({
       customerMode: "associated";
       roomId: number;
       associatedClientId: string;
@@ -222,18 +241,18 @@ export type CreateReservationPayload =
       /** Pasajero real que se hospeda (la empresa asociada es el huesped facturable). */
       guestName?: string;
       guestDni?: string;
-    };
+    } & GuestRegistryInput);
 
 export type AssignWalkInPayload =
-  | {
+  | ({
       customerMode: "manual";
       roomId: number;
       clientName: string;
       nights: number;
       guestCount?: number;
       stayType?: WalkInStayType;
-    }
-  | {
+    } & GuestRegistryInput)
+  | ({
       customerMode: "associated";
       roomId: number;
       nights: number;
@@ -243,7 +262,7 @@ export type AssignWalkInPayload =
       /** Pasajero real que se hospeda (la empresa asociada es el huesped facturable). */
       guestName?: string;
       guestDni?: string;
-    };
+    } & GuestRegistryInput);
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
 

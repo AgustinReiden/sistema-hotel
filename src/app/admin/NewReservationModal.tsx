@@ -15,10 +15,12 @@ import { toast } from "sonner";
 
 import AssociatedClientSelector from "./AssociatedClientSelector";
 import DateTimePickerField from "./DateTimePickerField";
+import GuestRegistryFields from "./GuestRegistryFields";
 import { calculateReservationPriceBreakdown } from "@/lib/pricing";
 import type {
   AssociatedClient,
   CreateReservationPayload,
+  GuestRegistryInput,
   ReservationCustomerMode,
   Room,
 } from "@/lib/types";
@@ -126,11 +128,13 @@ export default function NewReservationModal({
   const [form, setForm] = useState<ReservationFormState>(() =>
     buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime)
   );
+  const [registry, setRegistry] = useState<GuestRegistryInput>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
+    setRegistry({});
   }, [isOpen, initialValues, standardCheckInTime, standardCheckOutTime]);
 
   if (!isOpen) return null;
@@ -184,6 +188,7 @@ export default function NewReservationModal({
               checkIn: new Date(form.checkIn).toISOString(),
               checkOut: new Date(form.checkOut).toISOString(),
               guestCount: form.guestCount,
+              ...registry,
             }
           : {
               customerMode: "associated",
@@ -194,6 +199,7 @@ export default function NewReservationModal({
               guestCount: form.guestCount,
               guestName: form.guestName.trim() || undefined,
               guestDni: form.guestDni.trim() || undefined,
+              ...registry,
             };
 
       const result = await onSubmit(payload);
@@ -459,6 +465,12 @@ export default function NewReservationModal({
               Opcional. No afecta el precio (se calcula por habitacion).
             </p>
           </div>
+
+          <GuestRegistryFields
+            value={registry}
+            onChange={(patch) => setRegistry((current) => ({ ...current, ...patch }))}
+            idPrefix="reserva"
+          />
 
           {pricePreview && selectedAssociatedClient && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">
