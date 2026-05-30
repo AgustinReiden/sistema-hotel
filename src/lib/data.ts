@@ -65,11 +65,19 @@ type TimelineData = {
 type GuestReservationRow = {
   id: string;
   client_name: string;
+  client_dni: string | null;
   status: ReservationStatus;
   check_in_target: string;
   check_out_target: string;
   total_price: number;
   paid_amount: number;
+  guest_profession: string | null;
+  guest_address: string | null;
+  guest_locality: string | null;
+  guest_nationality: string | null;
+  guest_doc_type: string | null;
+  guest_birth_date: string | null;
+  guest_vehicle: string | null;
   rooms: { room_number: string } | { room_number: string }[] | null;
 };
 
@@ -295,11 +303,19 @@ export async function getGuestsData(
       `
       id,
       client_name,
+      client_dni,
       status,
       check_in_target,
       check_out_target,
       total_price,
       paid_amount,
+      guest_profession,
+      guest_address,
+      guest_locality,
+      guest_nationality,
+      guest_doc_type,
+      guest_birth_date,
+      guest_vehicle,
       rooms ( room_number )
       `
     )
@@ -329,12 +345,20 @@ export async function getGuestsData(
     return {
       id: reservation.id,
       client_name: reservation.client_name,
+      client_dni: reservation.client_dni ?? null,
       status: reservation.status,
       check_in_target: reservation.check_in_target,
       check_out_target: reservation.check_out_target,
       room_number: roomNumber,
       total_price: reservation.total_price || 0,
       paid_amount: reservation.paid_amount || 0,
+      guest_profession: reservation.guest_profession ?? null,
+      guest_address: reservation.guest_address ?? null,
+      guest_locality: reservation.guest_locality ?? null,
+      guest_nationality: reservation.guest_nationality ?? null,
+      guest_doc_type: reservation.guest_doc_type ?? null,
+      guest_birth_date: reservation.guest_birth_date ?? null,
+      guest_vehicle: reservation.guest_vehicle ?? null,
     };
   });
 }
@@ -423,6 +447,13 @@ export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> 
     if (input.guestName) params.p_guest_name = input.guestName;
     if (input.guestDni) params.p_guest_dni = input.guestDni;
   }
+  if (input.guestProfession) params.p_guest_profession = input.guestProfession;
+  if (input.guestAddress) params.p_guest_address = input.guestAddress;
+  if (input.guestLocality) params.p_guest_locality = input.guestLocality;
+  if (input.guestNationality) params.p_guest_nationality = input.guestNationality;
+  if (input.guestDocType) params.p_guest_doc_type = input.guestDocType;
+  if (input.guestBirthDate) params.p_guest_birth_date = input.guestBirthDate;
+  if (input.guestVehicle) params.p_guest_vehicle = input.guestVehicle;
 
   const { data, error } = await supabase.rpc("rpc_staff_assign_walk_in", params);
 
@@ -503,6 +534,13 @@ export async function staffCreateReservation(
     if (input.guestName) params.p_guest_name = input.guestName;
     if (input.guestDni) params.p_guest_dni = input.guestDni;
   }
+  if (input.guestProfession) params.p_guest_profession = input.guestProfession;
+  if (input.guestAddress) params.p_guest_address = input.guestAddress;
+  if (input.guestLocality) params.p_guest_locality = input.guestLocality;
+  if (input.guestNationality) params.p_guest_nationality = input.guestNationality;
+  if (input.guestDocType) params.p_guest_doc_type = input.guestDocType;
+  if (input.guestBirthDate) params.p_guest_birth_date = input.guestBirthDate;
+  if (input.guestVehicle) params.p_guest_vehicle = input.guestVehicle;
 
   const { data, error } = await supabase.rpc("rpc_staff_create_reservation", params);
 

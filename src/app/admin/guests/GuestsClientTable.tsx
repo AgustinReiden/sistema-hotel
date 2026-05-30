@@ -49,6 +49,7 @@ export default function GuestsClientTable({
             <th className="px-6 py-4">Huésped</th>
             <th className="px-6 py-4">Habitación</th>
             <th className="px-6 py-4">Fechas</th>
+            <th className="px-6 py-4">Registro</th>
             <th className="px-6 py-4">Estado</th>
             <th className="px-6 py-4 text-right">Acciones</th>
           </tr>
@@ -74,6 +75,12 @@ export default function GuestsClientTable({
                       >
                         {guest.client_name}
                       </span>
+                      {guest.client_dni && (
+                        <span className="text-[11px] text-slate-500">
+                          {guest.guest_doc_type ? `${guest.guest_doc_type} ` : ""}
+                          {guest.client_dni}
+                        </span>
+                      )}
                       {debt > 0 && canPay && (
                         <span className="text-[10px] uppercase font-bold text-amber-600 tracking-wider">
                           Deuda: ${debt.toLocaleString("en-US")}
@@ -94,6 +101,21 @@ export default function GuestsClientTable({
                   <p className="text-xs text-slate-500">
                     {format(new Date(guest.check_out_target), "dd MMM yyyy", { locale: es })}
                   </p>
+                </td>
+                <td className="px-6 py-4">
+                  {guest.guest_profession || guest.guest_locality || guest.guest_nationality ? (
+                    <div className="flex flex-col text-xs text-slate-600 max-w-[180px]">
+                      {guest.guest_profession && (
+                        <span className="font-medium text-slate-800 truncate">{guest.guest_profession}</span>
+                      )}
+                      {guest.guest_locality && <span className="truncate">{guest.guest_locality}</span>}
+                      {guest.guest_nationality && (
+                        <span className="text-slate-400 truncate">{guest.guest_nationality}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-300">—</span>
+                  )}
                 </td>
                 <td className="px-6 py-4">
                   {guest.status === "checked_in" && (

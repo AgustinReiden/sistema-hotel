@@ -5,11 +5,17 @@ import { CreditCard, Moon, Percent, Phone, Sun, UserRound, X } from "lucide-reac
 import { toast } from "sonner";
 
 import AssociatedClientSelector from "./AssociatedClientSelector";
+import GuestRegistryFields from "./GuestRegistryFields";
 import {
   calculateHalfDayPriceBreakdown,
   calculateWalkInPriceBreakdown,
 } from "@/lib/pricing";
-import type { AssignWalkInPayload, AssociatedClient, WalkInStayType } from "@/lib/types";
+import type {
+  AssignWalkInPayload,
+  AssociatedClient,
+  GuestRegistryInput,
+  WalkInStayType,
+} from "@/lib/types";
 
 type WalkInModalProps = {
   isOpen: boolean;
@@ -40,6 +46,7 @@ export default function WalkInModal({
   const [guestDni, setGuestDni] = useState("");
   const [nights, setNights] = useState(1);
   const [guestCount, setGuestCount] = useState(1);
+  const [registry, setRegistry] = useState<GuestRegistryInput>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -52,6 +59,7 @@ export default function WalkInModal({
     setGuestDni("");
     setNights(1);
     setGuestCount(1);
+    setRegistry({});
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -92,6 +100,7 @@ export default function WalkInModal({
               nights: isHalfDay ? 1 : nights,
               guestCount,
               stayType,
+              ...registry,
             }
           : {
               customerMode: "associated",
@@ -102,6 +111,7 @@ export default function WalkInModal({
               stayType,
               guestName: guestName.trim() || undefined,
               guestDni: guestDni.trim() || undefined,
+              ...registry,
             };
 
       const result = await onSubmit(payload);
@@ -329,6 +339,12 @@ export default function WalkInModal({
               <p className="text-xs text-slate-500 mt-1">Opcional (default 1).</p>
             </div>
           </div>
+
+          <GuestRegistryFields
+            value={registry}
+            onChange={(patch) => setRegistry((current) => ({ ...current, ...patch }))}
+            idPrefix="walkin"
+          />
 
           {isHalfDay && halfDayPrice <= 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
