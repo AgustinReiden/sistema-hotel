@@ -6,6 +6,7 @@ import type {
   AdminAlert,
   AssignWalkInPayload,
   AssociatedClient,
+  AssociatedClientLedger,
   CashShift,
   CashShiftStatus,
   CleaningType,
@@ -181,6 +182,78 @@ export async function getAssociatedClients(searchTerm = ""): Promise<AssociatedC
   if (error) throw error;
 
   return ((data ?? []) as AssociatedClientRow[]).map(toAssociatedClient);
+}
+
+/**
+ * Ficha de un asociado: su historial de estadías + totales (facturado/cobrado/saldo).
+ * El saldo es la deuda pendiente = facturado - cobrado, sobre estadías no canceladas.
+ */
+export async function getAssociatedClientLedger(
+  clientId: string
+): Promise<AssociatedClientLedger> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("reservations")
+    .select(
+      `
+      id,
+      notes,
+      status,
+      check_in_target,
+      check_out_target,
+      total_price,
+      paid_amount,
+      rooms ( room_number )
+      `
+    )
+    .eq("associated_client_id", clientId)
+    .order("check_in_target", { ascending: false });
+
+  if (error) throw error;
+
+  type LedgerRow = {
+    id: string;
+    notes: string | null;
+    status: ReservationStatus;
+    check_in_target: string;
+    check_out_target: string;
+    total_price: number | string | null;
+    paid_amount: number | string | null;
+    rooms: { room_number: string } | { room_number: string }[] | null;
+  };
+
+  const rows = (data ?? []) as LedgerRow[];
+  let facturado = 0;
+  let cobrado = 0;
+  let count = 0;
+
+  const reservations = rows.map((row) => {
+    const roomRelation = row.rooms;
+    const roomNumber = Array.isArray(roomRelation)
+      ? roomRelation[0]?.room_number ?? null
+      : roomRelation?.room_number ?? null;
+    const total = Number(row.total_price) || 0;
+    const paid = Number(row.paid_amount) || 0;
+
+    if (row.status !== "cancelled") {
+      facturado += total;
+      cobrado += paid;
+      count += 1;
+    }
+
+    return {
+      id: row.id,
+      passenger: row.notes,
+      room_number: roomNumber,
+      status: row.status,
+      check_in_target: row.check_in_target,
+      check_out_target: row.check_out_target,
+      total_price: total,
+      paid_amount: paid,
+    };
+  });
+
+  return { reservations, facturado, cobrado, saldo: facturado - cobrado, count };
 }
 
 export async function getDashboardData(): Promise<DashboardData> {

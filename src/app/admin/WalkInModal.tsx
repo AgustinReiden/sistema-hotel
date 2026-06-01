@@ -84,9 +84,15 @@ export default function WalkInModal({
     e.preventDefault();
     if (!isHalfDay && nights < 1) return;
     if (customerMode === "manual" && !clientName.trim()) return;
-    if (customerMode === "associated" && !associatedClientId) {
-      toast.error("Selecciona un asociado para continuar.");
-      return;
+    if (customerMode === "associated") {
+      if (!associatedClientId) {
+        toast.error("Selecciona un asociado para continuar.");
+        return;
+      }
+      if (!guestName.trim() || !guestDni.trim()) {
+        toast.error("Cargá el nombre y el DNI del pasajero.");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -109,8 +115,8 @@ export default function WalkInModal({
               nights: isHalfDay ? 1 : nights,
               guestCount,
               stayType,
-              guestName: guestName.trim() || undefined,
-              guestDni: guestDni.trim() || undefined,
+              guestName: guestName.trim(),
+              guestDni: guestDni.trim(),
               ...registry,
             };
 
@@ -269,16 +275,17 @@ export default function WalkInModal({
 
               <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Pasajero que se hospeda (opcional)
+                  Pasajero que se hospeda <span className="text-red-500">*</span>
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label htmlFor="walkinGuestName" className="block text-xs font-semibold text-slate-600 mb-1">
-                      Nombre del pasajero
+                      Nombre del pasajero <span className="text-red-500">*</span>
                     </label>
                     <input
                       id="walkinGuestName"
                       type="text"
+                      required
                       value={guestName}
                       onChange={(e) => setGuestName(e.target.value)}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
@@ -287,11 +294,12 @@ export default function WalkInModal({
                   </div>
                   <div>
                     <label htmlFor="walkinGuestDni" className="block text-xs font-semibold text-slate-600 mb-1">
-                      DNI del pasajero
+                      DNI del pasajero <span className="text-red-500">*</span>
                     </label>
                     <input
                       id="walkinGuestDni"
                       type="text"
+                      required
                       value={guestDni}
                       onChange={(e) => setGuestDni(e.target.value)}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
@@ -300,7 +308,7 @@ export default function WalkInModal({
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  La empresa queda como huésped facturable; estos datos se guardan como observación.
+                  La empresa es el huésped facturable; el pasajero real es obligatorio y se guarda en observaciones.
                 </p>
               </div>
             </div>
@@ -413,7 +421,9 @@ export default function WalkInModal({
               disabled={
                 isSubmitting ||
                 (isHalfDay && halfDayPrice <= 0) ||
-                (customerMode === "manual" ? !clientName.trim() : !associatedClientId)
+                (customerMode === "manual"
+                  ? !clientName.trim()
+                  : !associatedClientId || !guestName.trim() || !guestDni.trim())
               }
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
