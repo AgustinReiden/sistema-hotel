@@ -79,6 +79,18 @@ const optionalGuestText = z.preprocess(
   z.string().trim().max(120, "Maximo 120 caracteres.").optional()
 );
 
+// Datos del pasajero real: obligatorios cuando la reserva va a nombre de un asociado.
+const requiredPassengerName = z
+  .string()
+  .trim()
+  .min(2, "El nombre del pasajero es obligatorio.")
+  .max(120, "Maximo 120 caracteres.");
+const requiredPassengerDni = z
+  .string()
+  .trim()
+  .min(6, "El DNI/CUIT del pasajero es obligatorio (minimo 6 caracteres).")
+  .max(60, "Maximo 60 caracteres.");
+
 const optionalDateText = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
   z.string().trim().max(20).optional()
@@ -121,8 +133,8 @@ export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
     ...walkInBaseSchema,
     customerMode: z.literal("associated"),
     associatedClientId: associatedClientIdSchema,
-    guestName: optionalGuestText,
-    guestDni: optionalGuestText,
+    guestName: requiredPassengerName,
+    guestDni: requiredPassengerDni,
   }),
 ]);
 
@@ -152,8 +164,8 @@ export const createReservationSchema = z
       checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
       checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
       guestCount: guestCountSchema,
-      guestName: optionalGuestText,
-      guestDni: optionalGuestText,
+      guestName: requiredPassengerName,
+      guestDni: requiredPassengerDni,
       ...guestRegistrySchemaFields,
     }),
   ])

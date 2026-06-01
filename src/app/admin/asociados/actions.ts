@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getAssociatedClientLedger } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionResult } from "@/lib/types";
+import type { ActionResult, AssociatedClientLedger } from "@/lib/types";
 import { associatedClientSchema } from "@/lib/validations";
 
 type AssociatedClientFormPayload = {
@@ -120,6 +121,19 @@ export async function toggleAssociatedClientStatusAction(
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al actualizar el estado del asociado.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function loadAssociatedClientLedgerAction(
+  clientId: string
+): Promise<ActionResult<AssociatedClientLedger>> {
+  try {
+    await assertAdmin();
+    const ledger = await getAssociatedClientLedger(clientId);
+    return { success: true, data: ledger };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo cargar la ficha del asociado.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

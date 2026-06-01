@@ -42,11 +42,24 @@ describe("assignWalkInSchema", () => {
       roomId: 1,
       nights: 2,
       associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+      guestName: "Maria Lopez",
+      guestDni: "30123456",
     });
 
     expect(result.customerMode).toBe("associated");
     if (result.customerMode !== "associated") throw new Error("Expected associated mode");
     expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
+  });
+
+  it("rejects associated walk-in without passenger data", () => {
+    expect(() =>
+      assignWalkInSchema.parse({
+        customerMode: "associated",
+        roomId: 1,
+        nights: 1,
+        associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+      })
+    ).toThrow();
   });
 
   it("rejects empty client name in manual mode", () => {
@@ -160,11 +173,25 @@ describe("createReservationSchema", () => {
       associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
       checkIn: "2026-04-01T14:00:00.000Z",
       checkOut: "2026-04-03T10:00:00.000Z",
+      guestName: "Maria Lopez",
+      guestDni: "30123456",
     });
 
     expect(result.customerMode).toBe("associated");
     if (result.customerMode !== "associated") throw new Error("Expected associated mode");
     expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
+  });
+
+  it("rejects associated reservation without passenger data", () => {
+    expect(() =>
+      createReservationSchema.parse({
+        customerMode: "associated",
+        roomId: 1,
+        associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+        checkIn: "2026-04-01T14:00:00.000Z",
+        checkOut: "2026-04-03T10:00:00.000Z",
+      })
+    ).toThrow();
   });
 
   it("allows empty optional phone", () => {
