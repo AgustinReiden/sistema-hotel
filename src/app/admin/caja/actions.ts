@@ -46,7 +46,11 @@ export async function closeShiftAction(input: {
     // rinde la caja de un recepcionista permanece logueado. Ya no se reabre turno.
     const shouldLogout = role !== "admin";
 
-    revalidateCajaViews();
+    // Si el que cierra se va (recepcionista), NO revalidamos /admin/caja: si lo
+    // hicieramos, el server-component re-renderizaria con summary=null y desmontaria
+    // el modal de cierre antes de imprimir el comprobante y cerrar sesion. El admin
+    // queda en la pagina, asi que ahi si revalidamos.
+    if (!shouldLogout) revalidateCajaViews();
     return { success: true, data: { ...result, shouldLogout } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cerrar la caja.");
