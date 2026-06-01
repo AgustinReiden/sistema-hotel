@@ -205,6 +205,27 @@ export type AssociatedClient = {
   updated_at: string;
 };
 
+/** Una fila del historial de estadías de un asociado (para su ficha). */
+export type AssociatedLedgerRow = {
+  id: string;
+  passenger: string | null;
+  room_number: string | null;
+  status: ReservationStatus;
+  check_in_target: string;
+  check_out_target: string;
+  total_price: number;
+  paid_amount: number;
+};
+
+/** Ficha del asociado: historial de estadías + totales (facturado/cobrado/saldo). */
+export type AssociatedClientLedger = {
+  reservations: AssociatedLedgerRow[];
+  facturado: number;
+  cobrado: number;
+  saldo: number;
+  count: number;
+};
+
 export type ReservationCustomerMode = "manual" | "associated";
 
 export type WalkInStayType = "night" | "half_day";
@@ -238,9 +259,9 @@ export type CreateReservationPayload =
       checkIn: string;
       checkOut: string;
       guestCount?: number;
-      /** Pasajero real que se hospeda (la empresa asociada es el huesped facturable). */
-      guestName?: string;
-      guestDni?: string;
+      /** Pasajero real que se hospeda; obligatorio en modo asociado (la empresa es el huesped facturable). */
+      guestName: string;
+      guestDni: string;
     } & GuestRegistryInput);
 
 export type AssignWalkInPayload =
@@ -259,9 +280,9 @@ export type AssignWalkInPayload =
       associatedClientId: string;
       guestCount?: number;
       stayType?: WalkInStayType;
-      /** Pasajero real que se hospeda (la empresa asociada es el huesped facturable). */
-      guestName?: string;
-      guestDni?: string;
+      /** Pasajero real que se hospeda; obligatorio en modo asociado (la empresa es el huesped facturable). */
+      guestName: string;
+      guestDni: string;
     } & GuestRegistryInput);
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";

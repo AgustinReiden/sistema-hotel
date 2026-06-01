@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Edit, FolderArchive, Plus, RotateCcw } from "lucide-react";
+import { Edit, FolderArchive, Plus, RotateCcw, ScrollText } from "lucide-react";
 import { toast } from "sonner";
 
 import AssociatedClientModal from "./AssociatedClientModal";
+import AssociatedClientLedgerModal from "./AssociatedClientLedgerModal";
 import {
   createAssociatedClientAction,
   toggleAssociatedClientStatusAction,
@@ -22,6 +23,7 @@ export default function AssociatedClientsClientTable({
 }) {
   const router = useRouter();
   const [selectedClient, setSelectedClient] = useState<AssociatedClient | null>(null);
+  const [ledgerClient, setLedgerClient] = useState<AssociatedClient | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [changingStatusId, setChangingStatusId] = useState<string | null>(null);
 
@@ -108,6 +110,13 @@ export default function AssociatedClientsClientTable({
                 <td className="px-6 py-4 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button
+                      onClick={() => setLedgerClient(client)}
+                      className="inline-flex items-center justify-center p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                      title="Ver ficha (historial y saldo)"
+                    >
+                      <ScrollText size={18} />
+                    </button>
+                    <button
                       onClick={() => setSelectedClient(client)}
                       className="inline-flex items-center justify-center p-2 text-brand-600 hover:bg-brand-50 rounded-lg transition-colors cursor-pointer"
                       title="Editar Asociado"
@@ -160,6 +169,11 @@ export default function AssociatedClientsClientTable({
           if (result.success) router.refresh();
           return result;
         }}
+      />
+
+      <AssociatedClientLedgerModal
+        client={ledgerClient}
+        onClose={() => setLedgerClient(null)}
       />
     </>
   );
