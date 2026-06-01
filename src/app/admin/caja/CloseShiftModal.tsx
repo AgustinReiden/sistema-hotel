@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Banknote,
@@ -9,7 +9,7 @@ import {
   EyeOff,
   Landmark,
   Loader2,
-  LogOut,
+  Printer,
   Wallet,
   X,
 } from "lucide-react";
@@ -23,7 +23,6 @@ type Props = {
   onClose: () => void;
   shiftId: string;
   totalsByMethod: Record<PaymentMethod, number>;
-  isAdmin: boolean;
 };
 
 type CloseResult = {
@@ -56,7 +55,6 @@ export default function CloseShiftModal({
   onClose,
   shiftId,
   totalsByMethod,
-  isAdmin,
 }: Props) {
   const router = useRouter();
   const [actualCash, setActualCash] = useState("");
@@ -65,6 +63,21 @@ export default function CloseShiftModal({
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState<CloseResult | null>(null);
   const [finishing, setFinishing] = useState(false);
+
+  // Recepcionista: al cerrar la caja, abre el comprobante de rendicion (auto-imprime con
+  // kiosk) y, dado un margen para que cargue con la sesion aun valida, cierra sesion.
+  useEffect(() => {
+    if (!closed?.shouldLogout) return;
+    window.open(
+      `/admin/caja/rendiciones/${shiftId}?autoprint=1`,
+      `rendicion-${shiftId}`,
+      "width=420,height=720"
+    );
+    const timer = window.setTimeout(() => {
+      logout();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [closed, shiftId]);
 
   if (!isOpen) return null;
 
@@ -135,25 +148,42 @@ export default function CloseShiftModal({
                 <p className="font-bold text-slate-800">${formatMoney(closed.actual_cash)}</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleFinish}
-              disabled={finishing}
-              className="w-full px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
-            >
-              {finishing ? (
-                <Loader2 className="animate-spin" size={18} />
-              ) : closed.shouldLogout ? (
-                <LogOut size={18} />
-              ) : (
-                <CheckCircle2 size={18} />
-              )}
-              {closed.shouldLogout ? "Finalizar y cerrar sesion" : "Listo"}
-            </button>
-            {!isAdmin && (
-              <p className="text-[11px] text-slate-400 mt-3">
-                Al finalizar se cierra tu sesion. La proxima vez que ingreses se abre la caja de nuevo.
-              </p>
+            {closed.shouldLogout ? (
+              <>
+                <div className="flex items-center justify-center gap-2 text-sm font-medium text-slate-600">
+                  <Loader2 className="animate-spin" size={18} />
+                  Imprimiendo comprobante y cerrando sesion…
+                </div>
+                <p className="text-[11px] text-slate-400 mt-3">
+                  La proxima vez que ingreses se abre la caja de nuevo.
+                </p>
+              </>
+            ) : (
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.open(
+                      `/admin/caja/rendiciones/${shiftId}?autoprint=1`,
+                      `rendicion-${shiftId}`,
+                      "width=420,height=720"
+                    )
+                  }
+                  className="flex-1 px-5 py-2.5 border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Printer size={18} />
+                  Imprimir comprobante
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFinish}
+                  disabled={finishing}
+                  className="flex-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  {finishing ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+                  Listo
+                </button>
+              </div>
             )}
           </div>
         </div>

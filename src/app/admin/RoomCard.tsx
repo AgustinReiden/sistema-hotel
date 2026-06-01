@@ -59,6 +59,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
   const [isChangeRoomModalOpen, setIsChangeRoomModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [extendNights, setExtendNights] = useState(1);
+  const [extendMode, setExtendMode] = useState<"nights" | "half_day">("nights");
   const [cancelReason, setCancelReason] = useState("");
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
@@ -160,13 +161,20 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
     if (!reservationId) return;
 
     startTransition(async () => {
-      const result = await handleExtendReservation(reservationId, extendNights);
+      const result =
+        extendMode === "half_day"
+          ? await handleLateCheckOut(reservationId)
+          : await handleExtendReservation(reservationId, extendNights);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
       setIsExtendModalOpen(false);
-      toast.success("Reserva ampliada exitosamente.");
+      toast.success(
+        extendMode === "half_day"
+          ? "Medio día agregado a la reserva."
+          : "Reserva ampliada exitosamente."
+      );
     });
   };
 
@@ -287,7 +295,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 </button>
               )}
               <button
-                onClick={() => setIsExtendModalOpen(true)}
+                onClick={() => {
+                  setExtendMode("nights");
+                  setExtendNights(1);
+                  setIsExtendModalOpen(true);
+                }}
                 disabled={isPending}
                 className="flex-1 px-3 py-2 rounded-lg disabled:opacity-50 text-sm font-bold transition-colors bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
               >
@@ -492,20 +504,51 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Ampliar Reserva</h3>
             <p className="text-sm text-slate-600 mb-4">
-              Agrega noches a la estadía de <strong>{room.client}</strong>.
+              Extendé la estadía de <strong>{room.client}</strong>.
             </p>
             <form onSubmit={submitExtend}>
-              <div className="mb-6">
-                <label className="block text-sm font-bold text-slate-700 mb-2">Noches Adicionales</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={extendNights}
-                  onChange={(e) => setExtendNights(parseInt(e.target.value, 10) || 1)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring outline-none"
-                  required
-                />
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setExtendMode("nights")}
+                  className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+                    extendMode === "nights"
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-slate-200 text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  Noche(s)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExtendMode("half_day")}
+                  className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+                    extendMode === "half_day"
+                      ? "border-amber-500 bg-amber-50 text-amber-700"
+                      : "border-slate-200 text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  Medio día
+                </button>
               </div>
+              {extendMode === "nights" ? (
+                <div className="mb-6">
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Noches Adicionales</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={extendNights}
+                    onChange={(e) => setExtendNights(parseInt(e.target.value, 10) || 1)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring outline-none"
+                    required
+                  />
+                </div>
+              ) : (
+                <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Se cobra el precio de <strong>medio día</strong> y la salida pasa al horario de
+                  late check-out. Se aplica una vez por reserva.
+                </div>
+              )}
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"

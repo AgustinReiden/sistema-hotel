@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   addMonths,
   eachDayOfInterval,
@@ -58,6 +58,14 @@ export default function DateTimePickerField({
   const [viewMonth, setViewMonth] = useState<Date>(startOfMonth(initial.date));
   const [draftDate, setDraftDate] = useState<Date>(initial.date);
   const [draftTime, setDraftTime] = useState<string>(initial.time);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Al abrir el calendario, encuadrarlo en pantalla (queda bien dentro del modal con scroll).
+  useEffect(() => {
+    if (open) {
+      popoverRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [open]);
 
   const openPicker = () => {
     const parsed = parseValue(value);
@@ -94,7 +102,10 @@ export default function DateTimePickerField({
       </button>
 
       {open && (
-        <div className="mt-2 rounded-xl border border-slate-200 bg-white shadow-lg p-4 space-y-4">
+        <div
+          ref={popoverRef}
+          className="mt-2 rounded-xl border border-slate-200 bg-white shadow-lg p-4 space-y-4"
+        >
           <div className="flex items-center justify-between">
             <button
               type="button"
