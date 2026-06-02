@@ -175,7 +175,10 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
   const autoPrint = sp.autoprint === "1";
   const requestedCopy =
     sp.copy === "duplicate" ? "duplicate" : sp.copy === "original" ? "original" : null;
-  const copyMode = autoPrint ? requestedCopy ?? "original" : requestedCopy ?? "both";
+  // En autoimpresion se imprimen las dos copias (original + duplicado) en un UNICO trabajo
+  // y la ventana se cierra una vez. Antes navegaba de una copia a la otra, y esa segunda
+  // request perdia la sesion (al cerrar caja) -> el comprobante "se cerraba" antes de imprimir.
+  const copyMode = autoPrint ? "both" : requestedCopy ?? "both";
   const [summary, hotelSettings] = await Promise.all([
     getShiftSummary(id),
     getHotelSettings().catch(() => null),
@@ -212,10 +215,6 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     notes: shift.notes,
     printedAt: formatHotelDateTime(new Date().toISOString(), tz),
   };
-  const nextUrl =
-    autoPrint && copyMode === "original"
-      ? `/admin/caja/rendiciones/${id}?autoprint=1&copy=duplicate`
-      : undefined;
   const copies =
     copyMode === "both"
       ? [
@@ -241,7 +240,7 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
         {copies.map((copy) => (
           <ShiftCopy key={copy.key} title={copy.title} {...copyProps} />
         ))}
-        {autoPrint && <ThermalAutoPrint nextUrl={nextUrl} closeOnDone={!nextUrl} />}
+        {autoPrint && <ThermalAutoPrint closeOnDone />}
 
         <style>{`
           @page { size: 75mm auto; margin: 2mm; }
