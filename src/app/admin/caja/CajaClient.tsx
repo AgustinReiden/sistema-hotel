@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Wallet,
   DollarSign,
@@ -44,8 +45,24 @@ type Props = {
 };
 
 export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
+  const router = useRouter();
   const [openModalOpen, setOpenModalOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
+
+  // Mantener la vista de caja al dia: si otro usuario (p. ej. el recepcionista) abre o
+  // cierra la caja, esta pantalla lo refleja sin recargar a mano (cada 15s y al volver el
+  // foco). Se pausa mientras hay un modal abierto para no interrumpir. router.refresh()
+  // re-fetchea los server components preservando el estado del cliente.
+  useEffect(() => {
+    if (openModalOpen || closeModalOpen) return;
+    const refresh = () => router.refresh();
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [openModalOpen, closeModalOpen, router]);
 
   return (
     <div className="p-8 pb-20 overflow-y-auto w-full">
