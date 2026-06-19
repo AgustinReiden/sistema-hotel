@@ -33,7 +33,7 @@ const nextConfig = {
                 protocol: 'https',
                 hostname: process.env.NEXT_PUBLIC_SUPABASE_URL
                     ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
-                    : 'kbwikplgzmrerceamdja.supabase.co',
+                    : 'xoqxbtlpppsyzccljjxp.supabase.co',
             },
         ],
     },
