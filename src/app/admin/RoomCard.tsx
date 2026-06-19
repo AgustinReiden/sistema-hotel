@@ -218,7 +218,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
       className={`relative bg-white rounded-xl border transition-all duration-300 shadow-sm hover:shadow-md ${room.isLate ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200"}`}
     >
       <div
-        className={`p-4 border-b flex justify-between items-start rounded-t-xl ${room.status === "available"
+        className={`p-3 border-b flex justify-between items-start rounded-t-xl ${room.status === "available"
           ? "bg-slate-50 border-slate-100"
           : room.status === "occupied"
             ? room.isLate
@@ -256,7 +256,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-3 space-y-3">
         {room.status === "occupied" && (
           <>
             <div>
@@ -272,7 +272,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 <p
                   className={`text-sm font-bold flex items-center ${room.isLate ? "text-amber-600" : "text-slate-800"}`}
                 >
-                  <Clock size={14} className="mr-1.5" />
+                  <Clock size={13} className="mr-1.5" />
                   {room.checkout}
                 </p>
               </div>
@@ -322,7 +322,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 disabled={isPending}
                 className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
               >
-                <Plus size={14} />
+                <Plus size={13} />
                 Extra
               </button>
               <button
@@ -330,7 +330,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                 disabled={isPending}
                 className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
               >
-                <Replace size={14} />
+                <Replace size={13} />
                 Cambiar
               </button>
               {isAdmin && (
@@ -339,7 +339,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
                   disabled={isPending}
                   className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
                 >
-                  <Pencil size={14} />
+                  <Pencil size={13} />
                   Editar
                 </button>
               )}
@@ -382,7 +382,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
               </>
             ) : (
               <>
-                <BedDouble size={32} className="text-slate-200 mb-1" />
+                <BedDouble size={24} className="text-slate-200 mb-1" />
                 <button
                   onClick={() => setIsWalkInModalOpen(true)}
                   className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
