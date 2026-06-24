@@ -279,9 +279,10 @@ export default function PublicSearchForm() {
         setOpenPicker(null);
 
         if (nextQuery === currentQuery) {
-            document
-                .getElementById("habitaciones")
-                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            const target =
+                document.getElementById("resultados") ??
+                document.getElementById("habitaciones");
+            target?.scrollIntoView({ behavior: "smooth", block: "start" });
             return;
         }
 
