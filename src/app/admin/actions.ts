@@ -12,6 +12,7 @@ import {
   doCheckIn,
   doCheckout,
   extendReservation,
+  findGuestByDni,
   getCancellationReason,
   getHotelSettings,
   getReservationForEdit,
@@ -36,6 +37,7 @@ import type {
   ActionResult,
   AssignWalkInPayload,
   CreateReservationPayload,
+  GuestDniMatch,
   PaymentMethod,
   Room,
 } from "@/lib/types";
@@ -150,6 +152,15 @@ export async function handleAssignWalkIn(
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al asignar la habitacion.");
     return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+// Busca un huésped existente por DNI para avisar duplicados al cargar un cliente ocasional.
+export async function lookupGuestByDni(dni: string): Promise<GuestDniMatch | null> {
+  try {
+    return await findGuestByDni(dni);
+  } catch {
+    return null;
   }
 }
 

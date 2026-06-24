@@ -12,6 +12,7 @@ import {
   FileText,
   Clock,
   CircleDollarSign,
+  EyeOff,
 } from "lucide-react";
 
 import OpenShiftModal from "./OpenShiftModal";
@@ -41,10 +42,12 @@ const METHOD_META: Record<string, { label: string; icon: ReactNode }> = {
 type Props = {
   summary: ShiftSummary | null;
   isAdmin: boolean;
+  /** Recepcion no ve el efectivo (arqueo a ciegas); el admin si. */
+  canSeeCash: boolean;
   hotelTimezone: string;
 };
 
-export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
+export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone }: Props) {
   const router = useRouter();
   const [openModalOpen, setOpenModalOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
@@ -139,11 +142,23 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {!canSeeCash && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+              <EyeOff size={18} className="text-slate-400 shrink-0 mt-0.5" />
+              <div className="text-sm text-slate-600">
+                <span className="font-bold text-slate-700">Arqueo a ciegas:</span> el efectivo del
+                turno no se muestra. Lo vas a contar al cerrar y recién ahí aparece la diferencia.
+              </div>
+            </div>
+          )}
+
+          <div
+            className={`grid grid-cols-1 gap-6 mb-8 ${canSeeCash ? "md:grid-cols-3" : "md:grid-cols-2"}`}
+          >
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">
                 <CircleDollarSign size={14} />
-                Total Cobrado
+                {canSeeCash ? "Total Cobrado" : "Cobrado (otros medios)"}
               </div>
               <p className="text-3xl font-bold text-slate-900">
                 ${formatMoney(summary.totalIncome)}
@@ -153,18 +168,20 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
               </p>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">
-                <Banknote size={14} />
-                Efectivo del turno
+            {canSeeCash && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">
+                  <Banknote size={14} />
+                  Efectivo del turno
+                </div>
+                <p className="text-3xl font-bold text-emerald-600">
+                  ${formatMoney(summary.cashIncome)}
+                </p>
+                <p className="text-xs text-slate-500 mt-2">
+                  Lo que hay que rendir en efectivo.
+                </p>
               </div>
-              <p className="text-3xl font-bold text-emerald-600">
-                ${formatMoney(summary.cashIncome)}
-              </p>
-              <p className="text-xs text-slate-500 mt-2">
-                Lo que hay que rendir en efectivo.
-              </p>
-            </div>
+            )}
 
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">
@@ -216,6 +233,7 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
                   <ul className="divide-y divide-slate-100">
                     {summary.payments.map((p) => {
                       const meta = METHOD_META[p.payment_method] ?? METHOD_META.other;
+                      const hideAmount = !canSeeCash && p.payment_method === "cash";
                       return (
                         <li
                           key={p.id}
@@ -239,8 +257,8 @@ export default function CajaClient({ summary, isAdmin, hotelTimezone }: Props) {
                               </p>
                             </div>
                           </div>
-                          <span className="font-bold text-emerald-600 shrink-0">
-                            +${formatMoney(p.amount)}
+                          <span className={`font-bold shrink-0 ${hideAmount ? "text-slate-400" : "text-emerald-600"}`}>
+                            {hideAmount ? "—" : `+$${formatMoney(p.amount)}`}
                           </span>
                         </li>
                       );

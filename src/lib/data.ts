@@ -12,11 +12,14 @@ import type {
   CleaningType,
   CreateReservationPayload,
   Guest,
+  GuestDirectoryEntry,
+  GuestDniMatch,
   HotelSettings,
   MaintenanceRoom,
   PendingReservation,
   PaymentMethod,
   Reservation,
+  ReservationHistoryPage,
   ReservationStatus,
   RoomCategory,
   RoomCategoryUsage,
@@ -24,6 +27,7 @@ import type {
   RoomCleaningLogEntry,
   ShiftPaymentRow,
   ShiftSummary,
+  UpcomingGuest,
   UserRole,
 } from "./types";
 
@@ -361,79 +365,265 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
   };
 }
 
-export async function getGuestsData(
-  searchTerm = "",
-  statusFilter = "",
-  options: { includeCancelled?: boolean } = {}
-): Promise<Guest[]> {
+const GUEST_RESERVATION_SELECT = `
+  id,
+  client_name,
+  client_dni,
+  status,
+  check_in_target,
+  check_out_target,
+  total_price,
+  paid_amount,
+  guest_profession,
+  guest_address,
+  guest_locality,
+  guest_nationality,
+  guest_doc_type,
+  guest_birth_date,
+  guest_vehicle,
+  rooms ( room_number )
+`;
+
+function roomNumberFromRelation(
+  relation: { room_number: string } | { room_number: string }[] | null
+): string {
+  return Array.isArray(relation)
+    ? relation[0]?.room_number ?? "N/A"
+    : relation?.room_number ?? "N/A";
+}
+
+function mapGuestReservationRow(reservation: GuestReservationRow): Guest {
+  return {
+    id: reservation.id,
+    client_name: reservation.client_name,
+    client_dni: reservation.client_dni ?? null,
+    status: reservation.status,
+    check_in_target: reservation.check_in_target,
+    check_out_target: reservation.check_out_target,
+    room_number: roomNumberFromRelation(reservation.rooms),
+    total_price: reservation.total_price || 0,
+    paid_amount: reservation.paid_amount || 0,
+    guest_profession: reservation.guest_profession ?? null,
+    guest_address: reservation.guest_address ?? null,
+    guest_locality: reservation.guest_locality ?? null,
+    guest_nationality: reservation.guest_nationality ?? null,
+    guest_doc_type: reservation.guest_doc_type ?? null,
+    guest_birth_date: reservation.guest_birth_date ?? null,
+    guest_vehicle: reservation.guest_vehicle ?? null,
+  };
+}
+
+// Clave de deduplicación: DNI normalizado (sin puntos/guiones, mayúsculas) si existe;
+// si no, el nombre normalizado. Resuelve "Jose Boeris" vs "JOSÉ BOERIS" cuando comparten DNI.
+function guestDedupKey(dni: string | null | undefined, name: string): string {
+  const normalizedDni = (dni ?? "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  if (normalizedDni) return `dni:${normalizedDni}`;
+  return `name:${name.trim().toLowerCase()}`;
+}
+
+/**
+ * Directorio REAL de huéspedes: una fila por persona (deduplicada por DNI/nombre),
+ * con los datos canónicos de su reserva más reciente + cantidad de estadías.
+ */
+export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectoryEntry[]> {
   const supabase = await createClient();
-  const normalizedSearch = searchTerm.trim();
-  const includeCancelled = options.includeCancelled ?? false;
+  const search = searchTerm.trim();
 
   let query = supabase
     .from("reservations")
     .select(
-      `
-      id,
-      client_name,
-      client_dni,
-      status,
-      check_in_target,
-      check_out_target,
-      total_price,
-      paid_amount,
-      guest_profession,
-      guest_address,
-      guest_locality,
-      guest_nationality,
-      guest_doc_type,
-      guest_birth_date,
-      guest_vehicle,
-      rooms ( room_number )
-      `
+      `client_name, client_dni, client_phone, check_in_target, guest_locality, guest_nationality, guest_doc_type`
     )
+    .neq("status", "cancelled")
     .order("check_in_target", { ascending: false });
 
-  if (normalizedSearch) {
-    query = query.ilike("client_name", `%${normalizedSearch}%`);
-  }
-
-  if (statusFilter) {
-    query = query.eq("status", statusFilter);
-  } else if (!includeCancelled) {
-    // Sin filtro explícito: ocultar cancelled por default
-    query = query.neq("status", "cancelled");
+  if (search) {
+    query = query.or(`client_name.ilike.%${search}%,client_dni.ilike.%${search}%`);
   }
 
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows = (data ?? []) as GuestReservationRow[];
-  return rows.map((reservation) => {
-    const roomRelation = reservation.rooms;
-    const roomNumber = Array.isArray(roomRelation)
-      ? roomRelation[0]?.room_number ?? "N/A"
-      : roomRelation?.room_number ?? "N/A";
+  type Row = {
+    client_name: string;
+    client_dni: string | null;
+    client_phone: string | null;
+    check_in_target: string;
+    guest_locality: string | null;
+    guest_nationality: string | null;
+    guest_doc_type: string | null;
+  };
 
-    return {
-      id: reservation.id,
-      client_name: reservation.client_name,
-      client_dni: reservation.client_dni ?? null,
-      status: reservation.status,
-      check_in_target: reservation.check_in_target,
-      check_out_target: reservation.check_out_target,
-      room_number: roomNumber,
-      total_price: reservation.total_price || 0,
-      paid_amount: reservation.paid_amount || 0,
-      guest_profession: reservation.guest_profession ?? null,
-      guest_address: reservation.guest_address ?? null,
-      guest_locality: reservation.guest_locality ?? null,
-      guest_nationality: reservation.guest_nationality ?? null,
-      guest_doc_type: reservation.guest_doc_type ?? null,
-      guest_birth_date: reservation.guest_birth_date ?? null,
-      guest_vehicle: reservation.guest_vehicle ?? null,
-    };
-  });
+  const map = new Map<string, GuestDirectoryEntry>();
+  // data viene ordenada por check_in_target DESC: la primera ocurrencia de cada clave
+  // es la más reciente (datos canónicos).
+  for (const r of (data ?? []) as Row[]) {
+    const key = guestDedupKey(r.client_dni, r.client_name);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        key,
+        client_name: r.client_name,
+        client_dni: r.client_dni ?? null,
+        client_phone: r.client_phone ?? null,
+        guest_locality: r.guest_locality ?? null,
+        guest_nationality: r.guest_nationality ?? null,
+        guest_doc_type: r.guest_doc_type ?? null,
+        stays_count: 1,
+        last_check_in: r.check_in_target,
+      });
+    } else {
+      existing.stays_count += 1;
+      existing.client_phone = existing.client_phone ?? r.client_phone ?? null;
+      existing.guest_locality = existing.guest_locality ?? r.guest_locality ?? null;
+      existing.guest_nationality = existing.guest_nationality ?? r.guest_nationality ?? null;
+      existing.guest_doc_type = existing.guest_doc_type ?? r.guest_doc_type ?? null;
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    b.last_check_in.localeCompare(a.last_check_in)
+  );
+}
+
+/**
+ * Historial de reservas paginado (15 por página por defecto), acotado a los últimos
+ * `days` días (60 por defecto). Devuelve también el total para la paginación.
+ */
+export async function getReservationHistory(
+  options: {
+    page?: number;
+    pageSize?: number;
+    days?: number;
+    search?: string;
+    includeCancelled?: boolean;
+  } = {}
+): Promise<ReservationHistoryPage> {
+  const supabase = await createClient();
+  const page = Math.max(1, options.page ?? 1);
+  const pageSize = options.pageSize ?? 15;
+  const days = options.days ?? 60;
+  const search = (options.search ?? "").trim();
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  let query = supabase
+    .from("reservations")
+    .select(GUEST_RESERVATION_SELECT, { count: "exact" })
+    .gte("check_in_target", sinceIso)
+    .order("check_in_target", { ascending: false });
+
+  if (!options.includeCancelled) {
+    query = query.neq("status", "cancelled");
+  }
+  if (search) {
+    query = query.or(`client_name.ilike.%${search}%,client_dni.ilike.%${search}%`);
+  }
+
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  const rows = ((data ?? []) as GuestReservationRow[]).map(mapGuestReservationRow);
+  const total = count ?? 0;
+  return {
+    rows,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+/**
+ * Huéspedes por llegar: todas las reservas próximas (pending/confirmed) sin límite de
+ * tiempo, ordenadas por fecha de entrada ascendente.
+ */
+export async function getUpcomingGuests(searchTerm = ""): Promise<UpcomingGuest[]> {
+  const supabase = await createClient();
+  const search = searchTerm.trim();
+
+  let query = supabase
+    .from("reservations")
+    .select(
+      `id, client_name, client_dni, status, check_in_target, check_out_target, guest_count, rooms ( room_number )`
+    )
+    .in("status", ["pending", "confirmed"])
+    .order("check_in_target", { ascending: true });
+
+  if (search) {
+    query = query.or(`client_name.ilike.%${search}%,client_dni.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    client_name: string;
+    client_dni: string | null;
+    status: ReservationStatus;
+    check_in_target: string;
+    check_out_target: string;
+    guest_count: number | null;
+    rooms: { room_number: string } | { room_number: string }[] | null;
+  };
+
+  return ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    client_name: r.client_name,
+    client_dni: r.client_dni ?? null,
+    status: r.status,
+    check_in_target: r.check_in_target,
+    check_out_target: r.check_out_target,
+    room_number: roomNumberFromRelation(r.rooms),
+    guest_count: r.guest_count ?? 1,
+  }));
+}
+
+const normalizeDni = (dni: string | null | undefined) =>
+  (dni ?? "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+
+/**
+ * Busca un huésped ya cargado con el mismo DNI (normalizado, sin puntos/guiones).
+ * Sirve para evitar duplicados ("Jose Boeris" vs "JOSÉ BOERIS"): si existe, la UI
+ * ofrece reutilizar los datos canónicos. Devuelve la coincidencia más reciente.
+ */
+export async function findGuestByDni(dni: string): Promise<GuestDniMatch | null> {
+  const normalized = normalizeDni(dni);
+  if (normalized.length < 6) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("reservations")
+    .select("client_name, client_first_name, client_last_name, client_phone, client_dni, check_in_target")
+    .neq("status", "cancelled")
+    .not("client_dni", "is", null)
+    .order("check_in_target", { ascending: false });
+
+  if (error) throw error;
+
+  type Row = {
+    client_name: string;
+    client_first_name: string | null;
+    client_last_name: string | null;
+    client_phone: string | null;
+    client_dni: string | null;
+  };
+
+  for (const r of (data ?? []) as Row[]) {
+    if (normalizeDni(r.client_dni) === normalized) {
+      return {
+        client_name: r.client_name,
+        client_first_name: r.client_first_name ?? null,
+        client_last_name: r.client_last_name ?? null,
+        client_phone: r.client_phone ?? null,
+      };
+    }
+  }
+  return null;
 }
 
 export async function applyLateCheckOut(reservationId: string): Promise<void> {
@@ -507,7 +697,8 @@ export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> 
   // para seguir funcionando aunque todavia no se haya aplicado la migracion 50.
   const params: Record<string, string | number | boolean | null> = {
     p_room_id: input.roomId,
-    p_client_name: input.customerMode === "manual" ? input.clientName : null,
+    // El nombre completo lo compone el RPC a partir de nombre + apellido.
+    p_client_name: null,
     p_nights: input.nights,
     p_associated_client_id:
       input.customerMode === "associated" ? input.associatedClientId : null,
@@ -515,6 +706,11 @@ export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> 
   };
   if (input.stayType === "half_day") {
     params.p_half_day = true;
+  }
+  if (input.customerMode === "manual") {
+    params.p_client_first_name = input.clientFirstName;
+    params.p_client_last_name = input.clientLastName;
+    params.p_client_dni = input.clientDni;
   }
   if (input.customerMode === "associated") {
     if (input.guestName) params.p_guest_name = input.guestName;
@@ -595,7 +791,8 @@ export async function staffCreateReservation(
     p_room_id: input.roomId,
     p_check_in: input.checkIn,
     p_check_out: input.checkOut,
-    p_client_name: input.customerMode === "manual" ? input.clientName : null,
+    // El nombre completo lo compone el RPC a partir de nombre + apellido.
+    p_client_name: null,
     p_client_dni: input.customerMode === "manual" ? input.clientDni : null,
     p_client_phone:
       input.customerMode === "manual" ? input.clientPhone || null : null,
@@ -603,6 +800,10 @@ export async function staffCreateReservation(
       input.customerMode === "associated" ? input.associatedClientId : null,
     p_guest_count: input.guestCount ?? 1,
   };
+  if (input.customerMode === "manual") {
+    params.p_client_first_name = input.clientFirstName;
+    params.p_client_last_name = input.clientLastName;
+  }
   if (input.customerMode === "associated") {
     if (input.guestName) params.p_guest_name = input.guestName;
     if (input.guestDni) params.p_guest_dni = input.guestDni;

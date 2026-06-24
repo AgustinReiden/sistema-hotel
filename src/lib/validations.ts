@@ -79,6 +79,23 @@ const optionalGuestText = z.preprocess(
   z.string().trim().max(120, "Maximo 120 caracteres.").optional()
 );
 
+// Cliente ocasional (modo manual): nombre y apellido separados + DNI obligatorio.
+const clientFirstNameSchema = z
+  .string()
+  .trim()
+  .min(2, "El nombre debe tener al menos 2 caracteres.")
+  .max(120, "Maximo 120 caracteres.");
+const clientLastNameSchema = z
+  .string()
+  .trim()
+  .min(2, "El apellido debe tener al menos 2 caracteres.")
+  .max(120, "Maximo 120 caracteres.");
+const clientDniSchema = z
+  .string()
+  .trim()
+  .min(6, "El DNI o CUIT debe tener al menos 6 caracteres.")
+  .max(60, "Maximo 60 caracteres.");
+
 // Datos del pasajero real: obligatorios cuando la reserva va a nombre de un asociado.
 const requiredPassengerName = z
   .string()
@@ -124,10 +141,9 @@ export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
   z.object({
     ...walkInBaseSchema,
     customerMode: z.literal("manual"),
-    clientName: z
-      .string()
-      .trim()
-      .min(2, "El nombre del huesped debe tener al menos 2 caracteres."),
+    clientFirstName: clientFirstNameSchema,
+    clientLastName: clientLastNameSchema,
+    clientDni: clientDniSchema,
   }),
   z.object({
     ...walkInBaseSchema,
@@ -143,14 +159,9 @@ export const createReservationSchema = z
     z.object({
       customerMode: z.literal("manual"),
       roomId: z.number().int().positive("El ID de la habitacion es invalido."),
-      clientName: z
-        .string()
-        .trim()
-        .min(2, "El nombre del huesped debe tener al menos 2 caracteres."),
-      clientDni: z
-        .string()
-        .trim()
-        .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
+      clientFirstName: clientFirstNameSchema,
+      clientLastName: clientLastNameSchema,
+      clientDni: clientDniSchema,
       clientPhone: optionalPhoneSchema,
       checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
       checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),

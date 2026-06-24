@@ -33,3 +33,23 @@ export function formatHotelDate(iso: string | null | undefined, timezone?: strin
     timeZone: timezone || DEFAULT_TZ,
   });
 }
+
+// Formato corto tipo "25 jun 13:00" en la zona del hotel. Se arma con formatToParts
+// para evitar comas/puntos que mete el locale y para forzar 24 hs.
+export function formatHotelShortDateTime(
+  iso: string | null | undefined,
+  timezone?: string
+): string {
+  if (!iso) return "—";
+  const parts = new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: timezone || DEFAULT_TZ,
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const month = get("month").replace(".", "");
+  return `${get("day")} ${month} ${get("hour")}:${get("minute")}`;
+}

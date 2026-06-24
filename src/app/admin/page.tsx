@@ -3,6 +3,7 @@ import { AlertTriangle, ClipboardList, Sparkles } from "lucide-react";
 import { format, isAfter } from "date-fns";
 import { es } from "date-fns/locale";
 
+import { formatHotelShortDateTime } from "@/lib/time";
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
 import {
@@ -107,9 +108,7 @@ export default async function Dashboard() {
       const effectiveCheckOut =
         activeReservation.late_check_out_until ?? activeReservation.check_out_target;
       client = activeReservation.client_name;
-      checkout = format(new Date(effectiveCheckOut), "dd MMM HH:mm", {
-        locale: es,
-      });
+      checkout = formatHotelShortDateTime(effectiveCheckOut, hotelSettings.timezone);
       reservationId = activeReservation.id;
       reservationStatus = activeReservation.status;
       baseTotalPrice = activeReservation.base_total_price;
@@ -127,9 +126,10 @@ export default async function Dashboard() {
       }
     } else if (confirmedReservation) {
       client = confirmedReservation.client_name;
-      checkout = format(new Date(confirmedReservation.check_out_target), "dd MMM HH:mm", {
-        locale: es,
-      });
+      checkout = formatHotelShortDateTime(
+        confirmedReservation.check_out_target,
+        hotelSettings.timezone
+      );
       reservationId = confirmedReservation.id;
       reservationStatus = confirmedReservation.status;
       baseTotalPrice = confirmedReservation.base_total_price;
