@@ -4,7 +4,10 @@ import { useEffect } from "react";
 
 export default function ScrollToResults() {
   useEffect(() => {
-    const el = document.getElementById("habitaciones");
+    // Apuntamos a las tarjetas (#resultados) para que se vea el boton "Reservar",
+    // no al encabezado de la seccion. Fallback a la seccion completa por las dudas.
+    const el =
+      document.getElementById("resultados") ?? document.getElementById("habitaciones");
     if (!el) return;
 
     // Scroll suave al entrar a los resultados, y una correccion instantanea poco despues:

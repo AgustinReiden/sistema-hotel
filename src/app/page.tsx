@@ -156,7 +156,9 @@ export default async function Home({ searchParams }: PageProps) {
               </div>
             )}
 
-            <div className="md:px-8">
+            {/* Objetivo del auto-scroll: aterriza en las tarjetas (con el boton "Reservar"),
+                no en el encabezado de la seccion. scroll-mt deja un respiro arriba. */}
+            <div id="resultados" className="md:px-8 scroll-mt-16">
               {hasVisibleOffers && (
                 <RoomCarousel
                   offers={visibleOffers}
