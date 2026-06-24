@@ -193,6 +193,48 @@ export type Guest = {
   guest_vehicle: string | null;
 };
 
+/** Una persona del directorio real de huespedes (deduplicado por DNI / nombre). */
+export type GuestDirectoryEntry = {
+  key: string;
+  client_name: string;
+  client_dni: string | null;
+  client_phone: string | null;
+  guest_locality: string | null;
+  guest_nationality: string | null;
+  guest_doc_type: string | null;
+  stays_count: number;
+  last_check_in: string;
+};
+
+/** Resultado de buscar un huésped existente por DNI (anti-duplicados). */
+export type GuestDniMatch = {
+  client_name: string;
+  client_first_name: string | null;
+  client_last_name: string | null;
+  client_phone: string | null;
+};
+
+/** Una llegada proxima (seccion "Huespedes por llegar"). */
+export type UpcomingGuest = {
+  id: string;
+  client_name: string;
+  client_dni: string | null;
+  status: ReservationStatus;
+  check_in_target: string;
+  check_out_target: string;
+  room_number: string;
+  guest_count: number;
+};
+
+/** Pagina del historial de reservas (paginado). */
+export type ReservationHistoryPage = {
+  rows: Guest[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 export type AssociatedClient = {
   id: string;
   display_name: string;
@@ -245,7 +287,8 @@ export type CreateReservationPayload =
   | ({
       customerMode: "manual";
       roomId: number;
-      clientName: string;
+      clientFirstName: string;
+      clientLastName: string;
       clientDni: string;
       clientPhone?: string;
       checkIn: string;
@@ -268,7 +311,9 @@ export type AssignWalkInPayload =
   | ({
       customerMode: "manual";
       roomId: number;
-      clientName: string;
+      clientFirstName: string;
+      clientLastName: string;
+      clientDni: string;
       nights: number;
       guestCount?: number;
       stayType?: WalkInStayType;

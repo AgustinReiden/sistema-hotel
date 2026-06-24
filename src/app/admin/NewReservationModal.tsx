@@ -16,10 +16,13 @@ import { toast } from "sonner";
 import AssociatedClientSelector from "./AssociatedClientSelector";
 import DateTimePickerField from "./DateTimePickerField";
 import GuestRegistryFields from "./GuestRegistryFields";
+import GuestDniHint from "./GuestDniHint";
+import { lookupGuestByDni } from "./actions";
 import { calculateReservationPriceBreakdown } from "@/lib/pricing";
 import type {
   AssociatedClient,
   CreateReservationPayload,
+  GuestDniMatch,
   GuestRegistryInput,
   ReservationCustomerMode,
   Room,
@@ -30,7 +33,8 @@ type ReservationFormData = CreateReservationPayload;
 type InitialReservationValues = Partial<{
   customerMode: ReservationCustomerMode;
   roomId: number;
-  clientName: string;
+  clientFirstName: string;
+  clientLastName: string;
   clientDni: string;
   clientPhone: string;
   associatedClientId: string;
@@ -54,7 +58,8 @@ type NewReservationModalProps = {
 
 type ReservationFormState = {
   customerMode: ReservationCustomerMode;
-  clientName: string;
+  clientFirstName: string;
+  clientLastName: string;
   clientDni: string;
   clientPhone: string;
   associatedClientId: string;
@@ -101,7 +106,8 @@ function buildInitialState(
 
   return {
     customerMode: initialValues?.customerMode ?? "manual",
-    clientName: initialValues?.clientName ?? "",
+    clientFirstName: initialValues?.clientFirstName ?? "",
+    clientLastName: initialValues?.clientLastName ?? "",
     clientDni: initialValues?.clientDni ?? "",
     clientPhone: initialValues?.clientPhone ?? "",
     associatedClientId: initialValues?.associatedClientId ?? "",
@@ -130,12 +136,51 @@ export default function NewReservationModal({
   );
   const [registry, setRegistry] = useState<GuestRegistryInput>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dniMatch, setDniMatch] = useState<GuestDniMatch | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
     setRegistry({});
+    setDniMatch(null);
   }, [isOpen, initialValues, standardCheckInTime, standardCheckOutTime]);
+
+  // Busca duplicados por DNI (con debounce) al cargar un cliente ocasional.
+  useEffect(() => {
+    if (!isOpen || form.customerMode !== "manual") {
+      setDniMatch(null);
+      return;
+    }
+    if (form.clientDni.replace(/[^a-zA-Z0-9]/g, "").length < 6) {
+      setDniMatch(null);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      const match = await lookupGuestByDni(form.clientDni.trim());
+      if (active) setDniMatch(match);
+    }, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [form.clientDni, form.customerMode, isOpen]);
+
+  const applyDniMatch = (match: GuestDniMatch) => {
+    setForm((current) => {
+      if (match.client_first_name || match.client_last_name) {
+        return {
+          ...current,
+          clientFirstName: match.client_first_name ?? "",
+          clientLastName: match.client_last_name ?? "",
+        };
+      }
+      const parts = match.client_name.trim().split(/\s+/);
+      const last = parts.length > 1 ? parts.pop() ?? "" : "";
+      return { ...current, clientFirstName: parts.join(" "), clientLastName: last };
+    });
+    setDniMatch(null);
+  };
 
   if (!isOpen) return null;
 
@@ -169,7 +214,10 @@ export default function NewReservationModal({
     }
 
     if (form.customerMode === "manual") {
-      if (!form.clientName.trim() || !form.clientDni.trim()) return;
+      if (!form.clientFirstName.trim() || !form.clientLastName.trim() || !form.clientDni.trim()) {
+        toast.error("Cargá nombre, apellido y DNI del huésped.");
+        return;
+      }
     } else {
       if (!form.associatedClientId) {
         toast.error("Selecciona un asociado para continuar.");
@@ -188,7 +236,8 @@ export default function NewReservationModal({
           ? {
               customerMode: "manual",
               roomId: Number(form.roomId),
-              clientName: form.clientName.trim(),
+              clientFirstName: form.clientFirstName.trim(),
+              clientLastName: form.clientLastName.trim(),
               clientDni: form.clientDni.trim(),
               clientPhone: form.clientPhone.trim() || undefined,
               checkIn: new Date(form.checkIn).toISOString(),
@@ -271,22 +320,37 @@ export default function NewReservationModal({
 
           {form.customerMode === "manual" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label htmlFor="clientName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Nombre del Huésped
+              <div>
+                <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Nombre
                 </label>
                 <input
-                  id="clientName"
+                  id="clientFirstName"
                   type="text"
                   required
-                  value={form.clientName}
-                  onChange={(e) => setForm((current) => ({ ...current, clientName: e.target.value }))}
+                  value={form.clientFirstName}
+                  onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                  placeholder="Ej. María López"
+                  placeholder="Ej. María"
                 />
               </div>
 
               <div>
+                <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Apellido
+                </label>
+                <input
+                  id="clientLastName"
+                  type="text"
+                  required
+                  value={form.clientLastName}
+                  onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="Ej. López"
+                />
+              </div>
+
+              <div className="md:col-span-2">
                 <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
                   <span className="flex items-center gap-1.5">
                     <CreditCard size={14} />
@@ -302,9 +366,10 @@ export default function NewReservationModal({
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                   placeholder="Ej. 20-12345678-3"
                 />
+                <GuestDniHint match={dniMatch} onUse={applyDniMatch} />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label htmlFor="clientPhone" className="block text-sm font-semibold text-slate-700 mb-1.5">
                   <span className="flex items-center gap-1.5">
                     <Phone size={14} />
@@ -444,7 +509,7 @@ export default function NewReservationModal({
             />
             <DateTimePickerField
               id="checkOut"
-              label="Salida Target"
+              label="Salida"
               icon={<ClockIcon size={14} className="mr-1" />}
               value={form.checkOut}
               onChange={(value) => setForm((current) => ({ ...current, checkOut: value }))}
@@ -519,7 +584,7 @@ export default function NewReservationModal({
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
             {form.customerMode === "manual"
-              ? "Nombre y DNI/CUIT son obligatorios para reservas manuales. El teléfono es opcional."
+              ? "Nombre, apellido y DNI/CUIT son obligatorios para reservas manuales. El teléfono es opcional."
               : "Al seleccionar un asociado, la reserva guarda una copia de sus datos y del descuento vigente en ese momento."}
           </div>
 
@@ -537,7 +602,9 @@ export default function NewReservationModal({
                 isSubmitting ||
                 form.roomId === "" ||
                 (form.customerMode === "manual"
-                  ? !form.clientName.trim() || !form.clientDni.trim()
+                  ? !form.clientFirstName.trim() ||
+                    !form.clientLastName.trim() ||
+                    !form.clientDni.trim()
                   : !form.associatedClientId || !form.guestName.trim() || !form.guestDni.trim())
               }
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"

@@ -6,6 +6,8 @@ import { toast } from "sonner";
 
 import AssociatedClientSelector from "./AssociatedClientSelector";
 import GuestRegistryFields from "./GuestRegistryFields";
+import GuestDniHint from "./GuestDniHint";
+import { lookupGuestByDni } from "./actions";
 import {
   calculateHalfDayPriceBreakdown,
   calculateWalkInPriceBreakdown,
@@ -13,6 +15,7 @@ import {
 import type {
   AssignWalkInPayload,
   AssociatedClient,
+  GuestDniMatch,
   GuestRegistryInput,
   WalkInStayType,
 } from "@/lib/types";
@@ -40,7 +43,10 @@ export default function WalkInModal({
 }: WalkInModalProps) {
   const [customerMode, setCustomerMode] = useState<CustomerMode>("manual");
   const [stayType, setStayType] = useState<WalkInStayType>("night");
-  const [clientName, setClientName] = useState("");
+  const [clientFirstName, setClientFirstName] = useState("");
+  const [clientLastName, setClientLastName] = useState("");
+  const [clientDni, setClientDni] = useState("");
+  const [dniMatch, setDniMatch] = useState<GuestDniMatch | null>(null);
   const [associatedClientId, setAssociatedClientId] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestDni, setGuestDni] = useState("");
@@ -53,7 +59,10 @@ export default function WalkInModal({
     if (!isOpen) return;
     setCustomerMode("manual");
     setStayType("night");
-    setClientName("");
+    setClientFirstName("");
+    setClientLastName("");
+    setClientDni("");
+    setDniMatch(null);
     setAssociatedClientId("");
     setGuestName("");
     setGuestDni("");
@@ -61,6 +70,40 @@ export default function WalkInModal({
     setGuestCount(1);
     setRegistry({});
   }, [isOpen]);
+
+  // Busca duplicados por DNI (con debounce) al cargar un cliente ocasional.
+  useEffect(() => {
+    if (!isOpen || customerMode !== "manual") {
+      setDniMatch(null);
+      return;
+    }
+    if (clientDni.replace(/[^a-zA-Z0-9]/g, "").length < 6) {
+      setDniMatch(null);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      const match = await lookupGuestByDni(clientDni.trim());
+      if (active) setDniMatch(match);
+    }, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [clientDni, customerMode, isOpen]);
+
+  const applyDniMatch = (match: GuestDniMatch) => {
+    if (match.client_first_name || match.client_last_name) {
+      setClientFirstName(match.client_first_name ?? "");
+      setClientLastName(match.client_last_name ?? "");
+    } else {
+      const parts = match.client_name.trim().split(/\s+/);
+      const last = parts.length > 1 ? parts.pop() ?? "" : "";
+      setClientFirstName(parts.join(" "));
+      setClientLastName(last);
+    }
+    setDniMatch(null);
+  };
 
   if (!isOpen) return null;
 
@@ -83,7 +126,12 @@ export default function WalkInModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isHalfDay && nights < 1) return;
-    if (customerMode === "manual" && !clientName.trim()) return;
+    if (customerMode === "manual") {
+      if (!clientFirstName.trim() || !clientLastName.trim() || !clientDni.trim()) {
+        toast.error("Cargá nombre, apellido y DNI del huésped.");
+        return;
+      }
+    }
     if (customerMode === "associated") {
       if (!associatedClientId) {
         toast.error("Selecciona un asociado para continuar.");
@@ -102,7 +150,9 @@ export default function WalkInModal({
           ? {
               customerMode: "manual",
               roomId: 0,
-              clientName: clientName.trim(),
+              clientFirstName: clientFirstName.trim(),
+              clientLastName: clientLastName.trim(),
+              clientDni: clientDni.trim(),
               nights: isHalfDay ? 1 : nights,
               guestCount,
               stayType,
@@ -213,19 +263,55 @@ export default function WalkInModal({
           </div>
 
           {customerMode === "manual" ? (
-            <div>
-              <label htmlFor="clientName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Nombre del Huésped
-              </label>
-              <input
-                id="clientName"
-                type="text"
-                required
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                placeholder="Ej. Juan Pérez"
-              />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Nombre
+                  </label>
+                  <input
+                    id="clientFirstName"
+                    type="text"
+                    required
+                    value={clientFirstName}
+                    onChange={(e) => setClientFirstName(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    placeholder="Ej. Juan"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Apellido
+                  </label>
+                  <input
+                    id="clientLastName"
+                    type="text"
+                    required
+                    value={clientLastName}
+                    onChange={(e) => setClientLastName(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    placeholder="Ej. Pérez"
+                  />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <CreditCard size={14} />
+                    DNI o CUIT
+                  </span>
+                </label>
+                <input
+                  id="clientDni"
+                  type="text"
+                  required
+                  value={clientDni}
+                  onChange={(e) => setClientDni(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="Ej. 30123456"
+                />
+                <GuestDniHint match={dniMatch} onUse={applyDniMatch} />
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -422,7 +508,7 @@ export default function WalkInModal({
                 isSubmitting ||
                 (isHalfDay && halfDayPrice <= 0) ||
                 (customerMode === "manual"
-                  ? !clientName.trim()
+                  ? !clientFirstName.trim() || !clientLastName.trim() || !clientDni.trim()
                   : !associatedClientId || !guestName.trim() || !guestDni.trim())
               }
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"

@@ -2,21 +2,22 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { Guest } from "@/lib/types";
 import { DollarSign, Loader2, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import PaymentModal from "@/app/components/PaymentModal";
 import { handleCancelReservation } from "@/app/admin/actions";
+import { formatHotelDate, formatHotelShortDateTime } from "@/lib/time";
 
 export default function GuestsClientTable({
   initialGuests,
   searchQuery,
+  timezone,
 }: {
   initialGuests: Guest[];
   searchQuery: string;
+  timezone: string;
 }) {
   const router = useRouter();
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
@@ -96,10 +97,10 @@ export default function GuestsClientTable({
                 </td>
                 <td className="px-6 py-4">
                   <p className="text-sm text-slate-900 font-medium">
-                    {format(new Date(guest.check_in_target), "dd MMM, HH:mm", { locale: es })}
+                    {formatHotelShortDateTime(guest.check_in_target, timezone)}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {format(new Date(guest.check_out_target), "dd MMM yyyy", { locale: es })}
+                    {formatHotelDate(guest.check_out_target, timezone)}
                   </p>
                 </td>
                 <td className="px-6 py-4">

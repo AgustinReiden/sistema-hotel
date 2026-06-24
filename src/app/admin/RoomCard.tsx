@@ -267,7 +267,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div>
                 <p className="text-xs text-slate-500 mb-0.5">
-                  {room.hasLateCheckout ? "Check-out efectivo" : "Check-out Target"}
+                  {room.hasLateCheckout ? "Check-out efectivo" : "Check-out"}
                 </p>
                 <p
                   className={`text-sm font-bold flex items-center ${room.isLate ? "text-amber-600" : "text-slate-800"}`}

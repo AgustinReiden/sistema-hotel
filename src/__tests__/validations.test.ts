@@ -9,31 +9,38 @@ import {
 } from "@/lib/validations";
 
 describe("assignWalkInSchema", () => {
+  const validManualWalkIn = {
+    customerMode: "manual" as const,
+    roomId: 1,
+    clientFirstName: "Juan",
+    clientLastName: "Perez",
+    clientDni: "30123456",
+    nights: 3,
+  };
+
   it("accepts valid manual input", () => {
-    const result = assignWalkInSchema.parse({
-      customerMode: "manual",
-      roomId: 1,
-      clientName: "Juan Perez",
-      nights: 3,
-    });
+    const result = assignWalkInSchema.parse(validManualWalkIn);
 
     expect(result.customerMode).toBe("manual");
     if (result.customerMode !== "manual") throw new Error("Expected manual mode");
     expect(result.roomId).toBe(1);
-    expect(result.clientName).toBe("Juan Perez");
+    expect(result.clientFirstName).toBe("Juan");
+    expect(result.clientLastName).toBe("Perez");
+    expect(result.clientDni).toBe("30123456");
     expect(result.nights).toBe(3);
   });
 
-  it("trims manual client name", () => {
+  it("trims manual name and last name", () => {
     const result = assignWalkInSchema.parse({
-      customerMode: "manual",
-      roomId: 1,
-      clientName: "  Maria  ",
+      ...validManualWalkIn,
+      clientFirstName: "  Maria  ",
+      clientLastName: "  Gomez  ",
       nights: 1,
     });
 
     if (result.customerMode !== "manual") throw new Error("Expected manual mode");
-    expect(result.clientName).toBe("Maria");
+    expect(result.clientFirstName).toBe("Maria");
+    expect(result.clientLastName).toBe("Gomez");
   });
 
   it("accepts associated input", () => {
@@ -62,14 +69,21 @@ describe("assignWalkInSchema", () => {
     ).toThrow();
   });
 
-  it("rejects empty client name in manual mode", () => {
+  it("rejects empty first name in manual mode", () => {
     expect(() =>
-      assignWalkInSchema.parse({
-        customerMode: "manual",
-        roomId: 1,
-        clientName: "",
-        nights: 1,
-      })
+      assignWalkInSchema.parse({ ...validManualWalkIn, clientFirstName: "" })
+    ).toThrow();
+  });
+
+  it("rejects empty last name in manual mode", () => {
+    expect(() =>
+      assignWalkInSchema.parse({ ...validManualWalkIn, clientLastName: "" })
+    ).toThrow();
+  });
+
+  it("rejects missing DNI in manual mode", () => {
+    expect(() =>
+      assignWalkInSchema.parse({ ...validManualWalkIn, clientDni: "" })
     ).toThrow();
   });
 
@@ -84,32 +98,16 @@ describe("assignWalkInSchema", () => {
   });
 
   it("rejects 0 nights", () => {
-    expect(() =>
-      assignWalkInSchema.parse({
-        customerMode: "manual",
-        roomId: 1,
-        clientName: "Test",
-        nights: 0,
-      })
-    ).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validManualWalkIn, nights: 0 })).toThrow();
   });
 
   it("rejects more than 30 nights", () => {
-    expect(() =>
-      assignWalkInSchema.parse({
-        customerMode: "manual",
-        roomId: 1,
-        clientName: "Test",
-        nights: 31,
-      })
-    ).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validManualWalkIn, nights: 31 })).toThrow();
   });
 
   it("accepts half_day (siesta) stay type", () => {
     const result = assignWalkInSchema.parse({
-      customerMode: "manual",
-      roomId: 1,
-      clientName: "Cliente Siesta",
+      ...validManualWalkIn,
       nights: 1,
       stayType: "half_day",
     });
@@ -120,13 +118,7 @@ describe("assignWalkInSchema", () => {
 
   it("rejects an invalid stay type", () => {
     expect(() =>
-      assignWalkInSchema.parse({
-        customerMode: "manual",
-        roomId: 1,
-        clientName: "Test",
-        nights: 1,
-        stayType: "weekly",
-      })
+      assignWalkInSchema.parse({ ...validManualWalkIn, nights: 1, stayType: "weekly" })
     ).toThrow();
   });
 
@@ -150,7 +142,8 @@ describe("createReservationSchema", () => {
   const validManualInput = {
     customerMode: "manual" as const,
     roomId: 1,
-    clientName: "Carlos Lopez",
+    clientFirstName: "Carlos",
+    clientLastName: "Lopez",
     clientDni: "20-12345678-3",
     clientPhone: "3814123456",
     checkIn: "2026-04-01T14:00:00.000Z",
@@ -162,7 +155,8 @@ describe("createReservationSchema", () => {
     expect(result.customerMode).toBe("manual");
     if (result.customerMode !== "manual") throw new Error("Expected manual mode");
     expect(result.roomId).toBe(1);
-    expect(result.clientName).toBe("Carlos Lopez");
+    expect(result.clientFirstName).toBe("Carlos");
+    expect(result.clientLastName).toBe("Lopez");
     expect(result.clientDni).toBe("20-12345678-3");
   });
 
