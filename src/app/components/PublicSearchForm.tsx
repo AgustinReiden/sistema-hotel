@@ -279,13 +279,18 @@ export default function PublicSearchForm() {
         setOpenPicker(null);
 
         if (nextQuery === currentQuery) {
-            document.getElementById("habitaciones")?.scrollIntoView({ behavior: "smooth" });
+            document
+                .getElementById("habitaciones")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
             return;
         }
 
+        // Sin hash #habitaciones: el scroll lo maneja <ScrollToResults> en la pagina nueva.
+        // Asi evitamos que el salto del navegador al hash compita con el scroll suave y quede
+        // a medio camino.
         setIsSubmitting(true);
         startTransition(() => {
-            router.push(`/?${nextQuery}#habitaciones`);
+            router.push(`/?${nextQuery}`);
         });
     };
 

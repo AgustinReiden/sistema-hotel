@@ -105,25 +105,35 @@ export default function BookingModal({
     const checkInDateTime = localToISO(checkIn, checkInTime, timezone);
     const checkOutDateTime = localToISO(checkOut, checkOutTime, timezone);
 
-    const result = await handlePublicBooking(
-      room.room_type,
-      clientName,
-      checkInDateTime,
-      checkOutDateTime,
-      phoneCountryCode,
-      phoneDigits,
-      clientDni.trim(),
-      guestCount
-    );
+    try {
+      const result = await handlePublicBooking(
+        room.room_type,
+        clientName,
+        checkInDateTime,
+        checkOutDateTime,
+        phoneCountryCode,
+        phoneDigits,
+        clientDni.trim(),
+        guestCount
+      );
 
-    setLoading(false);
+      if (result.success) {
+        setSuccess(true);
+        return;
+      }
 
-    if (result.success) {
-      setSuccess(true);
-      return;
+      setError(
+        result.error ||
+          "Ocurrio un error inesperado al procesar tu reserva. Es posible que ya no este disponible."
+      );
+    } catch {
+      // Garantiza que el huesped SIEMPRE vea un cartel (nunca queda el spinner colgado).
+      setError(
+        "No pudimos procesar tu reserva en este momento. Por favor reintentá o escribinos por WhatsApp."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    setError(result.error || "Ocurrio un error inesperado al procesar tu reserva. Es posible que ya no este disponible.");
   };
 
   return createPortal(
