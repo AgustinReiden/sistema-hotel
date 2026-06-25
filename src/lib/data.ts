@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "./supabase/server";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
+import { localToISO } from "./format";
 import type {
   AdminAlert,
   AssignWalkInPayload,
@@ -319,8 +320,19 @@ export async function getDashboardData(): Promise<DashboardData> {
 
 export async function getTimelineData(days = 7): Promise<TimelineData> {
   const supabase = await createClient();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const settings = await getHotelSettings();
+  const tz = settings.timezone || "America/Argentina/Tucuman";
+
+  // "Hoy" en la zona del hotel (NO la del servidor, que en prod es UTC): así la primera
+  // columna del calendario no se corre un día durante la franja nocturna de Argentina
+  // (~21:00–23:59, cuando en UTC ya es el día siguiente).
+  const todayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const today = new Date(localToISO(todayKey, "00:00", tz));
 
   const end = new Date(today);
   end.setDate(end.getDate() + days);
@@ -683,13 +695,20 @@ export async function findGuestByDni(dni: string): Promise<GuestDniMatch | null>
   return null;
 }
 
-export async function applyLateCheckOut(reservationId: string): Promise<void> {
+export async function applyLateCheckOut(
+  reservationId: string
+): Promise<{ halfDayCharged: boolean; halfDayAmount: number }> {
   const supabase = await createClient();
-  const { error } = await supabase.rpc("rpc_staff_apply_late_checkout", {
+  const { data, error } = await supabase.rpc("rpc_staff_apply_late_checkout", {
     p_reservation_id: reservationId,
   });
 
   if (error) throw error;
+  const r = (data ?? {}) as { half_day_charged?: boolean; half_day_amount?: number };
+  return {
+    halfDayCharged: Boolean(r.half_day_charged),
+    halfDayAmount: Number(r.half_day_amount) || 0,
+  };
 }
 
 export async function doCheckIn(reservationId: string): Promise<void> {
@@ -1281,12 +1300,18 @@ export async function extendReservation(reservationId: string, extraNights: numb
   const { data: res, error: fetchErr } = await supabase
     .from("reservations")
     .select(
-      "room_id, check_in_target, check_out_target, total_price, base_total_price, discount_percent, discount_amount"
+      "room_id, status, check_in_target, check_out_target, total_price, base_total_price, discount_percent, discount_amount"
     )
     .eq("id", reservationId)
     .single();
 
   if (fetchErr) throw fetchErr;
+
+  // Guard de estado (la UI ya solo ofrece "Ampliar" en reservas activas, pero no dependemos
+  // solo del render): no permitir ampliar una reserva cancelada/finalizada.
+  if (res.status !== "confirmed" && res.status !== "checked_in") {
+    throw new Error("Solo se puede ampliar una reserva activa (confirmada o en estadía).");
+  }
 
   const currentIn = new Date(res.check_in_target);
   const currentOut = new Date(res.check_out_target);
@@ -1341,7 +1366,16 @@ export async function extendReservation(reservationId: string, extraNights: numb
     })
     .eq("id", reservationId);
 
-  if (updateErr) throw updateErr;
+  if (updateErr) {
+    // Carrera con el constraint anti-solapamiento (EXCLUDE, errcode 23P01): traducir el mensaje
+    // crudo de Postgres a algo claro para el recepcionista.
+    if ((updateErr as { code?: string }).code === "23P01") {
+      throw new Error(
+        "No se puede ampliar: la habitación quedó comprometida para esas fechas."
+      );
+    }
+    throw updateErr;
+  }
 }
 
 // ---- Solicitudes de Reserva ----

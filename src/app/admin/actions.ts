@@ -55,15 +55,17 @@ function revalidateCalendarViews() {
   revalidatePath("/admin/timeline");
 }
 
-export async function handleLateCheckOut(reservationId: string): Promise<ActionResult> {
+export async function handleLateCheckOut(
+  reservationId: string
+): Promise<ActionResult<{ halfDayCharged: boolean }>> {
   try {
-    await applyLateCheckOut(reservationId);
+    const result = await applyLateCheckOut(reservationId);
     revalidatePath("/admin");
     revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/caja");
-    return { success: true };
+    return { success: true, data: { halfDayCharged: result.halfDayCharged } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cobrar medio dia.");
     return { success: false, error: parsed.error, code: parsed.code };

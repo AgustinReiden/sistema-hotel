@@ -32,6 +32,14 @@ export async function handlePublicBooking(
         if (inDate >= outDate) {
             return { success: false, error: "La fecha de salida debe ser posterior a la de llegada." };
         }
+        // Reserva para hoy cuando el horario de check-in ya pasó: el RPC la rechazaría con un
+        // mensaje técnico. Damos uno claro y accionable al huésped.
+        if (inDate <= new Date()) {
+            return {
+                success: false,
+                error: "Para reservar para hoy llamanos o escribinos por WhatsApp; la reserva online es para fechas futuras.",
+            };
+        }
 
         const formattedPhone = formatPhoneForWhatsapp(
             validated.phoneLocal,

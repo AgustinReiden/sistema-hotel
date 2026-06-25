@@ -100,7 +100,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
         return;
       }
 
-      toast.success("Medio dia cobrado.");
+      toast.success(
+        result.data?.halfDayCharged
+          ? "Medio día cobrado."
+          : "El medio día ya estaba aplicado; no se volvió a cobrar."
+      );
     });
   };
 
@@ -161,20 +165,28 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
     if (!reservationId) return;
 
     startTransition(async () => {
-      const result =
-        extendMode === "half_day"
-          ? await handleLateCheckOut(reservationId)
-          : await handleExtendReservation(reservationId, extendNights);
+      if (extendMode === "half_day") {
+        const result = await handleLateCheckOut(reservationId);
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+        setIsExtendModalOpen(false);
+        toast.success(
+          result.data?.halfDayCharged
+            ? "Medio día agregado a la reserva."
+            : "El medio día ya estaba aplicado; no se volvió a cobrar."
+        );
+        return;
+      }
+
+      const result = await handleExtendReservation(reservationId, extendNights);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
       setIsExtendModalOpen(false);
-      toast.success(
-        extendMode === "half_day"
-          ? "Medio día agregado a la reserva."
-          : "Reserva ampliada exitosamente."
-      );
+      toast.success("Reserva ampliada exitosamente.");
     });
   };
 

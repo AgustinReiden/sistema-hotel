@@ -53,3 +53,19 @@ export function formatHotelShortDateTime(
   const month = get("month").replace(".", "");
   return `${get("day")} ${month} ${get("hour")}:${get("minute")}`;
 }
+
+// Fecha corta tipo "25 jun 26" en la zona del hotel.
+export function formatHotelShortDate(
+  iso: string | null | undefined,
+  timezone?: string
+): string {
+  if (!iso) return "—";
+  const parts = new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    timeZone: timezone || DEFAULT_TZ,
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("day")} ${get("month").replace(".", "")} ${get("year")}`;
+}
