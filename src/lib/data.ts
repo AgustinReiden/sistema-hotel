@@ -429,7 +429,14 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
   const supabase = await createClient();
   const search = searchTerm.trim();
 
-  let query = supabase
+  // Fuente 1: registro de huespedes (tabla guests; importado del Excel del hotel / cargas).
+  let guestsQuery = supabase
+    .from("guests")
+    .select(`full_name, document_type, document_id, phone, locality, nationality`)
+    .order("full_name", { ascending: true });
+
+  // Fuente 2: gente que efectivamente se hospedo (reservas no canceladas).
+  let resQuery = supabase
     .from("reservations")
     .select(
       `client_name, client_dni, client_phone, check_in_target, guest_locality, guest_nationality, guest_doc_type`
@@ -438,13 +445,17 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     .order("check_in_target", { ascending: false });
 
   if (search) {
-    query = query.or(`client_name.ilike.%${search}%,client_dni.ilike.%${search}%`);
+    guestsQuery = guestsQuery.or(`full_name.ilike.%${search}%,document_id.ilike.%${search}%`);
+    resQuery = resQuery.or(`client_name.ilike.%${search}%,client_dni.ilike.%${search}%`);
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
+  const [guestsRes, resRes] = await Promise.all([guestsQuery, resQuery]);
+  if (resRes.error) throw resRes.error;
+  // La tabla guests podria no existir en un entorno sin migrar: si falla, seguimos solo con
+  // reservas en vez de romper el directorio.
+  const guestRows = guestsRes.error ? [] : guestsRes.data ?? [];
 
-  type Row = {
+  type ResRow = {
     client_name: string;
     client_dni: string | null;
     client_phone: string | null;
@@ -453,11 +464,20 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     guest_nationality: string | null;
     guest_doc_type: string | null;
   };
+  type GuestRow = {
+    full_name: string;
+    document_type: string | null;
+    document_id: string | null;
+    phone: string | null;
+    locality: string | null;
+    nationality: string | null;
+  };
 
   const map = new Map<string, GuestDirectoryEntry>();
-  // data viene ordenada por check_in_target DESC: la primera ocurrencia de cada clave
-  // es la más reciente (datos canónicos).
-  for (const r of (data ?? []) as Row[]) {
+
+  // Reservas primero (aportan cantidad de estadias y ultima visita). Vienen ordenadas por
+  // check_in_target DESC -> la primera ocurrencia de cada clave es la mas reciente (canonica).
+  for (const r of (resRes.data ?? []) as ResRow[]) {
     const key = guestDedupKey(r.client_dni, r.client_name);
     const existing = map.get(key);
     if (!existing) {
@@ -481,9 +501,38 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     }
   }
 
-  return Array.from(map.values()).sort((a, b) =>
-    b.last_check_in.localeCompare(a.last_check_in)
-  );
+  // Registro de huespedes: agrega a los que todavia no tienen reserva y completa datos
+  // faltantes (telefono, localidad, etc.) de los que ya estan.
+  for (const g of guestRows as GuestRow[]) {
+    const key = guestDedupKey(g.document_id, g.full_name);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        key,
+        client_name: g.full_name,
+        client_dni: g.document_id ?? null,
+        client_phone: g.phone ?? null,
+        guest_locality: g.locality ?? null,
+        guest_nationality: g.nationality ?? null,
+        guest_doc_type: g.document_type ?? null,
+        stays_count: 0,
+        last_check_in: null,
+      });
+    } else {
+      existing.client_phone = existing.client_phone ?? g.phone ?? null;
+      existing.guest_locality = existing.guest_locality ?? g.locality ?? null;
+      existing.guest_nationality = existing.guest_nationality ?? g.nationality ?? null;
+      existing.guest_doc_type = existing.guest_doc_type ?? g.document_type ?? null;
+    }
+  }
+
+  // Orden: primero los que se hospedaron (por ultima visita desc), despues el registro por nombre.
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.last_check_in && b.last_check_in) return b.last_check_in.localeCompare(a.last_check_in);
+    if (a.last_check_in) return -1;
+    if (b.last_check_in) return 1;
+    return a.client_name.localeCompare(b.client_name, "es-AR", { sensitivity: "base" });
+  });
 }
 
 /**

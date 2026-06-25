@@ -203,7 +203,8 @@ export type GuestDirectoryEntry = {
   guest_nationality: string | null;
   guest_doc_type: string | null;
   stays_count: number;
-  last_check_in: string;
+  /** Última visita; null si está en el registro pero todavía no tiene reservas en el sistema. */
+  last_check_in: string | null;
 };
 
 /** Resultado de buscar un huésped existente por DNI (anti-duplicados). */

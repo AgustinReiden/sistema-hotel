@@ -56,9 +56,13 @@ export default function GuestDirectoryTable({
                 </div>
               </td>
               <td className="px-6 py-4 text-center">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                  {guest.stays_count}
-                </span>
+                {guest.stays_count > 0 ? (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                    {guest.stays_count}
+                  </span>
+                ) : (
+                  <span className="text-slate-300">—</span>
+                )}
               </td>
               <td className="px-6 py-4 text-sm text-slate-600">
                 {formatHotelDate(guest.last_check_in, timezone)}
