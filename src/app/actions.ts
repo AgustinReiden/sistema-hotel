@@ -45,7 +45,9 @@ export async function handlePublicBooking(
             checkOut,
             clientPhone: formattedPhone ?? validated.phoneLocal,
             clientDni: validated.clientDni,
-            guestCount: guestCount && guestCount >= 1 ? Math.floor(guestCount) : 1,
+            // Techo defensivo en el endpoint publico; la capacidad real de la categoria la valida
+            // el RPC (rpc_public_create_reservation) contra rooms.capacity.
+            guestCount: Math.min(20, Math.max(1, Math.floor(Number(guestCount) || 1))),
         });
         revalidatePath("/");
         revalidatePath("/admin");
