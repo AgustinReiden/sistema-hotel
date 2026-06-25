@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { Building2, CreditCard, Loader2, Percent, X } from "lucide-react";
 
 import { loadAssociatedClientLedgerAction } from "./actions";
+import { formatHotelShortDate } from "@/lib/time";
 import type { AssociatedClient, AssociatedClientLedger } from "@/lib/types";
 
 function money(n: number) {
@@ -139,7 +138,7 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
                         return (
                           <tr key={r.id} className={r.status === "cancelled" ? "opacity-50" : ""}>
                             <td className="px-3 py-2 whitespace-nowrap">
-                              {format(new Date(r.check_in_target), "dd MMM yy", { locale: es })}
+                              {formatHotelShortDate(r.check_in_target)}
                             </td>
                             <td className="px-3 py-2">{r.room_number ?? "—"}</td>
                             <td className="px-3 py-2 text-xs text-slate-600 max-w-[200px] truncate">
