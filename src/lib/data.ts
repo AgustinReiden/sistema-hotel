@@ -421,13 +421,20 @@ function guestDedupKey(dni: string | null | undefined, name: string): string {
   return `name:${name.trim().toLowerCase()}`;
 }
 
+// Limpia el término de búsqueda de caracteres que rompen el parser de `.or()` de PostgREST
+// (coma, paréntesis) y de los comodines de ilike (`%` `_` `*`). Sin esto, buscar algo con una
+// coma o un CUIT con paréntesis tiraba un 500 y rompía la pantalla de Huéspedes/Asociados.
+function sanitizeSearchTerm(term: string): string {
+  return term.replace(/[,()%_*"]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 /**
  * Directorio REAL de huéspedes: una fila por persona (deduplicada por DNI/nombre),
  * con los datos canónicos de su reserva más reciente + cantidad de estadías.
  */
 export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectoryEntry[]> {
   const supabase = await createClient();
-  const search = searchTerm.trim();
+  const search = sanitizeSearchTerm(searchTerm);
 
   // Fuente 1: registro de huespedes (tabla guests; importado del Excel del hotel / cargas).
   let guestsQuery = supabase
@@ -435,13 +442,14 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     .select(`full_name, document_type, document_id, phone, locality, nationality`)
     .order("full_name", { ascending: true });
 
-  // Fuente 2: gente que efectivamente se hospedo (reservas no canceladas).
+  // Fuente 2: gente que efectivamente se hospedo. Solo estadias reales (checked_in/checked_out)
+  // para que "estadias" y "ultima visita" no se inflen con reservas futuras (pending/confirmed).
   let resQuery = supabase
     .from("reservations")
     .select(
       `client_name, client_dni, client_phone, check_in_target, guest_locality, guest_nationality, guest_doc_type`
     )
-    .neq("status", "cancelled")
+    .in("status", ["checked_in", "checked_out"])
     .order("check_in_target", { ascending: false });
 
   if (search) {
@@ -552,7 +560,7 @@ export async function getReservationHistory(
   const page = Math.max(1, options.page ?? 1);
   const pageSize = options.pageSize ?? 15;
   const days = options.days ?? 60;
-  const search = (options.search ?? "").trim();
+  const search = sanitizeSearchTerm(options.search ?? "");
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -592,7 +600,7 @@ export async function getReservationHistory(
  */
 export async function getUpcomingGuests(searchTerm = ""): Promise<UpcomingGuest[]> {
   const supabase = await createClient();
-  const search = searchTerm.trim();
+  const search = sanitizeSearchTerm(searchTerm);
 
   let query = supabase
     .from("reservations")
@@ -1273,7 +1281,7 @@ export async function extendReservation(reservationId: string, extraNights: numb
   const { data: res, error: fetchErr } = await supabase
     .from("reservations")
     .select(
-      "room_id, check_in_target, check_out_target, total_price, base_total_price, discount_percent"
+      "room_id, check_in_target, check_out_target, total_price, base_total_price, discount_percent, discount_amount"
     )
     .eq("id", reservationId)
     .single();
@@ -1305,6 +1313,12 @@ export async function extendReservation(reservationId: string, extraNights: numb
   const currentTotal = Number(res.total_price) || 0;
   const currentBaseTotal = Number(res.base_total_price) || currentTotal;
   const currentDiscountPercent = Number(res.discount_percent) || 0;
+  const currentDiscountAmount = Number(res.discount_amount) || 0;
+  // Recargos ya cargados (extras del minibar, medio día, etc.) que NO forman parte de la base:
+  // se suman directo a total_price, así que hay que preservarlos al recalcular. Antes "ampliar"
+  // recalculaba el total desde la base y los borraba en silencio (pérdida de plata).
+  const existingNetBase = currentBaseTotal - currentDiscountAmount;
+  const surcharges = Math.max(0, Math.round((currentTotal - existingNetBase) * 100) / 100);
   // Duration in ms → days (using floor to avoid floating-point issues with half-day checkout)
   const existingNights = Math.max(1, Math.round(
     (currentOut.getTime() - currentIn.getTime()) / (1000 * 60 * 60 * 24)
@@ -1313,7 +1327,7 @@ export async function extendReservation(reservationId: string, extraNights: numb
   const newBaseTotal = currentBaseTotal + extraNights * nightlyBaseRate;
   const newDiscountAmount =
     Math.round(((newBaseTotal * currentDiscountPercent) / 100) * 100) / 100;
-  const newTotal = newBaseTotal - newDiscountAmount;
+  const newTotal = newBaseTotal - newDiscountAmount + surcharges;
 
   // 4. Update reservation
   const { error: updateErr } = await supabase
@@ -2097,7 +2111,7 @@ export async function getAllActiveRoomsForMaintenance(): Promise<
     .eq("is_active", true)
     .order("room_number");
 
-  if (fallbackError) throw error;
+  if (fallbackError) throw fallbackError;
 
   return sortRoomsByNumber((fallbackRooms ?? []) as Room[]).map((room) => ({
     ...room,

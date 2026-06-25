@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
-import { getHotelSettings, getShiftSummary } from "@/lib/data";
+import { getCurrentUserRole, getHotelSettings, getShiftSummary } from "@/lib/data";
 import { formatAmount, formatShiftCode, formatSignedAmount } from "@/lib/format";
 import { formatHotelDateTime, formatHotelTime } from "@/lib/time";
 import ThermalAutoPrint from "@/app/admin/components/ThermalAutoPrint";
@@ -181,11 +181,32 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
   // y la ventana se cierra una vez. Antes navegaba de una copia a la otra, y esa segunda
   // request perdia la sesion (al cerrar caja) -> el comprobante "se cerraba" antes de imprimir.
   const copyMode = autoPrint ? "both" : requestedCopy ?? "both";
-  const [summary, hotelSettings] = await Promise.all([
+  const [summary, hotelSettings, role] = await Promise.all([
     getShiftSummary(id),
     getHotelSettings().catch(() => null),
+    getCurrentUserRole(),
   ]);
   if (!summary) notFound();
+
+  // Arqueo a ciegas: si un recepcionista intenta abrir la rendición de un turno TODAVÍA ABIERTO,
+  // no se la mostramos (vería el efectivo esperado / total antes de contar, anulando el control).
+  // La rendición se genera al cerrar; el admin sí puede verla siempre.
+  if (role !== "admin" && summary.shift.status === "open") {
+    return (
+      <div className="max-w-md mx-auto p-10 text-center">
+        <h1 className="text-xl font-bold text-slate-800 mb-2">Rendición no disponible</h1>
+        <p className="text-slate-600">
+          La rendición se genera al cerrar la caja. Cerrá el turno para verla e imprimirla.
+        </p>
+        <Link
+          href="/admin/caja"
+          className="inline-block mt-6 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-bold transition-colors"
+        >
+          Volver a Caja
+        </Link>
+      </div>
+    );
+  }
 
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
   const { shift, totalsByMethod, totalIncome, payments, openedByEmail, closedByEmail } = summary;
