@@ -41,11 +41,13 @@ type ReservationPlacement = {
   endsAfterRange: boolean;
 };
 
-const CELL_WIDTH = 120;
-const ROOM_COLUMN_WIDTH = 190;
-const ROW_HEIGHT = 58;
-const BAR_TOP = 4;
-const BAR_HEIGHT = 50;
+// Compacto: para que entren ~16 habitaciones a lo alto y 15 dias a lo ancho sin scroll
+// en una pantalla de escritorio (estilo sistema viejo del hotel).
+const CELL_WIDTH = 64;
+const ROOM_COLUMN_WIDTH = 108;
+const ROW_HEIGHT = 34;
+const BAR_TOP = 3;
+const BAR_HEIGHT = 26;
 
 function getReservationPalette(category: "active" | "next" | "future" | "pending") {
   switch (category) {
@@ -206,7 +208,7 @@ export default function CalendarClient({
         <div className="min-w-max">
           <div className="flex border-b border-slate-200 sticky top-0 z-30 bg-slate-50">
             <div
-              className="shrink-0 px-3 py-2 font-semibold text-slate-700 border-r border-slate-200 sticky left-0 z-40 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
+              className="shrink-0 px-2 py-1.5 text-sm font-semibold text-slate-700 border-r border-slate-200 sticky left-0 z-40 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
               style={{ width: `${ROOM_COLUMN_WIDTH}px` }}
             >
               Habitacion
@@ -214,11 +216,11 @@ export default function CalendarClient({
             {days.map((day) => (
               <div
                 key={day.toISOString()}
-                className="shrink-0 p-3 text-center border-r border-slate-200 bg-slate-50/70"
+                className="shrink-0 py-1.5 px-1 text-center border-r border-slate-200 bg-slate-50/70"
                 style={{ width: `${CELL_WIDTH}px` }}
               >
-                <p className="text-xs text-slate-500 uppercase font-medium">{format(day, "E", { locale: es })}</p>
-                <p className="text-sm font-bold text-slate-800">{format(day, "dd MMM", { locale: es })}</p>
+                <p className="text-[10px] text-slate-500 uppercase font-medium leading-tight">{format(day, "E", { locale: es })}</p>
+                <p className="text-xs font-bold text-slate-800 leading-tight">{format(day, "dd MMM", { locale: es })}</p>
               </div>
             ))}
           </div>
@@ -255,11 +257,11 @@ export default function CalendarClient({
             return (
               <div key={room.id} className="flex border-b border-slate-100 hover:bg-slate-50/20">
                 <div
-                  className="shrink-0 px-3 py-2 font-medium text-slate-800 bg-white border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0]"
+                  className="shrink-0 px-2 py-1 text-sm font-medium text-slate-800 bg-white border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0] flex flex-col justify-center leading-tight"
                   style={{ width: `${ROOM_COLUMN_WIDTH}px`, minHeight: `${ROW_HEIGHT}px` }}
                 >
                   Hab. {room.room_number}
-                  <span className="text-xs text-slate-500 block">{room.room_type}</span>
+                  <span className="text-[9px] text-slate-500 block truncate">{room.room_type}</span>
                 </div>
 
                 <div
@@ -296,7 +298,7 @@ export default function CalendarClient({
                     
                     const left = placement.visibleStartIndex * CELL_WIDTH;
                     const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
-                    const showText = horizontalWidth >= 100;
+                    const showText = horizontalWidth >= 56;
 
                     return (
                       <div
@@ -328,17 +330,17 @@ export default function CalendarClient({
                         </svg>
 
                         {showText && (
-                          <div className="relative z-10 flex h-full flex-col justify-center items-center pointer-events-none">
-                            <p className="text-[14px] font-black tracking-tight text-white drop-shadow-md whitespace-nowrap">
+                          <div className="relative z-10 flex h-full flex-col justify-center items-center pointer-events-none px-1 overflow-hidden">
+                            <p className="text-[10px] font-black tracking-tight text-white drop-shadow-md whitespace-nowrap leading-none">
                               {placement.reservation.client_name}
                             </p>
-                            <p className="text-[10px] uppercase font-black tracking-widest text-white/90 drop-shadow-md whitespace-nowrap">
+                            <p className="text-[7px] uppercase font-black tracking-widest text-white/90 drop-shadow-md whitespace-nowrap leading-none mt-0.5">
                               {placement.reservation.status === "checked_in" ? "En estadia" : (placement.reservation.status === "pending" ? "Pendiente" : "Confirmada")}
                             </p>
                           </div>
                         )}
                         {!endsAfterRange && (
-                          <span className="absolute bottom-[6px] right-[24px] z-10 text-[9px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
+                          <span className="absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
                             Salida
                           </span>
                         )}

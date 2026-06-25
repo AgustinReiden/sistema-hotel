@@ -25,6 +25,7 @@ function money(n: number) {
 
 type ReceiptCopyProps = {
   title: string;
+  firstCopy: boolean;
   hotelName: string;
   hotelAddress: string;
   paymentIdShort: string;
@@ -43,6 +44,7 @@ type ReceiptCopyProps = {
 function ReceiptCopy(props: ReceiptCopyProps) {
   const {
     title,
+    firstCopy,
     hotelName,
     hotelAddress,
     paymentIdShort,
@@ -58,7 +60,7 @@ function ReceiptCopy(props: ReceiptCopyProps) {
     notes,
   } = props;
   return (
-    <div className="thermal-page">
+    <div className={`thermal-page${firstCopy ? "" : " copy-next"}`}>
       <h1>{hotelName}</h1>
       <p className="addr">{hotelAddress}</p>
       <hr />
@@ -219,54 +221,57 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
 
   return (
     <div className="thermal">
-      {copies.map((copy) => (
-        <ReceiptCopy key={copy.key} title={copy.title} {...receiptData} />
+      {copies.map((copy, index) => (
+        <ReceiptCopy key={copy.key} title={copy.title} firstCopy={index === 0} {...receiptData} />
       ))}
+      <div className="thermal-feed" aria-hidden="true" />
       {autoPrint && <ReceiptAutoPrint closeOnDone />}
 
       <style>{`
-        @page { size: 75mm auto; margin: 2mm; }
+        /* Comandera termica: ancho 80mm y alto automatico (= largo del contenido), sin
+           margenes, para que no queden hojas en blanco y el corte caiga al final. */
+        @page { size: 80mm auto; margin: 0; }
         @media print {
           body {
             background: white !important;
             color: #000 !important;
+            margin: 0 !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-          .thermal { padding: 0 !important; }
           .no-print { display: none !important; }
         }
         .thermal {
           font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
           background: white;
           color: #000;
-          max-width: 75mm;
+          width: 72mm;
+          max-width: 72mm;
           margin: 0 auto;
-          padding: 6px;
-          line-height: 1.25;
+          line-height: 1.2;
           word-break: break-word;
         }
-        .thermal-page {
-          page-break-after: always;
-          break-after: page;
-          padding: 4mm 2.5mm;
+        /* Copias en flujo continuo (sin salto de pagina, que generaba el espacio en blanco
+           gigante entre original y duplicado); se separan con linea de corte punteada. */
+        .thermal-page { padding: 0 3mm; }
+        .thermal-page.copy-next {
+          margin-top: 4mm;
+          padding-top: 4mm;
+          border-top: 1px dashed #000;
         }
-        .thermal-page:last-child {
-          page-break-after: auto;
-          break-after: auto;
-        }
+        .thermal-feed { height: 10mm; }
         .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
         .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
         .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 2px; text-align: center; letter-spacing: 0.6px; }
         .thermal .sub { font-size: 10pt; font-weight: 800; text-align: center; margin: 0 0 6px; letter-spacing: 1.5px; }
-        .thermal hr { border: none; border-top: 1.5px solid #000; margin: 6px 0; }
-        .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 2px 0; }
+        .thermal hr { border: none; border-top: 1.5px solid #000; margin: 5px 0; }
+        .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 1.5px 0; }
         .thermal .row span:first-child { font-weight: 800; margin-right: 6px; }
         .thermal .row span:last-child { text-align: right; }
         .thermal .row.small { font-size: 9.5pt; font-weight: 700; }
-        .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 13pt; font-weight: 900; margin: 8px 0 4px; }
+        .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 13pt; font-weight: 900; margin: 6px 0 4px; }
         .thermal .note { font-size: 9.5pt; font-weight: 700; margin: 4px 0; }
-        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 10px 0 0; }
+        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 8px 0 0; }
         .thermal .footer.muted { color: #000; margin-top: 4px; }
       `}</style>
     </div>

@@ -28,6 +28,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 type ShiftCopyProps = {
   title: string;
+  firstCopy: boolean;
   hotelName: string;
   hotelAddress: string;
   shiftCode: string;
@@ -55,6 +56,7 @@ type ShiftCopyProps = {
 function ShiftCopy(props: ShiftCopyProps) {
   const {
     title,
+    firstCopy,
     hotelName,
     hotelAddress,
     shiftCode,
@@ -73,7 +75,7 @@ function ShiftCopy(props: ShiftCopyProps) {
   } = props;
 
   return (
-    <div className="thermal-page">
+    <div className={`thermal-page${firstCopy ? "" : " copy-next"}`}>
       <h1>{hotelName}</h1>
       <p className="addr">{hotelAddress}</p>
       <hr />
@@ -191,7 +193,7 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     .filter(([method, value]) => method !== "cash" && value > 0)
     .sort((a, b) => b[1] - a[1]);
 
-  const copyProps: Omit<ShiftCopyProps, "title"> = {
+  const copyProps: Omit<ShiftCopyProps, "title" | "firstCopy"> = {
     hotelName: hotelSettings?.name || "Hotel El Refugio",
     hotelAddress: hotelSettings?.address ?? "",
     shiftCode: formatShiftCode(shift.shift_number),
@@ -237,17 +239,21 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
       </div>
 
       <div className="thermal">
-        {copies.map((copy) => (
-          <ShiftCopy key={copy.key} title={copy.title} {...copyProps} />
+        {copies.map((copy, index) => (
+          <ShiftCopy key={copy.key} title={copy.title} firstCopy={index === 0} {...copyProps} />
         ))}
+        <div className="thermal-feed" aria-hidden="true" />
         {autoPrint && <ThermalAutoPrint closeOnDone />}
 
         <style>{`
-          @page { size: 75mm auto; margin: 2mm; }
+          /* Comandera termica: ancho 80mm y ALTO automatico (= largo del contenido), sin
+             margenes. Asi no quedan hojas en blanco y el corte cae al final del contenido. */
+          @page { size: 80mm auto; margin: 0; }
           @media print {
             body {
               background: white !important;
               color: #000 !important;
+              margin: 0 !important;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
             }
@@ -257,35 +263,37 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
             font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
             background: white;
             color: #000;
-            max-width: 75mm;
+            width: 72mm;
+            max-width: 72mm;
             margin: 0 auto;
-            line-height: 1.25;
+            line-height: 1.2;
             word-break: break-word;
           }
-          .thermal-page {
-            page-break-after: always;
-            break-after: page;
-            padding: 4mm 2.5mm;
+          /* Copias en flujo continuo (sin salto de pagina, que era lo que generaba el
+             espacio en blanco gigante entre original y duplicado). Se separan con una
+             linea de corte punteada. */
+          .thermal-page { padding: 0 3mm; }
+          .thermal-page.copy-next {
+            margin-top: 4mm;
+            padding-top: 4mm;
+            border-top: 1px dashed #000;
           }
-          .thermal-page:last-child {
-            page-break-after: auto;
-            break-after: auto;
-          }
+          .thermal-feed { height: 10mm; }
           .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
           .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 4px; }
           .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 0; text-align: center; letter-spacing: 0.6px; }
           .thermal .sub { font-size: 10pt; font-weight: 800; text-align: center; margin: 0 0 6px; letter-spacing: 1.5px; }
           .thermal .section { font-size: 10pt; font-weight: 900; text-align: center; margin: 6px 0 3px; letter-spacing: 0.8px; }
-          .thermal hr { border: none; border-top: 1.5px solid #000; margin: 6px 0; }
-          .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 2px 0; }
+          .thermal hr { border: none; border-top: 1.5px solid #000; margin: 5px 0; }
+          .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 1.5px 0; }
           .thermal .row span:last-child { text-align: right; }
           .thermal .row.small { font-size: 9.5pt; }
-          .thermal .row.big { font-size: 12.5pt; font-weight: 900; margin: 5px 0; }
+          .thermal .row.big { font-size: 12.5pt; font-weight: 900; margin: 4px 0; }
           .thermal .indent { padding-left: 6px; }
           .thermal .muted { color: #000; }
-          .thermal .payment-line { margin-bottom: 3px; }
+          .thermal .payment-line { margin-bottom: 2px; }
           .thermal .small { font-size: 9.5pt; font-weight: 700; }
-          .thermal .sign { font-size: 10pt; font-weight: 800; text-align: center; margin: 10px 0 2px; }
+          .thermal .sign { font-size: 10pt; font-weight: 800; text-align: center; margin: 8px 0 2px; }
         `}</style>
       </div>
     </>

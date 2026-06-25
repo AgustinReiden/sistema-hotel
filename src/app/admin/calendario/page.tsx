@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function CalendarPage() {
   const [{ rooms, reservations, startDate, daysCount }, hotelSettings, role, associatedClients] =
     await Promise.all([
-    getTimelineData(14),
+    getTimelineData(15),
     getHotelSettings(),
     getCurrentUserRole(),
     getActiveAssociatedClients(),
@@ -37,7 +37,7 @@ export default async function CalendarPage() {
         />
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4">
         <CalendarClient
           rooms={rooms}
           reservations={reservations}

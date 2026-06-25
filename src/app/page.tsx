@@ -6,6 +6,7 @@ import RoomCarousel from "./components/RoomCarousel";
 import ScrollToResults from "./components/ScrollToResults";
 import { determineSmarterAvailableRooms, getAllRooms, getAvailableRooms, getHotelSettings } from "@/lib/data";
 import { buildPublicRoomOffers, getRoomCapacity } from "@/lib/rooms";
+import { localToISO } from "@/lib/format";
 
 type PageProps = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -29,10 +30,20 @@ export default async function Home({ searchParams }: PageProps) {
 
   const isSearching = !!checkin && !!checkout;
 
-  const [settings, roomsForDisplay] = await Promise.all([
-    getHotelSettings(),
-    isSearching ? getAvailableRooms(checkin, checkout) : getAllRooms(),
-  ]);
+  const settings = await getHotelSettings();
+  // La disponibilidad se calcula con los MISMOS horarios (check-in/out estandar, zona del
+  // hotel) que usa la reserva real. Antes se mandaban fechas "pelapas" (medianoche UTC) y la
+  // habitacion se mostraba disponible pero al reservar chocaba con la restriccion -> "no disponible".
+  const stdCheckIn = (settings.standard_check_in_time || "14:00").slice(0, 5);
+  const stdCheckOut = (settings.standard_check_out_time || "10:00").slice(0, 5);
+  const tz = settings.timezone || "America/Argentina/Tucuman";
+  const roomsForDisplay =
+    isSearching && checkin && checkout
+      ? await getAvailableRooms(
+          localToISO(checkin, stdCheckIn, tz),
+          localToISO(checkout, stdCheckOut, tz)
+        )
+      : await getAllRooms();
   const publicRooms = isSearching ? [] : roomsForDisplay.filter((room) => room.is_active);
   const availableRooms = isSearching ? roomsForDisplay : [];
 
