@@ -202,6 +202,7 @@ export async function getAssociatedClientLedger(
     .select(
       `
       id,
+      client_name,
       notes,
       status,
       check_in_target,
@@ -218,6 +219,7 @@ export async function getAssociatedClientLedger(
 
   type LedgerRow = {
     id: string;
+    client_name: string | null;
     notes: string | null;
     status: ReservationStatus;
     check_in_target: string;
@@ -246,9 +248,16 @@ export async function getAssociatedClientLedger(
       count += 1;
     }
 
+    // Pasajero real: en el modelo nuevo es client_name (la persona). Para filas legacy de
+    // modo asociado, client_name era la empresa y el pasajero quedaba en notes ("Pasajero: ...").
+    const legacyPassenger =
+      row.notes && /^Pasajero:/i.test(row.notes)
+        ? row.notes.replace(/^Pasajero:\s*/i, "").trim()
+        : null;
+
     return {
       id: row.id,
-      passenger: row.notes,
+      passenger: legacyPassenger ?? row.client_name ?? null,
       room_number: roomNumber,
       status: row.status,
       check_in_target: row.check_in_target,
@@ -451,7 +460,7 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
   // Fuente 1: registro de huespedes (tabla guests; importado del Excel del hotel / cargas).
   let guestsQuery = supabase
     .from("guests")
-    .select(`full_name, document_type, document_id, phone, locality, nationality`)
+    .select(`id, full_name, document_type, document_id, phone, locality, nationality, discount_percent`)
     .order("full_name", { ascending: true });
 
   // Fuente 2: gente que efectivamente se hospedo. Solo estadias reales (checked_in/checked_out)
@@ -485,12 +494,14 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     guest_doc_type: string | null;
   };
   type GuestRow = {
+    id: string;
     full_name: string;
     document_type: string | null;
     document_id: string | null;
     phone: string | null;
     locality: string | null;
     nationality: string | null;
+    discount_percent: number | null;
   };
 
   const map = new Map<string, GuestDirectoryEntry>();
@@ -503,12 +514,14 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     if (!existing) {
       map.set(key, {
         key,
+        id: null,
         client_name: r.client_name,
         client_dni: r.client_dni ?? null,
         client_phone: r.client_phone ?? null,
         guest_locality: r.guest_locality ?? null,
         guest_nationality: r.guest_nationality ?? null,
         guest_doc_type: r.guest_doc_type ?? null,
+        discount_percent: 0,
         stays_count: 1,
         last_check_in: r.check_in_target,
       });
@@ -529,16 +542,21 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     if (!existing) {
       map.set(key, {
         key,
+        id: g.id,
         client_name: g.full_name,
         client_dni: g.document_id ?? null,
         client_phone: g.phone ?? null,
         guest_locality: g.locality ?? null,
         guest_nationality: g.nationality ?? null,
         guest_doc_type: g.document_type ?? null,
+        discount_percent: Number(g.discount_percent ?? 0),
         stays_count: 0,
         last_check_in: null,
       });
     } else {
+      // La ficha del padron es canonica para id y descuento personal.
+      existing.id = existing.id ?? g.id;
+      existing.discount_percent = Number(g.discount_percent ?? existing.discount_percent ?? 0);
       existing.client_phone = existing.client_phone ?? g.phone ?? null;
       existing.guest_locality = existing.guest_locality ?? g.locality ?? null;
       existing.guest_nationality = existing.guest_nationality ?? g.nationality ?? null;
@@ -693,6 +711,39 @@ export async function findGuestByDni(dni: string): Promise<GuestDniMatch | null>
     }
   }
   return null;
+}
+
+/**
+ * Fija el descuento personal de un huesped del padron. Si la persona todavia no tiene ficha
+ * (id null en el directorio, solo viene de reservas), crea el registro con ese descuento.
+ * Solo admin (RLS de la tabla guests + guard de la pagina /admin/guests).
+ */
+export async function setGuestPersonalDiscount(input: {
+  id?: string | null;
+  fullName: string;
+  documentId?: string | null;
+  discountPercent: number;
+}): Promise<void> {
+  const supabase = await createClient();
+
+  if (input.id) {
+    const { error } = await supabase
+      .from("guests")
+      .update({
+        discount_percent: input.discountPercent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.id);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from("guests").insert({
+    full_name: input.fullName,
+    document_id: input.documentId ?? null,
+    discount_percent: input.discountPercent,
+  });
+  if (error) throw error;
 }
 
 export async function applyLateCheckOut(
@@ -861,29 +912,23 @@ export async function staffCreateReservation(
   input: CreateReservationPayload
 ): Promise<string> {
   const supabase = await createClient();
-  // Los datos de pasajero se envian solo cuando se cargan, para seguir funcionando
-  // aunque todavia no se haya aplicado la migracion 51.
+  // Flujo unico: el huesped (persona) es siempre obligatorio; la empresa/convenio es opcional.
+  // El RPC hace find-or-create del huesped en el padron y resuelve la precedencia de descuento
+  // (empresa -> descuento personal del huesped -> 0).
   const params: Record<string, string | number | null> = {
     p_room_id: input.roomId,
     p_check_in: input.checkIn,
     p_check_out: input.checkOut,
     // El nombre completo lo compone el RPC a partir de nombre + apellido.
     p_client_name: null,
-    p_client_dni: input.customerMode === "manual" ? input.clientDni : null,
-    p_client_phone:
-      input.customerMode === "manual" ? input.clientPhone || null : null,
-    p_associated_client_id:
-      input.customerMode === "associated" ? input.associatedClientId : null,
+    p_client_dni: input.clientDni,
+    p_client_phone: input.clientPhone || null,
+    p_associated_client_id: input.associatedClientId || null,
     p_guest_count: input.guestCount ?? 1,
+    p_client_first_name: input.clientFirstName,
+    p_client_last_name: input.clientLastName,
+    p_guest_id: input.guestId || null,
   };
-  if (input.customerMode === "manual") {
-    params.p_client_first_name = input.clientFirstName;
-    params.p_client_last_name = input.clientLastName;
-  }
-  if (input.customerMode === "associated") {
-    if (input.guestName) params.p_guest_name = input.guestName;
-    if (input.guestDni) params.p_guest_dni = input.guestDni;
-  }
   if (input.guestProfession) params.p_guest_profession = input.guestProfession;
   if (input.guestAddress) params.p_guest_address = input.guestAddress;
   if (input.guestLocality) params.p_guest_locality = input.guestLocality;

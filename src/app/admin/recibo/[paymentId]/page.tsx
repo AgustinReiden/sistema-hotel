@@ -33,6 +33,7 @@ type ReceiptCopyProps = {
   createdAtFormatted: string;
   clientName: string;
   clientDni: string | null;
+  billedTo: string | null;
   roomNumber: string | null;
   amount: number;
   totalPrice: number;
@@ -52,6 +53,7 @@ function ReceiptCopy(props: ReceiptCopyProps) {
     createdAtFormatted,
     clientName,
     clientDni,
+    billedTo,
     roomNumber,
     amount,
     totalPrice,
@@ -83,6 +85,12 @@ function ReceiptCopy(props: ReceiptCopyProps) {
         <p className="row">
           <span>DNI/CUIT:</span>
           <span>{clientDni}</span>
+        </p>
+      )}
+      {billedTo && (
+        <p className="row">
+          <span>Factura a:</span>
+          <span>{billedTo}</span>
         </p>
       )}
       {roomNumber && (
@@ -147,7 +155,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     .select(
       `
       id, amount, payment_method, notes, created_at,
-      reservation:reservations ( client_name, client_dni, total_price, paid_amount, rooms ( room_number ) )
+      reservation:reservations ( client_name, client_dni, total_price, paid_amount, rooms ( room_number ), associated_client:associated_clients ( display_name ) )
       `
     )
     .eq("id", paymentId)
@@ -164,22 +172,19 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     reservation: unknown;
   };
   const raw = data as Raw;
-  const reservationRelation = raw.reservation as
-    | {
-        client_name: string;
-        client_dni: string | null;
-        total_price: number | string;
-        paid_amount: number | string;
-        rooms: { room_number: string } | { room_number: string }[] | null;
-      }
-    | Array<{
-        client_name: string;
-        client_dni: string | null;
-        total_price: number | string;
-        paid_amount: number | string;
-        rooms: { room_number: string } | { room_number: string }[] | null;
-      }>
+  type AssociatedRelation =
+    | { display_name: string }
+    | { display_name: string }[]
     | null;
+  type ReservationShape = {
+    client_name: string;
+    client_dni: string | null;
+    total_price: number | string;
+    paid_amount: number | string;
+    rooms: { room_number: string } | { room_number: string }[] | null;
+    associated_client: AssociatedRelation;
+  };
+  const reservationRelation = raw.reservation as ReservationShape | ReservationShape[] | null;
   const reservation = Array.isArray(reservationRelation)
     ? reservationRelation[0]
     : reservationRelation;
@@ -187,6 +192,10 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const roomNumber = Array.isArray(roomsRelation)
     ? roomsRelation[0]?.room_number
     : roomsRelation?.room_number;
+  const associatedRelation = reservation?.associated_client;
+  const billedTo = Array.isArray(associatedRelation)
+    ? associatedRelation[0]?.display_name ?? null
+    : associatedRelation?.display_name ?? null;
 
   const hotelSettings = await getHotelSettings().catch(() => null);
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
@@ -203,6 +212,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     createdAtFormatted: formatHotelDateTime(raw.created_at, tz),
     clientName: reservation?.client_name ?? "---",
     clientDni: reservation?.client_dni ?? null,
+    billedTo,
     roomNumber: roomNumber ?? null,
     amount,
     totalPrice,

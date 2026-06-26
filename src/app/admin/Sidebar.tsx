@@ -61,7 +61,7 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                         </Link>
                         <Link href="/admin/asociados" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Building2 size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Asociados</span>
+                            <span className="font-medium">Empresas / Convenios</span>
                         </Link>
                         <Link href="/admin/settings" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Settings size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />

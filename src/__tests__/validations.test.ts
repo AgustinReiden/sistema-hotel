@@ -139,8 +139,8 @@ describe("assignWalkInSchema", () => {
 });
 
 describe("createReservationSchema", () => {
-  const validManualInput = {
-    customerMode: "manual" as const,
+  // Flujo unico: el huesped (persona) es siempre obligatorio; la empresa/convenio es opcional.
+  const validInput = {
     roomId: 1,
     clientFirstName: "Carlos",
     clientLastName: "Lopez",
@@ -150,87 +150,63 @@ describe("createReservationSchema", () => {
     checkOut: "2026-04-03T10:00:00.000Z",
   };
 
-  it("accepts valid manual reservation data", () => {
-    const result = createReservationSchema.parse(validManualInput);
-    expect(result.customerMode).toBe("manual");
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
+  it("accepts a guest-only reservation (sin empresa)", () => {
+    const result = createReservationSchema.parse(validInput);
     expect(result.roomId).toBe(1);
     expect(result.clientFirstName).toBe("Carlos");
     expect(result.clientLastName).toBe("Lopez");
     expect(result.clientDni).toBe("20-12345678-3");
+    expect(result.associatedClientId).toBeUndefined();
   });
 
-  it("accepts associated reservation data", () => {
+  it("accepts an optional empresa/convenio (associatedClientId)", () => {
     const result = createReservationSchema.parse({
-      customerMode: "associated",
-      roomId: 1,
+      ...validInput,
       associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      checkIn: "2026-04-01T14:00:00.000Z",
-      checkOut: "2026-04-03T10:00:00.000Z",
-      guestName: "Maria Lopez",
-      guestDni: "30123456",
     });
-
-    expect(result.customerMode).toBe("associated");
-    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
     expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
   });
 
-  it("rejects associated reservation without passenger data", () => {
+  it("accepts an optional guestId (huesped del padron)", () => {
+    const result = createReservationSchema.parse({
+      ...validInput,
+      guestId: "550e8400-e29b-41d4-a716-446655440000",
+    });
+    expect(result.guestId).toBe("550e8400-e29b-41d4-a716-446655440000");
+  });
+
+  it("treats empty associatedClientId as undefined", () => {
+    const result = createReservationSchema.parse({ ...validInput, associatedClientId: "" });
+    expect(result.associatedClientId).toBeUndefined();
+  });
+
+  it("rejects an invalid associatedClientId", () => {
     expect(() =>
-      createReservationSchema.parse({
-        customerMode: "associated",
-        roomId: 1,
-        associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-        checkIn: "2026-04-01T14:00:00.000Z",
-        checkOut: "2026-04-03T10:00:00.000Z",
-      })
+      createReservationSchema.parse({ ...validInput, associatedClientId: "not-a-uuid" })
     ).toThrow();
   });
 
   it("allows empty optional phone", () => {
-    const result = createReservationSchema.parse({
-      ...validManualInput,
-      clientPhone: "",
-    });
-
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
+    const result = createReservationSchema.parse({ ...validInput, clientPhone: "" });
     expect(result.clientPhone).toBeUndefined();
   });
 
-  it("rejects missing DNI or CUIT in manual mode", () => {
-    expect(() =>
-      createReservationSchema.parse({
-        ...validManualInput,
-        clientDni: "",
-      })
-    ).toThrow();
+  it("rejects missing name or DNI (la persona es obligatoria)", () => {
+    expect(() => createReservationSchema.parse({ ...validInput, clientDni: "" })).toThrow();
+    expect(() => createReservationSchema.parse({ ...validInput, clientFirstName: "" })).toThrow();
+    expect(() => createReservationSchema.parse({ ...validInput, clientLastName: "" })).toThrow();
   });
 
   it("rejects short optional phone when provided", () => {
     expect(() =>
-      createReservationSchema.parse({
-        ...validManualInput,
-        clientPhone: "123",
-      })
-    ).toThrow();
-  });
-
-  it("rejects missing associated id in associated mode", () => {
-    expect(() =>
-      createReservationSchema.parse({
-        customerMode: "associated",
-        roomId: 1,
-        checkIn: "2026-04-01T14:00:00.000Z",
-        checkOut: "2026-04-03T10:00:00.000Z",
-      })
+      createReservationSchema.parse({ ...validInput, clientPhone: "123" })
     ).toThrow();
   });
 
   it("rejects checkOut before checkIn", () => {
     expect(() =>
       createReservationSchema.parse({
-        ...validManualInput,
+        ...validInput,
         checkIn: "2026-04-05T14:00:00.000Z",
         checkOut: "2026-04-03T10:00:00.000Z",
       })
@@ -239,24 +215,8 @@ describe("createReservationSchema", () => {
 
   it("rejects invalid date format", () => {
     expect(() =>
-      createReservationSchema.parse({ ...validManualInput, checkIn: "not-a-date" })
+      createReservationSchema.parse({ ...validInput, checkIn: "not-a-date" })
     ).toThrow();
-  });
-
-  it("keeps passenger data on associated reservation", () => {
-    const result = createReservationSchema.parse({
-      customerMode: "associated",
-      roomId: 1,
-      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      checkIn: "2026-04-01T14:00:00.000Z",
-      checkOut: "2026-04-03T10:00:00.000Z",
-      guestName: "Maria Lopez",
-      guestDni: "30123456",
-    });
-
-    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
-    expect(result.guestName).toBe("Maria Lopez");
-    expect(result.guestDni).toBe("30123456");
   });
 });
 

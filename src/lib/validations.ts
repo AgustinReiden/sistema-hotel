@@ -154,32 +154,33 @@ export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
   }),
 ]);
 
+// Empresa/Convenio opcional en el alta de reserva: vacio -> undefined; si viene, uuid valido.
+const optionalAssociatedClientId = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  associatedClientIdSchema.optional()
+);
+
+// Id del padron de huespedes (opcional): si la persona se eligio del directorio.
+const optionalGuestId = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  z.string().uuid("El huesped seleccionado es invalido.").optional()
+);
+
+// Flujo unico: la persona (huesped) es obligatoria; la empresa/convenio es opcional.
 export const createReservationSchema = z
-  .discriminatedUnion("customerMode", [
-    z.object({
-      customerMode: z.literal("manual"),
-      roomId: z.number().int().positive("El ID de la habitacion es invalido."),
-      clientFirstName: clientFirstNameSchema,
-      clientLastName: clientLastNameSchema,
-      clientDni: clientDniSchema,
-      clientPhone: optionalPhoneSchema,
-      checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
-      checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
-      guestCount: guestCountSchema,
-      ...guestRegistrySchemaFields,
-    }),
-    z.object({
-      customerMode: z.literal("associated"),
-      roomId: z.number().int().positive("El ID de la habitacion es invalido."),
-      associatedClientId: associatedClientIdSchema,
-      checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
-      checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
-      guestCount: guestCountSchema,
-      guestName: requiredPassengerName,
-      guestDni: requiredPassengerDni,
-      ...guestRegistrySchemaFields,
-    }),
-  ])
+  .object({
+    roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+    guestId: optionalGuestId,
+    clientFirstName: clientFirstNameSchema,
+    clientLastName: clientLastNameSchema,
+    clientDni: clientDniSchema,
+    clientPhone: optionalPhoneSchema,
+    associatedClientId: optionalAssociatedClientId,
+    checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
+    checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
+    guestCount: guestCountSchema,
+    ...guestRegistrySchemaFields,
+  })
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {
     message: "La fecha de salida debe ser posterior a la fecha de entrada.",
     path: ["checkOut"],

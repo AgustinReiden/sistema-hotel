@@ -196,12 +196,16 @@ export type Guest = {
 /** Una persona del directorio real de huespedes (deduplicado por DNI / nombre). */
 export type GuestDirectoryEntry = {
   key: string;
+  /** Id del padron (tabla guests) si la persona ya tiene ficha; null si solo viene de reservas. */
+  id: string | null;
   client_name: string;
   client_dni: string | null;
   client_phone: string | null;
   guest_locality: string | null;
   guest_nationality: string | null;
   guest_doc_type: string | null;
+  /** Descuento personal del huesped (0 si no tiene ficha en el padron o no se le cargo). */
+  discount_percent: number;
   stays_count: number;
   /** Última visita; null si está en el registro pero todavía no tiene reservas en el sistema. */
   last_check_in: string | null;
@@ -284,29 +288,25 @@ export type GuestRegistryInput = {
   guestVehicle?: string;
 };
 
-export type CreateReservationPayload =
-  | ({
-      customerMode: "manual";
-      roomId: number;
-      clientFirstName: string;
-      clientLastName: string;
-      clientDni: string;
-      clientPhone?: string;
-      checkIn: string;
-      checkOut: string;
-      guestCount?: number;
-    } & GuestRegistryInput)
-  | ({
-      customerMode: "associated";
-      roomId: number;
-      associatedClientId: string;
-      checkIn: string;
-      checkOut: string;
-      guestCount?: number;
-      /** Pasajero real que se hospeda; obligatorio en modo asociado (la empresa es el huesped facturable). */
-      guestName: string;
-      guestDni: string;
-    } & GuestRegistryInput);
+/**
+ * Alta de reserva (flujo unico). El huesped (persona) es SIEMPRE quien se hospeda y queda en
+ * client_*; la Empresa/Convenio (associatedClientId) es opcional y, si esta, su descuento pisa
+ * al descuento personal del huesped.
+ */
+export type CreateReservationPayload = {
+  roomId: number;
+  /** Padron id si el huesped se eligio del directorio; null/undefined si es nuevo (se crea solo). */
+  guestId?: string | null;
+  clientFirstName: string;
+  clientLastName: string;
+  clientDni: string;
+  clientPhone?: string;
+  /** Empresa/Convenio facturable (opcional). */
+  associatedClientId?: string | null;
+  checkIn: string;
+  checkOut: string;
+  guestCount?: number;
+} & GuestRegistryInput;
 
 export type AssignWalkInPayload =
   | ({

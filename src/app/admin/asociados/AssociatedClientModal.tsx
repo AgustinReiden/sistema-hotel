@@ -73,11 +73,13 @@ export default function AssociatedClientModal({
 
       if (result.success) {
         toast.success(
-          initialClient ? "Asociado actualizado correctamente." : "Asociado creado correctamente."
+          initialClient
+            ? "Empresa/Convenio actualizado correctamente."
+            : "Empresa/Convenio creado correctamente."
         );
         onClose();
       } else {
-        toast.error(result.error || "No se pudo guardar el asociado.");
+        toast.error(result.error || "No se pudo guardar la empresa/convenio.");
       }
     } finally {
       setIsSubmitting(false);
@@ -103,7 +105,7 @@ export default function AssociatedClientModal({
               <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-display-name">
                 <span className="flex items-center gap-1.5">
                   <UserRound size={14} />
-                  Nombre del Asociado
+                  Nombre de la Empresa / Convenio
                 </span>
               </label>
               <input
@@ -192,7 +194,7 @@ export default function AssociatedClientModal({
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            El descuento se congelará en cada reserva o check-in al momento de seleccionar este asociado.
+            El descuento se congelará en cada reserva o check-in al momento de seleccionar esta empresa/convenio.
           </div>
 
           <div className="pt-4 border-t border-slate-100 flex gap-3">
@@ -208,7 +210,7 @@ export default function AssociatedClientModal({
               disabled={isSubmitting || !form.displayName.trim() || !form.documentId.trim()}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
-              {isSubmitting ? "Guardando..." : initialClient ? "Guardar Cambios" : "Crear Asociado"}
+              {isSubmitting ? "Guardando..." : initialClient ? "Guardar Cambios" : "Crear Empresa / Convenio"}
             </button>
           </div>
         </form>

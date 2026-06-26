@@ -134,7 +134,7 @@ export default function WalkInModal({
     }
     if (customerMode === "associated") {
       if (!associatedClientId) {
-        toast.error("Selecciona un asociado para continuar.");
+        toast.error("Selecciona una empresa/convenio para continuar.");
         return;
       }
       if (!guestName.trim() || !guestDni.trim()) {
@@ -220,7 +220,7 @@ export default function WalkInModal({
                     : "border-slate-200 hover:border-slate-300"
                 }`}
               >
-                <p className="font-semibold text-slate-800">Asociado</p>
+                <p className="font-semibold text-slate-800">Empresa / Convenio</p>
                 <p className="text-sm text-slate-500">Usa el padrón y aplica el descuento al total.</p>
               </button>
             </div>
@@ -320,7 +320,7 @@ export default function WalkInModal({
                 selectedId={associatedClientId}
                 onSelect={setAssociatedClientId}
                 inputId="walkinAssociatedClient"
-                label="Asociado"
+                label="Empresa / Convenio"
               />
 
               {selectedAssociatedClient ? (
@@ -355,7 +355,7 @@ export default function WalkInModal({
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                  Selecciona un asociado activo para usar sus datos y descuento en este check-in.
+                  Selecciona una empresa/convenio activo para usar sus datos y descuento en este check-in.
                 </div>
               )}
 
@@ -488,7 +488,7 @@ export default function WalkInModal({
               {customerMode === "associated" && (
                 <div className="mt-3 flex items-center gap-2 text-xs font-medium text-emerald-700">
                   <Percent size={12} />
-                  Se guardará el descuento y los datos actuales del asociado en esta reserva.
+                  Se guardará el descuento y los datos actuales de la empresa/convenio en esta reserva.
                 </div>
               )}
             </div>
