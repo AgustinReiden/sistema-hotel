@@ -43,9 +43,9 @@ export default async function AssociatedClientsPage({
               <Building2 size={20} className="text-slate-600" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-800">Asociados</h1>
+              <h1 className="text-xl font-bold text-slate-800">Empresas / Convenios</h1>
               <p className="text-sm text-slate-500">
-                Padrón de clientes recurrentes con descuento automático.
+                Empresas y convenios facturables con descuento automático.
               </p>
             </div>
           </div>
@@ -59,7 +59,7 @@ export default async function AssociatedClientsPage({
               name="q"
               type="text"
               defaultValue={search}
-              placeholder="Buscar asociado..."
+              placeholder="Buscar empresa/convenio..."
               className="pl-9 pr-4 py-2 bg-slate-100 border-transparent rounded-lg text-sm focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none w-72 transition-all"
             />
           </form>

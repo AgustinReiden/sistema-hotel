@@ -115,7 +115,7 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
               </h3>
               {ledger.reservations.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 text-sm border border-dashed border-slate-200 rounded-xl">
-                  Este asociado todavía no tiene estadías registradas.
+                  Esta empresa/convenio todavía no tiene estadías registradas.
                 </div>
               ) : (
                 <div className="border border-slate-200 rounded-xl overflow-x-auto">

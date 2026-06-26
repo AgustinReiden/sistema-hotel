@@ -1,5 +1,6 @@
 import { formatHotelDate } from "@/lib/time";
 import type { GuestDirectoryEntry } from "@/lib/types";
+import GuestDiscountCell from "./GuestDiscountCell";
 
 export default function GuestDirectoryTable({
   guests,
@@ -18,6 +19,7 @@ export default function GuestDirectoryTable({
             <th className="px-6 py-4">Huésped</th>
             <th className="px-6 py-4">Contacto</th>
             <th className="px-6 py-4">Origen</th>
+            <th className="px-6 py-4">Descuento</th>
             <th className="px-6 py-4 text-center">Estadías</th>
             <th className="px-6 py-4">Última visita</th>
           </tr>
@@ -54,6 +56,9 @@ export default function GuestDirectoryTable({
                     <span className="text-slate-300">—</span>
                   )}
                 </div>
+              </td>
+              <td className="px-6 py-4">
+                <GuestDiscountCell entry={guest} />
               </td>
               <td className="px-6 py-4 text-center">
                 {guest.stays_count > 0 ? (

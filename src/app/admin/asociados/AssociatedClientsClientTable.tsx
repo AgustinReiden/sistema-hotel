@@ -30,13 +30,13 @@ export default function AssociatedClientsClientTable({
   const handleToggleStatus = async (client: AssociatedClient) => {
     const nextIsActive = !client.is_active;
     const actionLabel = nextIsActive ? "reactivar" : "archivar";
-    if (!confirm(`¿Seguro que deseas ${actionLabel} este asociado?`)) return;
+    if (!confirm(`¿Seguro que deseas ${actionLabel} esta empresa/convenio?`)) return;
 
     setChangingStatusId(client.id);
     const result = await toggleAssociatedClientStatusAction(client.id, nextIsActive);
 
     if (result.success) {
-      toast.success(nextIsActive ? "Asociado reactivado." : "Asociado archivado.");
+      toast.success(nextIsActive ? "Empresa/Convenio reactivado." : "Empresa/Convenio archivado.");
       router.refresh();
     } else {
       toast.error(result.error);
@@ -53,7 +53,7 @@ export default function AssociatedClientsClientTable({
           className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors shadow-sm"
         >
           <Plus size={18} className="mr-2" />
-          Nuevo Asociado
+          Nueva Empresa / Convenio
         </button>
       </div>
 
@@ -61,7 +61,7 @@ export default function AssociatedClientsClientTable({
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-semibold">
-              <th className="px-6 py-4">Asociado</th>
+              <th className="px-6 py-4">Empresa / Convenio</th>
               <th className="px-6 py-4">DNI/CUIT</th>
               <th className="px-6 py-4">Teléfono</th>
               <th className="px-6 py-4">Descuento</th>
@@ -119,7 +119,7 @@ export default function AssociatedClientsClientTable({
                     <button
                       onClick={() => setSelectedClient(client)}
                       className="inline-flex items-center justify-center p-2 text-brand-600 hover:bg-brand-50 rounded-lg transition-colors cursor-pointer"
-                      title="Editar Asociado"
+                      title="Editar Empresa/Convenio"
                     >
                       <Edit size={18} />
                     </button>
@@ -127,7 +127,7 @@ export default function AssociatedClientsClientTable({
                       onClick={() => handleToggleStatus(client)}
                       disabled={changingStatusId === client.id}
                       className="inline-flex items-center justify-center p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                      title={client.is_active ? "Archivar Asociado" : "Reactivar Asociado"}
+                      title={client.is_active ? "Archivar Empresa/Convenio" : "Reactivar Empresa/Convenio"}
                     >
                       {client.is_active ? <FolderArchive size={18} /> : <RotateCcw size={18} />}
                     </button>
@@ -142,15 +142,15 @@ export default function AssociatedClientsClientTable({
       {initialClients.length === 0 && (
         <div className="p-8 text-center text-slate-500">
           {searchQuery
-            ? "No hay asociados que coincidan con la búsqueda."
-            : "Todavía no hay asociados cargados."}
+            ? "No hay empresas/convenios que coincidan con la búsqueda."
+            : "Todavía no hay empresas/convenios cargados."}
         </div>
       )}
 
       <AssociatedClientModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        title="Nuevo Asociado"
+        title="Nueva Empresa / Convenio"
         onSubmit={async (payload) => {
           const result = await createAssociatedClientAction(payload);
           if (result.success) router.refresh();
@@ -162,9 +162,9 @@ export default function AssociatedClientsClientTable({
         isOpen={Boolean(selectedClient)}
         onClose={() => setSelectedClient(null)}
         initialClient={selectedClient}
-        title="Editar Asociado"
+        title="Editar Empresa / Convenio"
         onSubmit={async (payload) => {
-          if (!selectedClient) return { success: false, error: "Asociado no encontrado." };
+          if (!selectedClient) return { success: false, error: "Empresa/Convenio no encontrado." };
           const result = await updateAssociatedClientAction(selectedClient.id, payload);
           if (result.success) router.refresh();
           return result;

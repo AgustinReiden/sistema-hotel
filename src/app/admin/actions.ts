@@ -14,12 +14,14 @@ import {
   extendReservation,
   findGuestByDni,
   getCancellationReason,
+  getGuestDirectory,
   getHotelSettings,
   getAvailableRooms,
   getReservationForEdit,
   getReservationWithRoom,
   getRoomsAvailableForReservation,
   markRoomAsAvailable,
+  setGuestPersonalDiscount,
   staffCreateReservation,
   updateReservation,
   updateWhatsappStatus,
@@ -38,6 +40,7 @@ import type {
   ActionResult,
   AssignWalkInPayload,
   CreateReservationPayload,
+  GuestDirectoryEntry,
   GuestDniMatch,
   PaymentMethod,
   Room,
@@ -164,6 +167,47 @@ export async function lookupGuestByDni(dni: string): Promise<GuestDniMatch | nul
     return await findGuestByDni(dni);
   } catch {
     return null;
+  }
+}
+
+// Busca huespedes en el padron (nombre o DNI) para el autocompletado del modal de reserva.
+export async function searchGuestsAction(term: string): Promise<GuestDirectoryEntry[]> {
+  try {
+    const trimmed = term.trim();
+    const results = await getGuestDirectory(trimmed);
+    // Acota el payload: las primeras coincidencias alcanzan para elegir.
+    return results.slice(0, 25);
+  } catch {
+    return [];
+  }
+}
+
+// Fija el descuento personal de un huesped del padron (solo admin).
+export async function updateGuestDiscountAction(input: {
+  id?: string | null;
+  fullName: string;
+  documentId?: string | null;
+  discountPercent: number;
+}): Promise<ActionResult> {
+  try {
+    const percent = Number(input.discountPercent);
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      return { success: false, error: "El descuento debe estar entre 0 y 100." };
+    }
+    if (!input.fullName.trim()) {
+      return { success: false, error: "Falta el nombre del huesped." };
+    }
+    await setGuestPersonalDiscount({
+      id: input.id ?? null,
+      fullName: input.fullName.trim(),
+      documentId: input.documentId ?? null,
+      discountPercent: percent,
+    });
+    revalidatePath("/admin/guests");
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo guardar el descuento del huesped.");
+    return { success: false, error: parsed.error, code: parsed.code };
   }
 }
 

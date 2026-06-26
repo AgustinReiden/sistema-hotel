@@ -139,7 +139,8 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
         </div>
 
         <p className="text-xs text-slate-500 mt-2">
-          {view === "directorio" && "Personas que se hospedaron, sin repetir (agrupadas por DNI)."}
+          {view === "directorio" &&
+            "Padrón de huéspedes (sin repetir, agrupados por DNI). El descuento se aplica al elegirlos en una reserva."}
           {view === "historial" && "Reservas de los últimos 60 días, 15 por página."}
           {view === "por_llegar" && "Todas las reservas próximas, sin límite de tiempo."}
         </p>

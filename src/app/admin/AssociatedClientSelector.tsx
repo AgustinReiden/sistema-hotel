@@ -61,12 +61,12 @@ export default function AssociatedClientSelector({
       </div>
 
       {activeClients.length === 0 ? (
-        <p className="text-xs text-slate-500">No hay asociados activos cargados.</p>
+        <p className="text-xs text-slate-500">No hay empresas/convenios activos cargados.</p>
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white max-h-52 overflow-y-auto divide-y divide-slate-100">
           {filtered.length === 0 ? (
             <div className="px-4 py-3 text-sm text-slate-500">
-              No se encontraron asociados para “{query.trim()}”.
+              No se encontraron empresas/convenios para “{query.trim()}”.
             </div>
           ) : (
             filtered.map((client) => {

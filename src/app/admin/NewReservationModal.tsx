@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   BedDouble,
+  Building2,
   Calendar as CalendarIcon,
   Clock as ClockIcon,
   CreditCard,
@@ -18,28 +19,19 @@ import { toast } from "sonner";
 import AssociatedClientSelector from "./AssociatedClientSelector";
 import DateTimePickerField from "./DateTimePickerField";
 import GuestRegistryFields from "./GuestRegistryFields";
-import GuestDniHint from "./GuestDniHint";
-import { fetchAvailableRoomsAction, lookupGuestByDni } from "./actions";
-import { calculateReservationPriceBreakdown } from "@/lib/pricing";
+import GuestSelector from "./GuestSelector";
+import { fetchAvailableRoomsAction } from "./actions";
+import { calculateReservationPriceBreakdown, resolveEffectiveDiscountPercent } from "@/lib/pricing";
 import type {
   AssociatedClient,
   CreateReservationPayload,
-  GuestDniMatch,
+  GuestDirectoryEntry,
   GuestRegistryInput,
-  ReservationCustomerMode,
   Room,
 } from "@/lib/types";
 
-type ReservationFormData = CreateReservationPayload;
-
 type InitialReservationValues = Partial<{
-  customerMode: ReservationCustomerMode;
   roomId: number;
-  clientFirstName: string;
-  clientLastName: string;
-  clientDni: string;
-  clientPhone: string;
-  associatedClientId: string;
   checkIn: string;
   checkOut: string;
   guestCount: number;
@@ -48,7 +40,7 @@ type InitialReservationValues = Partial<{
 type NewReservationModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: ReservationFormData) => Promise<{ success: boolean; error?: string }>;
+  onSubmit: (data: CreateReservationPayload) => Promise<{ success: boolean; error?: string }>;
   rooms: Room[];
   associatedClients: AssociatedClient[];
   initialValues?: InitialReservationValues;
@@ -59,14 +51,17 @@ type NewReservationModalProps = {
 };
 
 type ReservationFormState = {
-  customerMode: ReservationCustomerMode;
+  /** Id del padron si el huesped se eligio del directorio (habilita su descuento personal). */
+  guestId: string | null;
   clientFirstName: string;
   clientLastName: string;
   clientDni: string;
   clientPhone: string;
+  /** Descuento personal del huesped elegido (solo display + preview; el RPC lo revalida). */
+  guestDiscountPercent: number;
+  /** Esta reserva la paga una empresa/convenio (con descuento). */
+  hasCompany: boolean;
   associatedClientId: string;
-  guestName: string;
-  guestDni: string;
   roomId: number | "";
   checkIn: string;
   checkOut: string;
@@ -107,14 +102,14 @@ function buildInitialState(
   const defaults = buildDefaultDateValues(checkInTime, checkOutTime);
 
   return {
-    customerMode: initialValues?.customerMode ?? "manual",
-    clientFirstName: initialValues?.clientFirstName ?? "",
-    clientLastName: initialValues?.clientLastName ?? "",
-    clientDni: initialValues?.clientDni ?? "",
-    clientPhone: initialValues?.clientPhone ?? "",
-    associatedClientId: initialValues?.associatedClientId ?? "",
-    guestName: "",
-    guestDni: "",
+    guestId: null,
+    clientFirstName: "",
+    clientLastName: "",
+    clientDni: "",
+    clientPhone: "",
+    guestDiscountPercent: 0,
+    hasCompany: false,
+    associatedClientId: "",
     roomId: initialValues?.roomId ?? "",
     checkIn: initialValues?.checkIn ?? defaults.checkIn,
     checkOut: initialValues?.checkOut ?? defaults.checkOut,
@@ -126,6 +121,14 @@ function buildInitialState(
 function shortDate(local: string): string {
   if (!local) return "";
   return new Date(local).toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+}
+
+function splitName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: "", last: "" };
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  const last = parts.pop() as string;
+  return { first: parts.join(" "), last };
 }
 
 export default function NewReservationModal({
@@ -144,7 +147,6 @@ export default function NewReservationModal({
   );
   const [registry, setRegistry] = useState<GuestRegistryInput>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dniMatch, setDniMatch] = useState<GuestDniMatch | null>(null);
   const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
@@ -152,29 +154,7 @@ export default function NewReservationModal({
     if (!isOpen) return;
     setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
     setRegistry({});
-    setDniMatch(null);
   }, [isOpen, initialValues, standardCheckInTime, standardCheckOutTime]);
-
-  // Busca duplicados por DNI (con debounce) al cargar un cliente ocasional.
-  useEffect(() => {
-    if (!isOpen || form.customerMode !== "manual") {
-      setDniMatch(null);
-      return;
-    }
-    if (form.clientDni.replace(/[^a-zA-Z0-9]/g, "").length < 6) {
-      setDniMatch(null);
-      return;
-    }
-    let active = true;
-    const timer = setTimeout(async () => {
-      const match = await lookupGuestByDni(form.clientDni.trim());
-      if (active) setDniMatch(match);
-    }, 400);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [form.clientDni, form.customerMode, isOpen]);
 
   // Habitaciones libres para las fechas elegidas; se actualiza al cambiar check-in/out.
   useEffect(() => {
@@ -209,102 +189,118 @@ export default function NewReservationModal({
     };
   }, [isOpen, form.checkIn, form.checkOut]);
 
-  const applyDniMatch = (match: GuestDniMatch) => {
-    setForm((current) => {
-      if (match.client_first_name || match.client_last_name) {
-        return {
-          ...current,
-          clientFirstName: match.client_first_name ?? "",
-          clientLastName: match.client_last_name ?? "",
-        };
-      }
-      const parts = match.client_name.trim().split(/\s+/);
-      const last = parts.length > 1 ? parts.pop() ?? "" : "";
-      return { ...current, clientFirstName: parts.join(" "), clientLastName: last };
-    });
-    setDniMatch(null);
+  const handleGuestSelect = (entry: GuestDirectoryEntry) => {
+    const { first, last } = splitName(entry.client_name);
+    setForm((current) => ({
+      ...current,
+      guestId: entry.id,
+      clientFirstName: first,
+      clientLastName: last,
+      clientDni: entry.client_dni ?? "",
+      clientPhone: entry.client_phone ?? "",
+      guestDiscountPercent: entry.discount_percent ?? 0,
+    }));
+    setRegistry((current) => ({
+      ...current,
+      guestLocality: current.guestLocality ?? entry.guest_locality ?? undefined,
+      guestNationality: current.guestNationality ?? entry.guest_nationality ?? undefined,
+      guestDocType: current.guestDocType ?? entry.guest_doc_type ?? undefined,
+    }));
+    toast.success(`Huésped cargado: ${entry.client_name}`);
   };
+
+  const clearGuest = () =>
+    setForm((current) => ({
+      ...current,
+      guestId: null,
+      clientFirstName: "",
+      clientLastName: "",
+      clientDni: "",
+      clientPhone: "",
+      guestDiscountPercent: 0,
+    }));
 
   if (!isOpen) return null;
 
   const selectedRoom =
     form.roomId === "" ? null : rooms.find((room) => room.id === Number(form.roomId)) ?? null;
-  const selectedAssociatedClient =
-    associatedClients.find((client) => client.id === form.associatedClientId) ?? null;
+  const selectedAssociatedClient = form.hasCompany
+    ? associatedClients.find((client) => client.id === form.associatedClientId) ?? null
+    : null;
   const hasValidDates =
     Boolean(form.checkIn) &&
     Boolean(form.checkOut) &&
     new Date(form.checkOut).getTime() > new Date(form.checkIn).getTime();
+
+  // Precedencia de descuento: empresa/convenio -> descuento personal del huesped -> 0.
+  const effectiveDiscount = resolveEffectiveDiscountPercent({
+    hasCompany: Boolean(selectedAssociatedClient),
+    companyDiscountPercent: selectedAssociatedClient?.discount_percent,
+    guestDiscountPercent: form.guestDiscountPercent,
+  });
+  const discountSource = selectedAssociatedClient
+    ? `Empresa/Convenio: ${selectedAssociatedClient.display_name}`
+    : form.guestDiscountPercent > 0
+      ? "Descuento del huésped"
+      : null;
+
   const pricePreview =
-    form.customerMode === "associated" && selectedRoom && selectedAssociatedClient && hasValidDates
+    selectedRoom && hasValidDates
       ? calculateReservationPriceBreakdown({
           basePrice: selectedRoom.base_price,
           checkIn: new Date(form.checkIn).toISOString(),
           checkOut: new Date(form.checkOut).toISOString(),
-          discountPercent: selectedAssociatedClient.discount_percent,
+          discountPercent: effectiveDiscount,
         })
       : null;
+
+  const guestComplete =
+    Boolean(form.clientFirstName.trim()) &&
+    Boolean(form.clientLastName.trim()) &&
+    Boolean(form.clientDni.trim());
+  const companyComplete = !form.hasCompany || Boolean(form.associatedClientId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.roomId === "" || !form.checkIn || !form.checkOut) {
+      toast.error("Elegí fechas y habitación.");
       return;
     }
-
     if (new Date(form.checkOut) <= new Date(form.checkIn)) {
       toast.error("La fecha de salida debe ser posterior a la fecha de entrada.");
       return;
     }
-
-    if (form.customerMode === "manual") {
-      if (!form.clientFirstName.trim() || !form.clientLastName.trim() || !form.clientDni.trim()) {
-        toast.error("Cargá nombre, apellido y DNI del huésped.");
-        return;
-      }
-    } else {
-      if (!form.associatedClientId) {
-        toast.error("Selecciona un asociado para continuar.");
-        return;
-      }
-      if (!form.guestName.trim() || !form.guestDni.trim()) {
-        toast.error("Cargá el nombre y el DNI del pasajero.");
-        return;
-      }
+    if (!guestComplete) {
+      toast.error("Cargá nombre, apellido y DNI del huésped.");
+      return;
+    }
+    if (form.hasCompany && !form.associatedClientId) {
+      toast.error("Seleccioná la empresa/convenio o desactivá esa opción.");
+      return;
     }
 
     setIsSubmitting(true);
     try {
-      const payload: ReservationFormData =
-        form.customerMode === "manual"
-          ? {
-              customerMode: "manual",
-              roomId: Number(form.roomId),
-              clientFirstName: form.clientFirstName.trim(),
-              clientLastName: form.clientLastName.trim(),
-              clientDni: form.clientDni.trim(),
-              clientPhone: form.clientPhone.trim() || undefined,
-              checkIn: new Date(form.checkIn).toISOString(),
-              checkOut: new Date(form.checkOut).toISOString(),
-              guestCount: form.guestCount,
-              ...registry,
-            }
-          : {
-              customerMode: "associated",
-              roomId: Number(form.roomId),
-              associatedClientId: form.associatedClientId,
-              checkIn: new Date(form.checkIn).toISOString(),
-              checkOut: new Date(form.checkOut).toISOString(),
-              guestCount: form.guestCount,
-              guestName: form.guestName.trim(),
-              guestDni: form.guestDni.trim(),
-              ...registry,
-            };
+      const payload: CreateReservationPayload = {
+        roomId: Number(form.roomId),
+        guestId: form.guestId ?? undefined,
+        clientFirstName: form.clientFirstName.trim(),
+        clientLastName: form.clientLastName.trim(),
+        clientDni: form.clientDni.trim(),
+        clientPhone: form.clientPhone.trim() || undefined,
+        associatedClientId: form.hasCompany ? form.associatedClientId : undefined,
+        checkIn: new Date(form.checkIn).toISOString(),
+        checkOut: new Date(form.checkOut).toISOString(),
+        guestCount: form.guestCount,
+        ...registry,
+      };
 
       const result = await onSubmit(payload);
 
       if (result.success) {
         toast.success("Reserva creada correctamente.");
-        setForm(buildInitialState(initialValues));
+        setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
+        setRegistry({});
         onClose();
       } else {
         toast.error(result.error || "Error al crear reserva");
@@ -313,6 +309,9 @@ export default function NewReservationModal({
       setIsSubmitting(false);
     }
   };
+
+  const inputClass =
+    "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
@@ -327,41 +326,34 @@ export default function NewReservationModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div className="space-y-3">
-            <p className="text-sm font-semibold text-slate-700">Tipo de cliente</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setForm((current) => ({ ...current, customerMode: "manual" }))}
-                className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                  form.customerMode === "manual"
-                    ? "border-emerald-500 bg-emerald-50"
-                    : "border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <p className="font-semibold text-slate-800">Cliente ocasional</p>
-                <p className="text-sm text-slate-500">
-                  Carga manual. No se guarda en el padrón de asociados.
-                </p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm((current) => ({ ...current, customerMode: "associated" }))}
-                className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                  form.customerMode === "associated"
-                    ? "border-emerald-500 bg-emerald-50"
-                    : "border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <p className="font-semibold text-slate-800">Asociado</p>
-                <p className="text-sm text-slate-500">
-                  Selecciona uno existente y aplica su descuento automáticamente.
-                </p>
-              </button>
+          {/* 1) Huésped: columna vertebral. Buscar en el padrón o cargar nuevo. */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <UserRound size={16} className="text-emerald-600" />
+                Huésped
+              </p>
+              {form.guestId ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                  Del padrón
+                  {form.guestDiscountPercent > 0 && (
+                    <span className="flex items-center gap-0.5">
+                      · <Percent size={10} />
+                      {form.guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                guestComplete && (
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
+                    Nuevo · se guarda solo
+                  </span>
+                )
+              )}
             </div>
-          </div>
 
-          {form.customerMode === "manual" ? (
+            <GuestSelector onSelect={handleGuestSelect} />
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
@@ -373,7 +365,7 @@ export default function NewReservationModal({
                   required
                   value={form.clientFirstName}
                   onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  className={inputClass}
                   placeholder="Ej. María"
                 />
               </div>
@@ -388,12 +380,12 @@ export default function NewReservationModal({
                   required
                   value={form.clientLastName}
                   onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  className={inputClass}
                   placeholder="Ej. López"
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
                   <span className="flex items-center gap-1.5">
                     <CreditCard size={14} />
@@ -406,13 +398,12 @@ export default function NewReservationModal({
                   required
                   value={form.clientDni}
                   onChange={(e) => setForm((current) => ({ ...current, clientDni: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  className={inputClass}
                   placeholder="Ej. 20-12345678-3"
                 />
-                <GuestDniHint match={dniMatch} onUse={applyDniMatch} />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <label htmlFor="clientPhone" className="block text-sm font-semibold text-slate-700 mb-1.5">
                   <span className="flex items-center gap-1.5">
                     <Phone size={14} />
@@ -424,99 +415,88 @@ export default function NewReservationModal({
                   type="tel"
                   value={form.clientPhone}
                   onChange={(e) => setForm((current) => ({ ...current, clientPhone: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  className={inputClass}
                   placeholder="Opcional"
                 />
               </div>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <AssociatedClientSelector
-                clients={associatedClients}
-                selectedId={form.associatedClientId}
-                onSelect={(id) => setForm((current) => ({ ...current, associatedClientId: id }))}
-                inputId="associatedClient"
-                label="Asociado"
+
+            {form.guestId && (
+              <button
+                type="button"
+                onClick={clearGuest}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
+              >
+                Limpiar y cargar otro huésped
+              </button>
+            )}
+          </div>
+
+          {/* 2) Empresa/Convenio (opcional): aporta descuento y es la facturable. */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.hasCompany}
+                onChange={(e) =>
+                  setForm((current) => ({
+                    ...current,
+                    hasCompany: e.target.checked,
+                    associatedClientId: e.target.checked ? current.associatedClientId : "",
+                  }))
+                }
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
               />
+              <span className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <Building2 size={16} className="text-slate-400" />
+                Esta reserva la paga una empresa/convenio (con descuento)
+              </span>
+            </label>
 
-              {selectedAssociatedClient ? (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
-                      Nombre
-                    </p>
-                    <p className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                      <UserRound size={14} className="text-slate-400" />
-                      {selectedAssociatedClient.display_name}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
-                      DNI/CUIT
-                    </p>
-                    <p className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                      <CreditCard size={14} className="text-slate-400" />
-                      {selectedAssociatedClient.document_id}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
-                      Teléfono
-                    </p>
-                    <p className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                      <Phone size={14} className="text-slate-400" />
-                      {selectedAssociatedClient.phone || "Sin dato"}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                  Selecciona un asociado activo para usar sus datos y descuento en esta reserva.
-                </div>
-              )}
+            {form.hasCompany && (
+              <div className="space-y-3 pt-1">
+                <AssociatedClientSelector
+                  clients={associatedClients}
+                  selectedId={form.associatedClientId}
+                  onSelect={(id) => setForm((current) => ({ ...current, associatedClientId: id }))}
+                  inputId="associatedClient"
+                  label="Empresa / Convenio"
+                />
 
-              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Pasajero que se hospeda <span className="text-red-500">*</span>
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="resGuestName" className="block text-xs font-semibold text-slate-600 mb-1">
-                      Nombre del pasajero <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      id="resGuestName"
-                      type="text"
-                      required
-                      value={form.guestName}
-                      onChange={(e) => setForm((current) => ({ ...current, guestName: e.target.value }))}
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                      placeholder="Ej. María López"
-                    />
+                {selectedAssociatedClient ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Nombre</p>
+                      <p className="text-sm font-semibold text-slate-800 truncate">
+                        {selectedAssociatedClient.display_name}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">DNI/CUIT</p>
+                      <p className="text-sm font-semibold text-slate-800 truncate">
+                        {selectedAssociatedClient.document_id}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Descuento</p>
+                      <p className="text-sm font-semibold text-emerald-700">
+                        {selectedAssociatedClient.discount_percent.toLocaleString("es-AR", {
+                          maximumFractionDigits: 2,
+                        })}
+                        %
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <label htmlFor="resGuestDni" className="block text-xs font-semibold text-slate-600 mb-1">
-                      DNI del pasajero <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      id="resGuestDni"
-                      type="text"
-                      required
-                      value={form.guestDni}
-                      onChange={(e) => setForm((current) => ({ ...current, guestDni: e.target.value }))}
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                      placeholder="Ej. 30123456"
-                    />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                    Seleccioná una empresa/convenio activo para usar su descuento.
                   </div>
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  La empresa es el huésped facturable; el pasajero real es obligatorio y se guarda en observaciones.
-                </p>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Campo destacado: solo habitaciones libres para las fechas elegidas. */}
+          {/* 3) Campo destacado: solo habitaciones libres para las fechas elegidas. */}
           <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/50 p-3.5">
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="roomId" className="flex items-center gap-2 text-sm font-bold text-emerald-800">
@@ -616,11 +596,13 @@ export default function NewReservationModal({
             idPrefix="reserva"
           />
 
-          {pricePreview && selectedAssociatedClient && (
+          {pricePreview && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">
               <div className="flex items-center gap-2 text-emerald-700 mb-3">
                 <Percent size={16} />
-                <p className="text-sm font-bold">Vista previa del descuento del asociado</p>
+                <p className="text-sm font-bold">
+                  {discountSource ? `Precio con ${discountSource.toLowerCase()}` : "Precio de la reserva"}
+                </p>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div>
@@ -636,11 +618,8 @@ export default function NewReservationModal({
                 <div>
                   <p className="text-xs uppercase font-bold text-emerald-600">Descuento</p>
                   <p className="font-semibold text-slate-800">
-                    {selectedAssociatedClient.discount_percent.toLocaleString("es-AR", {
-                      minimumFractionDigits: 0,
-                      maximumFractionDigits: 2,
-                    })}
-                    % (${pricePreview.discountAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })})
+                    {pricePreview.discountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}% ($
+                    {pricePreview.discountAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })})
                   </p>
                 </div>
                 <div>
@@ -650,14 +629,11 @@ export default function NewReservationModal({
                   </p>
                 </div>
               </div>
+              {discountSource && (
+                <p className="mt-2 text-[11px] text-emerald-700/80">{discountSource}</p>
+              )}
             </div>
           )}
-
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {form.customerMode === "manual"
-              ? "Nombre, apellido y DNI/CUIT son obligatorios para reservas manuales. El teléfono es opcional."
-              : "Al seleccionar un asociado, la reserva guarda una copia de sus datos y del descuento vigente en ese momento."}
-          </div>
 
           <div className="pt-4 border-t border-slate-100 flex gap-3">
             <button
@@ -669,15 +645,7 @@ export default function NewReservationModal({
             </button>
             <button
               type="submit"
-              disabled={
-                isSubmitting ||
-                form.roomId === "" ||
-                (form.customerMode === "manual"
-                  ? !form.clientFirstName.trim() ||
-                    !form.clientLastName.trim() ||
-                    !form.clientDni.trim()
-                  : !form.associatedClientId || !form.guestName.trim() || !form.guestDni.trim())
-              }
+              disabled={isSubmitting || form.roomId === "" || !guestComplete || !companyComplete}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
               {isSubmitting ? "Creando..." : "Crear Reserva"}

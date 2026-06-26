@@ -9,6 +9,25 @@ export function calculateReservationNights(checkIn: string, checkOut: string) {
   return Math.max(1, Math.ceil(durationMs / DAY_IN_MS));
 }
 
+/**
+ * Precedencia de descuento de una reserva (debe coincidir con rpc_staff_create_reservation):
+ * si hay una empresa/convenio adjunta manda SU descuento (aunque sea 0, porque es la
+ * facturable); si no, manda el descuento personal del huesped; si no hay ninguno, 0.
+ */
+export function resolveEffectiveDiscountPercent({
+  hasCompany,
+  companyDiscountPercent,
+  guestDiscountPercent,
+}: {
+  hasCompany: boolean;
+  companyDiscountPercent?: number | null;
+  guestDiscountPercent?: number | null;
+}): number {
+  const value = hasCompany ? companyDiscountPercent : guestDiscountPercent;
+  const normalized = Number(value ?? 0);
+  return Number.isFinite(normalized) ? roundCurrency(normalized) : 0;
+}
+
 export function calculateReservationPriceBreakdown({
   basePrice,
   checkIn,
