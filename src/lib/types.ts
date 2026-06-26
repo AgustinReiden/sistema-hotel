@@ -308,28 +308,25 @@ export type CreateReservationPayload = {
   guestCount?: number;
 } & GuestRegistryInput;
 
-export type AssignWalkInPayload =
-  | ({
-      customerMode: "manual";
-      roomId: number;
-      clientFirstName: string;
-      clientLastName: string;
-      clientDni: string;
-      nights: number;
-      guestCount?: number;
-      stayType?: WalkInStayType;
-    } & GuestRegistryInput)
-  | ({
-      customerMode: "associated";
-      roomId: number;
-      nights: number;
-      associatedClientId: string;
-      guestCount?: number;
-      stayType?: WalkInStayType;
-      /** Pasajero real que se hospeda; obligatorio en modo asociado (la empresa es el huesped facturable). */
-      guestName: string;
-      guestDni: string;
-    } & GuestRegistryInput);
+/**
+ * Check-in directo (walk-in), flujo unico igual que CreateReservationPayload. El huesped (persona)
+ * es SIEMPRE quien se hospeda y queda en client_*; la Empresa/Convenio (associatedClientId) es
+ * opcional y, si esta, su descuento pisa al descuento personal del huesped.
+ */
+export type AssignWalkInPayload = {
+  roomId: number;
+  /** Padron id si el huesped se eligio del directorio; null/undefined si es nuevo (se crea solo). */
+  guestId?: string | null;
+  clientFirstName: string;
+  clientLastName: string;
+  clientDni: string;
+  clientPhone?: string;
+  /** Empresa/Convenio facturable (opcional). */
+  associatedClientId?: string | null;
+  nights: number;
+  guestCount?: number;
+  stayType?: WalkInStayType;
+} & GuestRegistryInput;
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
 

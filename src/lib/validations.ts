@@ -96,18 +96,6 @@ const clientDniSchema = z
   .min(6, "El DNI o CUIT debe tener al menos 6 caracteres.")
   .max(60, "Maximo 60 caracteres.");
 
-// Datos del pasajero real: obligatorios cuando la reserva va a nombre de un asociado.
-const requiredPassengerName = z
-  .string()
-  .trim()
-  .min(2, "El nombre del pasajero es obligatorio.")
-  .max(120, "Maximo 120 caracteres.");
-const requiredPassengerDni = z
-  .string()
-  .trim()
-  .min(6, "El DNI/CUIT del pasajero es obligatorio (minimo 6 caracteres).")
-  .max(60, "Maximo 60 caracteres.");
-
 const optionalDateText = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
   z.string().trim().max(20).optional()
@@ -124,37 +112,7 @@ const guestRegistrySchemaFields = {
   guestVehicle: optionalGuestText,
 };
 
-const walkInBaseSchema = {
-  customerMode: z.enum(["manual", "associated"]),
-  roomId: z.number().int().positive("El ID de la habitacion es invalido."),
-  nights: z
-    .number()
-    .int()
-    .min(1, "Debe ser al menos 1 noche")
-    .max(30, "Maximo 30 noches por reserva."),
-  guestCount: guestCountSchema,
-  stayType: z.enum(["night", "half_day"]).optional(),
-  ...guestRegistrySchemaFields,
-};
-
-export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
-  z.object({
-    ...walkInBaseSchema,
-    customerMode: z.literal("manual"),
-    clientFirstName: clientFirstNameSchema,
-    clientLastName: clientLastNameSchema,
-    clientDni: clientDniSchema,
-  }),
-  z.object({
-    ...walkInBaseSchema,
-    customerMode: z.literal("associated"),
-    associatedClientId: associatedClientIdSchema,
-    guestName: requiredPassengerName,
-    guestDni: requiredPassengerDni,
-  }),
-]);
-
-// Empresa/Convenio opcional en el alta de reserva: vacio -> undefined; si viene, uuid valido.
+// Empresa/Convenio opcional: vacio -> undefined; si viene, uuid valido.
 const optionalAssociatedClientId = z.preprocess(
   (value) => (value === "" || value === null ? undefined : value),
   associatedClientIdSchema.optional()
@@ -165,6 +123,26 @@ const optionalGuestId = z.preprocess(
   (value) => (value === "" || value === null ? undefined : value),
   z.string().uuid("El huesped seleccionado es invalido.").optional()
 );
+
+// Walk-in (flujo unico, igual que createReservationSchema): la persona (huesped) es obligatoria;
+// la empresa/convenio es opcional. Se suma lo propio del walk-in (noches + tipo de estadia).
+export const assignWalkInSchema = z.object({
+  roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+  guestId: optionalGuestId,
+  clientFirstName: clientFirstNameSchema,
+  clientLastName: clientLastNameSchema,
+  clientDni: clientDniSchema,
+  clientPhone: optionalPhoneSchema,
+  associatedClientId: optionalAssociatedClientId,
+  nights: z
+    .number()
+    .int()
+    .min(1, "Debe ser al menos 1 noche")
+    .max(30, "Maximo 30 noches por reserva."),
+  guestCount: guestCountSchema,
+  stayType: z.enum(["night", "half_day"]).optional(),
+  ...guestRegistrySchemaFields,
+});
 
 // Flujo unico: la persona (huesped) es obligatoria; la empresa/convenio es opcional.
 export const createReservationSchema = z
