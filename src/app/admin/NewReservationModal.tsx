@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import {
+  BedDouble,
   Calendar as CalendarIcon,
   Clock as ClockIcon,
   CreditCard,
+  Loader2,
   Percent,
   Phone,
   UserRound,
@@ -17,7 +19,7 @@ import AssociatedClientSelector from "./AssociatedClientSelector";
 import DateTimePickerField from "./DateTimePickerField";
 import GuestRegistryFields from "./GuestRegistryFields";
 import GuestDniHint from "./GuestDniHint";
-import { lookupGuestByDni } from "./actions";
+import { fetchAvailableRoomsAction, lookupGuestByDni } from "./actions";
 import { calculateReservationPriceBreakdown } from "@/lib/pricing";
 import type {
   AssociatedClient,
@@ -120,6 +122,12 @@ function buildInitialState(
   };
 }
 
+// Fecha corta "dd MMM" a partir del string local "yyyy-MM-ddTHH:mm" del form.
+function shortDate(local: string): string {
+  if (!local) return "";
+  return new Date(local).toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+}
+
 export default function NewReservationModal({
   isOpen,
   onClose,
@@ -137,6 +145,8 @@ export default function NewReservationModal({
   const [registry, setRegistry] = useState<GuestRegistryInput>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dniMatch, setDniMatch] = useState<GuestDniMatch | null>(null);
+  const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
+  const [loadingRooms, setLoadingRooms] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -165,6 +175,39 @@ export default function NewReservationModal({
       clearTimeout(timer);
     };
   }, [form.clientDni, form.customerMode, isOpen]);
+
+  // Habitaciones libres para las fechas elegidas; se actualiza al cambiar check-in/out.
+  useEffect(() => {
+    if (!isOpen) return;
+    const checkIn = form.checkIn;
+    const checkOut = form.checkOut;
+    if (!checkIn || !checkOut || new Date(checkOut).getTime() <= new Date(checkIn).getTime()) {
+      setAvailableRooms([]);
+      setLoadingRooms(false);
+      return;
+    }
+    let active = true;
+    setLoadingRooms(true);
+    const timer = setTimeout(async () => {
+      const rooms = await fetchAvailableRoomsAction(
+        new Date(checkIn).toISOString(),
+        new Date(checkOut).toISOString()
+      );
+      if (!active) return;
+      setAvailableRooms(rooms);
+      setLoadingRooms(false);
+      // Si la habitación elegida dejó de estar libre para las nuevas fechas, la limpiamos.
+      setForm((current) =>
+        current.roomId !== "" && !rooms.some((r) => r.id === Number(current.roomId))
+          ? { ...current, roomId: "" }
+          : current
+      );
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, form.checkIn, form.checkOut]);
 
   const applyDniMatch = (match: GuestDniMatch) => {
     setForm((current) => {
@@ -473,30 +516,58 @@ export default function NewReservationModal({
             </div>
           )}
 
-          <div>
-            <label htmlFor="roomId" className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Habitación
-            </label>
+          {/* Campo destacado: solo habitaciones libres para las fechas elegidas. */}
+          <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/50 p-3.5">
+            <div className="flex items-center justify-between mb-2">
+              <label htmlFor="roomId" className="flex items-center gap-2 text-sm font-bold text-emerald-800">
+                <BedDouble size={16} className="text-emerald-600" />
+                Habitación
+              </label>
+              {hasValidDates && (
+                <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                  {loadingRooms ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    `${availableRooms.length} libre${availableRooms.length === 1 ? "" : "s"}`
+                  )}
+                </span>
+              )}
+            </div>
             <select
               id="roomId"
               required
               value={form.roomId}
+              disabled={loadingRooms || !hasValidDates}
               onChange={(e) =>
                 setForm((current) => ({
                   ...current,
                   roomId: e.target.value ? Number(e.target.value) : "",
                 }))
               }
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              className="w-full px-4 py-2.5 bg-white border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <option value="">Seleccione una habitación</option>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  Hab. {room.room_number} - {room.room_type} (
-                  {room.status === "available" ? "Disponible" : "Ocupada/Aseo"})
-                </option>
-              ))}
+              {!hasValidDates ? (
+                <option value="">Elegí primero las fechas</option>
+              ) : loadingRooms ? (
+                <option value="">Buscando disponibilidad…</option>
+              ) : availableRooms.length === 0 ? (
+                <option value="">No hay habitaciones libres para esas fechas</option>
+              ) : (
+                <>
+                  <option value="">Seleccioná una habitación</option>
+                  {availableRooms.map((room) => (
+                    <option key={room.id} value={room.id}>
+                      Hab. {room.room_number} - {room.room_type}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
+            {hasValidDates && (
+              <p className="mt-1.5 text-[11px] text-emerald-700/80">
+                Libres para {shortDate(form.checkIn)} → {shortDate(form.checkOut)}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
