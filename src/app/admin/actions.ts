@@ -15,6 +15,7 @@ import {
   findGuestByDni,
   getCancellationReason,
   getHotelSettings,
+  getAvailableRooms,
   getReservationForEdit,
   getReservationWithRoom,
   getRoomsAvailableForReservation,
@@ -163,6 +164,22 @@ export async function lookupGuestByDni(dni: string): Promise<GuestDniMatch | nul
     return await findGuestByDni(dni);
   } catch {
     return null;
+  }
+}
+
+// Habitaciones libres para un rango de fechas (para el selector del modal "Nueva Reserva").
+// Misma semántica que valida el RPC al crear, así lo que se ofrece coincide con lo reservable.
+export async function fetchAvailableRoomsAction(
+  checkIn: string,
+  checkOut: string
+): Promise<Room[]> {
+  try {
+    if (!checkIn || !checkOut || new Date(checkOut).getTime() <= new Date(checkIn).getTime()) {
+      return [];
+    }
+    return await getAvailableRooms(checkIn, checkOut);
+  } catch {
+    return [];
   }
 }
 
