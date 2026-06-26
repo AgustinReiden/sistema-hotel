@@ -9,8 +9,9 @@ import {
 } from "@/lib/validations";
 
 describe("assignWalkInSchema", () => {
-  const validManualWalkIn = {
-    customerMode: "manual" as const,
+  // Flujo unico (igual que createReservationSchema): el huesped (persona) es siempre obligatorio;
+  // la empresa/convenio es opcional. Se suma lo propio del walk-in (noches + tipo de estadia).
+  const validWalkIn = {
     roomId: 1,
     clientFirstName: "Juan",
     clientLastName: "Perez",
@@ -18,123 +19,92 @@ describe("assignWalkInSchema", () => {
     nights: 3,
   };
 
-  it("accepts valid manual input", () => {
-    const result = assignWalkInSchema.parse(validManualWalkIn);
+  it("accepts a guest-only walk-in (sin empresa)", () => {
+    const result = assignWalkInSchema.parse(validWalkIn);
 
-    expect(result.customerMode).toBe("manual");
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
     expect(result.roomId).toBe(1);
     expect(result.clientFirstName).toBe("Juan");
     expect(result.clientLastName).toBe("Perez");
     expect(result.clientDni).toBe("30123456");
     expect(result.nights).toBe(3);
+    expect(result.associatedClientId).toBeUndefined();
   });
 
-  it("trims manual name and last name", () => {
+  it("trims name and last name", () => {
     const result = assignWalkInSchema.parse({
-      ...validManualWalkIn,
+      ...validWalkIn,
       clientFirstName: "  Maria  ",
       clientLastName: "  Gomez  ",
       nights: 1,
     });
 
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
     expect(result.clientFirstName).toBe("Maria");
     expect(result.clientLastName).toBe("Gomez");
   });
 
-  it("accepts associated input", () => {
+  it("accepts an optional empresa/convenio (associatedClientId)", () => {
     const result = assignWalkInSchema.parse({
-      customerMode: "associated",
-      roomId: 1,
+      ...validWalkIn,
       nights: 2,
       associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      guestName: "Maria Lopez",
-      guestDni: "30123456",
     });
 
-    expect(result.customerMode).toBe("associated");
-    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
     expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
   });
 
-  it("rejects associated walk-in without passenger data", () => {
+  it("accepts an optional guestId (huesped del padron)", () => {
+    const result = assignWalkInSchema.parse({
+      ...validWalkIn,
+      guestId: "550e8400-e29b-41d4-a716-446655440000",
+    });
+
+    expect(result.guestId).toBe("550e8400-e29b-41d4-a716-446655440000");
+  });
+
+  it("treats empty associatedClientId as undefined", () => {
+    const result = assignWalkInSchema.parse({ ...validWalkIn, associatedClientId: "" });
+    expect(result.associatedClientId).toBeUndefined();
+  });
+
+  it("rejects an invalid associatedClientId", () => {
     expect(() =>
-      assignWalkInSchema.parse({
-        customerMode: "associated",
-        roomId: 1,
-        nights: 1,
-        associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      })
+      assignWalkInSchema.parse({ ...validWalkIn, associatedClientId: "not-a-uuid" })
     ).toThrow();
   });
 
-  it("rejects empty first name in manual mode", () => {
-    expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, clientFirstName: "" })
-    ).toThrow();
+  it("allows empty optional phone", () => {
+    const result = assignWalkInSchema.parse({ ...validWalkIn, clientPhone: "" });
+    expect(result.clientPhone).toBeUndefined();
   });
 
-  it("rejects empty last name in manual mode", () => {
-    expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, clientLastName: "" })
-    ).toThrow();
-  });
-
-  it("rejects missing DNI in manual mode", () => {
-    expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, clientDni: "" })
-    ).toThrow();
-  });
-
-  it("rejects missing associated id in associated mode", () => {
-    expect(() =>
-      assignWalkInSchema.parse({
-        customerMode: "associated",
-        roomId: 1,
-        nights: 1,
-      })
-    ).toThrow();
+  it("rejects missing name or DNI (la persona es obligatoria)", () => {
+    expect(() => assignWalkInSchema.parse({ ...validWalkIn, clientFirstName: "" })).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validWalkIn, clientLastName: "" })).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validWalkIn, clientDni: "" })).toThrow();
   });
 
   it("rejects 0 nights", () => {
-    expect(() => assignWalkInSchema.parse({ ...validManualWalkIn, nights: 0 })).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validWalkIn, nights: 0 })).toThrow();
   });
 
   it("rejects more than 30 nights", () => {
-    expect(() => assignWalkInSchema.parse({ ...validManualWalkIn, nights: 31 })).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validWalkIn, nights: 31 })).toThrow();
   });
 
   it("accepts half_day (siesta) stay type", () => {
     const result = assignWalkInSchema.parse({
-      ...validManualWalkIn,
+      ...validWalkIn,
       nights: 1,
       stayType: "half_day",
     });
 
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
     expect(result.stayType).toBe("half_day");
   });
 
   it("rejects an invalid stay type", () => {
     expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, nights: 1, stayType: "weekly" })
+      assignWalkInSchema.parse({ ...validWalkIn, nights: 1, stayType: "weekly" })
     ).toThrow();
-  });
-
-  it("keeps passenger data on associated walk-in", () => {
-    const result = assignWalkInSchema.parse({
-      customerMode: "associated",
-      roomId: 1,
-      nights: 1,
-      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      guestName: "  Maria Lopez  ",
-      guestDni: "30123456",
-    });
-
-    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
-    expect(result.guestName).toBe("Maria Lopez");
-    expect(result.guestDni).toBe("30123456");
   });
 });
 

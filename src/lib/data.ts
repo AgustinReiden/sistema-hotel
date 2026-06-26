@@ -820,28 +820,24 @@ export async function checkRoomAvailability(
 
 export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> {
   const supabase = await createClient();
-  // Los parametros nuevos (siesta / pasajero) se envian solo cuando hacen falta,
-  // para seguir funcionando aunque todavia no se haya aplicado la migracion 50.
+  // Flujo unico (igual que staffCreateReservation): el huesped (persona) es siempre obligatorio;
+  // la empresa/convenio es opcional. El RPC hace find-or-create del huesped en el padron y resuelve
+  // la precedencia de descuento (empresa -> descuento personal del huesped -> 0).
   const params: Record<string, string | number | boolean | null> = {
     p_room_id: input.roomId,
     // El nombre completo lo compone el RPC a partir de nombre + apellido.
     p_client_name: null,
     p_nights: input.nights,
-    p_associated_client_id:
-      input.customerMode === "associated" ? input.associatedClientId : null,
+    p_associated_client_id: input.associatedClientId || null,
     p_guest_count: input.guestCount ?? 1,
+    p_client_dni: input.clientDni,
+    p_client_first_name: input.clientFirstName,
+    p_client_last_name: input.clientLastName,
+    p_client_phone: input.clientPhone || null,
+    p_guest_id: input.guestId || null,
   };
   if (input.stayType === "half_day") {
     params.p_half_day = true;
-  }
-  if (input.customerMode === "manual") {
-    params.p_client_first_name = input.clientFirstName;
-    params.p_client_last_name = input.clientLastName;
-    params.p_client_dni = input.clientDni;
-  }
-  if (input.customerMode === "associated") {
-    if (input.guestName) params.p_guest_name = input.guestName;
-    if (input.guestDni) params.p_guest_dni = input.guestDni;
   }
   if (input.guestProfession) params.p_guest_profession = input.guestProfession;
   if (input.guestAddress) params.p_guest_address = input.guestAddress;
