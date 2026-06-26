@@ -213,10 +213,12 @@ export default function CalendarClient({
             >
               Habitacion
             </div>
-            {days.map((day) => (
+            {days.map((day, dayIndex) => (
               <div
                 key={day.toISOString()}
-                className="shrink-0 py-1.5 px-1 text-center border-r border-slate-200 bg-slate-50/70"
+                className={`shrink-0 py-1.5 px-1 text-center border-r border-slate-200 ${
+                  dayIndex % 2 === 1 ? "bg-slate-100" : "bg-slate-50/70"
+                }`}
                 style={{ width: `${CELL_WIDTH}px` }}
               >
                 <p className="text-[10px] text-slate-500 uppercase font-medium leading-tight">{format(day, "E", { locale: es })}</p>
@@ -225,7 +227,7 @@ export default function CalendarClient({
             ))}
           </div>
 
-          {rooms.map((room) => {
+          {rooms.map((room, roomIndex) => {
             const roomReservations = reservations
               .filter((reservation) => reservation.room_id === room.id)
               .sort(
@@ -254,10 +256,13 @@ export default function CalendarClient({
               }
             });
 
+            // Zebra de filas: banda primaria blanco / gris para distinguir habitaciones.
+            const rowBg = roomIndex % 2 === 1 ? "bg-slate-100" : "bg-white";
+
             return (
-              <div key={room.id} className="flex border-b border-slate-100 hover:bg-slate-50/20">
+              <div key={room.id} className="flex border-b border-slate-100">
                 <div
-                  className="shrink-0 px-2 py-1 text-sm font-medium text-slate-800 bg-white border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0] flex flex-col justify-center leading-tight"
+                  className={`shrink-0 px-2 py-1 text-sm font-medium text-slate-800 border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0] flex flex-col justify-center leading-tight ${rowBg}`}
                   style={{ width: `${ROOM_COLUMN_WIDTH}px`, minHeight: `${ROW_HEIGHT}px` }}
                 >
                   Hab. {room.room_number}
@@ -265,16 +270,18 @@ export default function CalendarClient({
                 </div>
 
                 <div
-                  className="relative shrink-0"
+                  className={`relative shrink-0 ${rowBg}`}
                   style={{ width: `${daysCount * CELL_WIDTH}px`, height: `${ROW_HEIGHT}px` }}
                 >
                   <div className="absolute inset-0 flex">
-                    {days.map((day) => (
+                    {days.map((day, dayIndex) => (
                       <button
                         type="button"
                         key={`${room.id}-${day.toISOString()}`}
                         onClick={() => openCreateModal(room.id, day)}
-                        className="h-full shrink-0 border-r border-slate-100 hover:bg-slate-50 transition-colors"
+                        className={`h-full shrink-0 border-r border-slate-100 transition-colors hover:bg-brand-50 ${
+                          dayIndex % 2 === 1 ? "bg-slate-500/5" : ""
+                        }`}
                         style={{ width: `${CELL_WIDTH}px` }}
                         aria-label={`Crear reserva para habitación ${room.room_number} el ${format(day, "dd/MM/yyyy")}`}
                       />
