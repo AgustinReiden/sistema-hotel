@@ -1,6 +1,7 @@
+import { Percent } from "lucide-react";
+
 import { formatHotelDate } from "@/lib/time";
 import type { GuestDirectoryEntry } from "@/lib/types";
-import GuestDiscountCell from "./GuestDiscountCell";
 
 export default function GuestDirectoryTable({
   guests,
@@ -58,7 +59,14 @@ export default function GuestDirectoryTable({
                 </div>
               </td>
               <td className="px-6 py-4">
-                <GuestDiscountCell entry={guest} />
+                {guest.discount_percent > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                    <Percent size={11} />
+                    {guest.discount_percent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+                  </span>
+                ) : (
+                  <span className="text-slate-300 text-sm">—</span>
+                )}
               </td>
               <td className="px-6 py-4 text-center">
                 {guest.stays_count > 0 ? (

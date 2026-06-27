@@ -11,7 +11,9 @@ import type {
   CashShift,
   CashShiftStatus,
   CleaningType,
+  CompanyPassenger,
   CreateReservationPayload,
+  DiscountedClient,
   Guest,
   GuestDirectoryEntry,
   GuestDniMatch,
@@ -746,6 +748,76 @@ export async function setGuestPersonalDiscount(input: {
   if (error) throw error;
 }
 
+/** Fija el descuento de una empresa/convenio (seccion Descuentos). Solo admin. */
+export async function setCompanyDiscount(
+  companyId: string,
+  discountPercent: number
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("associated_clients")
+    .update({ discount_percent: discountPercent, updated_at: new Date().toISOString() })
+    .eq("id", companyId);
+  if (error) throw error;
+}
+
+/** Lista de clientes con descuento (huespedes + empresas) para la seccion Descuentos. */
+export async function getDiscountedClients(): Promise<DiscountedClient[]> {
+  const supabase = await createClient();
+  const [guestsRes, companiesRes] = await Promise.all([
+    supabase
+      .from("guests")
+      .select("id, full_name, document_id, discount_percent")
+      .gt("discount_percent", 0)
+      .order("full_name", { ascending: true }),
+    supabase
+      .from("associated_clients")
+      .select("id, display_name, document_id, discount_percent")
+      .gt("discount_percent", 0)
+      .order("display_name", { ascending: true }),
+  ]);
+  if (guestsRes.error) throw guestsRes.error;
+  if (companiesRes.error) throw companiesRes.error;
+
+  const companies: DiscountedClient[] = (companiesRes.data ?? []).map((c) => ({
+    kind: "company",
+    id: c.id,
+    name: c.display_name,
+    document_id: c.document_id ?? null,
+    discount_percent: Number(c.discount_percent) || 0,
+  }));
+  const guests: DiscountedClient[] = (guestsRes.data ?? []).map((g) => ({
+    kind: "guest",
+    id: g.id,
+    name: g.full_name,
+    document_id: g.document_id ?? null,
+    discount_percent: Number(g.discount_percent) || 0,
+  }));
+  return [...companies, ...guests];
+}
+
+/** Pasajeros de una empresa (tabla company_passengers), buscados por nombre o DNI. */
+export async function searchCompanyPassengers(
+  companyId: string,
+  term = ""
+): Promise<CompanyPassenger[]> {
+  const supabase = await createClient();
+  let query = supabase
+    .from("company_passengers")
+    .select("*")
+    .eq("associated_client_id", companyId)
+    .order("full_name", { ascending: true });
+
+  const search = sanitizeSearchTerm(term);
+  if (search) {
+    query = query.or(`full_name.ilike.%${search}%,document_id.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query.limit(25);
+  if (error) throw error;
+  return (data ?? []) as CompanyPassenger[];
+}
+
 export async function applyLateCheckOut(
   reservationId: string
 ): Promise<{ halfDayCharged: boolean; halfDayAmount: number }> {
@@ -820,25 +892,32 @@ export async function checkRoomAvailability(
 
 export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> {
   const supabase = await createClient();
-  // Flujo unico (igual que staffCreateReservation): el huesped (persona) es siempre obligatorio;
-  // la empresa/convenio es opcional. El RPC hace find-or-create del huesped en el padron y resuelve
-  // la precedencia de descuento (empresa -> descuento personal del huesped -> 0).
+  // Mismo fork que el alta: persona (huesped en guests) o empresa (pasajero en company_passengers).
   const params: Record<string, string | number | boolean | null> = {
     p_room_id: input.roomId,
-    // El nombre completo lo compone el RPC a partir de nombre + apellido.
-    p_client_name: null,
     p_nights: input.nights,
-    p_associated_client_id: input.associatedClientId || null,
     p_guest_count: input.guestCount ?? 1,
-    p_client_dni: input.clientDni,
-    p_client_first_name: input.clientFirstName,
-    p_client_last_name: input.clientLastName,
-    p_client_phone: input.clientPhone || null,
-    p_guest_id: input.guestId || null,
   };
   if (input.stayType === "half_day") {
     params.p_half_day = true;
   }
+
+  if (input.mode === "company") {
+    params.p_associated_client_id = input.associatedClientId;
+    params.p_company_passenger_id = input.companyPassengerId || null;
+    params.p_client_name = input.passengerName;
+    params.p_client_dni = input.passengerDni;
+  } else {
+    params.p_associated_client_id = null;
+    params.p_company_passenger_id = null;
+    params.p_guest_id = input.guestId || null;
+    // El nombre completo lo compone el RPC a partir de nombre + apellido.
+    params.p_client_name = null;
+    params.p_client_first_name = input.clientFirstName;
+    params.p_client_last_name = input.clientLastName;
+    params.p_client_dni = input.clientDni;
+  }
+
   if (input.guestProfession) params.p_guest_profession = input.guestProfession;
   if (input.guestAddress) params.p_guest_address = input.guestAddress;
   if (input.guestLocality) params.p_guest_locality = input.guestLocality;
@@ -908,23 +987,34 @@ export async function staffCreateReservation(
   input: CreateReservationPayload
 ): Promise<string> {
   const supabase = await createClient();
-  // Flujo unico: el huesped (persona) es siempre obligatorio; la empresa/convenio es opcional.
-  // El RPC hace find-or-create del huesped en el padron y resuelve la precedencia de descuento
-  // (empresa -> descuento personal del huesped -> 0).
+  // La reserva es persona o empresa; el RPC hace find-or-create del humano (huesped en guests /
+  // pasajero en company_passengers) y resuelve el descuento (empresa -> huesped seleccionado -> 0).
   const params: Record<string, string | number | null> = {
     p_room_id: input.roomId,
     p_check_in: input.checkIn,
     p_check_out: input.checkOut,
-    // El nombre completo lo compone el RPC a partir de nombre + apellido.
-    p_client_name: null,
-    p_client_dni: input.clientDni,
-    p_client_phone: input.clientPhone || null,
-    p_associated_client_id: input.associatedClientId || null,
     p_guest_count: input.guestCount ?? 1,
-    p_client_first_name: input.clientFirstName,
-    p_client_last_name: input.clientLastName,
-    p_guest_id: input.guestId || null,
   };
+
+  if (input.mode === "company") {
+    params.p_associated_client_id = input.associatedClientId;
+    params.p_company_passenger_id = input.companyPassengerId || null;
+    // El humano que se hospeda es el pasajero de la empresa.
+    params.p_client_name = input.passengerName;
+    params.p_client_dni = input.passengerDni;
+    params.p_client_phone = input.passengerPhone || null;
+  } else {
+    params.p_associated_client_id = null;
+    params.p_company_passenger_id = null;
+    params.p_guest_id = input.guestId || null;
+    // El nombre completo lo compone el RPC a partir de nombre + apellido.
+    params.p_client_name = null;
+    params.p_client_first_name = input.clientFirstName;
+    params.p_client_last_name = input.clientLastName;
+    params.p_client_dni = input.clientDni;
+    params.p_client_phone = input.clientPhone || null;
+  }
+
   if (input.guestProfession) params.p_guest_profession = input.guestProfession;
   if (input.guestAddress) params.p_guest_address = input.guestAddress;
   if (input.guestLocality) params.p_guest_locality = input.guestLocality;

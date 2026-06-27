@@ -17,6 +17,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 
 import AssociatedClientSelector from "./AssociatedClientSelector";
+import CompanyPassengerSelector from "./CompanyPassengerSelector";
 import DateTimePickerField from "./DateTimePickerField";
 import GuestRegistryFields from "./GuestRegistryFields";
 import GuestSelector from "./GuestSelector";
@@ -24,11 +25,14 @@ import { fetchAvailableRoomsAction } from "./actions";
 import { calculateReservationPriceBreakdown, resolveEffectiveDiscountPercent } from "@/lib/pricing";
 import type {
   AssociatedClient,
+  CompanyPassenger,
   CreateReservationPayload,
   GuestDirectoryEntry,
   GuestRegistryInput,
   Room,
 } from "@/lib/types";
+
+type ReservationMode = "person" | "company";
 
 type InitialReservationValues = Partial<{
   roomId: number;
@@ -51,17 +55,20 @@ type NewReservationModalProps = {
 };
 
 type ReservationFormState = {
-  /** Id del padron si el huesped se eligio del directorio (habilita su descuento personal). */
+  mode: ReservationMode;
+  // Persona (huesped)
   guestId: string | null;
   clientFirstName: string;
   clientLastName: string;
   clientDni: string;
   clientPhone: string;
-  /** Descuento personal del huesped elegido (solo display + preview; el RPC lo revalida). */
   guestDiscountPercent: number;
-  /** Esta reserva la paga una empresa/convenio (con descuento). */
-  hasCompany: boolean;
+  // Empresa
   associatedClientId: string;
+  companyPassengerId: string | null;
+  passengerName: string;
+  passengerDni: string;
+  // Compartido
   roomId: number | "";
   checkIn: string;
   checkOut: string;
@@ -102,14 +109,17 @@ function buildInitialState(
   const defaults = buildDefaultDateValues(checkInTime, checkOutTime);
 
   return {
+    mode: "person",
     guestId: null,
     clientFirstName: "",
     clientLastName: "",
     clientDni: "",
     clientPhone: "",
     guestDiscountPercent: 0,
-    hasCompany: false,
     associatedClientId: "",
+    companyPassengerId: null,
+    passengerName: "",
+    passengerDni: "",
     roomId: initialValues?.roomId ?? "",
     checkIn: initialValues?.checkIn ?? defaults.checkIn,
     checkOut: initialValues?.checkOut ?? defaults.checkOut,
@@ -130,6 +140,9 @@ function splitName(full: string): { first: string; last: string } {
   const last = parts.pop() as string;
   return { first: parts.join(" "), last };
 }
+
+const inputClass =
+  "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
 
 export default function NewReservationModal({
   isOpen,
@@ -176,7 +189,6 @@ export default function NewReservationModal({
       if (!active) return;
       setAvailableRooms(rooms);
       setLoadingRooms(false);
-      // Si la habitación elegida dejó de estar libre para las nuevas fechas, la limpiamos.
       setForm((current) =>
         current.roomId !== "" && !rooms.some((r) => r.id === Number(current.roomId))
           ? { ...current, roomId: "" }
@@ -220,29 +232,42 @@ export default function NewReservationModal({
       guestDiscountPercent: 0,
     }));
 
+  const handlePassengerSelect = (p: CompanyPassenger) => {
+    setForm((current) => ({
+      ...current,
+      companyPassengerId: p.id,
+      passengerName: p.full_name,
+      passengerDni: p.document_id ?? "",
+    }));
+  };
+
   if (!isOpen) return null;
 
   const selectedRoom =
     form.roomId === "" ? null : rooms.find((room) => room.id === Number(form.roomId)) ?? null;
-  const selectedAssociatedClient = form.hasCompany
-    ? associatedClients.find((client) => client.id === form.associatedClientId) ?? null
-    : null;
+  const selectedCompany =
+    form.mode === "company"
+      ? associatedClients.find((client) => client.id === form.associatedClientId) ?? null
+      : null;
   const hasValidDates =
     Boolean(form.checkIn) &&
     Boolean(form.checkOut) &&
     new Date(form.checkOut).getTime() > new Date(form.checkIn).getTime();
 
-  // Precedencia de descuento: empresa/convenio -> descuento personal del huesped -> 0.
+  // Precedencia de descuento: empresa -> descuento personal del huesped -> 0.
   const effectiveDiscount = resolveEffectiveDiscountPercent({
-    hasCompany: Boolean(selectedAssociatedClient),
-    companyDiscountPercent: selectedAssociatedClient?.discount_percent,
+    hasCompany: form.mode === "company",
+    companyDiscountPercent: selectedCompany?.discount_percent,
     guestDiscountPercent: form.guestDiscountPercent,
   });
-  const discountSource = selectedAssociatedClient
-    ? `Empresa/Convenio: ${selectedAssociatedClient.display_name}`
-    : form.guestDiscountPercent > 0
-      ? "Descuento del huésped"
-      : null;
+  const discountSource =
+    form.mode === "company"
+      ? selectedCompany
+        ? `Empresa/Convenio: ${selectedCompany.display_name}`
+        : null
+      : form.guestDiscountPercent > 0
+        ? "Descuento del huésped"
+        : null;
 
   const pricePreview =
     selectedRoom && hasValidDates
@@ -254,11 +279,17 @@ export default function NewReservationModal({
         })
       : null;
 
-  const guestComplete =
+  const personComplete =
     Boolean(form.clientFirstName.trim()) &&
     Boolean(form.clientLastName.trim()) &&
     Boolean(form.clientDni.trim());
-  const companyComplete = !form.hasCompany || Boolean(form.associatedClientId);
+  const companyComplete =
+    Boolean(form.associatedClientId) &&
+    Boolean(form.passengerName.trim()) &&
+    Boolean(form.passengerDni.trim());
+  const clientComplete = form.mode === "person" ? personComplete : companyComplete;
+
+  const setMode = (mode: ReservationMode) => setForm((current) => ({ ...current, mode }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -270,30 +301,50 @@ export default function NewReservationModal({
       toast.error("La fecha de salida debe ser posterior a la fecha de entrada.");
       return;
     }
-    if (!guestComplete) {
+    if (form.mode === "person" && !personComplete) {
       toast.error("Cargá nombre, apellido y DNI del huésped.");
       return;
     }
-    if (form.hasCompany && !form.associatedClientId) {
-      toast.error("Seleccioná la empresa/convenio o desactivá esa opción.");
-      return;
+    if (form.mode === "company") {
+      if (!form.associatedClientId) {
+        toast.error("Seleccioná la empresa/convenio.");
+        return;
+      }
+      if (!form.passengerName.trim() || !form.passengerDni.trim()) {
+        toast.error("Cargá el nombre y el DNI del pasajero.");
+        return;
+      }
     }
 
     setIsSubmitting(true);
     try {
-      const payload: CreateReservationPayload = {
-        roomId: Number(form.roomId),
-        guestId: form.guestId ?? undefined,
-        clientFirstName: form.clientFirstName.trim(),
-        clientLastName: form.clientLastName.trim(),
-        clientDni: form.clientDni.trim(),
-        clientPhone: form.clientPhone.trim() || undefined,
-        associatedClientId: form.hasCompany ? form.associatedClientId : undefined,
-        checkIn: new Date(form.checkIn).toISOString(),
-        checkOut: new Date(form.checkOut).toISOString(),
-        guestCount: form.guestCount,
-        ...registry,
-      };
+      const payload: CreateReservationPayload =
+        form.mode === "company"
+          ? {
+              mode: "company",
+              roomId: Number(form.roomId),
+              associatedClientId: form.associatedClientId,
+              companyPassengerId: form.companyPassengerId ?? undefined,
+              passengerName: form.passengerName.trim(),
+              passengerDni: form.passengerDni.trim(),
+              checkIn: new Date(form.checkIn).toISOString(),
+              checkOut: new Date(form.checkOut).toISOString(),
+              guestCount: form.guestCount,
+              ...registry,
+            }
+          : {
+              mode: "person",
+              roomId: Number(form.roomId),
+              guestId: form.guestId ?? undefined,
+              clientFirstName: form.clientFirstName.trim(),
+              clientLastName: form.clientLastName.trim(),
+              clientDni: form.clientDni.trim(),
+              clientPhone: form.clientPhone.trim() || undefined,
+              checkIn: new Date(form.checkIn).toISOString(),
+              checkOut: new Date(form.checkOut).toISOString(),
+              guestCount: form.guestCount,
+              ...registry,
+            };
 
       const result = await onSubmit(payload);
 
@@ -310,9 +361,6 @@ export default function NewReservationModal({
     }
   };
 
-  const inputClass =
-    "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-auto overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-left max-h-[90vh] overflow-y-auto">
@@ -326,177 +374,235 @@ export default function NewReservationModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* 1) Huésped: columna vertebral. Buscar en el padrón o cargar nuevo. */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
+          {/* Tipo de reserva: Persona o Empresa */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setMode("person")}
+              className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                form.mode === "person"
+                  ? "border-emerald-500 bg-emerald-50"
+                  : "border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              <p className="flex items-center gap-2 font-semibold text-slate-800">
                 <UserRound size={16} className="text-emerald-600" />
-                Huésped
+                Persona
               </p>
-              {form.guestId ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
-                  Del padrón
-                  {form.guestDiscountPercent > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      · <Percent size={10} />
-                      {form.guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
-                    </span>
-                  )}
-                </span>
-              ) : (
-                guestComplete && (
-                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
-                    Nuevo · se guarda solo
-                  </span>
-                )
-              )}
-            </div>
-
-            <GuestSelector onSelect={handleGuestSelect} />
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Nombre
-                </label>
-                <input
-                  id="clientFirstName"
-                  type="text"
-                  required
-                  value={form.clientFirstName}
-                  onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
-                  className={inputClass}
-                  placeholder="Ej. María"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Apellido
-                </label>
-                <input
-                  id="clientLastName"
-                  type="text"
-                  required
-                  value={form.clientLastName}
-                  onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
-                  className={inputClass}
-                  placeholder="Ej. López"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard size={14} />
-                    DNI o CUIT
-                  </span>
-                </label>
-                <input
-                  id="clientDni"
-                  type="text"
-                  required
-                  value={form.clientDni}
-                  onChange={(e) => setForm((current) => ({ ...current, clientDni: e.target.value }))}
-                  className={inputClass}
-                  placeholder="Ej. 20-12345678-3"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="clientPhone" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <Phone size={14} />
-                    Teléfono
-                  </span>
-                </label>
-                <input
-                  id="clientPhone"
-                  type="tel"
-                  value={form.clientPhone}
-                  onChange={(e) => setForm((current) => ({ ...current, clientPhone: e.target.value }))}
-                  className={inputClass}
-                  placeholder="Opcional"
-                />
-              </div>
-            </div>
-
-            {form.guestId && (
-              <button
-                type="button"
-                onClick={clearGuest}
-                className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
-              >
-                Limpiar y cargar otro huésped
-              </button>
-            )}
+              <p className="text-xs text-slate-500">Un huésped. Si tiene descuento, se aplica solo.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("company")}
+              className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                form.mode === "company"
+                  ? "border-emerald-500 bg-emerald-50"
+                  : "border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              <p className="flex items-center gap-2 font-semibold text-slate-800">
+                <Building2 size={16} className="text-emerald-600" />
+                Empresa / Convenio
+              </p>
+              <p className="text-xs text-slate-500">La empresa paga; se carga el pasajero real.</p>
+            </button>
           </div>
 
-          {/* 2) Empresa/Convenio (opcional): aporta descuento y es la facturable. */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.hasCompany}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    hasCompany: e.target.checked,
-                    associatedClientId: e.target.checked ? current.associatedClientId : "",
-                  }))
-                }
-                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                <Building2 size={16} className="text-slate-400" />
-                Esta reserva la paga una empresa/convenio (con descuento)
-              </span>
-            </label>
-
-            {form.hasCompany && (
-              <div className="space-y-3 pt-1">
-                <AssociatedClientSelector
-                  clients={associatedClients}
-                  selectedId={form.associatedClientId}
-                  onSelect={(id) => setForm((current) => ({ ...current, associatedClientId: id }))}
-                  inputId="associatedClient"
-                  label="Empresa / Convenio"
-                />
-
-                {selectedAssociatedClient ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Nombre</p>
-                      <p className="text-sm font-semibold text-slate-800 truncate">
-                        {selectedAssociatedClient.display_name}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">DNI/CUIT</p>
-                      <p className="text-sm font-semibold text-slate-800 truncate">
-                        {selectedAssociatedClient.document_id}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Descuento</p>
-                      <p className="text-sm font-semibold text-emerald-700">
-                        {selectedAssociatedClient.discount_percent.toLocaleString("es-AR", {
-                          maximumFractionDigits: 2,
-                        })}
-                        %
-                      </p>
-                    </div>
-                  </div>
+          {form.mode === "person" ? (
+            /* ----- PERSONA: buscar/crear huésped ----- */
+            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                  <UserRound size={16} className="text-emerald-600" />
+                  Huésped
+                </p>
+                {form.guestId ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                    Del padrón
+                    {form.guestDiscountPercent > 0 && (
+                      <span className="flex items-center gap-0.5">
+                        · <Percent size={10} />
+                        {form.guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+                      </span>
+                    )}
+                  </span>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                    Seleccioná una empresa/convenio activo para usar su descuento.
-                  </div>
+                  personComplete && (
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
+                      Nuevo · se guarda solo
+                    </span>
+                  )
                 )}
               </div>
-            )}
-          </div>
 
-          {/* 3) Campo destacado: solo habitaciones libres para las fechas elegidas. */}
+              <GuestSelector onSelect={handleGuestSelect} />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Nombre
+                  </label>
+                  <input
+                    id="clientFirstName"
+                    type="text"
+                    value={form.clientFirstName}
+                    onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
+                    className={inputClass}
+                    placeholder="Ej. María"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Apellido
+                  </label>
+                  <input
+                    id="clientLastName"
+                    type="text"
+                    value={form.clientLastName}
+                    onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
+                    className={inputClass}
+                    placeholder="Ej. López"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <CreditCard size={14} />
+                      DNI o CUIT
+                    </span>
+                  </label>
+                  <input
+                    id="clientDni"
+                    type="text"
+                    value={form.clientDni}
+                    onChange={(e) => setForm((current) => ({ ...current, clientDni: e.target.value }))}
+                    className={inputClass}
+                    placeholder="Ej. 20-12345678-3"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clientPhone" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <Phone size={14} />
+                      Teléfono
+                    </span>
+                  </label>
+                  <input
+                    id="clientPhone"
+                    type="tel"
+                    value={form.clientPhone}
+                    onChange={(e) => setForm((current) => ({ ...current, clientPhone: e.target.value }))}
+                    className={inputClass}
+                    placeholder="Opcional"
+                  />
+                </div>
+              </div>
+
+              {form.guestId && (
+                <button
+                  type="button"
+                  onClick={clearGuest}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
+                >
+                  Limpiar y cargar otro huésped
+                </button>
+              )}
+            </div>
+          ) : (
+            /* ----- EMPRESA: elegir empresa + pasajero real ----- */
+            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+              <AssociatedClientSelector
+                clients={associatedClients}
+                selectedId={form.associatedClientId}
+                onSelect={(id) =>
+                  setForm((current) => ({
+                    ...current,
+                    associatedClientId: id,
+                    companyPassengerId: null,
+                    passengerName: "",
+                    passengerDni: "",
+                  }))
+                }
+                inputId="associatedClient"
+                label="Empresa / Convenio"
+              />
+
+              {selectedCompany && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                  <span className="font-semibold text-slate-800 truncate">{selectedCompany.display_name}</span>
+                  <span className="flex items-center gap-1 text-emerald-700 font-semibold shrink-0">
+                    <Percent size={12} />
+                    {selectedCompany.discount_percent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%
+                  </span>
+                </div>
+              )}
+
+              {/* Pasajero real que se hospeda (tabla aparte de la empresa) */}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
+                  Pasajero que se hospeda <span className="text-red-500">*</span>
+                </p>
+                {form.associatedClientId ? (
+                  <>
+                    <CompanyPassengerSelector
+                      key={form.associatedClientId}
+                      companyId={form.associatedClientId}
+                      onSelect={handlePassengerSelect}
+                    />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="passengerName" className="block text-xs font-semibold text-slate-600 mb-1">
+                          Nombre del pasajero <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          id="passengerName"
+                          type="text"
+                          value={form.passengerName}
+                          onChange={(e) =>
+                            setForm((current) => ({
+                              ...current,
+                              passengerName: e.target.value,
+                              companyPassengerId: null,
+                            }))
+                          }
+                          className={inputClass}
+                          placeholder="Ej. Juan Pérez"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="passengerDni" className="block text-xs font-semibold text-slate-600 mb-1">
+                          DNI del pasajero <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          id="passengerDni"
+                          type="text"
+                          value={form.passengerDni}
+                          onChange={(e) =>
+                            setForm((current) => ({
+                              ...current,
+                              passengerDni: e.target.value,
+                              companyPassengerId: null,
+                            }))
+                          }
+                          className={inputClass}
+                          placeholder="Ej. 30123456"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {form.companyPassengerId
+                        ? "Pasajero de la empresa seleccionado."
+                        : "Si no figura, se crea en la lista de la empresa al confirmar."}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500">Elegí primero la empresa/convenio.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Campo destacado: solo habitaciones libres para las fechas elegidas. */}
           <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/50 p-3.5">
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="roomId" className="flex items-center gap-2 text-sm font-bold text-emerald-800">
@@ -629,9 +735,7 @@ export default function NewReservationModal({
                   </p>
                 </div>
               </div>
-              {discountSource && (
-                <p className="mt-2 text-[11px] text-emerald-700/80">{discountSource}</p>
-              )}
+              {discountSource && <p className="mt-2 text-[11px] text-emerald-700/80">{discountSource}</p>}
             </div>
           )}
 
@@ -645,7 +749,7 @@ export default function NewReservationModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || form.roomId === "" || !guestComplete || !companyComplete}
+              disabled={isSubmitting || form.roomId === "" || !clientComplete}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
               {isSubmitting ? "Creando..." : "Crear Reserva"}

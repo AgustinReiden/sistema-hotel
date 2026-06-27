@@ -164,15 +164,12 @@ export default function AssociatedClientModal({
               <input
                 id="associated-discount"
                 type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                required
                 value={form.discountPercent}
-                onChange={(e) => setForm((current) => ({ ...current, discountPercent: e.target.value }))}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                placeholder="Ej. 10"
+                readOnly
+                disabled
+                className="w-full px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 outline-none cursor-not-allowed"
               />
+              <p className="text-[11px] text-slate-500 mt-1">Se gestiona en la sección Descuentos.</p>
             </div>
 
             <div className="md:col-span-2">
@@ -194,7 +191,8 @@ export default function AssociatedClientModal({
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            El descuento se congelará en cada reserva o check-in al momento de seleccionar esta empresa/convenio.
+            El descuento se asigna desde la sección <strong>Descuentos</strong> y se congela en cada
+            reserva o check-in al seleccionar esta empresa/convenio.
           </div>
 
           <div className="pt-4 border-t border-slate-100 flex gap-3">
