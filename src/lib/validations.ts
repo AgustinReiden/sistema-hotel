@@ -51,6 +51,13 @@ const optionalContactPhoneAsNull = z.preprocess(
 
 const associatedClientIdSchema = z.string().uuid("El asociado seleccionado es invalido.");
 
+// Id opcional (huesped del padron / pasajero de la empresa): vacio -> undefined; si viene, uuid.
+const optionalUuid = (msg: string) =>
+  z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().uuid(msg).optional()
+  );
+
 const percentageSchema = z.preprocess(
   (value) => {
     if (typeof value === "string") {
@@ -125,7 +132,6 @@ const guestRegistrySchemaFields = {
 };
 
 const walkInBaseSchema = {
-  customerMode: z.enum(["manual", "associated"]),
   roomId: z.number().int().positive("El ID de la habitacion es invalido."),
   nights: z
     .number()
@@ -137,50 +143,56 @@ const walkInBaseSchema = {
   ...guestRegistrySchemaFields,
 };
 
-export const assignWalkInSchema = z.discriminatedUnion("customerMode", [
+// Check-in directo: persona (huesped) o empresa (con pasajero real).
+export const assignWalkInSchema = z.discriminatedUnion("mode", [
   z.object({
     ...walkInBaseSchema,
-    customerMode: z.literal("manual"),
+    mode: z.literal("person"),
+    guestId: optionalUuid("El huesped seleccionado es invalido."),
     clientFirstName: clientFirstNameSchema,
     clientLastName: clientLastNameSchema,
     clientDni: clientDniSchema,
   }),
   z.object({
     ...walkInBaseSchema,
-    customerMode: z.literal("associated"),
+    mode: z.literal("company"),
     associatedClientId: associatedClientIdSchema,
-    guestName: requiredPassengerName,
-    guestDni: requiredPassengerDni,
+    companyPassengerId: optionalUuid("El pasajero seleccionado es invalido."),
+    passengerName: requiredPassengerName,
+    passengerDni: requiredPassengerDni,
   }),
 ]);
 
-// Empresa/Convenio opcional en el alta de reserva: vacio -> undefined; si viene, uuid valido.
-const optionalAssociatedClientId = z.preprocess(
-  (value) => (value === "" || value === null ? undefined : value),
-  associatedClientIdSchema.optional()
-);
+const checkInOutFields = {
+  roomId: z.number().int().positive("El ID de la habitacion es invalido."),
+  checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
+  checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
+  guestCount: guestCountSchema,
+  ...guestRegistrySchemaFields,
+};
 
-// Id del padron de huespedes (opcional): si la persona se eligio del directorio.
-const optionalGuestId = z.preprocess(
-  (value) => (value === "" || value === null ? undefined : value),
-  z.string().uuid("El huesped seleccionado es invalido.").optional()
-);
-
-// Flujo unico: la persona (huesped) es obligatoria; la empresa/convenio es opcional.
+// La reserva es PERSONA (huesped) o EMPRESA (con pasajero real).
 export const createReservationSchema = z
-  .object({
-    roomId: z.number().int().positive("El ID de la habitacion es invalido."),
-    guestId: optionalGuestId,
-    clientFirstName: clientFirstNameSchema,
-    clientLastName: clientLastNameSchema,
-    clientDni: clientDniSchema,
-    clientPhone: optionalPhoneSchema,
-    associatedClientId: optionalAssociatedClientId,
-    checkIn: z.string().datetime({ message: "La fecha de entrada es invalida." }),
-    checkOut: z.string().datetime({ message: "La fecha de salida es invalida." }),
-    guestCount: guestCountSchema,
-    ...guestRegistrySchemaFields,
-  })
+  .discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("person"),
+      guestId: optionalUuid("El huesped seleccionado es invalido."),
+      clientFirstName: clientFirstNameSchema,
+      clientLastName: clientLastNameSchema,
+      clientDni: clientDniSchema,
+      clientPhone: optionalPhoneSchema,
+      ...checkInOutFields,
+    }),
+    z.object({
+      mode: z.literal("company"),
+      associatedClientId: associatedClientIdSchema,
+      companyPassengerId: optionalUuid("El pasajero seleccionado es invalido."),
+      passengerName: requiredPassengerName,
+      passengerDni: requiredPassengerDni,
+      passengerPhone: optionalPhoneSchema,
+      ...checkInOutFields,
+    }),
+  ])
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {
     message: "La fecha de salida debe ser posterior a la fecha de entrada.",
     path: ["checkOut"],

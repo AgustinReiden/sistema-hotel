@@ -289,29 +289,66 @@ export type GuestRegistryInput = {
 };
 
 /**
- * Alta de reserva (flujo unico). El huesped (persona) es SIEMPRE quien se hospeda y queda en
- * client_*; la Empresa/Convenio (associatedClientId) es opcional y, si esta, su descuento pisa
- * al descuento personal del huesped.
+ * Alta de reserva. La reserva es PERSONA o EMPRESA:
+ * - person: la persona (huesped) se hospeda y queda en client_*; su descuento personal se aplica
+ *   si se eligio del padron (guestId). Vive en la tabla guests (se crea sola).
+ * - company: la reserva va por una Empresa/Convenio (su descuento se aplica) y el pasajero real
+ *   (passenger*) es quien se hospeda; vive en la tabla company_passengers (dedup por empresa).
  */
-export type CreateReservationPayload = {
-  roomId: number;
-  /** Padron id si el huesped se eligio del directorio; null/undefined si es nuevo (se crea solo). */
-  guestId?: string | null;
-  clientFirstName: string;
-  clientLastName: string;
-  clientDni: string;
-  clientPhone?: string;
-  /** Empresa/Convenio facturable (opcional). */
-  associatedClientId?: string | null;
-  checkIn: string;
-  checkOut: string;
-  guestCount?: number;
-} & GuestRegistryInput;
+export type CreateReservationPayload =
+  | ({
+      mode: "person";
+      roomId: number;
+      /** Padron id si el huesped se eligio del directorio; null/undefined si es nuevo. */
+      guestId?: string | null;
+      clientFirstName: string;
+      clientLastName: string;
+      clientDni: string;
+      clientPhone?: string;
+      checkIn: string;
+      checkOut: string;
+      guestCount?: number;
+    } & GuestRegistryInput)
+  | ({
+      mode: "company";
+      roomId: number;
+      associatedClientId: string;
+      /** Id del pasajero si se eligio de la lista de la empresa; null/undefined si es nuevo. */
+      companyPassengerId?: string | null;
+      passengerName: string;
+      passengerDni: string;
+      passengerPhone?: string;
+      checkIn: string;
+      checkOut: string;
+      guestCount?: number;
+    } & GuestRegistryInput);
 
+/** Pasajero/empleado que viaja por una empresa (tabla company_passengers, separada de guests). */
+export type CompanyPassenger = {
+  id: string;
+  associated_client_id: string;
+  full_name: string;
+  document_id: string | null;
+  phone: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Una fila de la seccion Descuentos: un huesped o una empresa con descuento asignado. */
+export type DiscountedClient = {
+  kind: "guest" | "company";
+  id: string;
+  name: string;
+  document_id: string | null;
+  discount_percent: number;
+};
+
+// Check-in directo (walk-in): mismo fork que el alta de reserva, persona o empresa.
 export type AssignWalkInPayload =
   | ({
-      customerMode: "manual";
+      mode: "person";
       roomId: number;
+      guestId?: string | null;
       clientFirstName: string;
       clientLastName: string;
       clientDni: string;
@@ -320,15 +357,15 @@ export type AssignWalkInPayload =
       stayType?: WalkInStayType;
     } & GuestRegistryInput)
   | ({
-      customerMode: "associated";
+      mode: "company";
       roomId: number;
       nights: number;
       associatedClientId: string;
+      companyPassengerId?: string | null;
+      passengerName: string;
+      passengerDni: string;
       guestCount?: number;
       stayType?: WalkInStayType;
-      /** Pasajero real que se hospeda; obligatorio en modo asociado (la empresa es el huesped facturable). */
-      guestName: string;
-      guestDni: string;
     } & GuestRegistryInput);
 
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";

@@ -9,8 +9,8 @@ import {
 } from "@/lib/validations";
 
 describe("assignWalkInSchema", () => {
-  const validManualWalkIn = {
-    customerMode: "manual" as const,
+  const validPersonWalkIn = {
+    mode: "person" as const,
     roomId: 1,
     clientFirstName: "Juan",
     clientLastName: "Perez",
@@ -18,11 +18,10 @@ describe("assignWalkInSchema", () => {
     nights: 3,
   };
 
-  it("accepts valid manual input", () => {
-    const result = assignWalkInSchema.parse(validManualWalkIn);
+  it("accepts valid person input", () => {
+    const result = assignWalkInSchema.parse(validPersonWalkIn);
 
-    expect(result.customerMode).toBe("manual");
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
+    if (result.mode !== "person") throw new Error("Expected person mode");
     expect(result.roomId).toBe(1);
     expect(result.clientFirstName).toBe("Juan");
     expect(result.clientLastName).toBe("Perez");
@@ -30,38 +29,39 @@ describe("assignWalkInSchema", () => {
     expect(result.nights).toBe(3);
   });
 
-  it("trims manual name and last name", () => {
+  it("trims person name and last name", () => {
     const result = assignWalkInSchema.parse({
-      ...validManualWalkIn,
+      ...validPersonWalkIn,
       clientFirstName: "  Maria  ",
       clientLastName: "  Gomez  ",
       nights: 1,
     });
 
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
+    if (result.mode !== "person") throw new Error("Expected person mode");
     expect(result.clientFirstName).toBe("Maria");
     expect(result.clientLastName).toBe("Gomez");
   });
 
-  it("accepts associated input", () => {
+  it("accepts company input with passenger", () => {
     const result = assignWalkInSchema.parse({
-      customerMode: "associated",
+      mode: "company",
       roomId: 1,
       nights: 2,
       associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      guestName: "Maria Lopez",
-      guestDni: "30123456",
+      passengerName: "Maria Lopez",
+      passengerDni: "30123456",
     });
 
-    expect(result.customerMode).toBe("associated");
-    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
+    if (result.mode !== "company") throw new Error("Expected company mode");
     expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
+    expect(result.passengerName).toBe("Maria Lopez");
+    expect(result.passengerDni).toBe("30123456");
   });
 
-  it("rejects associated walk-in without passenger data", () => {
+  it("rejects company walk-in without passenger data", () => {
     expect(() =>
       assignWalkInSchema.parse({
-        customerMode: "associated",
+        mode: "company",
         roomId: 1,
         nights: 1,
         associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
@@ -69,78 +69,81 @@ describe("assignWalkInSchema", () => {
     ).toThrow();
   });
 
-  it("rejects empty first name in manual mode", () => {
+  it("rejects empty first name in person mode", () => {
     expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, clientFirstName: "" })
+      assignWalkInSchema.parse({ ...validPersonWalkIn, clientFirstName: "" })
     ).toThrow();
   });
 
-  it("rejects empty last name in manual mode", () => {
+  it("rejects empty last name in person mode", () => {
     expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, clientLastName: "" })
+      assignWalkInSchema.parse({ ...validPersonWalkIn, clientLastName: "" })
     ).toThrow();
   });
 
-  it("rejects missing DNI in manual mode", () => {
+  it("rejects missing DNI in person mode", () => {
     expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, clientDni: "" })
+      assignWalkInSchema.parse({ ...validPersonWalkIn, clientDni: "" })
     ).toThrow();
   });
 
-  it("rejects missing associated id in associated mode", () => {
+  it("rejects missing company id in company mode", () => {
     expect(() =>
       assignWalkInSchema.parse({
-        customerMode: "associated",
+        mode: "company",
         roomId: 1,
         nights: 1,
+        passengerName: "Maria Lopez",
+        passengerDni: "30123456",
       })
     ).toThrow();
   });
 
   it("rejects 0 nights", () => {
-    expect(() => assignWalkInSchema.parse({ ...validManualWalkIn, nights: 0 })).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validPersonWalkIn, nights: 0 })).toThrow();
   });
 
   it("rejects more than 30 nights", () => {
-    expect(() => assignWalkInSchema.parse({ ...validManualWalkIn, nights: 31 })).toThrow();
+    expect(() => assignWalkInSchema.parse({ ...validPersonWalkIn, nights: 31 })).toThrow();
   });
 
   it("accepts half_day (siesta) stay type", () => {
     const result = assignWalkInSchema.parse({
-      ...validManualWalkIn,
+      ...validPersonWalkIn,
       nights: 1,
       stayType: "half_day",
     });
 
-    if (result.customerMode !== "manual") throw new Error("Expected manual mode");
+    if (result.mode !== "person") throw new Error("Expected person mode");
     expect(result.stayType).toBe("half_day");
   });
 
   it("rejects an invalid stay type", () => {
     expect(() =>
-      assignWalkInSchema.parse({ ...validManualWalkIn, nights: 1, stayType: "weekly" })
+      assignWalkInSchema.parse({ ...validPersonWalkIn, nights: 1, stayType: "weekly" })
     ).toThrow();
   });
 
-  it("keeps passenger data on associated walk-in", () => {
+  it("trims passenger data on company walk-in", () => {
     const result = assignWalkInSchema.parse({
-      customerMode: "associated",
+      mode: "company",
       roomId: 1,
       nights: 1,
       associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-      guestName: "  Maria Lopez  ",
-      guestDni: "30123456",
+      passengerName: "  Maria Lopez  ",
+      passengerDni: "30123456",
     });
 
-    if (result.customerMode !== "associated") throw new Error("Expected associated mode");
-    expect(result.guestName).toBe("Maria Lopez");
-    expect(result.guestDni).toBe("30123456");
+    if (result.mode !== "company") throw new Error("Expected company mode");
+    expect(result.passengerName).toBe("Maria Lopez");
+    expect(result.passengerDni).toBe("30123456");
   });
 });
 
 describe("createReservationSchema", () => {
-  // Flujo unico: el huesped (persona) es siempre obligatorio; la empresa/convenio es opcional.
-  const validInput = {
+  // La reserva es PERSONA (huesped) o EMPRESA (con pasajero real).
+  const validPerson = {
+    mode: "person" as const,
     roomId: 1,
     clientFirstName: "Carlos",
     clientLastName: "Lopez",
@@ -149,64 +152,81 @@ describe("createReservationSchema", () => {
     checkIn: "2026-04-01T14:00:00.000Z",
     checkOut: "2026-04-03T10:00:00.000Z",
   };
+  const validCompany = {
+    mode: "company" as const,
+    roomId: 1,
+    associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+    passengerName: "Juan Perez",
+    passengerDni: "30123456",
+    checkIn: "2026-04-01T14:00:00.000Z",
+    checkOut: "2026-04-03T10:00:00.000Z",
+  };
 
-  it("accepts a guest-only reservation (sin empresa)", () => {
-    const result = createReservationSchema.parse(validInput);
-    expect(result.roomId).toBe(1);
+  it("accepts a person reservation", () => {
+    const result = createReservationSchema.parse(validPerson);
+    if (result.mode !== "person") throw new Error("Expected person mode");
     expect(result.clientFirstName).toBe("Carlos");
-    expect(result.clientLastName).toBe("Lopez");
     expect(result.clientDni).toBe("20-12345678-3");
-    expect(result.associatedClientId).toBeUndefined();
   });
 
-  it("accepts an optional empresa/convenio (associatedClientId)", () => {
+  it("accepts an optional guestId on a person reservation", () => {
     const result = createReservationSchema.parse({
-      ...validInput,
-      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
-    });
-    expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
-  });
-
-  it("accepts an optional guestId (huesped del padron)", () => {
-    const result = createReservationSchema.parse({
-      ...validInput,
+      ...validPerson,
       guestId: "550e8400-e29b-41d4-a716-446655440000",
     });
+    if (result.mode !== "person") throw new Error("Expected person mode");
     expect(result.guestId).toBe("550e8400-e29b-41d4-a716-446655440000");
   });
 
-  it("treats empty associatedClientId as undefined", () => {
-    const result = createReservationSchema.parse({ ...validInput, associatedClientId: "" });
-    expect(result.associatedClientId).toBeUndefined();
+  it("accepts a company reservation with passenger", () => {
+    const result = createReservationSchema.parse(validCompany);
+    if (result.mode !== "company") throw new Error("Expected company mode");
+    expect(result.associatedClientId).toBe("550e8400-e29b-41d4-a716-446655440000");
+    expect(result.passengerName).toBe("Juan Perez");
+    expect(result.passengerDni).toBe("30123456");
   });
 
-  it("rejects an invalid associatedClientId", () => {
+  it("rejects a company reservation without passenger data", () => {
     expect(() =>
-      createReservationSchema.parse({ ...validInput, associatedClientId: "not-a-uuid" })
+      createReservationSchema.parse({
+        mode: "company",
+        roomId: 1,
+        associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+        checkIn: "2026-04-01T14:00:00.000Z",
+        checkOut: "2026-04-03T10:00:00.000Z",
+      })
     ).toThrow();
   });
 
-  it("allows empty optional phone", () => {
-    const result = createReservationSchema.parse({ ...validInput, clientPhone: "" });
+  it("rejects a company reservation without company id", () => {
+    expect(() =>
+      createReservationSchema.parse({
+        mode: "company",
+        roomId: 1,
+        passengerName: "Juan Perez",
+        passengerDni: "30123456",
+        checkIn: "2026-04-01T14:00:00.000Z",
+        checkOut: "2026-04-03T10:00:00.000Z",
+      })
+    ).toThrow();
+  });
+
+  it("allows empty optional phone on a person reservation", () => {
+    const result = createReservationSchema.parse({ ...validPerson, clientPhone: "" });
+    if (result.mode !== "person") throw new Error("Expected person mode");
     expect(result.clientPhone).toBeUndefined();
   });
 
-  it("rejects missing name or DNI (la persona es obligatoria)", () => {
-    expect(() => createReservationSchema.parse({ ...validInput, clientDni: "" })).toThrow();
-    expect(() => createReservationSchema.parse({ ...validInput, clientFirstName: "" })).toThrow();
-    expect(() => createReservationSchema.parse({ ...validInput, clientLastName: "" })).toThrow();
-  });
-
-  it("rejects short optional phone when provided", () => {
-    expect(() =>
-      createReservationSchema.parse({ ...validInput, clientPhone: "123" })
-    ).toThrow();
+  it("rejects missing name or DNI on a person reservation", () => {
+    expect(() => createReservationSchema.parse({ ...validPerson, clientDni: "" })).toThrow();
+    expect(() => createReservationSchema.parse({ ...validPerson, clientFirstName: "" })).toThrow();
+    expect(() => createReservationSchema.parse({ ...validPerson, clientLastName: "" })).toThrow();
   });
 
   it("rejects checkOut before checkIn", () => {
     expect(() =>
       createReservationSchema.parse({
-        ...validInput,
+        ...validPerson,
         checkIn: "2026-04-05T14:00:00.000Z",
         checkOut: "2026-04-03T10:00:00.000Z",
       })
@@ -215,7 +235,7 @@ describe("createReservationSchema", () => {
 
   it("rejects invalid date format", () => {
     expect(() =>
-      createReservationSchema.parse({ ...validInput, checkIn: "not-a-date" })
+      createReservationSchema.parse({ ...validPerson, checkIn: "not-a-date" })
     ).toThrow();
   });
 });

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles } from 'lucide-react';
+import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles, Percent } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
 export default function Sidebar({ role, userEmail, hasOpenShift }: { role: string; userEmail: string; hasOpenShift?: boolean }) {
@@ -62,6 +62,10 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                         <Link href="/admin/asociados" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Building2 size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                             <span className="font-medium">Empresas / Convenios</span>
+                        </Link>
+                        <Link href="/admin/descuentos" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                            <Percent size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
+                            <span className="font-medium">Descuentos</span>
                         </Link>
                         <Link href="/admin/settings" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Settings size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
