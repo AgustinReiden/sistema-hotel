@@ -16,12 +16,12 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-import AssociatedClientSelector from "./AssociatedClientSelector";
 import CompanyPassengerSelector from "./CompanyPassengerSelector";
+import ClientSearch from "./ClientSearch";
 import DateTimePickerField from "./DateTimePickerField";
+import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
-import GuestSelector from "./GuestSelector";
-import { fetchAvailableRoomsAction } from "./actions";
+import { fetchAvailableRoomsAction, searchGuestsAction } from "./actions";
 import { calculateReservationPriceBreakdown, resolveEffectiveDiscountPercent } from "@/lib/pricing";
 import type {
   AssociatedClient,
@@ -141,6 +141,8 @@ function splitName(full: string): { first: string; last: string } {
   return { first: parts.join(" "), last };
 }
 
+const normalizeDni = (value: string) => value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+
 const inputClass =
   "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
 
@@ -162,11 +164,13 @@ export default function NewReservationModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
+  const [dniMatch, setDniMatch] = useState<GuestDirectoryEntry | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
     setRegistry({});
+    setDniMatch(null);
   }, [isOpen, initialValues, standardCheckInTime, standardCheckOutTime]);
 
   // Habitaciones libres para las fechas elegidas; se actualiza al cambiar check-in/out.
@@ -201,16 +205,46 @@ export default function NewReservationModal({
     };
   }, [isOpen, form.checkIn, form.checkOut]);
 
-  const handleGuestSelect = (entry: GuestDirectoryEntry) => {
+  // Anti-duplicado: si se tipea un DNI (sin huésped elegido) que ya está en el padrón, avisar.
+  useEffect(() => {
+    if (!isOpen || form.mode !== "person" || form.guestId) {
+      setDniMatch(null);
+      return;
+    }
+    const norm = normalizeDni(form.clientDni);
+    if (norm.length < 6) {
+      setDniMatch(null);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      const found = await searchGuestsAction(form.clientDni.trim());
+      if (!active) return;
+      const match = found.find((g) => normalizeDni(g.client_dni ?? "") === norm) ?? null;
+      setDniMatch(match);
+    }, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, form.mode, form.guestId, form.clientDni]);
+
+  const applyGuest = (entry: GuestDirectoryEntry) => {
     const { first, last } = splitName(entry.client_name);
     setForm((current) => ({
       ...current,
+      mode: "person",
       guestId: entry.id,
       clientFirstName: first,
       clientLastName: last,
       clientDni: entry.client_dni ?? "",
       clientPhone: entry.client_phone ?? "",
       guestDiscountPercent: entry.discount_percent ?? 0,
+      // Limpia cualquier rastro de empresa al pasar a persona.
+      associatedClientId: "",
+      companyPassengerId: null,
+      passengerName: "",
+      passengerDni: "",
     }));
     setRegistry((current) => ({
       ...current,
@@ -218,7 +252,24 @@ export default function NewReservationModal({
       guestNationality: current.guestNationality ?? entry.guest_nationality ?? undefined,
       guestDocType: current.guestDocType ?? entry.guest_doc_type ?? undefined,
     }));
+    setDniMatch(null);
+  };
+
+  const handleGuestSelect = (entry: GuestDirectoryEntry) => {
+    applyGuest(entry);
     toast.success(`Huésped cargado: ${entry.client_name}`);
+  };
+
+  const handleCompanySelect = (company: AssociatedClient) => {
+    setForm((current) => ({
+      ...current,
+      mode: "company",
+      associatedClientId: company.id,
+      companyPassengerId: null,
+      passengerName: "",
+      passengerDni: "",
+    }));
+    setDniMatch(null);
   };
 
   const clearGuest = () =>
@@ -230,6 +281,16 @@ export default function NewReservationModal({
       clientDni: "",
       clientPhone: "",
       guestDiscountPercent: 0,
+    }));
+
+  const clearCompany = () =>
+    setForm((current) => ({
+      ...current,
+      mode: "person",
+      associatedClientId: "",
+      companyPassengerId: null,
+      passengerName: "",
+      passengerDni: "",
     }));
 
   const handlePassengerSelect = (p: CompanyPassenger) => {
@@ -288,8 +349,6 @@ export default function NewReservationModal({
     Boolean(form.passengerName.trim()) &&
     Boolean(form.passengerDni.trim());
   const clientComplete = form.mode === "person" ? personComplete : companyComplete;
-
-  const setMode = (mode: ReservationMode) => setForm((current) => ({ ...current, mode }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -352,6 +411,7 @@ export default function NewReservationModal({
         toast.success("Reserva creada correctamente.");
         setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
         setRegistry({});
+        setDniMatch(null);
         onClose();
       } else {
         toast.error(result.error || "Error al crear reserva");
@@ -374,233 +434,199 @@ export default function NewReservationModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Tipo de reserva: Persona o Empresa */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setMode("person")}
-              className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                form.mode === "person"
-                  ? "border-emerald-500 bg-emerald-50"
-                  : "border-slate-200 hover:border-slate-300"
-              }`}
-            >
-              <p className="flex items-center gap-2 font-semibold text-slate-800">
-                <UserRound size={16} className="text-emerald-600" />
-                Persona
-              </p>
-              <p className="text-xs text-slate-500">Un huésped. Si tiene descuento, se aplica solo.</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("company")}
-              className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                form.mode === "company"
-                  ? "border-emerald-500 bg-emerald-50"
-                  : "border-slate-200 hover:border-slate-300"
-              }`}
-            >
-              <p className="flex items-center gap-2 font-semibold text-slate-800">
-                <Building2 size={16} className="text-emerald-600" />
-                Empresa / Convenio
-              </p>
-              <p className="text-xs text-slate-500">La empresa paga; se carga el pasajero real.</p>
-            </button>
-          </div>
+          {/* Buscador único: huésped o empresa. Lo que se elige define el modo. */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            <ClientSearch
+              associatedClients={associatedClients}
+              onSelectGuest={handleGuestSelect}
+              onSelectCompany={handleCompanySelect}
+            />
 
-          {form.mode === "person" ? (
-            /* ----- PERSONA: buscar/crear huésped ----- */
-            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                  <UserRound size={16} className="text-emerald-600" />
-                  Huésped
-                </p>
-                {form.guestId ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
-                    Del padrón
-                    {form.guestDiscountPercent > 0 && (
-                      <span className="flex items-center gap-0.5">
-                        · <Percent size={10} />
-                        {form.guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+            {form.mode === "person" ? (
+              /* ----- PERSONA: campos siempre visibles ----- */
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                    <UserRound size={16} className="text-emerald-600" />
+                    Huésped
+                  </p>
+                  {form.guestId ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                      Del padrón
+                      {form.guestDiscountPercent > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          · <Percent size={10} />
+                          {form.guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    personComplete && (
+                      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
+                        Nuevo · se guarda solo
+                      </span>
+                    )
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      Nombre
+                    </label>
+                    <input
+                      id="clientFirstName"
+                      type="text"
+                      value={form.clientFirstName}
+                      onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
+                      className={inputClass}
+                      placeholder="Ej. María"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      Apellido
+                    </label>
+                    <input
+                      id="clientLastName"
+                      type="text"
+                      value={form.clientLastName}
+                      onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
+                      className={inputClass}
+                      placeholder="Ej. López"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <CreditCard size={14} />
+                        DNI o CUIT
+                      </span>
+                    </label>
+                    <input
+                      id="clientDni"
+                      type="text"
+                      value={form.clientDni}
+                      onChange={(e) => setForm((current) => ({ ...current, clientDni: e.target.value }))}
+                      className={inputClass}
+                      placeholder="Ej. 20-12345678-3"
+                    />
+                    {!form.guestId && (
+                      <GuestDniHint name={dniMatch?.client_name ?? null} onUse={() => dniMatch && handleGuestSelect(dniMatch)} />
+                    )}
+                  </div>
+                  <div className="md:col-span-2">
+                    <label htmlFor="clientPhone" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <Phone size={14} />
+                        Teléfono
+                      </span>
+                    </label>
+                    <input
+                      id="clientPhone"
+                      type="tel"
+                      value={form.clientPhone}
+                      onChange={(e) => setForm((current) => ({ ...current, clientPhone: e.target.value }))}
+                      className={inputClass}
+                      placeholder="Opcional"
+                    />
+                  </div>
+                </div>
+
+                {form.guestId && (
+                  <button
+                    type="button"
+                    onClick={clearGuest}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
+                  >
+                    Limpiar y cargar otro huésped
+                  </button>
+                )}
+              </div>
+            ) : (
+              /* ----- EMPRESA: elegida desde el buscador; se carga el pasajero real ----- */
+              <div className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Building2 size={16} className="text-sky-600 shrink-0" />
+                    <span className="font-semibold text-slate-800 truncate">
+                      {selectedCompany?.display_name ?? "Empresa"}
+                    </span>
+                    {selectedCompany && (
+                      <span className="flex items-center gap-1 text-emerald-700 font-semibold shrink-0">
+                        <Percent size={12} />
+                        {selectedCompany.discount_percent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%
                       </span>
                     )}
                   </span>
-                ) : (
-                  personComplete && (
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
-                      Nuevo · se guarda solo
-                    </span>
-                  )
-                )}
-              </div>
+                  <button
+                    type="button"
+                    onClick={clearCompany}
+                    className="shrink-0 text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
+                  >
+                    Quitar empresa
+                  </button>
+                </div>
 
-              <GuestSelector onSelect={handleGuestSelect} />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    Nombre
-                  </label>
-                  <input
-                    id="clientFirstName"
-                    type="text"
-                    value={form.clientFirstName}
-                    onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
-                    className={inputClass}
-                    placeholder="Ej. María"
+                {/* Pasajero real que se hospeda (tabla aparte de la empresa) */}
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
+                    Pasajero que se hospeda <span className="text-red-500">*</span>
+                  </p>
+                  <CompanyPassengerSelector
+                    key={form.associatedClientId}
+                    companyId={form.associatedClientId}
+                    onSelect={handlePassengerSelect}
                   />
-                </div>
-                <div>
-                  <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    Apellido
-                  </label>
-                  <input
-                    id="clientLastName"
-                    type="text"
-                    value={form.clientLastName}
-                    onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
-                    className={inputClass}
-                    placeholder="Ej. López"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    <span className="flex items-center gap-1.5">
-                      <CreditCard size={14} />
-                      DNI o CUIT
-                    </span>
-                  </label>
-                  <input
-                    id="clientDni"
-                    type="text"
-                    value={form.clientDni}
-                    onChange={(e) => setForm((current) => ({ ...current, clientDni: e.target.value }))}
-                    className={inputClass}
-                    placeholder="Ej. 20-12345678-3"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="clientPhone" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    <span className="flex items-center gap-1.5">
-                      <Phone size={14} />
-                      Teléfono
-                    </span>
-                  </label>
-                  <input
-                    id="clientPhone"
-                    type="tel"
-                    value={form.clientPhone}
-                    onChange={(e) => setForm((current) => ({ ...current, clientPhone: e.target.value }))}
-                    className={inputClass}
-                    placeholder="Opcional"
-                  />
-                </div>
-              </div>
-
-              {form.guestId && (
-                <button
-                  type="button"
-                  onClick={clearGuest}
-                  className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
-                >
-                  Limpiar y cargar otro huésped
-                </button>
-              )}
-            </div>
-          ) : (
-            /* ----- EMPRESA: elegir empresa + pasajero real ----- */
-            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-              <AssociatedClientSelector
-                clients={associatedClients}
-                selectedId={form.associatedClientId}
-                onSelect={(id) =>
-                  setForm((current) => ({
-                    ...current,
-                    associatedClientId: id,
-                    companyPassengerId: null,
-                    passengerName: "",
-                    passengerDni: "",
-                  }))
-                }
-                inputId="associatedClient"
-                label="Empresa / Convenio"
-              />
-
-              {selectedCompany && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
-                  <span className="font-semibold text-slate-800 truncate">{selectedCompany.display_name}</span>
-                  <span className="flex items-center gap-1 text-emerald-700 font-semibold shrink-0">
-                    <Percent size={12} />
-                    {selectedCompany.discount_percent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%
-                  </span>
-                </div>
-              )}
-
-              {/* Pasajero real que se hospeda (tabla aparte de la empresa) */}
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
-                  Pasajero que se hospeda <span className="text-red-500">*</span>
-                </p>
-                {form.associatedClientId ? (
-                  <>
-                    <CompanyPassengerSelector
-                      key={form.associatedClientId}
-                      companyId={form.associatedClientId}
-                      onSelect={handlePassengerSelect}
-                    />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label htmlFor="passengerName" className="block text-xs font-semibold text-slate-600 mb-1">
-                          Nombre del pasajero <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          id="passengerName"
-                          type="text"
-                          value={form.passengerName}
-                          onChange={(e) =>
-                            setForm((current) => ({
-                              ...current,
-                              passengerName: e.target.value,
-                              companyPassengerId: null,
-                            }))
-                          }
-                          className={inputClass}
-                          placeholder="Ej. Juan Pérez"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="passengerDni" className="block text-xs font-semibold text-slate-600 mb-1">
-                          DNI del pasajero <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          id="passengerDni"
-                          type="text"
-                          value={form.passengerDni}
-                          onChange={(e) =>
-                            setForm((current) => ({
-                              ...current,
-                              passengerDni: e.target.value,
-                              companyPassengerId: null,
-                            }))
-                          }
-                          className={inputClass}
-                          placeholder="Ej. 30123456"
-                        />
-                      </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="passengerName" className="block text-xs font-semibold text-slate-600 mb-1">
+                        Nombre del pasajero <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="passengerName"
+                        type="text"
+                        value={form.passengerName}
+                        onChange={(e) =>
+                          setForm((current) => ({
+                            ...current,
+                            passengerName: e.target.value,
+                            companyPassengerId: null,
+                          }))
+                        }
+                        className={inputClass}
+                        placeholder="Ej. Juan Pérez"
+                      />
                     </div>
-                    <p className="text-[11px] text-slate-500">
-                      {form.companyPassengerId
-                        ? "Pasajero de la empresa seleccionado."
-                        : "Si no figura, se crea en la lista de la empresa al confirmar."}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-sm text-slate-500">Elegí primero la empresa/convenio.</p>
-                )}
+                    <div>
+                      <label htmlFor="passengerDni" className="block text-xs font-semibold text-slate-600 mb-1">
+                        DNI del pasajero <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="passengerDni"
+                        type="text"
+                        value={form.passengerDni}
+                        onChange={(e) =>
+                          setForm((current) => ({
+                            ...current,
+                            passengerDni: e.target.value,
+                            companyPassengerId: null,
+                          }))
+                        }
+                        className={inputClass}
+                        placeholder="Ej. 30123456"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {form.companyPassengerId
+                      ? "Pasajero de la empresa seleccionado."
+                      : "Si no figura, se crea en la lista de la empresa al confirmar."}
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Campo destacado: solo habitaciones libres para las fechas elegidas. */}
           <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/50 p-3.5">

@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { Building2, CreditCard, Moon, Percent, Sun, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
-import AssociatedClientSelector from "./AssociatedClientSelector";
+import ClientSearch from "./ClientSearch";
 import CompanyPassengerSelector from "./CompanyPassengerSelector";
+import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
-import GuestSelector from "./GuestSelector";
+import { searchGuestsAction } from "./actions";
 import {
   calculateHalfDayPriceBreakdown,
   calculateWalkInPriceBreakdown,
@@ -45,6 +46,8 @@ function splitName(full: string): { first: string; last: string } {
   return { first: parts.join(" "), last };
 }
 
+const normalizeDni = (value: string) => value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+
 export default function WalkInModal({
   isOpen,
   onClose,
@@ -62,6 +65,7 @@ export default function WalkInModal({
   const [clientLastName, setClientLastName] = useState("");
   const [clientDni, setClientDni] = useState("");
   const [guestDiscountPercent, setGuestDiscountPercent] = useState(0);
+  const [dniMatch, setDniMatch] = useState<GuestDirectoryEntry | null>(null);
   // Empresa
   const [associatedClientId, setAssociatedClientId] = useState("");
   const [companyPassengerId, setCompanyPassengerId] = useState<string | null>(null);
@@ -82,6 +86,7 @@ export default function WalkInModal({
     setClientLastName("");
     setClientDni("");
     setGuestDiscountPercent(0);
+    setDniMatch(null);
     setAssociatedClientId("");
     setCompanyPassengerId(null);
     setPassengerName("");
@@ -91,14 +96,68 @@ export default function WalkInModal({
     setRegistry({});
   }, [isOpen]);
 
+  // Anti-duplicado: si se tipea un DNI (sin huésped elegido) que ya está en el padrón, avisar.
+  useEffect(() => {
+    if (!isOpen || mode !== "person" || guestId) {
+      setDniMatch(null);
+      return;
+    }
+    const norm = normalizeDni(clientDni);
+    if (norm.length < 6) {
+      setDniMatch(null);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      const found = await searchGuestsAction(clientDni.trim());
+      if (!active) return;
+      setDniMatch(found.find((g) => normalizeDni(g.client_dni ?? "") === norm) ?? null);
+    }, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, mode, guestId, clientDni]);
+
   const handleGuestSelect = (entry: GuestDirectoryEntry) => {
     const { first, last } = splitName(entry.client_name);
+    setMode("person");
     setGuestId(entry.id);
     setClientFirstName(first);
     setClientLastName(last);
     setClientDni(entry.client_dni ?? "");
     setGuestDiscountPercent(entry.discount_percent ?? 0);
+    setAssociatedClientId("");
+    setCompanyPassengerId(null);
+    setPassengerName("");
+    setPassengerDni("");
+    setDniMatch(null);
     toast.success(`Huésped cargado: ${entry.client_name}`);
+  };
+
+  const handleCompanySelect = (company: AssociatedClient) => {
+    setMode("company");
+    setAssociatedClientId(company.id);
+    setCompanyPassengerId(null);
+    setPassengerName("");
+    setPassengerDni("");
+    setDniMatch(null);
+  };
+
+  const clearGuest = () => {
+    setGuestId(null);
+    setClientFirstName("");
+    setClientLastName("");
+    setClientDni("");
+    setGuestDiscountPercent(0);
+  };
+
+  const clearCompany = () => {
+    setMode("person");
+    setAssociatedClientId("");
+    setCompanyPassengerId(null);
+    setPassengerName("");
+    setPassengerDni("");
   };
 
   const handlePassengerSelect = (p: CompanyPassenger) => {
@@ -208,36 +267,6 @@ export default function WalkInModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Tipo de reserva: Persona o Empresa */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setMode("person")}
-              className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                mode === "person" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-slate-300"
-              }`}
-            >
-              <p className="flex items-center gap-2 font-semibold text-slate-800">
-                <UserRound size={16} className="text-emerald-600" />
-                Persona
-              </p>
-              <p className="text-xs text-slate-500">Un huésped. Si tiene descuento, se aplica solo.</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("company")}
-              className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                mode === "company" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-slate-300"
-              }`}
-            >
-              <p className="flex items-center gap-2 font-semibold text-slate-800">
-                <Building2 size={16} className="text-emerald-600" />
-                Empresa / Convenio
-              </p>
-              <p className="text-xs text-slate-500">La empresa paga; se carga el pasajero real.</p>
-            </button>
-          </div>
-
           {/* Tipo de estadía */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
@@ -268,179 +297,177 @@ export default function WalkInModal({
             </button>
           </div>
 
-          {mode === "person" ? (
-            /* ----- PERSONA ----- */
-            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                  <UserRound size={16} className="text-emerald-600" />
-                  Huésped
-                </p>
-                {guestId ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
-                    Del padrón
-                    {guestDiscountPercent > 0 && (
-                      <span className="flex items-center gap-0.5">
-                        · <Percent size={10} />
-                        {guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+          {/* Buscador único: huésped o empresa. Lo que se elige define el modo. */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            <ClientSearch
+              associatedClients={associatedClients}
+              onSelectGuest={handleGuestSelect}
+              onSelectCompany={handleCompanySelect}
+              inputId="walkinClientSearch"
+            />
+
+            {mode === "person" ? (
+              /* ----- PERSONA: campos siempre visibles ----- */
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                    <UserRound size={16} className="text-emerald-600" />
+                    Huésped
+                  </p>
+                  {guestId ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                      Del padrón
+                      {guestDiscountPercent > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          · <Percent size={10} />
+                          {guestDiscountPercent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    personComplete && (
+                      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
+                        Nuevo · se guarda solo
+                      </span>
+                    )
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      Nombre
+                    </label>
+                    <input
+                      id="clientFirstName"
+                      type="text"
+                      value={clientFirstName}
+                      onChange={(e) => setClientFirstName(e.target.value)}
+                      className={inputClass}
+                      placeholder="Ej. Juan"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      Apellido
+                    </label>
+                    <input
+                      id="clientLastName"
+                      type="text"
+                      value={clientLastName}
+                      onChange={(e) => setClientLastName(e.target.value)}
+                      className={inputClass}
+                      placeholder="Ej. Pérez"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <CreditCard size={14} />
+                        DNI o CUIT
+                      </span>
+                    </label>
+                    <input
+                      id="clientDni"
+                      type="text"
+                      value={clientDni}
+                      onChange={(e) => setClientDni(e.target.value)}
+                      className={inputClass}
+                      placeholder="Ej. 30123456"
+                    />
+                    {!guestId && (
+                      <GuestDniHint name={dniMatch?.client_name ?? null} onUse={() => dniMatch && handleGuestSelect(dniMatch)} />
+                    )}
+                  </div>
+                </div>
+
+                {guestId && (
+                  <button
+                    type="button"
+                    onClick={clearGuest}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
+                  >
+                    Limpiar y cargar otro huésped
+                  </button>
+                )}
+              </div>
+            ) : (
+              /* ----- EMPRESA: elegida desde el buscador; se carga el pasajero real ----- */
+              <div className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Building2 size={16} className="text-sky-600 shrink-0" />
+                    <span className="font-semibold text-slate-800 truncate">
+                      {selectedCompany?.display_name ?? "Empresa"}
+                    </span>
+                    {selectedCompany && (
+                      <span className="flex items-center gap-1 text-emerald-700 font-semibold shrink-0">
+                        <Percent size={12} />
+                        {selectedCompany.discount_percent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%
                       </span>
                     )}
                   </span>
-                ) : (
-                  personComplete && (
-                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-500">
-                      Nuevo · se guarda solo
-                    </span>
-                  )
-                )}
-              </div>
+                  <button
+                    type="button"
+                    onClick={clearCompany}
+                    className="shrink-0 text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
+                  >
+                    Quitar empresa
+                  </button>
+                </div>
 
-              <GuestSelector onSelect={handleGuestSelect} inputId="walkinGuestSearch" />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="clientFirstName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    Nombre
-                  </label>
-                  <input
-                    id="clientFirstName"
-                    type="text"
-                    value={clientFirstName}
-                    onChange={(e) => setClientFirstName(e.target.value)}
-                    className={inputClass}
-                    placeholder="Ej. Juan"
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
+                    Pasajero que se hospeda <span className="text-red-500">*</span>
+                  </p>
+                  <CompanyPassengerSelector
+                    key={associatedClientId}
+                    companyId={associatedClientId}
+                    onSelect={handlePassengerSelect}
                   />
-                </div>
-                <div>
-                  <label htmlFor="clientLastName" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    Apellido
-                  </label>
-                  <input
-                    id="clientLastName"
-                    type="text"
-                    value={clientLastName}
-                    onChange={(e) => setClientLastName(e.target.value)}
-                    className={inputClass}
-                    placeholder="Ej. Pérez"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label htmlFor="clientDni" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    <span className="flex items-center gap-1.5">
-                      <CreditCard size={14} />
-                      DNI o CUIT
-                    </span>
-                  </label>
-                  <input
-                    id="clientDni"
-                    type="text"
-                    value={clientDni}
-                    onChange={(e) => setClientDni(e.target.value)}
-                    className={inputClass}
-                    placeholder="Ej. 30123456"
-                  />
-                </div>
-              </div>
-
-              {guestId && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGuestId(null);
-                    setClientFirstName("");
-                    setClientLastName("");
-                    setClientDni("");
-                    setGuestDiscountPercent(0);
-                  }}
-                  className="text-xs font-semibold text-slate-500 hover:text-slate-700 underline"
-                >
-                  Limpiar y cargar otro huésped
-                </button>
-              )}
-            </div>
-          ) : (
-            /* ----- EMPRESA ----- */
-            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-              <AssociatedClientSelector
-                clients={associatedClients}
-                selectedId={associatedClientId}
-                onSelect={(id) => {
-                  setAssociatedClientId(id);
-                  setCompanyPassengerId(null);
-                  setPassengerName("");
-                  setPassengerDni("");
-                }}
-                inputId="walkinAssociatedClient"
-                label="Empresa / Convenio"
-              />
-
-              {selectedCompany && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
-                  <span className="font-semibold text-slate-800 truncate">{selectedCompany.display_name}</span>
-                  <span className="flex items-center gap-1 text-emerald-700 font-semibold shrink-0">
-                    <Percent size={12} />
-                    {selectedCompany.discount_percent.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%
-                  </span>
-                </div>
-              )}
-
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
-                  Pasajero que se hospeda <span className="text-red-500">*</span>
-                </p>
-                {associatedClientId ? (
-                  <>
-                    <CompanyPassengerSelector
-                      key={associatedClientId}
-                      companyId={associatedClientId}
-                      onSelect={handlePassengerSelect}
-                    />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label htmlFor="walkinPassengerName" className="block text-xs font-semibold text-slate-600 mb-1">
-                          Nombre del pasajero <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          id="walkinPassengerName"
-                          type="text"
-                          value={passengerName}
-                          onChange={(e) => {
-                            setPassengerName(e.target.value);
-                            setCompanyPassengerId(null);
-                          }}
-                          className={inputClass}
-                          placeholder="Ej. María López"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="walkinPassengerDni" className="block text-xs font-semibold text-slate-600 mb-1">
-                          DNI del pasajero <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          id="walkinPassengerDni"
-                          type="text"
-                          value={passengerDni}
-                          onChange={(e) => {
-                            setPassengerDni(e.target.value);
-                            setCompanyPassengerId(null);
-                          }}
-                          className={inputClass}
-                          placeholder="Ej. 30123456"
-                        />
-                      </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="walkinPassengerName" className="block text-xs font-semibold text-slate-600 mb-1">
+                        Nombre del pasajero <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="walkinPassengerName"
+                        type="text"
+                        value={passengerName}
+                        onChange={(e) => {
+                          setPassengerName(e.target.value);
+                          setCompanyPassengerId(null);
+                        }}
+                        className={inputClass}
+                        placeholder="Ej. María López"
+                      />
                     </div>
-                    <p className="text-[11px] text-slate-500">
-                      {companyPassengerId
-                        ? "Pasajero de la empresa seleccionado."
-                        : "Si no figura, se crea en la lista de la empresa al confirmar."}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-sm text-slate-500">Elegí primero la empresa/convenio.</p>
-                )}
+                    <div>
+                      <label htmlFor="walkinPassengerDni" className="block text-xs font-semibold text-slate-600 mb-1">
+                        DNI del pasajero <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="walkinPassengerDni"
+                        type="text"
+                        value={passengerDni}
+                        onChange={(e) => {
+                          setPassengerDni(e.target.value);
+                          setCompanyPassengerId(null);
+                        }}
+                        className={inputClass}
+                        placeholder="Ej. 30123456"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {companyPassengerId
+                      ? "Pasajero de la empresa seleccionado."
+                      : "Si no figura, se crea en la lista de la empresa al confirmar."}
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {!isHalfDay && (
