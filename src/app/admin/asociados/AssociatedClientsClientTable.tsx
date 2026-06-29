@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Edit, FolderArchive, Plus, RotateCcw, ScrollText } from "lucide-react";
+import { Edit, FolderArchive, Plus, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import AssociatedClientModal from "./AssociatedClientModal";
 import AssociatedClientLedgerModal from "./AssociatedClientLedgerModal";
 import {
   createAssociatedClientAction,
+  deleteAssociatedClientAction,
   toggleAssociatedClientStatusAction,
   updateAssociatedClientAction,
 } from "./actions";
@@ -26,6 +27,26 @@ export default function AssociatedClientsClientTable({
   const [ledgerClient, setLedgerClient] = useState<AssociatedClient | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [changingStatusId, setChangingStatusId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (client: AssociatedClient) => {
+    if (
+      !confirm(
+        `¿Borrar definitivamente "${client.display_name}"?\n\nSe borran también sus pasajeros cargados. Las reservas históricas quedan SIN esta empresa asociada (se pierde su cuenta corriente).\n\nSi querés conservar el historial, mejor archivala.`
+      )
+    )
+      return;
+
+    setDeletingId(client.id);
+    const result = await deleteAssociatedClientAction(client.id);
+    if (result.success) {
+      toast.success("Empresa/Convenio borrado.");
+      router.refresh();
+    } else {
+      toast.error(result.error);
+    }
+    setDeletingId(null);
+  };
 
   const handleToggleStatus = async (client: AssociatedClient) => {
     const nextIsActive = !client.is_active;
@@ -130,6 +151,14 @@ export default function AssociatedClientsClientTable({
                       title={client.is_active ? "Archivar Empresa/Convenio" : "Reactivar Empresa/Convenio"}
                     >
                       {client.is_active ? <FolderArchive size={18} /> : <RotateCcw size={18} />}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(client)}
+                      disabled={deletingId === client.id}
+                      className="inline-flex items-center justify-center p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                      title="Borrar definitivamente"
+                    >
+                      {deletingId === client.id ? <RotateCcw size={18} className="animate-spin" /> : <Trash2 size={18} />}
                     </button>
                   </div>
                 </td>
