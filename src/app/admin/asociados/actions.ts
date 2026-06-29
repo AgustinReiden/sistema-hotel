@@ -125,6 +125,23 @@ export async function toggleAssociatedClientStatusAction(
   }
 }
 
+// Borra una empresa/convenio de forma definitiva. Sus pasajeros (company_passengers) se borran
+// en cascada; las reservas históricas quedan SIN empresa asociada (FK ON DELETE SET NULL), por lo
+// que se pierde su cuenta corriente. Para conservar el historial, preferir archivar.
+export async function deleteAssociatedClientAction(id: string): Promise<ActionResult> {
+  try {
+    const supabase = await assertAdmin();
+    const { error } = await supabase.from("associated_clients").delete().eq("id", id);
+    if (error) throw error;
+
+    revalidateAssociatedPaths();
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo borrar la empresa/convenio.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
 export async function loadAssociatedClientLedgerAction(
   clientId: string
 ): Promise<ActionResult<AssociatedClientLedger>> {

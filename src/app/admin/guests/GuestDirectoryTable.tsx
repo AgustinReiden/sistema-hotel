@@ -1,5 +1,12 @@
-import { Percent } from "lucide-react";
+"use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Edit, Loader2, Percent, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import GuestModal from "./GuestModal";
+import { deleteGuestAction } from "./actions";
 import { formatHotelDate } from "@/lib/time";
 import type { GuestDirectoryEntry } from "@/lib/types";
 
@@ -12,6 +19,30 @@ export default function GuestDirectoryTable({
   searchQuery: string;
   timezone: string;
 }) {
+  const router = useRouter();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (guest: GuestDirectoryEntry) => {
+    if (!guest.id) return;
+    if (
+      !confirm(
+        `¿Borrar a "${guest.client_name}" del padrón de huéspedes?\n\nLas reservas pasadas no se tocan; solo se quita del directorio.`
+      )
+    )
+      return;
+
+    setDeletingId(guest.id);
+    const result = await deleteGuestAction(guest.id);
+    if (result.success) {
+      toast.success("Huésped borrado del padrón.");
+      router.refresh();
+    } else {
+      toast.error(result.error);
+    }
+    setDeletingId(null);
+  };
+
   return (
     <div className="bg-white border text-left border-slate-200 rounded-xl overflow-hidden shadow-sm">
       <table className="w-full text-left border-collapse">
@@ -23,6 +54,7 @@ export default function GuestDirectoryTable({
             <th className="px-6 py-4">Descuento</th>
             <th className="px-6 py-4 text-center">Estadías</th>
             <th className="px-6 py-4">Última visita</th>
+            <th className="px-6 py-4 text-right">Acciones</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -80,6 +112,31 @@ export default function GuestDirectoryTable({
               <td className="px-6 py-4 text-sm text-slate-600">
                 {formatHotelDate(guest.last_check_in, timezone)}
               </td>
+              <td className="px-6 py-4 text-right">
+                {guest.id ? (
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => setEditingId(guest.id)}
+                      className="inline-flex items-center justify-center p-2 text-brand-600 hover:bg-brand-50 rounded-lg transition-colors cursor-pointer"
+                      title="Editar huésped"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(guest)}
+                      disabled={deletingId === guest.id}
+                      className="inline-flex items-center justify-center p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                      title="Borrar del padrón"
+                    >
+                      {deletingId === guest.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-slate-400" title="Aparece por reservas pasadas; todavía no tiene ficha propia.">
+                    de reservas
+                  </span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -92,6 +149,8 @@ export default function GuestDirectoryTable({
             : "Todavía no hay huéspedes registrados."}
         </div>
       )}
+
+      <GuestModal guestId={editingId} onClose={() => setEditingId(null)} onSaved={() => router.refresh()} />
     </div>
   );
 }

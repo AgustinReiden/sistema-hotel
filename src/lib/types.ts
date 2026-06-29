@@ -211,6 +211,20 @@ export type GuestDirectoryEntry = {
   last_check_in: string | null;
 };
 
+/** Ficha editable de un huésped del padrón (tabla guests). Para el modal de edición. */
+export type GuestRecord = {
+  id: string;
+  full_name: string;
+  document_type: string | null;
+  document_id: string | null;
+  phone: string | null;
+  address: string | null;
+  locality: string | null;
+  nationality: string | null;
+  profession: string | null;
+  discount_percent: number;
+};
+
 /** Resultado de buscar un huésped existente por DNI (anti-duplicados). */
 export type GuestDniMatch = {
   client_name: string;
