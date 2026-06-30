@@ -67,6 +67,10 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                             <Percent size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                             <span className="font-medium">Descuentos</span>
                         </Link>
+                        <Link href="/admin/cuentas" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                            <CircleDollarSign size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
+                            <span className="font-medium">Cuenta Corriente</span>
+                        </Link>
                         <Link href="/admin/settings" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Settings size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                             <span className="font-medium">Ajustes</span>

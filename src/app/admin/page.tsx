@@ -37,6 +37,7 @@ type DashboardRoom = {
   basePrice: number;
   halfDayPrice: number;
   hasArrivalToday: boolean;
+  accountCreditEnabled: boolean;
 };
 
 function getDateKey(date: Date, timeZone: string) {
@@ -64,7 +65,7 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount] = await Promise.all([
+  const [{ rooms, reservations, accountCreditByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
     getCurrentUserRole(),
@@ -160,6 +161,9 @@ export default async function Dashboard() {
       basePrice: room.base_price,
       halfDayPrice: room.half_day_price,
       hasArrivalToday: Boolean(confirmedReservation),
+      accountCreditEnabled: reservationId
+        ? Boolean(accountCreditByReservation[reservationId])
+        : false,
     };
   });
 

@@ -13,7 +13,11 @@ import type {
   CleaningType,
   CompanyPassenger,
   CreateReservationPayload,
+  CtaCteAccount,
+  CtaCteClientKind,
+  CtaCteMovimiento,
   DiscountedClient,
+  RegisterAccountPaymentPayload,
   Guest,
   GuestDirectoryEntry,
   GuestDniMatch,
@@ -58,6 +62,8 @@ type DashboardData = {
     total_price: number;
     paid_amount: number;
   }[];
+  /** reservationId -> el cliente facturable tiene cuenta corriente habilitada. */
+  accountCreditByReservation: Record<string, boolean>;
   todayIncome: number;
   hotelSettings: HotelSettings;
 };
@@ -107,6 +113,7 @@ type AssociatedClientRow = {
   discount_percent: number | string;
   notes: string | null;
   is_active: boolean;
+  cuenta_corriente_habilitada?: boolean | null;
   created_at: string;
   updated_at: string;
 };
@@ -127,6 +134,7 @@ function toAssociatedClient(row: AssociatedClientRow): AssociatedClient {
     discount_percent: Number(row.discount_percent) || 0,
     notes: row.notes,
     is_active: row.is_active,
+    cuenta_corriente_habilitada: Boolean(row.cuenta_corriente_habilitada),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -272,6 +280,133 @@ export async function getAssociatedClientLedger(
   return { reservations, facturado, cobrado, saldo: facturado - cobrado, count };
 }
 
+// ===========================================================================
+// Cuenta corriente (saldo = Σ cargos − Σ pagos; puede ser negativo = saldo a favor)
+// ===========================================================================
+
+type CcMovRow = {
+  associated_client_id: string | null;
+  guest_id: string | null;
+  tipo: "cargo" | "pago";
+  amount: number | string;
+};
+
+function signedMovement(tipo: "cargo" | "pago", amount: number): number {
+  return tipo === "cargo" ? amount : -amount;
+}
+
+/**
+ * Cuentas corrientes para la lista central de deudores: clientes habilitados O con saldo ≠ 0.
+ */
+export async function getCtaCteAccounts(): Promise<CtaCteAccount[]> {
+  const supabase = await createClient();
+
+  const [movRes, companiesRes, guestsRes] = await Promise.all([
+    supabase.from("cuenta_corriente_movimientos").select("associated_client_id, guest_id, tipo, amount"),
+    supabase
+      .from("associated_clients")
+      .select("id, display_name, document_id")
+      .eq("cuenta_corriente_habilitada", true),
+    supabase
+      .from("guests")
+      .select("id, full_name, document_id")
+      .eq("cuenta_corriente_habilitada", true),
+  ]);
+  if (movRes.error) throw movRes.error;
+
+  const companyBalance = new Map<string, number>();
+  const guestBalance = new Map<string, number>();
+  for (const m of (movRes.data ?? []) as CcMovRow[]) {
+    const delta = signedMovement(m.tipo, Number(m.amount) || 0);
+    if (m.associated_client_id) {
+      companyBalance.set(m.associated_client_id, (companyBalance.get(m.associated_client_id) ?? 0) + delta);
+    } else if (m.guest_id) {
+      guestBalance.set(m.guest_id, (guestBalance.get(m.guest_id) ?? 0) + delta);
+    }
+  }
+
+  const enabledCompanies = (companiesRes.data ?? []) as { id: string; display_name: string; document_id: string | null }[];
+  const enabledGuests = (guestsRes.data ?? []) as { id: string; full_name: string; document_id: string | null }[];
+
+  // Nombres de clientes con saldo que NO están en las listas de habilitados (ej. flag apagado luego).
+  const enabledCompanyIds = new Set(enabledCompanies.map((c) => c.id));
+  const enabledGuestIds = new Set(enabledGuests.map((g) => g.id));
+  const extraCompanyIds = [...companyBalance.keys()].filter((id) => !enabledCompanyIds.has(id));
+  const extraGuestIds = [...guestBalance.keys()].filter((id) => !enabledGuestIds.has(id));
+
+  const [extraCompaniesRes, extraGuestsRes] = await Promise.all([
+    extraCompanyIds.length
+      ? supabase.from("associated_clients").select("id, display_name, document_id").in("id", extraCompanyIds)
+      : Promise.resolve({ data: [], error: null }),
+    extraGuestIds.length
+      ? supabase.from("guests").select("id, full_name, document_id").in("id", extraGuestIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const accounts: CtaCteAccount[] = [];
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  for (const c of [...enabledCompanies, ...((extraCompaniesRes.data ?? []) as typeof enabledCompanies)]) {
+    accounts.push({
+      kind: "company",
+      id: c.id,
+      name: c.display_name,
+      document_id: c.document_id ?? null,
+      balance: round2(companyBalance.get(c.id) ?? 0),
+    });
+  }
+  for (const g of [...enabledGuests, ...((extraGuestsRes.data ?? []) as typeof enabledGuests)]) {
+    accounts.push({
+      kind: "guest",
+      id: g.id,
+      name: g.full_name,
+      document_id: g.document_id ?? null,
+      balance: round2(guestBalance.get(g.id) ?? 0),
+    });
+  }
+
+  // Deudores primero (mayor saldo), después el resto por nombre.
+  return accounts.sort((a, b) => b.balance - a.balance || a.name.localeCompare(b.name, "es-AR"));
+}
+
+/** Movimientos de la cuenta de un cliente (para la ficha), ordenados del más reciente. */
+export async function getCtaCteMovements(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<{ movements: CtaCteMovimiento[]; balance: number }> {
+  const supabase = await createClient();
+  const column = kind === "company" ? "associated_client_id" : "guest_id";
+
+  const { data, error } = await supabase
+    .from("cuenta_corriente_movimientos")
+    .select("id, tipo, amount, reservation_id, payment_method, notes, created_at")
+    .eq(column, clientId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  const movements = ((data ?? []) as (CtaCteMovimiento & { amount: number | string })[]).map((m) => ({
+    ...m,
+    amount: Number(m.amount) || 0,
+  }));
+  const balance = movements.reduce((sum, m) => sum + signedMovement(m.tipo, m.amount), 0);
+  return { movements, balance: Math.round((balance + Number.EPSILON) * 100) / 100 };
+}
+
+/** Registra un pago a cuenta (vía RPC admin-only). No toca la caja. */
+export async function registerAccountPayment(input: RegisterAccountPaymentPayload): Promise<string> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_register_account_payment", {
+    p_associated_client_id: input.kind === "company" ? input.clientId : null,
+    p_guest_id: input.kind === "guest" ? input.clientId : null,
+    p_amount: input.amount,
+    p_method: input.method ?? null,
+    p_notes: input.notes ?? null,
+  });
+  if (error) throw error;
+  const result = data as { movement_id?: string } | null;
+  return String(result?.movement_id ?? "");
+}
+
 export async function getDashboardData(): Promise<DashboardData> {
   const supabase = await createClient();
 
@@ -292,7 +427,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   if (settingsResult.error) throw settingsResult.error;
 
   const rooms = sortRoomsByNumber((roomsResult.data ?? []) as Room[]);
-  const reservations = (reservationsResult.data ?? []).map((r: {
+  const rawReservations = (reservationsResult.data ?? []) as {
     id: string;
     room_id: number;
     client_name: string;
@@ -307,7 +442,11 @@ export async function getDashboardData(): Promise<DashboardData> {
     discount_amount: number | string | null;
     total_price: number | string;
     paid_amount: number | string;
-  }) => ({
+    associated_client_id: string | null;
+    guest_id: string | null;
+  }[];
+
+  const reservations = rawReservations.map((r) => ({
     id: r.id,
     room_id: r.room_id,
     client_name: r.client_name,
@@ -323,10 +462,56 @@ export async function getDashboardData(): Promise<DashboardData> {
     total_price: Number(r.total_price) || 0,
     paid_amount: Number(r.paid_amount) || 0,
   }));
+
+  // Resolver, por reserva, si el cliente facturable (empresa o huésped) tiene cta cte habilitada.
+  const accountCreditByReservation = await resolveAccountCreditByReservation(supabase, rawReservations);
+
   const todayIncome = incomeResult.error ? 0 : Number(incomeResult.data || 0);
   const hotelSettings = settingsResult.data as HotelSettings;
 
-  return { rooms, reservations, todayIncome, hotelSettings };
+  return { rooms, reservations, accountCreditByReservation, todayIncome, hotelSettings };
+}
+
+/**
+ * Para un set de reservas, devuelve un mapa reservationId -> el cliente facturable
+ * (associated_client_id ?? guest_id) tiene cuenta corriente habilitada.
+ */
+async function resolveAccountCreditByReservation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  rows: { id: string; associated_client_id: string | null; guest_id: string | null }[]
+): Promise<Record<string, boolean>> {
+  const companyIds = [...new Set(rows.map((r) => r.associated_client_id).filter(Boolean))] as string[];
+  const guestIds = [...new Set(rows.map((r) => r.guest_id).filter(Boolean))] as string[];
+
+  const [companyRes, guestRes] = await Promise.all([
+    companyIds.length
+      ? supabase.from("associated_clients").select("id, cuenta_corriente_habilitada").in("id", companyIds)
+      : Promise.resolve({ data: [], error: null }),
+    guestIds.length
+      ? supabase.from("guests").select("id, cuenta_corriente_habilitada").in("id", guestIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const enabledCompany = new Set(
+    ((companyRes.data ?? []) as { id: string; cuenta_corriente_habilitada: boolean }[])
+      .filter((c) => c.cuenta_corriente_habilitada)
+      .map((c) => c.id)
+  );
+  const enabledGuest = new Set(
+    ((guestRes.data ?? []) as { id: string; cuenta_corriente_habilitada: boolean }[])
+      .filter((g) => g.cuenta_corriente_habilitada)
+      .map((g) => g.id)
+  );
+
+  const map: Record<string, boolean> = {};
+  for (const r of rows) {
+    map[r.id] = r.associated_client_id
+      ? enabledCompany.has(r.associated_client_id)
+      : r.guest_id
+        ? enabledGuest.has(r.guest_id)
+        : false;
+  }
+  return map;
 }
 
 export async function getTimelineData(days = 7): Promise<TimelineData> {
@@ -462,7 +647,7 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
   // Fuente 1: registro de huespedes (tabla guests; importado del Excel del hotel / cargas).
   let guestsQuery = supabase
     .from("guests")
-    .select(`id, full_name, document_type, document_id, phone, locality, nationality, discount_percent`)
+    .select(`id, full_name, document_type, document_id, phone, locality, nationality, discount_percent, cuenta_corriente_habilitada`)
     .order("full_name", { ascending: true });
 
   // Fuente 2: gente que efectivamente se hospedo. Solo estadias reales (checked_in/checked_out)
@@ -504,6 +689,7 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     locality: string | null;
     nationality: string | null;
     discount_percent: number | null;
+    cuenta_corriente_habilitada: boolean | null;
   };
 
   const map = new Map<string, GuestDirectoryEntry>();
@@ -524,6 +710,7 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
         guest_nationality: r.guest_nationality ?? null,
         guest_doc_type: r.guest_doc_type ?? null,
         discount_percent: 0,
+        cuenta_corriente_habilitada: false,
         stays_count: 1,
         last_check_in: r.check_in_target,
       });
@@ -552,6 +739,7 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
         guest_nationality: g.nationality ?? null,
         guest_doc_type: g.document_type ?? null,
         discount_percent: Number(g.discount_percent ?? 0),
+        cuenta_corriente_habilitada: Boolean(g.cuenta_corriente_habilitada),
         stays_count: 0,
         last_check_in: null,
       });
@@ -559,6 +747,8 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
       // La ficha del padron es canonica para id y descuento personal.
       existing.id = existing.id ?? g.id;
       existing.discount_percent = Number(g.discount_percent ?? existing.discount_percent ?? 0);
+      existing.cuenta_corriente_habilitada =
+        existing.cuenta_corriente_habilitada || Boolean(g.cuenta_corriente_habilitada);
       existing.client_phone = existing.client_phone ?? g.phone ?? null;
       existing.guest_locality = existing.guest_locality ?? g.locality ?? null;
       existing.guest_nationality = existing.guest_nationality ?? g.nationality ?? null;
@@ -847,7 +1037,7 @@ export async function doCheckout({
   paymentAmount,
   paymentMethod,
   paymentNotes,
-}: CheckoutReservationInput): Promise<{ paymentId: string | null }> {
+}: CheckoutReservationInput): Promise<{ paymentId: string | null; movementId: string | null }> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_staff_checkout_reservation", {
     p_reservation_id: reservationId,
@@ -857,8 +1047,8 @@ export async function doCheckout({
   });
 
   if (error) throw error;
-  const result = (data ?? {}) as { payment_id?: string | null };
-  return { paymentId: result.payment_id ?? null };
+  const result = (data ?? {}) as { payment_id?: string | null; movement_id?: string | null };
+  return { paymentId: result.payment_id ?? null, movementId: result.movement_id ?? null };
 }
 
 export async function markRoomAsAvailable(roomId: number): Promise<void> {
