@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Percent, Phone, StickyNote, UserRound, X } from "lucide-react";
+import { CreditCard, Percent, Phone, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AssociatedClient } from "@/lib/types";
@@ -15,6 +15,7 @@ type AssociatedClientModalProps = {
     phone?: string;
     discountPercent: number;
     notes?: string;
+    cuentaCorrienteHabilitada: boolean;
   }) => Promise<{ success: boolean; error?: string }>;
   initialClient?: AssociatedClient | null;
   title: string;
@@ -26,6 +27,7 @@ type FormState = {
   phone: string;
   discountPercent: string;
   notes: string;
+  cuentaCorrienteHabilitada: boolean;
 };
 
 function buildInitialState(initialClient?: AssociatedClient | null): FormState {
@@ -38,6 +40,7 @@ function buildInitialState(initialClient?: AssociatedClient | null): FormState {
         ? initialClient.discount_percent.toString()
         : "0",
     notes: initialClient?.notes ?? "",
+    cuentaCorrienteHabilitada: initialClient?.cuenta_corriente_habilitada ?? false,
   };
 }
 
@@ -69,6 +72,7 @@ export default function AssociatedClientModal({
         phone: form.phone.trim() || undefined,
         discountPercent: Number(form.discountPercent),
         notes: form.notes.trim() || undefined,
+        cuentaCorrienteHabilitada: form.cuentaCorrienteHabilitada,
       });
 
       if (result.success) {
@@ -170,6 +174,27 @@ export default function AssociatedClientModal({
                 className="w-full px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 outline-none cursor-not-allowed"
               />
               <p className="text-[11px] text-slate-500 mt-1">Se gestiona en la sección Descuentos.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-cc">
+                <span className="flex items-center gap-1.5">
+                  <Wallet size={14} />
+                  Cuenta corriente
+                </span>
+              </label>
+              <select
+                id="associated-cc"
+                value={form.cuentaCorrienteHabilitada ? "si" : "no"}
+                onChange={(e) =>
+                  setForm((current) => ({ ...current, cuentaCorrienteHabilitada: e.target.value === "si" }))
+                }
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              >
+                <option value="no">No</option>
+                <option value="si">Sí — habilitada a fiar</option>
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1">Habilita cerrar reservas a cuenta corriente.</p>
             </div>
 
             <div className="md:col-span-2">

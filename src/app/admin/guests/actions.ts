@@ -16,6 +16,7 @@ export type GuestRecordPayload = {
   nationality?: string | null;
   profession?: string | null;
   discountPercent: number;
+  cuentaCorrienteHabilitada: boolean;
 };
 
 async function assertAdmin() {
@@ -50,13 +51,20 @@ export async function loadGuestRecordAction(id: string): Promise<ActionResult<Gu
     const { data, error } = await supabase
       .from("guests")
       .select(
-        "id, full_name, document_type, document_id, phone, address, locality, nationality, profession, discount_percent"
+        "id, full_name, document_type, document_id, phone, address, locality, nationality, profession, discount_percent, cuenta_corriente_habilitada"
       )
       .eq("id", id)
       .maybeSingle();
     if (error) throw error;
     if (!data) return { success: false, error: "No se encontró el huésped." };
-    return { success: true, data: { ...data, discount_percent: Number(data.discount_percent ?? 0) } as GuestRecord };
+    return {
+      success: true,
+      data: {
+        ...data,
+        discount_percent: Number(data.discount_percent ?? 0),
+        cuenta_corriente_habilitada: Boolean(data.cuenta_corriente_habilitada),
+      } as GuestRecord,
+    };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cargar el huésped.");
     return { success: false, error: parsed.error, code: parsed.code };
@@ -91,6 +99,7 @@ export async function updateGuestAction(
         nationality: clean(payload.nationality),
         profession: clean(payload.profession),
         discount_percent: percent,
+        cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

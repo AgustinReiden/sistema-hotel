@@ -206,6 +206,8 @@ export type GuestDirectoryEntry = {
   guest_doc_type: string | null;
   /** Descuento personal del huesped (0 si no tiene ficha en el padron o no se le cargo). */
   discount_percent: number;
+  /** Cuenta corriente habilitada (solo true si tiene ficha en el padron y admin la habilitó). */
+  cuenta_corriente_habilitada: boolean;
   stays_count: number;
   /** Última visita; null si está en el registro pero todavía no tiene reservas en el sistema. */
   last_check_in: string | null;
@@ -223,6 +225,39 @@ export type GuestRecord = {
   nationality: string | null;
   profession: string | null;
   discount_percent: number;
+  cuenta_corriente_habilitada: boolean;
+};
+
+/** Tipo de cliente con cuenta corriente: empresa (associated_clients) o huésped (guests). */
+export type CtaCteClientKind = "company" | "guest";
+
+/** Una cuenta con su saldo, para la lista central de deudores y las fichas. */
+export type CtaCteAccount = {
+  kind: CtaCteClientKind;
+  id: string;
+  name: string;
+  document_id: string | null;
+  /** Σ cargos − Σ pagos. Positivo = debe; negativo = saldo a favor. */
+  balance: number;
+};
+
+/** Un movimiento de cuenta corriente (cargo de check-out o pago a cuenta). */
+export type CtaCteMovimiento = {
+  id: string;
+  tipo: "cargo" | "pago";
+  amount: number;
+  reservation_id: string | null;
+  payment_method: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type RegisterAccountPaymentPayload = {
+  kind: CtaCteClientKind;
+  clientId: string;
+  amount: number;
+  method?: string;
+  notes?: string;
 };
 
 /** Resultado de buscar un huésped existente por DNI (anti-duplicados). */
@@ -262,6 +297,8 @@ export type AssociatedClient = {
   discount_percent: number;
   notes: string | null;
   is_active: boolean;
+  /** Habilitado a usar cuenta corriente (fiar). Por defecto false; solo admin lo cambia. */
+  cuenta_corriente_habilitada: boolean;
   created_at: string;
   updated_at: string;
 };

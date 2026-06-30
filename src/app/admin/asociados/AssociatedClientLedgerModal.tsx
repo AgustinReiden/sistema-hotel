@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Building2, CreditCard, Loader2, Percent, X } from "lucide-react";
 
 import { loadAssociatedClientLedgerAction } from "./actions";
+import { loadCtaCteAccountAction } from "../cuentas/actions";
 import { formatHotelShortDate } from "@/lib/time";
 import type { AssociatedClient, AssociatedClientLedger } from "@/lib/types";
 
@@ -28,6 +29,7 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
   const [ledger, setLedger] = useState<AssociatedClientLedger | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ctaCteBalance, setCtaCteBalance] = useState<number | null>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -48,6 +50,18 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
       });
     return () => {
       cancelled = true;
+    };
+  }, [client]);
+
+  useEffect(() => {
+    if (!client) return;
+    let active = true;
+    loadCtaCteAccountAction("company", client.id).then((res) => {
+      if (!active) return;
+      setCtaCteBalance(res.success && res.data ? res.data.balance : null);
+    });
+    return () => {
+      active = false;
     };
   }, [client]);
 
@@ -109,6 +123,34 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
                   </p>
                 </div>
               </div>
+
+              {(client.cuenta_corriente_habilitada || (ctaCteBalance ?? 0) !== 0) && (
+                <div className="mb-6 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-purple-700">
+                      Cuenta corriente {client.cuenta_corriente_habilitada ? "(habilitada)" : ""}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      Saldo:{" "}
+                      {ctaCteBalance === null ? (
+                        "…"
+                      ) : ctaCteBalance > 0 ? (
+                        <span className="font-bold text-red-600">${money(ctaCteBalance)} debe</span>
+                      ) : ctaCteBalance < 0 ? (
+                        <span className="font-bold text-emerald-600">${money(Math.abs(ctaCteBalance))} a favor</span>
+                      ) : (
+                        <span className="font-semibold text-slate-500">$0,00</span>
+                      )}
+                    </p>
+                  </div>
+                  <a
+                    href="/admin/cuentas"
+                    className="shrink-0 text-xs font-bold text-purple-700 underline hover:text-purple-900"
+                  >
+                    Gestionar
+                  </a>
+                </div>
+              )}
 
               <h3 className="text-sm font-bold text-slate-700 mb-2">
                 Historial de estadías ({ledger.count})

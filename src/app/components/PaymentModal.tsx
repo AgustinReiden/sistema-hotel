@@ -36,6 +36,8 @@ interface PaymentModalProps {
   totalPrice: number | string;
   paidAmount: number | string;
   reservationId?: string;
+  /** Habilita el método "Cuenta corriente" (solo para clientes con cta cte habilitada). */
+  accountCreditEnabled?: boolean;
   onSuccess?: () => void;
   onSubmitPayment?: (payload: {
     amount: number;
@@ -53,6 +55,7 @@ export default function PaymentModal({
   totalPrice,
   paidAmount,
   reservationId,
+  accountCreditEnabled = false,
   onSuccess,
   onSubmitPayment,
 }: PaymentModalProps) {
@@ -244,11 +247,13 @@ export default function PaymentModal({
                   <Banknote size={18} className="text-slate-400" />
                   <span className="text-sm">Vale Blanco</span>
                 </label>
-                <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cuenta_corriente" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                  <input type="radio" name="method" value="cuenta_corriente" checked={method === "cuenta_corriente"} onChange={() => setMethod("cuenta_corriente")} className="sr-only" />
-                  <Wallet size={18} className="text-purple-500" />
-                  <span className="text-sm">Cta. Cte.</span>
-                </label>
+                {accountCreditEnabled && (
+                  <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cuenta_corriente" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
+                    <input type="radio" name="method" value="cuenta_corriente" checked={method === "cuenta_corriente"} onChange={() => setMethod("cuenta_corriente")} className="sr-only" />
+                    <Wallet size={18} className="text-purple-500" />
+                    <span className="text-sm">Cta. Cte.</span>
+                  </label>
+                )}
               </div>
             </div>
 

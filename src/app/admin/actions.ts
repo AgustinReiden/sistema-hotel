@@ -112,7 +112,7 @@ export async function handleCheckOut({
   paymentAmount,
   paymentMethod,
   paymentNotes,
-}: CheckoutPayload): Promise<ActionResult<{ paymentId: string | null }>> {
+}: CheckoutPayload): Promise<ActionResult<{ paymentId: string | null; movementId: string | null }>> {
   try {
     const result = await doCheckout({
       reservationId,
@@ -125,7 +125,8 @@ export async function handleCheckOut({
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/caja");
-    return { success: true, data: { paymentId: result.paymentId } };
+    revalidatePath("/admin/cuentas");
+    return { success: true, data: { paymentId: result.paymentId, movementId: result.movementId } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ejecutar check-out.");
     return { success: false, error: parsed.error, code: parsed.code };

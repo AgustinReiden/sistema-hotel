@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Loader2, Percent, UserRound, X } from "lucide-react";
+import { CreditCard, Loader2, Percent, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { loadGuestRecordAction, updateGuestAction, type GuestRecordPayload } from "./actions";
@@ -25,6 +25,7 @@ const emptyForm: GuestRecordPayload = {
   nationality: "",
   profession: "",
   discountPercent: 0,
+  cuentaCorrienteHabilitada: false,
 };
 
 export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProps) {
@@ -51,6 +52,7 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
           nationality: g.nationality ?? "",
           profession: g.profession ?? "",
           discountPercent: g.discount_percent ?? 0,
+          cuentaCorrienteHabilitada: g.cuenta_corriente_habilitada ?? false,
         });
       } else {
         toast.error(result.success ? "No se encontró el huésped." : result.error);
@@ -177,6 +179,22 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                   onChange={(e) => set({ discountPercent: Number(e.target.value) })}
                   className={inputClass}
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Wallet size={14} />
+                    Cuenta corriente
+                  </span>
+                </label>
+                <select
+                  value={form.cuentaCorrienteHabilitada ? "si" : "no"}
+                  onChange={(e) => set({ cuentaCorrienteHabilitada: e.target.value === "si" })}
+                  className={inputClass}
+                >
+                  <option value="no">No</option>
+                  <option value="si">Sí — habilitado a fiar</option>
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Localidad</label>

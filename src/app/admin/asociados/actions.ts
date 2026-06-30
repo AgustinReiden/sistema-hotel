@@ -14,6 +14,7 @@ type AssociatedClientFormPayload = {
   phone?: string;
   discountPercent: number;
   notes?: string;
+  cuentaCorrienteHabilitada?: boolean;
 };
 
 async function assertAdmin() {
@@ -59,6 +60,7 @@ export async function createAssociatedClientAction(
       phone: validated.phone ?? null,
       discount_percent: validated.discountPercent,
       notes: validated.notes ?? null,
+      cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
     });
 
     if (error) throw error;
@@ -87,6 +89,7 @@ export async function updateAssociatedClientAction(
         phone: validated.phone ?? null,
         discount_percent: validated.discountPercent,
         notes: validated.notes ?? null,
+        cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

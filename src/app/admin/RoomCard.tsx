@@ -43,10 +43,20 @@ type RoomCardProps = {
     basePrice: number;
     halfDayPrice: number;
     hasArrivalToday: boolean;
+    accountCreditEnabled: boolean;
   };
   associatedClients: AssociatedClient[];
   isAdmin?: boolean;
 };
+
+function openAccountVoucher(movementId: string) {
+  if (typeof window === "undefined") return;
+  window.open(
+    `/admin/comprobante-cc/${movementId}?autoprint=1`,
+    "comprobante-" + movementId,
+    "width=420,height=720"
+  );
+}
 
 export default function RoomCard({ room, associatedClients, isAdmin = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
@@ -154,6 +164,10 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
 
     if (result.success) {
       setIsPaymentModalOpen(false);
+      // Cierre a cuenta corriente: imprimir el comprobante que firma el cliente.
+      if (paymentMethod === "cuenta_corriente" && result.data?.movementId) {
+        openAccountVoucher(result.data.movementId);
+      }
     }
 
     return result;
@@ -478,6 +492,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
           discountAmount={room.discountAmount}
           totalPrice={room.totalPrice}
           paidAmount={room.paidAmount}
+          accountCreditEnabled={room.accountCreditEnabled}
           onSubmitPayment={submitCheckoutPayment}
         />
       )}
