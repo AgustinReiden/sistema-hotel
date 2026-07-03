@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Clock } from "lucide-react";
 
-const SHIFT_WARNING_MS = 8 * 60 * 60 * 1000;
+// Con una sola caja por hotel, un turno normal puede durar todo el dia (se vieron
+// turnos legitimos de ~20h). El aviso solo debe saltar cuando una caja quedo
+// olvidada de verdad, asi que avisamos recien pasado un dia entero.
+const SHIFT_WARNING_MS = 24 * 60 * 60 * 1000;
 
 function formatElapsed(openedAtMs: number, now: number) {
   const totalMinutes = Math.max(0, Math.floor((now - openedAtMs) / 60000));
@@ -55,7 +58,7 @@ export default function OpenShiftAgeAlert({ openedAt }: { openedAt: string | nul
               Turno de caja abierto hace {formatElapsed(openedAtMs, now)}
             </p>
             <p className="text-xs text-amber-800 mt-0.5">
-              Ya supero las 8 horas. Cierra el turno para rendirlo y abrir uno nuevo.
+              Lleva más de un día abierta. Convendría cerrarla para rendir el turno y abrir una nueva.
             </p>
           </div>
         </div>

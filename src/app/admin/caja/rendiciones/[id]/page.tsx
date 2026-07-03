@@ -39,7 +39,8 @@ type ShiftCopyProps = {
   expectedCash: number | null;
   actualCash: number | null;
   discrepancy: number | null;
-  otherMethods: Array<[string, number]>;
+  checkoutsCount: number;
+  cobradoRows: Array<[string, number]>;
   totalIncome: number;
   paymentsList: Array<{
     id: string;
@@ -67,7 +68,8 @@ function ShiftCopy(props: ShiftCopyProps) {
     expectedCash,
     actualCash,
     discrepancy,
-    otherMethods,
+    checkoutsCount,
+    cobradoRows,
     totalIncome,
     paymentsList,
     notes,
@@ -99,8 +101,28 @@ function ShiftCopy(props: ShiftCopyProps) {
       )}
 
       <hr />
+      <p className="row big">
+        <span>Piezas rendidas:</span>
+        <span>{checkoutsCount}</span>
+      </p>
+
+      <hr />
+      <p className="section">COBRADO POR MEDIO</p>
+      {cobradoRows.map(([label, amount]) => (
+        <p className="row" key={label}>
+          <span>{label}:</span>
+          <span>{money(amount)}</span>
+        </p>
+      ))}
+      <p className="row big">
+        <span>TOTAL:</span>
+        <span>{money(totalIncome)}</span>
+      </p>
+
+      <hr />
+      <p className="section">ARQUEO EFECTIVO</p>
       <p className="row">
-        <span>Efectivo:</span>
+        <span>Efectivo contado:</span>
         <span>{money(actualCash)}</span>
       </p>
       <p className="row">
@@ -110,25 +132,6 @@ function ShiftCopy(props: ShiftCopyProps) {
       <p className="row big">
         <span>Diferencia:</span>
         <span>{formatSignedAmount(discrepancy)}</span>
-      </p>
-
-      {otherMethods.length > 0 && (
-        <>
-          <hr />
-          {otherMethods.map(([method, amount]) => (
-            <p className="row" key={method}>
-              <span>{METHOD_LABELS[method] ?? method}:</span>
-              <span>{money(amount)}</span>
-            </p>
-          ))}
-        </>
-      )}
-
-      <hr />
-      <p className="section">TOTAL COBRADO</p>
-      <p className="row big">
-        <span>Total:</span>
-        <span>{money(totalIncome)}</span>
       </p>
 
       {paymentsList.length > 0 && (
@@ -209,10 +212,23 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
   }
 
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
-  const { shift, totalsByMethod, totalIncome, payments, openedByEmail, closedByEmail } = summary;
-  const otherMethods = (Object.entries(totalsByMethod) as Array<[string, number]>)
-    .filter(([method, value]) => method !== "cash" && value > 0)
-    .sort((a, b) => b[1] - a[1]);
+  const { shift, totalsByMethod, totalIncome, checkoutsCount, payments, openedByEmail, closedByEmail } =
+    summary;
+  // Medios fijos que siempre salen (aunque den 0) + los eventuales que tuvieron
+  // movimiento. "Tarjeta" agrupa credito + debito.
+  const cobradoRows: Array<[string, number]> = [
+    ["Efectivo", totalsByMethod.cash],
+    ["Tarjeta", totalsByMethod.credit_card + totalsByMethod.debit_card],
+    ["Vale Blanco", totalsByMethod.vale_blanco],
+    ["Cta Cte", totalsByMethod.cuenta_corriente],
+    ...(
+      [
+        ["Mercado Pago", totalsByMethod.mercado_pago],
+        ["Transferencia", totalsByMethod.bank_transfer],
+        ["Otro", totalsByMethod.other],
+      ] as Array<[string, number]>
+    ).filter(([, value]) => value > 0),
+  ];
 
   const copyProps: Omit<ShiftCopyProps, "title" | "firstCopy"> = {
     hotelName: hotelSettings?.name || "Hotel El Refugio",
@@ -225,7 +241,8 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     expectedCash: shift.expected_cash,
     actualCash: shift.actual_cash,
     discrepancy: shift.discrepancy,
-    otherMethods,
+    checkoutsCount,
+    cobradoRows,
     totalIncome,
     paymentsList: payments.map((payment) => ({
       id: payment.id,

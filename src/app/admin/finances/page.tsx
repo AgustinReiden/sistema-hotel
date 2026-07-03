@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { getOpenShiftForCurrentUser } from "@/lib/data";
+import { getActiveOpenShift } from "@/lib/data";
 
 export const revalidate = 0; // Ensure fresh data on every load
 
@@ -74,7 +74,7 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
             .in('status', ['confirmed', 'checked_in'])
             .order('check_out_target', { ascending: true }),
         supabase.rpc('get_today_extra_income'),
-        getOpenShiftForCurrentUser().catch(() => null),
+        getActiveOpenShift().catch(() => null),
     ]);
 
     const payments = paymentsResult.data || [];
