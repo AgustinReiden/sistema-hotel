@@ -8,17 +8,21 @@ import WalkInModal from "./WalkInModal";
 import ExtraChargesModal from "./ExtraChargesModal";
 import ChangeRoomModal from "./ChangeRoomModal";
 import EditReservationModal from "./EditReservationModal";
+import EarlyCheckoutModal from "./EarlyCheckoutModal";
 import {
   handleLateCheckOut,
   handleMarkAvailable,
   handleCancelReservation,
   handleCheckOut,
+  handleEarlyCheckOut,
   handleCheckIn,
   handleSetMaintenance,
   handleAssignWalkIn,
   handleExtendReservation,
 } from "./actions";
 import PaymentModal from "../components/PaymentModal";
+import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
+import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import type { AssociatedClient } from "@/lib/types";
 
 type RoomCardProps = {
@@ -29,6 +33,7 @@ type RoomCardProps = {
     status: string;
     client: string | null;
     checkout: string | null;
+    check_in_target: string | null;
     check_out_target: string | null;
     isLate: boolean;
     hasLateCheckout: boolean;
@@ -47,6 +52,7 @@ type RoomCardProps = {
   };
   associatedClients: AssociatedClient[];
   isAdmin?: boolean;
+  timezone: string;
 };
 
 function openAccountVoucher(movementId: string) {
@@ -58,7 +64,7 @@ function openAccountVoucher(movementId: string) {
   );
 }
 
-export default function RoomCard({ room, associatedClients, isAdmin = false }: RoomCardProps) {
+export default function RoomCard({ room, associatedClients, isAdmin = false, timezone }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -71,9 +77,45 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
   const [extendNights, setExtendNights] = useState(1);
   const [extendMode, setExtendMode] = useState<"nights" | "half_day">("nights");
   const [cancelReason, setCancelReason] = useState("");
+  const [isEarlyModalOpen, setIsEarlyModalOpen] = useState(false);
+  const [checkoutMode, setCheckoutMode] = useState<"normal" | "early">("normal");
+  const [earlyPreview, setEarlyPreview] = useState<{
+    breakdown: ReturnType<typeof calculateEarlyCheckoutBreakdown>;
+    reservedUntilLabel: string;
+    departureLabel: string;
+  } | null>(null);
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
   const isConfirmedArrival = room.hasArrivalToday;
+  // Cuando el cobro es "salida anticipada", el PaymentModal usa los montos recalculados.
+  const early = checkoutMode === "early" ? earlyPreview?.breakdown ?? null : null;
+
+  // Devuelve el preview de salida anticipada si el huésped se retira antes del día
+  // reservado (hay al menos una noche que no va a usar); si no, null.
+  const buildEarlyPreview = () => {
+    if (!room.check_in_target || !room.check_out_target) return null;
+    const nowIso = new Date().toISOString();
+    if (hotelDateKey(nowIso, timezone) >= hotelDateKey(room.check_out_target, timezone)) {
+      return null;
+    }
+    const breakdown = calculateEarlyCheckoutBreakdown({
+      checkInTargetIso: room.check_in_target,
+      checkOutTargetIso: room.check_out_target,
+      departureIso: nowIso,
+      baseTotalPrice: room.baseTotalPrice,
+      discountPercent: room.discountPercent,
+      discountAmount: room.discountAmount,
+      totalPrice: room.totalPrice,
+      paidAmount: room.paidAmount,
+      timezone,
+    });
+    if (breakdown.chargedNights >= breakdown.originalNights) return null;
+    return {
+      breakdown,
+      reservedUntilLabel: formatHotelShortDate(room.check_out_target, timezone),
+      departureLabel: formatHotelShortDate(nowIso, timezone),
+    };
+  };
 
   const onCheckIn = () => {
     const reservationId = room.reservationId;
@@ -121,11 +163,41 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
   const onCheckoutClick = () => {
     if (!room.reservationId) return;
 
+    // Si el huésped se va antes de lo reservado, primero mostramos el recálculo.
+    const preview = buildEarlyPreview();
+    if (preview) {
+      setEarlyPreview(preview);
+      setIsEarlyModalOpen(true);
+      return;
+    }
+
+    setCheckoutMode("normal");
     if (debt > 0) {
       setIsPaymentModalOpen(true);
       return;
     }
+    setIsCheckoutConfirmOpen(true);
+  };
 
+  // Salida anticipada elegida: cobrar solo las noches dormidas.
+  const chooseChargeEarly = () => {
+    setIsEarlyModalOpen(false);
+    setCheckoutMode("early");
+    if ((earlyPreview?.breakdown.newBalance ?? 0) > 0) {
+      setIsPaymentModalOpen(true);
+      return;
+    }
+    setIsCheckoutConfirmOpen(true);
+  };
+
+  // Se retira antes pero se cobra igual la reserva completa (flujo normal).
+  const chooseChargeFull = () => {
+    setIsEarlyModalOpen(false);
+    setCheckoutMode("normal");
+    if (debt > 0) {
+      setIsPaymentModalOpen(true);
+      return;
+    }
     setIsCheckoutConfirmOpen(true);
   };
 
@@ -133,8 +205,9 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
     const reservationId = room.reservationId;
     if (!reservationId) return;
 
+    const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
     startTransition(async () => {
-      const result = await handleCheckOut({ reservationId });
+      const result = await runCheckout({ reservationId });
       setIsCheckoutConfirmOpen(false);
 
       if (!result.success) {
@@ -142,7 +215,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
         return;
       }
 
-      toast.success("Check-out realizado correctamente.");
+      toast.success(
+        checkoutMode === "early"
+          ? "Salida anticipada realizada."
+          : "Check-out realizado correctamente."
+      );
     });
   };
 
@@ -156,7 +233,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
     const reservationId = room.reservationId;
     if (!reservationId) return { success: false as const, error: "Reserva no encontrada." };
 
-    const result = await handleCheckOut({
+    const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
+    const result = await runCheckout({
       reservationId,
       paymentAmount: amount,
       paymentMethod,
@@ -487,22 +565,59 @@ export default function RoomCard({ room, associatedClients, isAdmin = false }: R
           isOpen
           onClose={() => setIsPaymentModalOpen(false)}
           clientName={room.client || "Desconocido"}
-          baseTotalPrice={room.baseTotalPrice}
+          baseTotalPrice={early ? early.newBaseTotal : room.baseTotalPrice}
           discountPercent={room.discountPercent}
-          discountAmount={room.discountAmount}
-          totalPrice={room.totalPrice}
+          discountAmount={early ? early.newDiscountAmount : room.discountAmount}
+          totalPrice={early ? early.newTotal : room.totalPrice}
           paidAmount={room.paidAmount}
           accountCreditEnabled={room.accountCreditEnabled}
           onSubmitPayment={submitCheckoutPayment}
+          noteText={
+            early
+              ? `Salida anticipada: se cobran ${early.chargedNights} noche${early.chargedNights === 1 ? "" : "s"} (reservó ${early.originalNights}).`
+              : undefined
+          }
+        />
+      )}
+
+      {isEarlyModalOpen && earlyPreview && (
+        <EarlyCheckoutModal
+          clientName={room.client || "Desconocido"}
+          reservedUntilLabel={earlyPreview.reservedUntilLabel}
+          departureLabel={earlyPreview.departureLabel}
+          originalNights={earlyPreview.breakdown.originalNights}
+          chargedNights={earlyPreview.breakdown.chargedNights}
+          originalTotal={room.totalPrice}
+          newTotal={earlyPreview.breakdown.newTotal}
+          newBalance={earlyPreview.breakdown.newBalance}
+          paidAmount={room.paidAmount}
+          isOverpaid={earlyPreview.breakdown.isOverpaid}
+          isPending={isPending}
+          onChargeEarly={chooseChargeEarly}
+          onChargeFull={chooseChargeFull}
+          onClose={() => setIsEarlyModalOpen(false)}
         />
       )}
 
       {isCheckoutConfirmOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Confirmar Check-Out</h3>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">
+              {early ? "Confirmar salida anticipada" : "Confirmar Check-Out"}
+            </h3>
             <p className="text-sm text-slate-600 mb-6">
-              Estás a punto de finalizar la estadía de <strong>{room.client}</strong>. La deuda total está saldada y la habitación pasará a estado de limpieza.
+              {early ? (
+                <>
+                  Vas a cerrar la estadía de <strong>{room.client}</strong> cobrando{" "}
+                  {early.chargedNights} noche{early.chargedNights === 1 ? "" : "s"} (salida
+                  anticipada). La habitación pasará a estado de limpieza.
+                </>
+              ) : (
+                <>
+                  Estás a punto de finalizar la estadía de <strong>{room.client}</strong>. La deuda
+                  total está saldada y la habitación pasará a estado de limpieza.
+                </>
+              )}
             </p>
             <div className="flex gap-3 justify-end">
               <button

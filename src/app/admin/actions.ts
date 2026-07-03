@@ -11,6 +11,7 @@ import {
   confirmReservation,
   doCheckIn,
   doCheckout,
+  doEarlyCheckout,
   extendReservation,
   findGuestByDni,
   getCancellationReason,
@@ -129,6 +130,36 @@ export async function handleCheckOut({
     return { success: true, data: { paymentId: result.paymentId, movementId: result.movementId } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ejecutar check-out.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Salida anticipada: recalcula a las noches dormidas y cierra la reserva.
+ * Mismas revalidaciones que el check-out normal (incluida cuenta corriente).
+ */
+export async function handleEarlyCheckOut({
+  reservationId,
+  paymentAmount,
+  paymentMethod,
+  paymentNotes,
+}: CheckoutPayload): Promise<ActionResult<{ paymentId: string | null; movementId: string | null }>> {
+  try {
+    const result = await doEarlyCheckout({
+      reservationId,
+      paymentAmount,
+      paymentMethod,
+      paymentNotes,
+    });
+    revalidatePath("/admin");
+    revalidateCalendarViews();
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
+    revalidatePath("/admin/cuentas");
+    return { success: true, data: { paymentId: result.paymentId, movementId: result.movementId } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al ejecutar la salida anticipada.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

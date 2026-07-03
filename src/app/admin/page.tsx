@@ -23,6 +23,7 @@ type DashboardRoom = {
   status: string;
   client: string | null;
   checkout: string | null;
+  check_in_target: string | null;
   check_out_target: string | null;
   isLate: boolean;
   hasLateCheckout: boolean;
@@ -147,6 +148,7 @@ export default async function Dashboard() {
       status,
       client,
       checkout,
+      check_in_target: activeReservation?.check_in_target ?? null,
       check_out_target: activeReservation?.check_out_target ?? null,
       isLate,
       hasLateCheckout,
@@ -268,6 +270,7 @@ export default async function Dashboard() {
               room={room}
               associatedClients={associatedClients}
               isAdmin={isAdmin}
+              timezone={hotelSettings.timezone}
             />
           ))}
         </div>

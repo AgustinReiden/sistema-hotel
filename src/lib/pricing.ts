@@ -1,3 +1,5 @@
+import { countHotelNights } from "./time";
+
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
 function roundCurrency(value: number) {
@@ -7,6 +9,65 @@ function roundCurrency(value: number) {
 export function calculateReservationNights(checkIn: string, checkOut: string) {
   const durationMs = new Date(checkOut).getTime() - new Date(checkIn).getTime();
   return Math.max(1, Math.ceil(durationMs / DAY_IN_MS));
+}
+
+/**
+ * Salida anticipada: recalcula el precio a las noches efectivamente dormidas
+ * (desde el check-in hasta el día de salida), preservando la tarifa cotizada, el
+ * % de descuento y los extras (minibar, daños, media estadía). Es el PREVIEW que
+ * usa la UI; la autoridad es rpc_staff_early_checkout, que aplica la misma fórmula.
+ */
+export function calculateEarlyCheckoutBreakdown({
+  checkInTargetIso,
+  checkOutTargetIso,
+  departureIso,
+  baseTotalPrice,
+  discountPercent = 0,
+  discountAmount = 0,
+  totalPrice,
+  paidAmount = 0,
+  timezone,
+}: {
+  checkInTargetIso: string;
+  checkOutTargetIso: string;
+  departureIso: string;
+  baseTotalPrice: number;
+  discountPercent?: number;
+  discountAmount?: number;
+  totalPrice: number;
+  paidAmount?: number;
+  timezone?: string;
+}) {
+  const originalNights = Math.max(
+    1,
+    countHotelNights(checkInTargetIso, checkOutTargetIso, timezone)
+  );
+  const chargedNights = Math.min(
+    originalNights,
+    Math.max(1, countHotelNights(checkInTargetIso, departureIso, timezone))
+  );
+
+  const perNight = baseTotalPrice / originalNights;
+  const extras = roundCurrency(totalPrice - (baseTotalPrice - discountAmount));
+  const newBaseTotal = roundCurrency(perNight * chargedNights);
+  const newDiscountAmount = roundCurrency((newBaseTotal * discountPercent) / 100);
+  const newFinal = roundCurrency(newBaseTotal - newDiscountAmount);
+  const newTotal = roundCurrency(newFinal + extras);
+  const newBalance = roundCurrency(Math.max(0, newTotal - paidAmount));
+  const isOverpaid = newTotal < paidAmount;
+
+  return {
+    originalNights,
+    chargedNights,
+    newBaseTotal,
+    newDiscountPercent: roundCurrency(discountPercent),
+    newDiscountAmount,
+    newFinal,
+    extras,
+    newTotal,
+    newBalance,
+    isOverpaid,
+  };
 }
 
 /**
