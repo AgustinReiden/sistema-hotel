@@ -738,6 +738,30 @@ export async function doCheckout({
   return { paymentId: result.payment_id ?? null };
 }
 
+/**
+ * Salida anticipada: recalcula el precio a las noches dormidas y cierra la
+ * reserva en una sola operacion (rpc_staff_early_checkout). Mismo shape de
+ * entrada/salida que doCheckout para reusar el PaymentModal.
+ */
+export async function doEarlyCheckout({
+  reservationId,
+  paymentAmount,
+  paymentMethod,
+  paymentNotes,
+}: CheckoutReservationInput): Promise<{ paymentId: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_staff_early_checkout", {
+    p_reservation_id: reservationId,
+    p_payment_amount: paymentAmount ?? null,
+    p_payment_method: paymentMethod ?? null,
+    p_payment_notes: paymentNotes ?? null,
+  });
+
+  if (error) throw error;
+  const result = (data ?? {}) as { payment_id?: string | null };
+  return { paymentId: result.payment_id ?? null };
+}
+
 export async function markRoomAsAvailable(roomId: number): Promise<void> {
   // Se rutea por el RPC que valida rol (admin o maintenance) y registra
   // la limpieza en room_cleaning_log para auditoría.

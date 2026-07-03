@@ -1,3 +1,5 @@
+import { countHotelNights } from "./time";
+
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
 function roundCurrency(value: number) {
@@ -56,6 +58,72 @@ export function calculateWalkInPriceBreakdown({
     discountPercent: normalizedDiscountPercent,
     discountAmount,
     finalTotalPrice,
+  };
+}
+
+/**
+ * Salida anticipada: recalcula el precio a las noches efectivamente dormidas
+ * (desde el check-in hasta el dia de salida), preservando la tarifa cotizada, el
+ * % de descuento y los extras (minibar, danos, media estadia). Es el PREVIEW que
+ * usa la UI; la autoridad es rpc_staff_early_checkout, que aplica la misma formula.
+ *
+ * - noches a cobrar = noches calendario (zona hotel) check-in -> salida, min 1,
+ *   nunca mas que las noches originales.
+ * - tarifa/noche = baseTotalPrice / noches_originales.
+ * - extras = totalPrice - (baseTotalPrice - discountAmount).
+ * - nuevo total = (nuevaBase - nuevoDescuento) + extras.
+ * - isOverpaid: el nuevo total quedo por debajo de lo ya pagado (lo cierra admin).
+ */
+export function calculateEarlyCheckoutBreakdown({
+  checkInTargetIso,
+  checkOutTargetIso,
+  departureIso,
+  baseTotalPrice,
+  discountPercent = 0,
+  discountAmount = 0,
+  totalPrice,
+  paidAmount = 0,
+  timezone,
+}: {
+  checkInTargetIso: string;
+  checkOutTargetIso: string;
+  departureIso: string;
+  baseTotalPrice: number;
+  discountPercent?: number;
+  discountAmount?: number;
+  totalPrice: number;
+  paidAmount?: number;
+  timezone?: string;
+}) {
+  const originalNights = Math.max(
+    1,
+    countHotelNights(checkInTargetIso, checkOutTargetIso, timezone)
+  );
+  const chargedNights = Math.min(
+    originalNights,
+    Math.max(1, countHotelNights(checkInTargetIso, departureIso, timezone))
+  );
+
+  const perNight = baseTotalPrice / originalNights;
+  const extras = roundCurrency(totalPrice - (baseTotalPrice - discountAmount));
+  const newBaseTotal = roundCurrency(perNight * chargedNights);
+  const newDiscountAmount = roundCurrency((newBaseTotal * discountPercent) / 100);
+  const newFinal = roundCurrency(newBaseTotal - newDiscountAmount);
+  const newTotal = roundCurrency(newFinal + extras);
+  const newBalance = roundCurrency(Math.max(0, newTotal - paidAmount));
+  const isOverpaid = newTotal < paidAmount;
+
+  return {
+    originalNights,
+    chargedNights,
+    newBaseTotal,
+    newDiscountPercent: roundCurrency(discountPercent),
+    newDiscountAmount,
+    newFinal,
+    extras,
+    newTotal,
+    newBalance,
+    isOverpaid,
   };
 }
 

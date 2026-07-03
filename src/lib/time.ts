@@ -54,6 +54,35 @@ export function formatHotelShortDateTime(
   return `${get("day")} ${month} ${get("hour")}:${get("minute")}`;
 }
 
+// Fecha local del hotel como clave comparable "YYYY-MM-DD". Sirve para comparar
+// "que dia es hoy" contra la fecha de salida sin que la hora ni la zona del
+// navegador/servidor lo corran de dia.
+export function hotelDateKey(iso: string | number | Date, timezone?: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: timezone || DEFAULT_TZ,
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+// Cantidad de noches calendario (zona del hotel) entre dos instantes. Puede ser
+// negativa si `toIso` es anterior a `fromIso`; el llamador aplica el minimo.
+export function countHotelNights(
+  fromIso: string | number | Date,
+  toIso: string | number | Date,
+  timezone?: string
+): number {
+  const [fy, fm, fd] = hotelDateKey(fromIso, timezone).split("-").map(Number);
+  const [ty, tm, td] = hotelDateKey(toIso, timezone).split("-").map(Number);
+  // Se comparan las fechas como medianoche UTC para no arrastrar horas ni DST.
+  const fromUtc = Date.UTC(fy, fm - 1, fd);
+  const toUtc = Date.UTC(ty, tm - 1, td);
+  return Math.round((toUtc - fromUtc) / (1000 * 60 * 60 * 24));
+}
+
 // Fecha corta tipo "25 jun 26" en la zona del hotel.
 export function formatHotelShortDate(
   iso: string | null | undefined,
