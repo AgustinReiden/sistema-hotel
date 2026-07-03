@@ -43,6 +43,8 @@ interface PaymentModalProps {
     amount: number;
     paymentMethod: PaymentMethod;
   }) => Promise<ActionResult<{ paymentId: string | null }>>;
+  /** Aviso opcional arriba del monto (ej. rótulo de salida anticipada). */
+  noteText?: string;
 }
 
 export default function PaymentModal({
@@ -58,6 +60,7 @@ export default function PaymentModal({
   accountCreditEnabled = false,
   onSuccess,
   onSubmitPayment,
+  noteText,
 }: PaymentModalProps) {
   const numericBaseTotal = Number(baseTotalPrice ?? totalPrice);
   const numericDiscountPercent = Number(discountPercent ?? 0);
@@ -162,6 +165,12 @@ export default function PaymentModal({
               <p className="text-xl font-bold text-amber-600">${debt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
             </div>
           </div>
+
+          {noteText && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-6 text-sm font-bold text-amber-800">
+              {noteText}
+            </div>
+          )}
 
           {showDiscountBreakdown && (
             <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl mb-6">
