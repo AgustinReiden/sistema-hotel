@@ -1708,36 +1708,13 @@ function toCashShift(row: CashShiftRow): CashShift {
   };
 }
 
-export async function getOpenShiftForCurrentUser(): Promise<CashShift | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data, error } = await supabase
-    .from("cash_shifts")
-    .select("*")
-    .eq("opened_by", user.id)
-    .eq("status", "open")
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return null;
-  return toCashShift(data as CashShiftRow);
-}
-
 /**
- * Turno abierto vigente segun el rol del que mira:
- * - recepcionista: su propio turno abierto.
- * - admin: el turno abierto del hotel (el mas reciente), aunque lo haya abierto
- *   un recepcionista. El RLS ya permite al admin leer todas las cajas.
+ * La caja abierta del hotel. Hay una sola a la vez (indice unico
+ * cash_shifts_one_open_hotel), asi que recepcion y admin ven la misma: la que
+ * este abierta, sin importar quien la abrio. El RLS permite a cualquier staff
+ * leer la caja con status = 'open'.
  */
-export async function getActiveOpenShift(role: UserRole): Promise<CashShift | null> {
-  if (role !== "admin") {
-    return getOpenShiftForCurrentUser();
-  }
-
+export async function getActiveOpenShift(): Promise<CashShift | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("cash_shifts")
@@ -1822,6 +1799,15 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
     normalizeShiftPayment
   );
 
+  // Piezas rendidas: check-outs cuya reserva quedo ligada a este turno.
+  const { count: checkoutsCount, error: checkoutsError } = await supabase
+    .from("reservations")
+    .select("id", { count: "exact", head: true })
+    .eq("checkout_cash_shift_id", shiftId)
+    .eq("status", "checked_out");
+
+  if (checkoutsError) throw checkoutsError;
+
   const totalsByMethod: Record<PaymentMethod, number> = {
     cash: 0,
     credit_card: 0,
@@ -1849,6 +1835,7 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
   return {
     shift,
     paymentsCount: payments.length,
+    checkoutsCount: checkoutsCount ?? 0,
     totalsByMethod,
     totalIncome,
     cashIncome,
@@ -1887,7 +1874,9 @@ export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashS
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (user) query = query.eq("opened_by", user.id);
+    // Caja unica por hotel: recepcion ve las que abrio o cerro (puede cerrar una
+    // que abrio otro companero).
+    if (user) query = query.or(`opened_by.eq.${user.id},closed_by.eq.${user.id}`);
   }
 
   if (filters.from) query = query.gte("opened_at", filters.from);

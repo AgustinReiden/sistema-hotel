@@ -164,7 +164,10 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
                 ${formatMoney(summary.totalIncome)}
               </p>
               <p className="text-xs text-slate-500 mt-2">
-                {summary.paymentsCount} pago{summary.paymentsCount === 1 ? "" : "s"} en el turno
+                {summary.paymentsCount} pago{summary.paymentsCount === 1 ? "" : "s"}
+                {" · "}
+                {summary.checkoutsCount} pieza{summary.checkoutsCount === 1 ? "" : "s"} rendida
+                {summary.checkoutsCount === 1 ? "" : "s"}
               </p>
             </div>
 
@@ -274,6 +277,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
             onClose={() => setCloseModalOpen(false)}
             shiftId={summary.shift.id}
             totalsByMethod={summary.totalsByMethod}
+            checkoutsCount={summary.checkoutsCount}
           />
         </>
       )}

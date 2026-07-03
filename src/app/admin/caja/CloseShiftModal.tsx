@@ -4,19 +4,18 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Banknote,
+  BedDouble,
   CheckCircle2,
   CreditCard,
   EyeOff,
   Landmark,
   Loader2,
-  LogOut,
   Printer,
   Wallet,
   X,
 } from "lucide-react";
 
 import { closeShiftAction } from "./actions";
-import { logout } from "@/app/login/actions";
 import type { PaymentMethod } from "@/lib/types";
 
 type Props = {
@@ -24,6 +23,8 @@ type Props = {
   onClose: () => void;
   shiftId: string;
   totalsByMethod: Record<PaymentMethod, number>;
+  /** Piezas rendidas = check-outs hechos en el turno. */
+  checkoutsCount: number;
 };
 
 type CloseResult = {
@@ -56,6 +57,7 @@ export default function CloseShiftModal({
   onClose,
   shiftId,
   totalsByMethod,
+  checkoutsCount,
 }: Props) {
   const router = useRouter();
   const [actualCash, setActualCash] = useState("");
@@ -63,13 +65,11 @@ export default function CloseShiftModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState<CloseResult | null>(null);
-  const [finishing, setFinishing] = useState(false);
 
-  // Recepcionista: al cerrar la caja se abre solo el comprobante de rendicion para imprimir
-  // (con kiosk sale sin dialogo). El cierre de sesion NO es automatico: lo hace el boton
-  // "Cerrar sesion", asi nada se cierra antes de que el usuario pueda imprimir/apretar.
+  // Al cerrar la caja se abre solo el comprobante de rendicion para imprimir
+  // (con kiosk sale sin dialogo). Cerrar la caja ya no cierra sesion.
   useEffect(() => {
-    if (!closed?.shouldLogout) return;
+    if (!closed) return;
     window.open(
       `/admin/caja/rendiciones/${shiftId}?autoprint=1`,
       `rendicion-${shiftId}`,
@@ -108,12 +108,7 @@ export default function CloseShiftModal({
     setClosed(result.data!);
   };
 
-  const handleFinish = async () => {
-    if (closed?.shouldLogout) {
-      setFinishing(true);
-      await logout(); // cierra sesion y redirige a /login
-      return;
-    }
+  const handleFinish = () => {
     onClose();
     router.refresh();
   };
@@ -121,6 +116,19 @@ export default function CloseShiftModal({
   // Vista de resultado: se muestra la rendicion una vez cerrada la caja.
   if (closed) {
     const d = closed.discrepancy;
+    // "Efectivo" cobrado = efectivo esperado (se revela recien al cerrar; en el
+    // arqueo a ciegas totalsByMethod.cash llega en 0). Tarjeta = credito + debito.
+    const cobradoRows = [
+      { label: "Efectivo", amount: closed.expected_cash },
+      { label: "Tarjeta", amount: totalsByMethod.credit_card + totalsByMethod.debit_card },
+      { label: "Vale Blanco", amount: totalsByMethod.vale_blanco },
+      { label: "Cta Cte", amount: totalsByMethod.cuenta_corriente },
+    ];
+    const extraRows = [
+      { label: "Mercado Pago", amount: totalsByMethod.mercado_pago },
+      { label: "Transferencia", amount: totalsByMethod.bank_transfer },
+      { label: "Otro", amount: totalsByMethod.other },
+    ].filter((r) => r.amount > 0);
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
@@ -136,7 +144,7 @@ export default function CloseShiftModal({
                   ? `Quedo un sobrante de $${formatMoney(d)}.`
                   : `Quedo un faltante de $${formatMoney(Math.abs(d))}.`}
             </p>
-            <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="rounded-xl border border-slate-200 p-3 text-left">
                 <p className="text-xs text-slate-500">Efectivo esperado</p>
                 <p className="font-bold text-slate-800">${formatMoney(closed.expected_cash)}</p>
@@ -146,6 +154,23 @@ export default function CloseShiftModal({
                 <p className="font-bold text-slate-800">${formatMoney(closed.actual_cash)}</p>
               </div>
             </div>
+
+            <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 mb-6 text-left overflow-hidden">
+              <div className="flex items-center justify-between p-3 bg-slate-50">
+                <span className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                  <BedDouble size={15} />
+                  Piezas rendidas
+                </span>
+                <span className="text-lg font-bold text-slate-900">{checkoutsCount}</span>
+              </div>
+              {[...cobradoRows, ...extraRows].map((r) => (
+                <div key={r.label} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span className="text-slate-600 font-medium">{r.label}</span>
+                  <span className="font-bold text-slate-800">${formatMoney(r.amount)}</span>
+                </div>
+              ))}
+            </div>
+
             <div className="flex gap-3">
               <button
                 type="button"
@@ -164,25 +189,15 @@ export default function CloseShiftModal({
               <button
                 type="button"
                 onClick={handleFinish}
-                disabled={finishing}
-                className="flex-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
               >
-                {finishing ? (
-                  <Loader2 className="animate-spin" size={18} />
-                ) : closed.shouldLogout ? (
-                  <LogOut size={18} />
-                ) : (
-                  <CheckCircle2 size={18} />
-                )}
-                {closed.shouldLogout ? "Cerrar sesión" : "Listo"}
+                <CheckCircle2 size={18} />
+                Listo
               </button>
             </div>
-            {closed.shouldLogout && (
-              <p className="text-[11px] text-slate-400 mt-3">
-                Imprimí el comprobante y después cerrá sesión. La próxima vez que ingreses se abre
-                la caja de nuevo.
-              </p>
-            )}
+            <p className="text-[11px] text-slate-400 mt-3">
+              Imprimí el comprobante. Para el próximo turno abrí una caja nueva desde “Abrir Caja”.
+            </p>
           </div>
         </div>
       </div>

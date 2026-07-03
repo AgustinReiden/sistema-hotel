@@ -30,7 +30,7 @@ export default async function CajaPage() {
     getHotelSettings().catch(() => null),
   ]);
   const canSeeCash = role === "admin";
-  const shift = await getActiveOpenShift(role);
+  const shift = await getActiveOpenShift();
   let summary = shift ? await getShiftSummary(shift.id) : null;
   if (summary && !canSeeCash) {
     summary = blindCash(summary);

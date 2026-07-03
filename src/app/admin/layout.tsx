@@ -1,7 +1,6 @@
 import Sidebar from './Sidebar';
 import { createClient } from "@/lib/supabase/server";
 import { getActiveOpenShift } from "@/lib/data";
-import type { UserRole } from "@/lib/types";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 
 export default async function AdminLayout({
@@ -25,7 +24,7 @@ export default async function AdminLayout({
         if (profile?.role) {
             role = profile.role;
         }
-        openShift = await getActiveOpenShift(role as UserRole).catch(() => null);
+        openShift = await getActiveOpenShift().catch(() => null);
     }
 
     return (

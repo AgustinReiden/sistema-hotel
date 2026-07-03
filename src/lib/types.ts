@@ -384,6 +384,8 @@ export type ShiftPaymentRow = {
 export type ShiftSummary = {
   shift: CashShift;
   paymentsCount: number;
+  /** Cantidad de piezas rendidas: check-outs hechos durante este turno. */
+  checkoutsCount: number;
   totalsByMethod: Record<PaymentMethod, number>;
   totalIncome: number;
   cashIncome: number;
