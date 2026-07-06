@@ -2407,10 +2407,17 @@ export async function markRoomNoKey(
  * categoría del rango (correcto aunque haya muchas filas, vía count exact).
  */
 export async function getCleaningLog(
-  params: { fromIso?: string; toIso?: string; page?: number; pageSize?: number } = {}
+  params: {
+    fromIso?: string;
+    toIso?: string;
+    roomId?: number;
+    category?: CleaningCategory | "no_key";
+    page?: number;
+    pageSize?: number;
+  } = {}
 ): Promise<CleaningLogResult> {
   const supabase = await createClient();
-  const { fromIso, toIso } = params;
+  const { fromIso, toIso, roomId, category } = params;
   const page = Math.max(1, Math.trunc(params.page ?? 1));
   const pageSize = Math.min(200, Math.max(1, Math.trunc(params.pageSize ?? 25)));
   const offset = (page - 1) * pageSize;
@@ -2436,6 +2443,15 @@ export async function getCleaningLog(
     .order("cleaned_at", { ascending: false });
   if (fromIso) rowsQuery = rowsQuery.gte("cleaned_at", fromIso);
   if (toIso) rowsQuery = rowsQuery.lt("cleaned_at", toIso);
+  if (roomId) rowsQuery = rowsQuery.eq("room_id", roomId);
+  if (category === "no_key") {
+    rowsQuery = rowsQuery.eq("outcome", "not_cleaned_no_key");
+  } else if (category === "checkin_daily") {
+    // "Con check-in" = limpiadas (las "sin llave" viven bajo su propio filtro).
+    rowsQuery = rowsQuery.eq("cleaning_category", "checkin_daily").eq("outcome", "cleaned");
+  } else if (category) {
+    rowsQuery = rowsQuery.eq("cleaning_category", category);
+  }
   rowsQuery = rowsQuery.range(offset, offset + pageSize - 1);
 
   const { data, count, error } = await rowsQuery;
@@ -2465,6 +2481,7 @@ export async function getCleaningLog(
       .select("id", { count: "exact", head: true });
     if (fromIso) q = q.gte("cleaned_at", fromIso);
     if (toIso) q = q.lt("cleaned_at", toIso);
+    if (roomId) q = q.eq("room_id", roomId);
     if (filters.category) q = q.eq("cleaning_category", filters.category);
     if (filters.outcome) q = q.eq("outcome", filters.outcome);
     const { count: n } = await q;
@@ -2524,6 +2541,17 @@ export async function getCleaningLog(
     pageSize,
     summary: { checkin_daily, checkout, empty_maintenance, occupied_anomaly, no_key },
   };
+}
+
+/** Lista breve de habitaciones activas (id + número) para filtros/dropdowns. */
+export async function getActiveRoomsBrief(): Promise<{ id: number; room_number: string }[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("rooms")
+    .select("id, room_number")
+    .eq("is_active", true);
+  if (error) throw error;
+  return sortRoomsByNumber((data ?? []) as { id: number; room_number: string }[]);
 }
 
 /**

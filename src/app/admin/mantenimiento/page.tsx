@@ -10,7 +10,12 @@ import {
   Wrench,
 } from "lucide-react";
 
-import { getCleaningLog, getHotelSettings, listAdminAlerts } from "@/lib/data";
+import {
+  getActiveRoomsBrief,
+  getCleaningLog,
+  getHotelSettings,
+  listAdminAlerts,
+} from "@/lib/data";
 import { localToISO } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
 import type { CleaningCategory, CleaningLogSummary } from "@/lib/types";
@@ -87,8 +92,22 @@ function summaryCards(summary: CleaningLogSummary) {
   ];
 }
 
+const ALLOWED_CATEGORIES = new Set([
+  "checkin_daily",
+  "checkout",
+  "empty_maintenance",
+  "occupied_anomaly",
+  "no_key",
+]);
+
 type PageProps = {
-  searchParams: Promise<{ from?: string; to?: string; page?: string }>;
+  searchParams: Promise<{
+    from?: string;
+    to?: string;
+    page?: string;
+    category?: string;
+    room?: string;
+  }>;
 };
 
 export default async function MantenimientoAdminPage({ searchParams }: PageProps) {
@@ -98,13 +117,25 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
 
   const from = sp.from ?? "";
   const to = sp.to ?? "";
+  const category = sp.category && ALLOWED_CATEGORIES.has(sp.category) ? sp.category : "";
+  const room = sp.room ?? "";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const fromIso = from ? localToISO(from, "00:00", tz) : undefined;
   const toIso = to ? localToISO(addOneDay(to), "00:00", tz) : undefined;
+  const roomIdParsed = room ? Number(room) : NaN;
+  const roomId = Number.isInteger(roomIdParsed) ? roomIdParsed : undefined;
 
-  const [logResult, alerts] = await Promise.all([
-    getCleaningLog({ fromIso, toIso, page, pageSize: PAGE_SIZE }),
+  const [logResult, alerts, rooms] = await Promise.all([
+    getCleaningLog({
+      fromIso,
+      toIso,
+      roomId,
+      category: (category || undefined) as CleaningCategory | "no_key" | undefined,
+      page,
+      pageSize: PAGE_SIZE,
+    }),
     listAdminAlerts(true),
+    getActiveRoomsBrief(),
   ]);
 
   const { rows, total, summary } = logResult;
@@ -117,6 +148,8 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
     const params = new URLSearchParams();
     if (from) params.set("from", from);
     if (to) params.set("to", to);
+    if (category) params.set("category", category);
+    if (room) params.set("room", room);
     if (p > 1) params.set("page", String(p));
     const qs = params.toString();
     return qs ? `/admin/mantenimiento?${qs}` : "/admin/mantenimiento";
@@ -153,7 +186,7 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-slate-100 bg-slate-50 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="p-5 border-b border-slate-100 bg-slate-50 flex flex-col gap-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-slate-100 text-slate-600">
                   <Sparkles size={18} />
@@ -167,7 +200,13 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
                   </p>
                 </div>
               </div>
-              <CleaningLogFilters from={from} to={to} />
+              <CleaningLogFilters
+                from={from}
+                to={to}
+                category={category}
+                room={room}
+                rooms={rooms}
+              />
             </div>
 
             {rows.length === 0 ? (
