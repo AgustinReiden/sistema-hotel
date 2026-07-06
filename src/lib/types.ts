@@ -15,6 +15,22 @@ export type RoomCleaningLogEntry = {
   has_admin_alert: boolean;
 };
 
+export type CleaningLogSummary = {
+  checkin_daily: number;
+  checkout: number;
+  empty_maintenance: number;
+  occupied_anomaly: number;
+  no_key: number;
+};
+
+export type CleaningLogResult = {
+  rows: RoomCleaningLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: CleaningLogSummary;
+};
+
 export type AdminAlert = {
   id: number;
   kind: string;
