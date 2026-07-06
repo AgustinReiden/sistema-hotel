@@ -33,8 +33,8 @@ import type {
   ReservationStatus,
   RoomCategory,
   RoomCategoryUsage,
+  CleaningLogResult,
   Room,
-  RoomCleaningLogEntry,
   ShiftPaymentRow,
   ShiftSummary,
   UpcomingGuest,
@@ -2402,11 +2402,20 @@ export async function markRoomNoKey(
   if (error) throw error;
 }
 
-export async function getRoomCleaningLog(
-  limit = 60
-): Promise<RoomCleaningLogEntry[]> {
+/**
+ * Histórico de limpiezas paginado + filtrable por rango de fechas, con el resumen por
+ * categoría del rango (correcto aunque haya muchas filas, vía count exact).
+ */
+export async function getCleaningLog(
+  params: { fromIso?: string; toIso?: string; page?: number; pageSize?: number } = {}
+): Promise<CleaningLogResult> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { fromIso, toIso } = params;
+  const page = Math.max(1, Math.trunc(params.page ?? 1));
+  const pageSize = Math.min(200, Math.max(1, Math.trunc(params.pageSize ?? 25)));
+  const offset = (page - 1) * pageSize;
+
+  let rowsQuery = supabase
     .from("room_cleaning_log")
     .select(
       `
@@ -2421,14 +2430,18 @@ export async function getRoomCleaningLog(
       outcome,
       notes,
       rooms ( room_number )
-      `
+      `,
+      { count: "exact" }
     )
-    .order("cleaned_at", { ascending: false })
-    .limit(limit);
+    .order("cleaned_at", { ascending: false });
+  if (fromIso) rowsQuery = rowsQuery.gte("cleaned_at", fromIso);
+  if (toIso) rowsQuery = rowsQuery.lt("cleaned_at", toIso);
+  rowsQuery = rowsQuery.range(offset, offset + pageSize - 1);
 
+  const { data, count, error } = await rowsQuery;
   if (error) throw error;
 
-  const rows = (data ?? []) as Array<{
+  const rowsRaw = (data ?? []) as Array<{
     id: number;
     room_id: number;
     cleaned_at: string;
@@ -2442,8 +2455,34 @@ export async function getRoomCleaningLog(
     rooms: { room_number: string } | { room_number: string }[] | null;
   }>;
 
+  // Resumen por categoría del rango (independiente de la paginación).
+  const countWith = async (filters: {
+    category?: CleaningCategory;
+    outcome?: CleaningOutcome;
+  }): Promise<number> => {
+    let q = supabase
+      .from("room_cleaning_log")
+      .select("id", { count: "exact", head: true });
+    if (fromIso) q = q.gte("cleaned_at", fromIso);
+    if (toIso) q = q.lt("cleaned_at", toIso);
+    if (filters.category) q = q.eq("cleaning_category", filters.category);
+    if (filters.outcome) q = q.eq("outcome", filters.outcome);
+    const { count: n } = await q;
+    return n ?? 0;
+  };
+
+  const [checkin_daily, checkout, empty_maintenance, occupied_anomaly, no_key] =
+    await Promise.all([
+      countWith({ category: "checkin_daily", outcome: "cleaned" }),
+      countWith({ category: "checkout" }),
+      countWith({ category: "empty_maintenance" }),
+      countWith({ category: "occupied_anomaly" }),
+      countWith({ outcome: "not_cleaned_no_key" }),
+    ]);
+
+  // Alertas asociadas, solo para las filas de la página actual.
   const alertLogIds = new Set<number>();
-  const logIds = rows.map((r) => r.id);
+  const logIds = rowsRaw.map((r) => r.id);
   if (logIds.length > 0) {
     const { data: alertsData } = await supabase
       .from("admin_alerts")
@@ -2457,7 +2496,7 @@ export async function getRoomCleaningLog(
     }
   }
 
-  return rows.map((r) => {
+  const rows = rowsRaw.map((r) => {
     const rel = r.rooms;
     const room_number = Array.isArray(rel)
       ? rel[0]?.room_number ?? "—"
@@ -2477,6 +2516,14 @@ export async function getRoomCleaningLog(
       has_admin_alert: alertLogIds.has(r.id),
     };
   });
+
+  return {
+    rows,
+    total: count ?? 0,
+    page,
+    pageSize,
+    summary: { checkin_daily, checkout, empty_maintenance, occupied_anomaly, no_key },
+  };
 }
 
 /**

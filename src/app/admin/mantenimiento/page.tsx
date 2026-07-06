@@ -1,50 +1,25 @@
-import { BedDouble, CheckCircle2, KeyRound, Lock, Sparkles, Wrench } from "lucide-react";
-
+import Link from "next/link";
 import {
-  getHotelSettings,
-  getRoomCleaningLog,
-  listAdminAlerts,
-} from "@/lib/data";
+  BedDouble,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  KeyRound,
+  Lock,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
+
+import { getCleaningLog, getHotelSettings, listAdminAlerts } from "@/lib/data";
+import { localToISO } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
-import type { CleaningCategory, RoomCleaningLogEntry } from "@/lib/types";
+import type { CleaningCategory, CleaningLogSummary } from "@/lib/types";
 import AlertsPanel from "./AlertsPanel";
+import CleaningLogFilters from "./CleaningLogFilters";
 
 export const dynamic = "force-dynamic";
 
-function statusLabel(raw: string): { label: string; color: string; icon: React.ReactNode } {
-  switch (raw) {
-    case "cleaning":
-      return {
-        label: "Limpieza",
-        color: "bg-amber-100 text-amber-700 border-amber-200",
-        icon: <Sparkles size={12} />,
-      };
-    case "maintenance":
-      return {
-        label: "Mantenimiento",
-        color: "bg-red-100 text-red-700 border-red-200",
-        icon: <Wrench size={12} />,
-      };
-    case "available":
-      return {
-        label: "Disponible",
-        color: "bg-emerald-100 text-emerald-700 border-emerald-200",
-        icon: <CheckCircle2 size={12} />,
-      };
-    case "occupied":
-      return {
-        label: "Ocupada",
-        color: "bg-slate-100 text-slate-700 border-slate-200",
-        icon: <CheckCircle2 size={12} />,
-      };
-    default:
-      return {
-        label: raw,
-        color: "bg-slate-100 text-slate-700 border-slate-200",
-        icon: <CheckCircle2 size={12} />,
-      };
-  }
-}
+const PAGE_SIZE = 25;
 
 function categoryLabel(
   category: CleaningCategory | null
@@ -63,76 +38,89 @@ function categoryLabel(
   }
 }
 
-type SummaryCard = {
-  key: CleaningCategory | "no_key";
-  label: string;
-  count: number;
-  icon: React.ReactNode;
-  color: string;
-};
+// "YYYY-MM-DD" + 1 día (para usar como límite superior exclusivo del rango).
+function addOneDay(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
 
-function buildSummary(log: RoomCleaningLogEntry[]): SummaryCard[] {
-  const counts: Record<string, number> = {
-    checkin_daily: 0,
-    checkout: 0,
-    empty_maintenance: 0,
-    occupied_anomaly: 0,
-    no_key: 0,
-  };
-  for (const entry of log) {
-    if (entry.outcome === "not_cleaned_no_key") {
-      counts.no_key += 1;
-      continue;
-    }
-    if (entry.cleaning_category) counts[entry.cleaning_category] += 1;
-  }
+function summaryCards(summary: CleaningLogSummary) {
   return [
     {
       key: "checkin_daily",
       label: "Con check-in",
-      count: counts.checkin_daily,
+      count: summary.checkin_daily,
       icon: <Sparkles size={16} />,
       color: "bg-sky-50 border-sky-200 text-sky-700",
     },
     {
       key: "checkout",
       label: "Por check-out",
-      count: counts.checkout,
+      count: summary.checkout,
       icon: <Lock size={16} />,
       color: "bg-amber-50 border-amber-200 text-amber-700",
     },
     {
       key: "empty_maintenance",
       label: "Mant. vacías",
-      count: counts.empty_maintenance,
+      count: summary.empty_maintenance,
       icon: <BedDouble size={16} />,
       color: "bg-slate-50 border-slate-200 text-slate-700",
     },
     {
       key: "occupied_anomaly",
       label: "Ocupada sin reserva",
-      count: counts.occupied_anomaly,
+      count: summary.occupied_anomaly,
       icon: <Wrench size={16} />,
       color: "bg-orange-50 border-orange-200 text-orange-700",
     },
     {
       key: "no_key",
       label: "Sin llave",
-      count: counts.no_key,
+      count: summary.no_key,
       icon: <KeyRound size={16} />,
       color: "bg-slate-50 border-slate-200 text-slate-600",
     },
   ];
 }
 
-export default async function MantenimientoAdminPage() {
-  const [log, alerts, hotelSettings] = await Promise.all([
-    getRoomCleaningLog(100),
-    listAdminAlerts(true),
-    getHotelSettings().catch(() => null),
-  ]);
+type PageProps = {
+  searchParams: Promise<{ from?: string; to?: string; page?: string }>;
+};
+
+export default async function MantenimientoAdminPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  const hotelSettings = await getHotelSettings().catch(() => null);
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
-  const summary = buildSummary(log);
+
+  const from = sp.from ?? "";
+  const to = sp.to ?? "";
+  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
+  const fromIso = from ? localToISO(from, "00:00", tz) : undefined;
+  const toIso = to ? localToISO(addOneDay(to), "00:00", tz) : undefined;
+
+  const [logResult, alerts] = await Promise.all([
+    getCleaningLog({ fromIso, toIso, page, pageSize: PAGE_SIZE }),
+    listAdminAlerts(true),
+  ]);
+
+  const { rows, total, summary } = logResult;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const cards = summaryCards(summary);
+  const firstIndex = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const lastIndex = Math.min(page * PAGE_SIZE, total);
+
+  const buildHref = (p: number) => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (p > 1) params.set("page", String(p));
+    const qs = params.toString();
+    return qs ? `/admin/mantenimiento?${qs}` : "/admin/mantenimiento";
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -150,7 +138,7 @@ export default async function MantenimientoAdminPage() {
           <AlertsPanel alerts={alerts} hotelTimezone={tz} />
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-            {summary.map((card) => (
+            {cards.map((card) => (
               <div
                 key={card.key}
                 className={`rounded-2xl border p-4 flex flex-col gap-1 ${card.color}`}
@@ -165,22 +153,26 @@ export default async function MantenimientoAdminPage() {
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-5 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-slate-100 text-slate-600">
-                <Sparkles size={18} />
+            <div className="p-5 border-b border-slate-100 bg-slate-50 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-slate-100 text-slate-600">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Histórico de limpiezas</h2>
+                  <p className="text-xs text-slate-500">
+                    {total === 0
+                      ? "No hay limpiezas en el rango seleccionado."
+                      : `Mostrando ${firstIndex}–${lastIndex} de ${total}. Las de "ocupada sin reserva" (naranja) requieren revisión.`}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Histórico de limpiezas</h2>
-                <p className="text-xs text-slate-500">
-                  Últimas {log.length} registradas. Las marcadas en naranja son limpiezas de una
-                  ocupada sin reserva que lo justifique (requieren revisión).
-                </p>
-              </div>
+              <CleaningLogFilters from={from} to={to} />
             </div>
 
-            {log.length === 0 ? (
+            {rows.length === 0 ? (
               <div className="p-10 text-center text-slate-500 font-medium text-sm">
-                Todavía no hay limpiezas registradas.
+                No hay limpiezas para mostrar.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -189,7 +181,6 @@ export default async function MantenimientoAdminPage() {
                     <tr>
                       <th className="text-left px-4 py-3 font-semibold">Fecha/Hora</th>
                       <th className="text-left px-4 py-3 font-semibold">Habitación</th>
-                      <th className="text-left px-4 py-3 font-semibold">Estado anterior</th>
                       <th className="text-left px-4 py-3 font-semibold">Categoría</th>
                       <th className="text-left px-4 py-3 font-semibold">Resultado</th>
                       <th className="text-left px-4 py-3 font-semibold">Limpió</th>
@@ -197,8 +188,7 @@ export default async function MantenimientoAdminPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {log.map((entry) => {
-                      const prev = statusLabel(entry.previous_status);
+                    {rows.map((entry) => {
                       const cat = categoryLabel(entry.cleaning_category);
                       const isAnomaly = entry.cleaning_category === "occupied_anomaly";
                       const noKey = entry.outcome === "not_cleaned_no_key";
@@ -212,14 +202,6 @@ export default async function MantenimientoAdminPage() {
                           </td>
                           <td className="px-4 py-3 font-semibold text-slate-800">
                             Hab. {entry.room_number}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border ${prev.color}`}
-                            >
-                              {prev.icon}
-                              {prev.label}
-                            </span>
                           </td>
                           <td className="px-4 py-3">
                             <span
@@ -250,6 +232,44 @@ export default async function MantenimientoAdminPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {total > 0 && (
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                <p className="text-xs text-slate-500">
+                  Página {page} de {totalPages}
+                </p>
+                <div className="flex items-center gap-2">
+                  {page > 1 ? (
+                    <Link
+                      href={buildHref(page - 1)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-bold hover:bg-slate-100 transition-colors flex items-center gap-1"
+                    >
+                      <ChevronLeft size={15} />
+                      Anterior
+                    </Link>
+                  ) : (
+                    <span className="px-3 py-1.5 rounded-lg border border-slate-100 bg-slate-100 text-slate-400 text-sm font-bold flex items-center gap-1 cursor-not-allowed">
+                      <ChevronLeft size={15} />
+                      Anterior
+                    </span>
+                  )}
+                  {page < totalPages ? (
+                    <Link
+                      href={buildHref(page + 1)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-bold hover:bg-slate-100 transition-colors flex items-center gap-1"
+                    >
+                      Siguiente
+                      <ChevronRight size={15} />
+                    </Link>
+                  ) : (
+                    <span className="px-3 py-1.5 rounded-lg border border-slate-100 bg-slate-100 text-slate-400 text-sm font-bold flex items-center gap-1 cursor-not-allowed">
+                      Siguiente
+                      <ChevronRight size={15} />
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
