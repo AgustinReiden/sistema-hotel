@@ -7,6 +7,7 @@ import { formatAmount, formatShiftCode, formatSignedAmount } from "@/lib/format"
 import { formatHotelDateTime, formatHotelTime } from "@/lib/time";
 import ThermalAutoPrint from "@/app/admin/components/ThermalAutoPrint";
 import PrintButton from "./PrintButton";
+import ExportCsvButton from "../../ExportCsvButton";
 
 export const revalidate = 0;
 
@@ -273,7 +274,16 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
           <ArrowLeft size={14} />
           Volver
         </Link>
-        <PrintButton />
+        <div className="flex items-center gap-2">
+          {shift.status === "closed" && (
+            <ExportCsvButton
+              shiftId={shift.id}
+              shiftNumber={shift.shift_number}
+              className="px-4 py-2 border border-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-sm disabled:opacity-60"
+            />
+          )}
+          <PrintButton />
+        </div>
       </div>
 
       <div className="thermal">

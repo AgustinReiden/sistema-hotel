@@ -9,6 +9,8 @@ export type RoomCleaningLogEntry = {
   cleaner_name: string | null;
   previous_status: string;
   cleaning_type: CleaningType | null;
+  cleaning_category: CleaningCategory | null;
+  outcome: CleaningOutcome;
   notes: string | null;
   has_admin_alert: boolean;
 };
@@ -34,6 +36,16 @@ export type CleaningType =
   | "limpia_ocupada"
   | "limpia_vacia"
   | "limpia_repaso";
+
+/** Categoría real de la limpieza, clasificada por el RPC según el contexto. */
+export type CleaningCategory =
+  | "checkout" // limpieza post check-out (bloquea el próximo check-in)
+  | "checkin_daily" // limpieza diaria de una habitación ocupada (no bloquea)
+  | "empty_maintenance" // mantenimiento/limpieza de una habitación vacía
+  | "occupied_anomaly"; // se limpió una ocupada sin reserva que lo justifique (alerta)
+
+/** Resultado de la limpieza diaria: se limpió o no se pudo (sin llave). */
+export type CleaningOutcome = "cleaned" | "not_cleaned_no_key";
 
 export type CleaningRequiredReason =
   | "status_cleaning"
@@ -131,6 +143,9 @@ export type MaintenanceRoom = Room & {
   requires_cleaning: boolean;
   cleaning_required_reason: CleaningRequiredReason | null;
   cleaned_today: boolean;
+  /** Resultado de la limpieza diaria de hoy (si ya se registró): limpiada o "sin llave". */
+  daily_outcome: CleaningOutcome | null;
+  daily_notes: string | null;
   active_client: string | null;
   active_check_out_target: string | null;
   active_late_check_out_until: string | null;
@@ -483,3 +498,12 @@ export type ShiftSummary = {
 };
 
 export type CloseShiftPayload = { shiftId: string; actualCash: number; notes?: string };
+
+/** Una fila del export CSV fiscal: un check-out del turno. */
+export type CheckoutExportRow = {
+  actual_check_out: string;
+  client_name: string;
+  client_dni: string | null;
+  total_price: number;
+  payment_method: PaymentMethod | "sin_cobro";
+};

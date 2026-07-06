@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
-import { closeCashShift, openCashShift } from "@/lib/data";
+import {
+  closeCashShift,
+  getHotelSettings,
+  getShiftCheckoutExport,
+  openCashShift,
+} from "@/lib/data";
+import { buildCheckoutCsv } from "@/lib/csv";
 import { parseActionError } from "@/lib/error-utils";
 import type { ActionResult } from "@/lib/types";
 import { closeShiftSchema } from "@/lib/validations";
@@ -54,6 +60,27 @@ export async function closeShiftAction(input: {
     return { success: true, data: { ...result, shouldLogout } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cerrar la caja.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Genera el CSV fiscal de los check-outs del turno (1 fila por check-out). El texto ya viene
+ * formateado (formato AR); el cliente sólo arma el Blob y dispara la descarga.
+ */
+export async function getCheckoutCsvAction(
+  shiftId: string
+): Promise<ActionResult<{ csv: string; rowCount: number }>> {
+  try {
+    const [rows, hotelSettings] = await Promise.all([
+      getShiftCheckoutExport(shiftId),
+      getHotelSettings().catch(() => null),
+    ]);
+    const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
+    const csv = buildCheckoutCsv(rows, tz);
+    return { success: true, data: { csv, rowCount: rows.length } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo generar el CSV.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }
