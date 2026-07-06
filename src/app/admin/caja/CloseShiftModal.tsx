@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   Banknote,
   BedDouble,
   CheckCircle2,
@@ -15,16 +16,30 @@ import {
   X,
 } from "lucide-react";
 
-import { closeShiftAction } from "./actions";
+import { closeShiftAction, openShiftAction } from "./actions";
+import { logout } from "@/app/login/actions";
+import ExportCsvButton from "./ExportCsvButton";
 import type { PaymentMethod } from "@/lib/types";
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
   shiftId: string;
+  shiftNumber: number;
   totalsByMethod: Record<PaymentMethod, number>;
   /** Piezas rendidas = check-outs hechos en el turno. */
   checkoutsCount: number;
+  /**
+   * Qué hacer al apretar "Listo" tras cerrar:
+   *  - "logout": recepción cerró su propia caja al fin de turno → cierra sesión.
+   *  - "reopen": recepción cerró una caja ajena (rendición forzada) → abre la suya y sigue.
+   *  - "refresh": admin → sólo refresca (comportamiento actual).
+   */
+  afterClose?: "logout" | "reopen" | "refresh";
+  /** En rendición forzada el modal no se puede descartar sin cerrar la caja. */
+  dismissable?: boolean;
+  /** Aviso destacado arriba del formulario (ej. quién dejó la caja abierta). */
+  notice?: string;
 };
 
 type CloseResult = {
@@ -56,13 +71,18 @@ export default function CloseShiftModal({
   isOpen,
   onClose,
   shiftId,
+  shiftNumber,
   totalsByMethod,
   checkoutsCount,
+  afterClose = "refresh",
+  dismissable = true,
+  notice,
 }: Props) {
   const router = useRouter();
   const [actualCash, setActualCash] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState<CloseResult | null>(null);
 
@@ -108,7 +128,21 @@ export default function CloseShiftModal({
     setClosed(result.data!);
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
+    if (afterClose === "logout") {
+      // Fin de turno de recepción: cerrar sesión (el próximo arranca con login propio).
+      setFinishing(true);
+      await logout();
+      return;
+    }
+    if (afterClose === "reopen") {
+      // Rendición forzada de caja ajena: abrir la propia y seguir trabajando.
+      setFinishing(true);
+      await openShiftAction();
+      onClose();
+      router.refresh();
+      return;
+    }
     onClose();
     router.refresh();
   };
@@ -184,19 +218,25 @@ export default function CloseShiftModal({
                 className="flex-1 px-5 py-2.5 border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
               >
                 <Printer size={18} />
-                Imprimir comprobante
+                Imprimir
               </button>
-              <button
-                type="button"
-                onClick={handleFinish}
-                className="flex-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
-              >
-                <CheckCircle2 size={18} />
-                Listo
-              </button>
+              <ExportCsvButton shiftId={shiftId} shiftNumber={shiftNumber} />
             </div>
+            <button
+              type="button"
+              onClick={handleFinish}
+              disabled={finishing}
+              className="w-full mt-3 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {finishing ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+              Listo
+            </button>
             <p className="text-[11px] text-slate-400 mt-3">
-              Imprimí el comprobante. Para el próximo turno abrí una caja nueva desde “Abrir Caja”.
+              {afterClose === "logout"
+                ? "Imprimí el comprobante y descargá el CSV. Al terminar se cierra la sesión."
+                : afterClose === "reopen"
+                  ? "Imprimí el comprobante y descargá el CSV. Al terminar se abre tu caja y seguís."
+                  : "Imprimí el comprobante y descargá el CSV. Para el próximo turno abrí una caja nueva."}
             </p>
           </div>
         </div>
@@ -219,12 +259,20 @@ export default function CloseShiftModal({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={24} />
-          </button>
+          {dismissable && (
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+              <X size={24} />
+            </button>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
+          {notice && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+              <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+              <div className="text-sm font-semibold text-amber-800">{notice}</div>
+            </div>
+          )}
           <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-start gap-3">
             <EyeOff size={18} className="text-slate-400 shrink-0 mt-0.5" />
             <div className="text-sm text-slate-600">
@@ -300,14 +348,16 @@ export default function CloseShiftModal({
         </form>
 
         <div className="p-6 border-t border-slate-100 flex gap-3 justify-end bg-slate-50 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
-          >
-            Cancelar
-          </button>
+          {dismissable && (
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+            >
+              Cancelar
+            </button>
+          )}
           <button
             type="button"
             onClick={(e) => handleSubmit(e as unknown as FormEvent)}

@@ -10,6 +10,9 @@ import type {
   AssociatedClientLedger,
   CashShift,
   CashShiftStatus,
+  CheckoutExportRow,
+  CleaningCategory,
+  CleaningOutcome,
   CleaningType,
   CompanyPassenger,
   CreateReservationPayload,
@@ -2383,6 +2386,22 @@ export async function markRoomClean(
   return { alertGenerated: Boolean(result.alert_generated) };
 }
 
+/**
+ * Registra que una habitación ocupada no se pudo limpiar hoy porque el huésped no dejó
+ * la llave. Queda "resuelta por hoy" (sale de pendientes) y el admin ve el motivo.
+ */
+export async function markRoomNoKey(
+  roomId: number,
+  notes?: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_mark_room_no_key", {
+    p_room_id: roomId,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
+}
+
 export async function getRoomCleaningLog(
   limit = 60
 ): Promise<RoomCleaningLogEntry[]> {
@@ -2398,6 +2417,8 @@ export async function getRoomCleaningLog(
       cleaner_name,
       previous_status,
       cleaning_type,
+      cleaning_category,
+      outcome,
       notes,
       rooms ( room_number )
       `
@@ -2415,6 +2436,8 @@ export async function getRoomCleaningLog(
     cleaner_name: string | null;
     previous_status: string;
     cleaning_type: CleaningType | null;
+    cleaning_category: CleaningCategory | null;
+    outcome: CleaningOutcome | null;
     notes: string | null;
     rooms: { room_number: string } | { room_number: string }[] | null;
   }>;
@@ -2448,6 +2471,8 @@ export async function getRoomCleaningLog(
       cleaner_name: r.cleaner_name,
       previous_status: r.previous_status,
       cleaning_type: r.cleaning_type,
+      cleaning_category: r.cleaning_category,
+      outcome: r.outcome ?? "cleaned",
       notes: r.notes,
       has_admin_alert: alertLogIds.has(r.id),
     };
@@ -2491,12 +2516,41 @@ export async function getAllActiveRoomsForMaintenance(): Promise<
           ? "status_maintenance"
           : null,
     cleaned_today: false,
+    daily_outcome: null,
+    daily_notes: null,
     active_client: null,
     active_check_out_target: null,
     active_late_check_out_until: null,
     last_checkout_client: null,
     last_checkout_at: null,
   })) as MaintenanceRoom[];
+}
+
+/**
+ * Filas para el export CSV fiscal: un check-out por fila, con la forma de pago usada al
+ * cerrar el check-out (o el medio del último pago real si la reserva llegó prepaga).
+ */
+export async function getShiftCheckoutExport(
+  shiftId: string
+): Promise<CheckoutExportRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_shift_checkout_export", {
+    p_shift_id: shiftId,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<{
+    actual_check_out: string;
+    client_name: string;
+    client_dni: string | null;
+    total_price: number | string;
+    payment_method: string;
+  }>).map((r) => ({
+    actual_check_out: r.actual_check_out,
+    client_name: r.client_name,
+    client_dni: r.client_dni,
+    total_price: Number(r.total_price) || 0,
+    payment_method: r.payment_method as CheckoutExportRow["payment_method"],
+  }));
 }
 
 export async function listAdminAlerts(onlyUnresolved = true): Promise<AdminAlert[]> {
