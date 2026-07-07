@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { getActiveOpenShift } from "@/lib/data";
+import { formatHotelTime } from "@/lib/time";
 
 export const revalidate = 0; // Ensure fresh data on every load
 
@@ -213,7 +212,7 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                                                 <div>
                                                     <p className="font-bold text-slate-800 text-sm">{resData?.client_name || "Desconocido"} (Hab. {roomNumber})</p>
                                                     <div className="flex gap-2 text-xs font-medium text-slate-500 mt-0.5">
-                                                        <span>{format(new Date(payment.created_at), "h:mm a", { locale: es })}</span>
+                                                        <span>{formatHotelTime(payment.created_at, hotelTimezone)}</span>
                                                         <span>•</span>
                                                         <span>{getPaymentMethodName(payment.payment_method)}</span>
                                                     </div>
