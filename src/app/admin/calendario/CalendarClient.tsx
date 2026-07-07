@@ -2,24 +2,61 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  addDays,
-  differenceInCalendarDays,
-  format,
-  startOfDay,
-} from "date-fns";
-import { es } from "date-fns/locale";
 import { CreditCard, FileText, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
 import { handleCancelReservation, handleCreateReservation } from "../actions";
+import { formatHotelDateTime } from "@/lib/time";
 import type { AssociatedClient, Reservation, Room, UserRole } from "@/lib/types";
+
+// ── Fechas por CLAVE "YYYY-MM-DD" en la zona del hotel, independientes de la tz del
+// navegador o del servidor. Así el calendario no se corre un día en la franja nocturna
+// argentina (cuando en UTC ya es el día siguiente) ni en PCs con la hora mal configurada.
+function dateKeyToUTCNoon(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+}
+function addDaysToKey(key: string, n: number): string {
+  const dt = dateKeyToUTCNoon(key);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+function diffDaysKeys(aKey: string, bKey: string): number {
+  const [ay, am, ad] = aKey.split("-").map(Number);
+  const [by, bm, bd] = bKey.split("-").map(Number);
+  return Math.round((Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86400000);
+}
+/** Clave "YYYY-MM-DD" de un instante ISO, en la zona indicada. */
+function hotelDateKeyOf(iso: string, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+// Etiquetas formateadas desde la clave (mediodía UTC + tz UTC → sin corrimientos).
+const WEEKDAY_FMT = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "short" });
+const DAYMONTH_FMT = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", day: "2-digit", month: "short" });
+function weekdayLabel(key: string): string {
+  return WEEKDAY_FMT.format(dateKeyToUTCNoon(key)).replace(".", "");
+}
+function dayMonthLabel(key: string): string {
+  return DAYMONTH_FMT.format(dateKeyToUTCNoon(key)).replace(".", "");
+}
+function ddmmyyyy(key: string): string {
+  const [y, m, d] = key.split("-");
+  return `${d}/${m}/${y}`;
+}
 
 type CalendarClientProps = {
   rooms: Room[];
   reservations: Reservation[];
-  startDate: string;
+  /** Clave "YYYY-MM-DD" de la primera columna (hoy en la zona del hotel). */
+  startDateKey: string;
+  timezone: string;
   daysCount: number;
   role: UserRole;
   associatedClients: AssociatedClient[];
@@ -64,14 +101,12 @@ function getReservationPalette(category: "active" | "next" | "future" | "pending
 
 function buildReservationPlacement(
   reservation: Reservation,
-  start: Date,
-  daysCount: number
+  startKey: string,
+  daysCount: number,
+  timezone: string
 ): ReservationPlacement | null {
-  const checkInDay = startOfDay(new Date(reservation.check_in_target));
-  const checkOutDay = startOfDay(new Date(reservation.check_out_target));
-
-  const checkInIndex = differenceInCalendarDays(checkInDay, start);
-  const checkoutIndex = differenceInCalendarDays(checkOutDay, start);
+  const checkInIndex = diffDaysKeys(hotelDateKeyOf(reservation.check_in_target, timezone), startKey);
+  const checkoutIndex = diffDaysKeys(hotelDateKeyOf(reservation.check_out_target, timezone), startKey);
 
   if (checkoutIndex < 0 || checkInIndex >= daysCount) return null;
 
@@ -99,7 +134,8 @@ function buildReservationPlacement(
 export default function CalendarClient({
   rooms,
   reservations,
-  startDate,
+  startDateKey,
+  timezone,
   daysCount,
   role,
   associatedClients,
@@ -112,22 +148,20 @@ export default function CalendarClient({
   const [cancelReason, setCancelReason] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  const start = useMemo(() => startOfDay(new Date(startDate)), [startDate]);
   const days = useMemo(
-    () => Array.from({ length: daysCount }, (_, index) => addDays(start, index)),
-    [daysCount, start]
+    () => Array.from({ length: daysCount }, (_, index) => addDaysToKey(startDateKey, index)),
+    [daysCount, startDateKey]
   );
   const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
   const canCancel = role === "admin" || role === "receptionist";
 
-  const openCreateModal = (roomId: number, day: Date) => {
-    const checkInDate = format(day, "yyyy-MM-dd");
-    const checkOutDate = format(addDays(day, 1), "yyyy-MM-dd");
+  const openCreateModal = (roomId: number, dayKey: string) => {
+    const checkOutKey = addDaysToKey(dayKey, 1);
 
     setCreateDraft({
       roomId,
-      checkIn: `${checkInDate}T${standardCheckInTime}`,
-      checkOut: `${checkOutDate}T${standardCheckOutTime}`,
+      checkIn: `${dayKey}T${standardCheckInTime}`,
+      checkOut: `${checkOutKey}T${standardCheckOutTime}`,
     });
   };
 
@@ -213,16 +247,16 @@ export default function CalendarClient({
             >
               Habitacion
             </div>
-            {days.map((day, dayIndex) => (
+            {days.map((dayKey, dayIndex) => (
               <div
-                key={day.toISOString()}
+                key={dayKey}
                 className={`shrink-0 py-1.5 px-1 text-center border-r border-slate-200 ${
                   dayIndex % 2 === 1 ? "bg-slate-100" : "bg-slate-50/70"
                 }`}
                 style={{ width: `${CELL_WIDTH}px` }}
               >
-                <p className="text-[10px] text-slate-500 uppercase font-medium leading-tight">{format(day, "E", { locale: es })}</p>
-                <p className="text-xs font-bold text-slate-800 leading-tight">{format(day, "dd MMM", { locale: es })}</p>
+                <p className="text-[10px] text-slate-500 uppercase font-medium leading-tight">{weekdayLabel(dayKey)}</p>
+                <p className="text-xs font-bold text-slate-800 leading-tight">{dayMonthLabel(dayKey)}</p>
               </div>
             ))}
           </div>
@@ -236,7 +270,9 @@ export default function CalendarClient({
               );
 
             const placements = roomReservations
-              .map((reservation) => buildReservationPlacement(reservation, start, daysCount))
+              .map((reservation) =>
+                buildReservationPlacement(reservation, startDateKey, daysCount, timezone)
+              )
               .filter((placement): placement is ReservationPlacement => placement !== null);
 
             let foundNext = false;
@@ -274,16 +310,16 @@ export default function CalendarClient({
                   style={{ width: `${daysCount * CELL_WIDTH}px`, height: `${ROW_HEIGHT}px` }}
                 >
                   <div className="absolute inset-0 flex">
-                    {days.map((day, dayIndex) => (
+                    {days.map((dayKey, dayIndex) => (
                       <button
                         type="button"
-                        key={`${room.id}-${day.toISOString()}`}
-                        onClick={() => openCreateModal(room.id, day)}
+                        key={`${room.id}-${dayKey}`}
+                        onClick={() => openCreateModal(room.id, dayKey)}
                         className={`h-full shrink-0 border-r border-slate-100 transition-colors hover:bg-brand-50 ${
                           dayIndex % 2 === 1 ? "bg-slate-500/5" : ""
                         }`}
                         style={{ width: `${CELL_WIDTH}px` }}
-                        aria-label={`Crear reserva para habitación ${room.room_number} el ${format(day, "dd/MM/yyyy")}`}
+                        aria-label={`Crear reserva para habitación ${room.room_number} el ${ddmmyyyy(dayKey)}`}
                       />
                     ))}
                   </div>
@@ -293,7 +329,7 @@ export default function CalendarClient({
                     const category = categoryMap.get(placement.reservation.id) ?? "pending";
                     const palette = getReservationPalette(category);
                     const width = cellSpan * CELL_WIDTH;
-                    
+
                     const gap = 6;
                     const paddingV = 4;
                     const tl_x = startsBeforeRange ? 0 : gap;
@@ -302,7 +338,7 @@ export default function CalendarClient({
                     const br_x = endsAfterRange ? width : width - gap;
 
                     const points = `${tl_x},${paddingV} ${tr_x},${paddingV} ${br_x},${BAR_HEIGHT - paddingV} ${bl_x},${BAR_HEIGHT - paddingV}`;
-                    
+
                     const left = placement.visibleStartIndex * CELL_WIDTH;
                     const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
                     const showText = horizontalWidth >= 56;
@@ -325,12 +361,12 @@ export default function CalendarClient({
                               <stop offset="100%" stopColor={palette.to} />
                             </linearGradient>
                           </defs>
-                          <polygon 
-                            points={points} 
-                            fill={`url(#grad-${placement.reservation.id})`} 
-                            stroke={`url(#grad-${placement.reservation.id})`} 
-                            strokeWidth="4" 
-                            strokeLinejoin="round" 
+                          <polygon
+                            points={points}
+                            fill={`url(#grad-${placement.reservation.id})`}
+                            stroke={`url(#grad-${placement.reservation.id})`}
+                            strokeWidth="4"
+                            strokeLinejoin="round"
                             className="drop-shadow-sm transition-opacity group-hover:opacity-90 pointer-events-auto cursor-pointer"
                             onClick={() => openReservationDetails(placement.reservation)}
                           />
@@ -449,11 +485,11 @@ export default function CalendarClient({
                   <div className="space-y-3 text-sm">
                     <div>
                       <p className="text-xs text-slate-400">Check-in</p>
-                      <p className="font-semibold text-slate-800">{format(new Date(selectedReservation.check_in_target), "dd/MM/yyyy HH:mm")}</p>
+                      <p className="font-semibold text-slate-800">{formatHotelDateTime(selectedReservation.check_in_target, timezone)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-400">Check-out</p>
-                      <p className="font-semibold text-slate-800">{format(new Date(selectedReservation.check_out_target), "dd/MM/yyyy HH:mm")}</p>
+                      <p className="font-semibold text-slate-800">{formatHotelDateTime(selectedReservation.check_out_target, timezone)}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>

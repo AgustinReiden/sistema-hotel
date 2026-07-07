@@ -54,6 +54,24 @@ export function formatHotelShortDateTime(
   return `${get("day")} ${month} ${get("hour")}:${get("minute")}`;
 }
 
+// Fecha con día de semana en la zona del hotel, tipo "lunes, 06 jul". Se arma con
+// formatToParts para controlar el separador y quitar el punto del mes abreviado.
+export function formatHotelWeekdayDate(
+  iso: string | null | undefined,
+  timezone?: string
+): string {
+  if (!iso) return "—";
+  const parts = new Intl.DateTimeFormat("es-AR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+    timeZone: timezone || DEFAULT_TZ,
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const month = get("month").replace(".", "");
+  return `${get("weekday")}, ${get("day")} ${month}`;
+}
+
 // Fecha local del hotel como clave comparable "YYYY-MM-DD". Sirve para comparar
 // "qué día es hoy" contra la fecha de salida sin que la hora ni la zona del
 // navegador/servidor lo corran de día.

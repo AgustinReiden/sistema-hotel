@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { AlertTriangle, ClipboardList, Sparkles } from "lucide-react";
-import { format, isAfter } from "date-fns";
-import { es } from "date-fns/locale";
+import { isAfter } from "date-fns";
 
-import { formatHotelShortDateTime } from "@/lib/time";
+import { formatHotelShortDateTime, formatHotelWeekdayDate } from "@/lib/time";
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
 import {
@@ -173,7 +172,7 @@ export default async function Dashboard() {
     <>
       <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-50 shadow-sm shrink-0">
         <h1 className="text-xl font-bold text-slate-800">
-          Vista Global: {format(now, "eeee, dd MMM", { locale: es })}
+          Vista Global: {formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}
         </h1>
         <div className="flex items-center space-x-4">
           {lateCheckoutsCount > 0 && (
