@@ -63,6 +63,13 @@ export type CleaningCategory =
 /** Resultado de la limpieza diaria: se limpió o no se pudo (sin llave). */
 export type CleaningOutcome = "cleaned" | "not_cleaned_no_key";
 
+/** Última limpieza de HOY de una habitación (para el estado "Limpiada hoy" del tablero). */
+export type TodayCleaning = {
+  at: string;
+  category: CleaningCategory | null;
+  outcome: CleaningOutcome;
+};
+
 export type CleaningRequiredReason =
   | "status_cleaning"
   | "status_maintenance"

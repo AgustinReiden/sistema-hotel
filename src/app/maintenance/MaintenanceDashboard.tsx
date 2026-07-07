@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -16,29 +16,23 @@ import {
 import { toast } from "sonner";
 
 import { markRoomCleanAction, markRoomNoKeyAction } from "./actions";
-import { formatHotelDateTime } from "@/lib/time";
-import type { CleaningType, MaintenanceRoom } from "@/lib/types";
+import { formatHotelDateTime, formatHotelTime } from "@/lib/time";
+import type { CleaningType, MaintenanceRoom, TodayCleaning } from "@/lib/types";
 
 type Props = {
   rooms: MaintenanceRoom[];
+  cleanedToday: Record<number, TodayCleaning>;
   hotelTimezone: string;
   loadError?: string;
 };
 
-// Solo para habitaciones VACÍAS que se limpian sin estar pendientes (caso inusual).
+// Solo para habitaciones VACÍAS que se marcan sin estar pendientes.
 const CLEANING_TYPES: { value: CleaningType; label: string }[] = [
   { value: "limpieza_mantenimiento", label: "Limpieza de mantenimiento (vacía)" },
   { value: "habitacion_ocupada", label: "Estaba ocupada (no debería)" },
 ];
 
-type RoomGroup = "blocking" | "daily" | "ready" | "occupied";
-
-function groupOf(room: MaintenanceRoom): RoomGroup {
-  if (room.requires_cleaning) {
-    return room.cleaning_required_reason === "overnight_stay" ? "daily" : "blocking";
-  }
-  return room.status === "available" ? "ready" : "occupied";
-}
+type RoomGroup = "blocking" | "daily" | "ready" | "occupied" | "done";
 
 function activeCheckout(room: MaintenanceRoom): string | null {
   return room.active_late_check_out_until ?? room.active_check_out_target;
@@ -57,7 +51,26 @@ function reasonText(room: MaintenanceRoom): string {
   }
 }
 
-export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }: Props) {
+function doneBadge(entry: TodayCleaning): string {
+  if (entry.outcome === "not_cleaned_no_key") return "Sin llave";
+  switch (entry.category) {
+    case "checkout":
+      return "Limpiada (check-out)";
+    case "checkin_daily":
+      return "Limpiada (diaria)";
+    case "occupied_anomaly":
+      return "Limpiada (ocupada s/reserva)";
+    default:
+      return "Limpiada";
+  }
+}
+
+export default function MaintenanceDashboard({
+  rooms,
+  cleanedToday,
+  hotelTimezone,
+  loadError,
+}: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [selected, setSelected] = useState<MaintenanceRoom | null>(null);
@@ -65,10 +78,19 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
   const [notes, setNotes] = useState("");
   const [cleaningType, setCleaningType] = useState<CleaningType | "">("");
 
-  const blocking = useMemo(() => rooms.filter((r) => groupOf(r) === "blocking"), [rooms]);
-  const daily = useMemo(() => rooms.filter((r) => groupOf(r) === "daily"), [rooms]);
-  const ready = useMemo(() => rooms.filter((r) => groupOf(r) === "ready"), [rooms]);
-  const occupied = useMemo(() => rooms.filter((r) => groupOf(r) === "occupied"), [rooms]);
+  const groupOf = (room: MaintenanceRoom): RoomGroup => {
+    if (room.requires_cleaning) {
+      return room.cleaning_required_reason === "overnight_stay" ? "daily" : "blocking";
+    }
+    if (cleanedToday[room.id]) return "done";
+    return room.status === "occupied" ? "occupied" : "ready";
+  };
+
+  const blocking = rooms.filter((r) => groupOf(r) === "blocking");
+  const daily = rooms.filter((r) => groupOf(r) === "daily");
+  const ready = rooms.filter((r) => groupOf(r) === "ready");
+  const occupied = rooms.filter((r) => groupOf(r) === "occupied");
+  const done = rooms.filter((r) => groupOf(r) === "done");
   const pendingCount = blocking.length + daily.length;
 
   const openClean = (room: MaintenanceRoom) => {
@@ -140,7 +162,9 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
     const isBlocking = group === "blocking";
     const isDaily = group === "daily";
     const isReady = group === "ready";
+    const isDone = group === "done";
     const checkout = activeCheckout(room);
+    const todayEntry = cleanedToday[room.id];
 
     const border = isMaint
       ? "border-red-300"
@@ -148,49 +172,57 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
         ? "border-amber-300"
         : isDaily
           ? "border-sky-300"
-          : isReady
+          : isDone
             ? "border-emerald-300"
-            : "border-slate-300";
+            : isReady
+              ? "border-slate-200"
+              : "border-slate-300";
     const headerBg = isMaint
       ? "bg-red-50 border-red-100"
       : isBlocking
         ? "bg-amber-50 border-amber-100"
         : isDaily
           ? "bg-sky-50 border-sky-100"
-          : isReady
+          : isDone
             ? "bg-emerald-50 border-emerald-100"
-            : "bg-slate-100 border-slate-200";
+            : isReady
+              ? "bg-white border-slate-100"
+              : "bg-slate-100 border-slate-200";
     const pill = isMaint
       ? "bg-red-500 text-white border-red-600"
       : isBlocking
         ? "bg-amber-500 text-white border-amber-600"
         : isDaily
           ? "bg-sky-500 text-white border-sky-600"
-          : isReady
+          : isDone
             ? "bg-emerald-500 text-white border-emerald-600"
-            : "bg-slate-500 text-white border-slate-600";
+            : isReady
+              ? "bg-slate-400 text-white border-slate-500"
+              : "bg-slate-500 text-white border-slate-600";
     const pillLabel = isMaint
       ? "Mantenimiento"
       : isBlocking
         ? "Check-out"
         : isDaily
           ? "Limpieza diaria"
-          : isReady
-            ? "Lista"
-            : "Ocupada";
+          : isDone
+            ? "Limpiada hoy"
+            : isReady
+              ? "Lista"
+              : "Ocupada";
     const pillIcon = isMaint ? (
       <Wrench size={12} />
     ) : isBlocking ? (
       <Lock size={12} />
     ) : isDaily ? (
       <Sparkles size={12} />
-    ) : isReady ? (
+    ) : isDone ? (
       <CheckCircle2 size={12} />
+    ) : isReady ? (
+      <Sparkles size={12} />
     ) : (
       <BedDouble size={12} />
     );
-
-    const noKeyToday = room.daily_outcome === "not_cleaned_no_key";
 
     return (
       <div key={room.id} className={`bg-white border rounded-2xl shadow-sm overflow-hidden ${border}`}>
@@ -213,7 +245,17 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
         </div>
 
         <div className="p-5 space-y-3">
-          {room.active_client ? (
+          {isDone && todayEntry ? (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+              <p className="text-sm font-bold text-emerald-800 flex items-center gap-1.5">
+                <CheckCircle2 size={15} />
+                {doneBadge(todayEntry)}
+              </p>
+              <p className="text-xs text-emerald-600 mt-0.5">
+                Hoy a las {formatHotelTime(todayEntry.at, hotelTimezone)}
+              </p>
+            </div>
+          ) : room.active_client ? (
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400 font-bold">Huésped actual</p>
               <p className="font-semibold text-slate-800 truncate">{room.active_client}</p>
@@ -247,12 +289,6 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
               {reasonText(room)}
             </p>
           )}
-          {noKeyToday && (
-            <p className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
-              <KeyRound size={13} />
-              Hoy quedó registrada como &quot;sin llave&quot;.
-            </p>
-          )}
 
           {(isBlocking || isDaily || isReady) && (
             <button
@@ -282,6 +318,24 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
     );
   };
 
+  const section = (
+    title: string,
+    icon: React.ReactNode,
+    list: MaintenanceRoom[],
+    extraClass = "mb-8"
+  ) =>
+    list.length > 0 ? (
+      <section className={extraClass}>
+        <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
+          {icon}
+          {title} ({list.length})
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {list.map(renderCard)}
+        </div>
+      </section>
+    ) : null;
+
   return (
     <div className="p-6 pb-20 max-w-5xl mx-auto">
       <div className="mb-6">
@@ -290,6 +344,7 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
           {pendingCount === 0
             ? "No hay habitaciones pendientes de limpieza."
             : `${pendingCount} habitación${pendingCount === 1 ? "" : "es"} pendiente${pendingCount === 1 ? "" : "s"} de limpieza.`}
+          {done.length > 0 && ` · ${done.length} limpiada${done.length === 1 ? "" : "s"} hoy.`}
         </p>
       </div>
 
@@ -300,52 +355,23 @@ export default function MaintenanceDashboard({ rooms, hotelTimezone, loadError }
         </div>
       )}
 
-      {blocking.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Lock size={14} className="text-amber-500" />
-            Por check-out — bloquean check-in ({blocking.length})
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {blocking.map(renderCard)}
-          </div>
-        </section>
+      {section(
+        "Por check-out — bloquean check-in",
+        <Lock size={14} className="text-amber-500" />,
+        blocking
       )}
-
-      {daily.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Sparkles size={14} className="text-sky-500" />
-            Limpieza diaria de ocupadas — no bloquea ({daily.length})
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {daily.map(renderCard)}
-          </div>
-        </section>
+      {section(
+        "Limpieza diaria de ocupadas — no bloquea",
+        <Sparkles size={14} className="text-sky-500" />,
+        daily
       )}
-
-      {ready.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <CheckCircle2 size={14} className="text-emerald-500" />
-            Listas ({ready.length})
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {ready.map(renderCard)}
-          </div>
-        </section>
-      )}
-
-      {occupied.length > 0 && (
-        <section>
-          <h2 className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <BedDouble size={14} className="text-slate-500" />
-            Ocupadas al día ({occupied.length})
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {occupied.map(renderCard)}
-          </div>
-        </section>
+      {section("Listas — para marcar", <Sparkles size={14} className="text-slate-400" />, ready)}
+      {section("Ocupadas", <BedDouble size={14} className="text-slate-500" />, occupied)}
+      {section(
+        "Limpiadas hoy",
+        <CheckCircle2 size={14} className="text-emerald-500" />,
+        done,
+        "mb-2"
       )}
 
       {selected && (

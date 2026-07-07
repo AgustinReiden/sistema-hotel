@@ -1,10 +1,14 @@
-import { getAllActiveRoomsForMaintenance, getHotelSettings } from "@/lib/data";
+import {
+  getAllActiveRoomsForMaintenance,
+  getHotelSettings,
+  getTodayCleanings,
+} from "@/lib/data";
 import MaintenanceDashboard from "./MaintenanceDashboard";
 
 export const dynamic = "force-dynamic";
 
 export default async function MaintenancePage() {
-  const [roomsResult, hotelSettings] = await Promise.all([
+  const [roomsResult, hotelSettings, cleanedToday] = await Promise.all([
     getAllActiveRoomsForMaintenance()
       .then((rooms) => ({ rooms, loadError: undefined as string | undefined }))
       .catch((error) => {
@@ -16,10 +20,12 @@ export default async function MaintenancePage() {
         };
       }),
     getHotelSettings().catch(() => null),
+    getTodayCleanings().catch(() => ({})),
   ]);
   return (
     <MaintenanceDashboard
       rooms={roomsResult.rooms}
+      cleanedToday={cleanedToday}
       hotelTimezone={hotelSettings?.timezone || "America/Argentina/Tucuman"}
       loadError={roomsResult.loadError}
     />
