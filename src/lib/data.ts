@@ -36,6 +36,7 @@ import type {
   CleaningLogResult,
   Room,
   ShiftPaymentRow,
+  TodayCleaning,
   ShiftSummary,
   UpcomingGuest,
   UserRole,
@@ -2541,6 +2542,48 @@ export async function getCleaningLog(
     pageSize,
     summary: { checkin_daily, checkout, empty_maintenance, occupied_anomaly, no_key },
   };
+}
+
+/**
+ * Última limpieza de HOY (zona del hotel) por habitación. Sirve para mostrar "Limpiada hoy"
+ * en el tablero de mantenimiento y para el límite de una limpieza por día en las vacías.
+ */
+export async function getTodayCleanings(): Promise<Record<number, TodayCleaning>> {
+  const supabase = await createClient();
+  const settings = await getHotelSettings().catch(() => null);
+  const tz = settings?.timezone || "America/Argentina/Tucuman";
+  const todayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const dayStartISO = localToISO(todayKey, "00:00", tz);
+
+  const { data, error } = await supabase
+    .from("room_cleaning_log")
+    .select("room_id, cleaned_at, cleaning_category, outcome")
+    .gte("cleaned_at", dayStartISO)
+    .order("cleaned_at", { ascending: false });
+  if (error) throw error;
+
+  const map: Record<number, TodayCleaning> = {};
+  for (const row of (data ?? []) as Array<{
+    room_id: number;
+    cleaned_at: string;
+    cleaning_category: CleaningCategory | null;
+    outcome: CleaningOutcome | null;
+  }>) {
+    // Filas ordenadas desc: la primera de cada habitación es la más reciente de hoy.
+    if (!(row.room_id in map)) {
+      map[row.room_id] = {
+        at: row.cleaned_at,
+        category: row.cleaning_category,
+        outcome: row.outcome ?? "cleaned",
+      };
+    }
+  }
+  return map;
 }
 
 /** Lista breve de habitaciones activas (id + número) para filtros/dropdowns. */
