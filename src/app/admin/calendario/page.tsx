@@ -20,6 +20,15 @@ export default async function CalendarPage() {
     getActiveAssociatedClients(),
   ]);
 
+  const tz = hotelSettings.timezone || "America/Argentina/Tucuman";
+  // Clave "YYYY-MM-DD" de HOY en la zona del hotel (startDate ya es la medianoche del hotel).
+  const startDateKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(startDate);
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
@@ -41,7 +50,8 @@ export default async function CalendarPage() {
         <CalendarClient
           rooms={rooms}
           reservations={reservations}
-          startDate={startDate.toISOString()}
+          startDateKey={startDateKey}
+          timezone={tz}
           daysCount={daysCount}
           role={role}
           associatedClients={associatedClients}
