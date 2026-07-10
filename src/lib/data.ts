@@ -3,6 +3,22 @@ import "server-only";
 import { createClient } from "./supabase/server";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import { localToISO } from "./format";
+import { hotelDateKey } from "./time";
+import {
+  buildDailyTotals,
+  buildOccupancyHistogram,
+  buildRevenueByRoomType,
+  computeWindowKpis,
+  countDaysInclusive,
+  hotelRangeToUtc,
+  pctDelta,
+  previousPeriodRange,
+  type CreatedReservation,
+  type DailyOccupancy,
+  type DailyTotal,
+  type NightlyReservation,
+  type PaymentPoint,
+} from "./analytics";
 import type {
   AdminAlert,
   AssignWalkInPayload,
@@ -1857,167 +1873,269 @@ export async function updateWhatsappStatus(reservationId: string, notified: bool
   if (error) throw error;
 }
 
-// ---- Analytics Dashboard ----
+// ---- Tablero Gerencial (BI) ----
 
-export type DailyIncome = { date: string; total: number };
-export type RoomTypeOccupancy = { room_type: string; count: number };
-export type PaymentMethodBreakdown = { method: string; total: number };
-export type StatusBreakdown = { status: string; count: number };
+export type KpiWithDelta = { current: number; previous: number; deltaPct: number | null };
 
-export type AnalyticsData = {
-  // KPIs
-  occupancyRate: number;
-  totalIncome: number;
-  totalReservations: number;
-  averageTicket: number;
-  totalCheckIns: number;
-  totalCancellations: number;
-  // Chart data
-  dailyIncome: DailyIncome[];
-  roomTypeOccupancy: RoomTypeOccupancy[];
-  paymentMethods: PaymentMethodBreakdown[];
-  statusBreakdown: StatusBreakdown[];
+export type DashboardKpis = {
+  lodgingRevenue: KpiWithDelta;
+  totalPaymentsIncome: KpiWithDelta;
+  occupancyRate: KpiWithDelta;
+  adr: KpiWithDelta;
+  revpar: KpiWithDelta;
+  reservationsCreated: KpiWithDelta;
+  cancellationRate: KpiWithDelta;
+  avgLengthOfStay: KpiWithDelta;
+  avgLeadTimeDays: KpiWithDelta;
 };
 
-export async function getAnalyticsData(
-  startDateStr: string,
-  endDateStr: string
-): Promise<AnalyticsData> {
-  const supabase = await createClient();
+export type ManagementDashboardData = {
+  range: { from: string; to: string; days: number };
+  previousRange: { from: string; to: string };
+  currency: string;
+  activeRooms: number;
+  kpis: DashboardKpis;
+  // Series del período actual
+  dailyOccupancy: DailyOccupancy[];
+  dailyCash: DailyTotal[];
+  // Breakdowns del período actual
+  revenueByRoomType: { room_type: string; total: number }[];
+  paymentMethods: { method: string; total: number }[];
+  extraChargesByType: { charge_type: string; total: number }[];
+  // Cobranzas (snapshot actual, no acotado al rango)
+  accountsReceivable: number;
+  currentAccountDebt: number;
+  topDebtors: { name: string; balance: number }[];
+  // Control de caja y operación del período
+  cashDiscrepancyTotal: number;
+  cleaningsByCategory: { category: string; count: number }[];
+  openAlerts: number;
+};
 
-  // Build UTC boundaries from date strings
-  const startUTC = new Date(`${startDateStr}T00:00:00`).toISOString();
-  const endUTC = new Date(`${endDateStr}T23:59:59.999`).toISOString();
+/**
+ * Datos del Tablero Gerencial para el rango [startKey, endKey] (claves "YYYY-MM-DD" en
+ * la zona del hotel). Los KPIs principales traen su comparación contra el período
+ * contiguo anterior de igual longitud. La agregación pesada (room-nights, ocupación,
+ * ADR/RevPAR) vive en funciones puras testeables de ./analytics; acá solo se traen y
+ * mapean las filas. Bucketing y límites de rango son en zona del hotel (no UTC).
+ */
+export async function getManagementDashboardData(
+  startKey: string,
+  endKey: string
+): Promise<ManagementDashboardData> {
+  const supabase = await createClient();
+  const settings = await getHotelSettings();
+  const tz = settings.timezone || "America/Argentina/Tucuman";
+  const currency = settings.currency || "ARS";
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  const prev = previousPeriodRange(startKey, endKey);
+  const unionWindow = hotelRangeToUtc(prev.start, endKey, tz); // [prevInicio .. fin]
+  const current = hotelRangeToUtc(startKey, endKey, tz); // solo período actual
 
   const [
-    roomsResult,
-    checkedInResult,
-    reservationsInRangeResult,
-    paymentsInRangeResult,
+    roomsRes,
+    overlapRes,
+    createdRes,
+    paymentsRes,
+    extrasRes,
+    shiftsRes,
+    cleaningRes,
+    receivableRes,
+    ccAccounts,
+    alertsRes,
   ] = await Promise.all([
-    // All active rooms
-    supabase.from("rooms").select("id, room_type").eq("is_active", true),
-    // Currently checked-in reservations
-    supabase.from("reservations").select("id").eq("status", "checked_in"),
-    // Reservations created in the date range (excluding cancelled for avg ticket)
+    supabase.from("rooms").select("id").eq("is_active", true),
+    // Estadías (no canceladas, comprometidas) que solapan la ventana unión.
     supabase
       .from("reservations")
-      .select("id, status, total_price, actual_check_in, room_id, rooms(room_type)")
-      .gte("created_at", startUTC)
-      .lte("created_at", endUTC),
-    // Payments in the date range
+      .select(
+        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, rooms(room_type)"
+      )
+      .in("status", ["confirmed", "checked_in", "checked_out"])
+      .lt("check_in_target", unionWindow.endUtcExclusive)
+      .gte("check_out_target", unionWindow.startUtc),
+    // Reservas creadas en la ventana unión (pickup / cancelaciones).
+    supabase
+      .from("reservations")
+      .select("status, created_at")
+      .gte("created_at", unionWindow.startUtc)
+      .lt("created_at", unionWindow.endUtcExclusive),
+    // Pagos de la ventana unión (para caja cobrada y su delta).
     supabase
       .from("payments")
-      .select("id, amount, payment_method, created_at")
-      .gte("created_at", startUTC)
-      .lte("created_at", endUTC),
+      .select("amount, payment_method, created_at")
+      .gte("created_at", unionWindow.startUtc)
+      .lt("created_at", unionWindow.endUtcExclusive),
+    // Recargos extra del período actual.
+    supabase
+      .from("extra_charges")
+      .select("charge_type, amount, created_at")
+      .gte("created_at", current.startUtc)
+      .lt("created_at", current.endUtcExclusive),
+    // Arqueos cerrados en el período (discrepancias).
+    supabase
+      .from("cash_shifts")
+      .select("discrepancy, closed_at")
+      .eq("status", "closed")
+      .gte("closed_at", current.startUtc)
+      .lt("closed_at", current.endUtcExclusive),
+    // Limpiezas del período (productividad housekeeping).
+    supabase
+      .from("room_cleaning_log")
+      .select("cleaning_category, cleaned_at")
+      .gte("cleaned_at", current.startUtc)
+      .lt("cleaned_at", current.endUtcExclusive),
+    // Reservas activas con saldo (por cobrar) — snapshot.
+    supabase
+      .from("reservations")
+      .select("total_price, paid_amount")
+      .in("status", ["confirmed", "checked_in"]),
+    // Cuentas corrientes (deuda) — snapshot; reutiliza el cálculo central.
+    getCtaCteAccounts(),
+    // Alertas operativas sin resolver.
+    supabase
+      .from("admin_alerts")
+      .select("id", { count: "exact", head: true })
+      .is("resolved_at", null),
   ]);
 
-  const rooms = roomsResult.data ?? [];
-  const checkedIn = checkedInResult.data ?? [];
-  const reservations = reservationsInRangeResult.data ?? [];
-  const payments = paymentsInRangeResult.data ?? [];
+  if (overlapRes.error) throw overlapRes.error;
 
-  // ── KPIs ──
-  const totalRooms = rooms.length;
-  const occupancyRate = totalRooms > 0 ? (checkedIn.length / totalRooms) * 100 : 0;
+  const activeRooms = (roomsRes.data ?? []).length;
 
-  const totalIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const roomTypeOf = (
+    rel: { room_type: string } | { room_type: string }[] | null | undefined
+  ): string => (Array.isArray(rel) ? rel[0]?.room_type ?? "—" : rel?.room_type ?? "—");
 
-  const totalReservations = reservations.length;
-
-  const nonCancelledReservations = reservations.filter(
-    (r) => r.status !== "cancelled"
-  );
-  const averageTicket =
-    nonCancelledReservations.length > 0
-      ? nonCancelledReservations.reduce(
-          (sum, r) => sum + Number(r.total_price),
-          0
-        ) / nonCancelledReservations.length
-      : 0;
-
-  const totalCheckIns = reservations.filter(
-    (r) => r.actual_check_in !== null
-  ).length;
-
-  const totalCancellations = reservations.filter(
-    (r) => r.status === "cancelled"
-  ).length;
-
-  // ── Chart: Daily Income ──
-  const dailyMap = new Map<string, number>();
-  for (const p of payments) {
-    const day = new Date(p.created_at).toISOString().split("T")[0];
-    dailyMap.set(day, (dailyMap.get(day) || 0) + Number(p.amount));
-  }
-  // Fill in missing days in range
-  const cursor = new Date(startDateStr);
-  const endDate = new Date(endDateStr);
-  while (cursor <= endDate) {
-    const key = cursor.toISOString().split("T")[0];
-    if (!dailyMap.has(key)) dailyMap.set(key, 0);
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  const dailyIncome: DailyIncome[] = Array.from(dailyMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, total]) => ({ date, total }));
-
-  // ── Chart: Room Type Occupancy ──
-  type RoomJoinRow = {
-    room_id: number;
+  type OverlapRow = {
+    status: ReservationStatus;
+    check_in_target: string;
+    check_out_target: string;
+    actual_check_in: string | null;
+    actual_check_out: string | null;
+    base_total_price: number | string | null;
+    discount_amount: number | string | null;
+    created_at: string;
     rooms: { room_type: string } | { room_type: string }[] | null;
   };
-  const roomTypeMap = new Map<string, number>();
-  for (const r of reservations.filter(
-    (r) => r.status === "checked_in" || r.status === "confirmed"
-  ) as unknown as RoomJoinRow[]) {
-    const roomRel = r.rooms;
-    const roomType = Array.isArray(roomRel)
-      ? roomRel[0]?.room_type
-      : roomRel?.room_type;
-    if (roomType) {
-      roomTypeMap.set(roomType, (roomTypeMap.get(roomType) || 0) + 1);
-    }
-  }
-  const roomTypeOccupancy: RoomTypeOccupancy[] = Array.from(
-    roomTypeMap.entries()
-  ).map(([room_type, count]) => ({ room_type, count }));
 
-  // ── Chart: Payment Methods ──
+  const overlap: NightlyReservation[] = ((overlapRes.data ?? []) as OverlapRow[]).map((r) => ({
+    status: r.status,
+    checkInTarget: r.check_in_target,
+    checkOutTarget: r.check_out_target,
+    actualCheckIn: r.actual_check_in,
+    actualCheckOut: r.actual_check_out,
+    baseTotalPrice: Number(r.base_total_price) || 0,
+    discountAmount: Number(r.discount_amount) || 0,
+    roomType: roomTypeOf(r.rooms),
+    createdAt: r.created_at,
+  }));
+
+  const created: CreatedReservation[] = (
+    (createdRes.data ?? []) as { status: ReservationStatus; created_at: string }[]
+  ).map((r) => ({ status: r.status, createdAt: r.created_at }));
+
+  const payments: PaymentPoint[] = (
+    (paymentsRes.data ?? []) as { amount: number | string; payment_method: string; created_at: string }[]
+  ).map((p) => ({ amount: Number(p.amount) || 0, method: p.payment_method, createdAt: p.created_at }));
+
+  // ── KPIs con comparación período vs. período (mismos datos, dos sub-rangos) ──
+  const kpiArgs = { reservationsOverlap: overlap, reservationsCreated: created, payments, activeRooms, tz };
+  const cur = computeWindowKpis({ ...kpiArgs, rangeStartKey: startKey, rangeEndKey: endKey });
+  const prvKpis = computeWindowKpis({ ...kpiArgs, rangeStartKey: prev.start, rangeEndKey: prev.end });
+  const delta = (a: number, b: number): KpiWithDelta => ({ current: a, previous: b, deltaPct: pctDelta(a, b) });
+
+  const kpis: DashboardKpis = {
+    lodgingRevenue: delta(cur.lodgingRevenue, prvKpis.lodgingRevenue),
+    totalPaymentsIncome: delta(cur.totalPaymentsIncome, prvKpis.totalPaymentsIncome),
+    occupancyRate: delta(cur.occupancyRate, prvKpis.occupancyRate),
+    adr: delta(cur.adr, prvKpis.adr),
+    revpar: delta(cur.revpar, prvKpis.revpar),
+    reservationsCreated: delta(cur.reservationsCreated, prvKpis.reservationsCreated),
+    cancellationRate: delta(cur.cancellationRate, prvKpis.cancellationRate),
+    avgLengthOfStay: delta(cur.avgLengthOfStay, prvKpis.avgLengthOfStay),
+    avgLeadTimeDays: delta(cur.avgLeadTimeDays, prvKpis.avgLeadTimeDays),
+  };
+
+  // ── Series y breakdowns (solo período actual) ──
+  const dailyOccupancy = buildOccupancyHistogram(overlap, startKey, endKey, activeRooms, tz);
+
+  const currentPayments = payments.filter((p) => {
+    const k = hotelDateKey(p.createdAt, tz);
+    return k >= startKey && k <= endKey;
+  });
+  const dailyCash = buildDailyTotals(
+    currentPayments.map((p) => ({ iso: p.createdAt, value: p.amount })),
+    startKey,
+    endKey,
+    tz
+  );
+
+  const revenueByRoomType = buildRevenueByRoomType(overlap, startKey, endKey, tz);
+
   const methodMap = new Map<string, number>();
-  for (const p of payments) {
-    methodMap.set(
-      p.payment_method,
-      (methodMap.get(p.payment_method) || 0) + Number(p.amount)
-    );
-  }
-  const paymentMethodsData: PaymentMethodBreakdown[] = Array.from(
-    methodMap.entries()
-  )
-    .map(([method, total]) => ({ method, total }))
+  for (const p of currentPayments) methodMap.set(p.method, (methodMap.get(p.method) ?? 0) + p.amount);
+  const paymentMethods = Array.from(methodMap.entries())
+    .map(([method, total]) => ({ method, total: round2(total) }))
     .sort((a, b) => b.total - a.total);
 
-  // ── Chart: Status Breakdown ──
-  const statusMap = new Map<string, number>();
-  for (const r of reservations) {
-    statusMap.set(r.status, (statusMap.get(r.status) || 0) + 1);
+  const extraMap = new Map<string, number>();
+  for (const e of (extrasRes.data ?? []) as { charge_type: string; amount: number | string }[]) {
+    extraMap.set(e.charge_type, (extraMap.get(e.charge_type) ?? 0) + (Number(e.amount) || 0));
   }
-  const statusBreakdown: StatusBreakdown[] = Array.from(
-    statusMap.entries()
-  ).map(([status, count]) => ({ status, count }));
+  const extraChargesByType = Array.from(extraMap.entries())
+    .map(([charge_type, total]) => ({ charge_type, total: round2(total) }))
+    .sort((a, b) => b.total - a.total);
+
+  // ── Cobranzas (snapshot) ──
+  const accountsReceivable = round2(
+    ((receivableRes.data ?? []) as { total_price: number | string; paid_amount: number | string }[]).reduce(
+      (sum, r) => {
+        const bal = (Number(r.total_price) || 0) - (Number(r.paid_amount) || 0);
+        return sum + (bal > 0 ? bal : 0);
+      },
+      0
+    )
+  );
+  const debtors = (ccAccounts as CtaCteAccount[]).filter((a) => a.balance > 0);
+  const currentAccountDebt = round2(debtors.reduce((sum, a) => sum + a.balance, 0));
+  const topDebtors = debtors.slice(0, 5).map((a) => ({ name: a.name, balance: a.balance }));
+
+  // ── Control de caja y operación del período ──
+  const cashDiscrepancyTotal = round2(
+    ((shiftsRes.data ?? []) as { discrepancy: number | string | null }[]).reduce(
+      (sum, s) => sum + Math.abs(Number(s.discrepancy) || 0),
+      0
+    )
+  );
+
+  const cleaningMap = new Map<string, number>();
+  for (const c of (cleaningRes.data ?? []) as { cleaning_category: string | null }[]) {
+    const cat = c.cleaning_category ?? "otros";
+    cleaningMap.set(cat, (cleaningMap.get(cat) ?? 0) + 1);
+  }
+  const cleaningsByCategory = Array.from(cleaningMap.entries())
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => b.count - a.count);
 
   return {
-    occupancyRate,
-    totalIncome,
-    totalReservations,
-    averageTicket,
-    totalCheckIns,
-    totalCancellations,
-    dailyIncome,
-    roomTypeOccupancy,
-    paymentMethods: paymentMethodsData,
-    statusBreakdown,
+    range: { from: startKey, to: endKey, days: countDaysInclusive(startKey, endKey) },
+    previousRange: { from: prev.start, to: prev.end },
+    currency,
+    activeRooms,
+    kpis,
+    dailyOccupancy,
+    dailyCash,
+    revenueByRoomType,
+    paymentMethods,
+    extraChargesByType,
+    accountsReceivable,
+    currentAccountDebt,
+    topDebtors,
+    cashDiscrepancyTotal,
+    cleaningsByCategory,
+    openAlerts: alertsRes.count ?? 0,
   };
 }
 
