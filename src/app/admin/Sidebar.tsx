@@ -81,7 +81,7 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                         </Link>
                         <Link href="/admin/analytics" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <BarChart3 size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Análisis</span>
+                            <span className="font-medium">Tablero</span>
                         </Link>
                     </>
                 )}
