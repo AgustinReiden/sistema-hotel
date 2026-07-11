@@ -1411,14 +1411,18 @@ export async function addExtraCharge(
   if (error) throw error;
 }
 
+export type ChangeRoomReason = "room_defective" | "guest_request";
+
 export async function changeReservationRoom(
   reservationId: string,
-  newRoomId: number
+  newRoomId: number,
+  reason: ChangeRoomReason
 ): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("rpc_change_reservation_room", {
     p_reservation_id: reservationId,
     p_new_room_id: newRoomId,
+    p_reason: reason,
   });
   if (error) throw error;
 }
@@ -1728,6 +1732,10 @@ export async function extendReservation(reservationId: string, extraNights: numb
       discount_percent: currentDiscountPercent,
       discount_amount: newDiscountAmount,
       total_price: newTotal,
+      // Ampliar mueve el checkout hacia adelante: cualquier late-checkout viejo deja de
+      // valer y hay que limpiarlo, si no el tablero marca un falso "Retraso Check-out".
+      late_check_out_until: null,
+      updated_at: new Date().toISOString(),
     })
     .eq("id", reservationId);
 
@@ -2803,6 +2811,22 @@ export async function resolveAdminAlert(alertId: number, notes?: string): Promis
   const { error } = await supabase.rpc("rpc_resolve_admin_alert", {
     p_alert_id: alertId,
     p_notes: notes ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function authorizeOldTariff(alertId: number): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_authorize_old_tariff", {
+    p_alert_id: alertId,
+  });
+  if (error) throw error;
+}
+
+export async function rejectOldTariff(alertId: number): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_reject_old_tariff", {
+    p_alert_id: alertId,
   });
   if (error) throw error;
 }

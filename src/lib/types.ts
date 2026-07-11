@@ -31,6 +31,16 @@ export type CleaningLogResult = {
   summary: CleaningLogSummary;
 };
 
+export type TariffRequestPayload = {
+  old_room_id: number;
+  old_base_total_price: number;
+  old_discount_percent: number;
+  old_discount_amount: number;
+  old_total_price: number;
+  new_room_id: number;
+  new_total_price: number;
+};
+
 export type AdminAlert = {
   id: number;
   kind: string;
@@ -38,6 +48,9 @@ export type AdminAlert = {
   related_room_id: number | null;
   related_room_number: string | null;
   related_cleaning_log_id: number | null;
+  related_reservation_id: string | null;
+  decision: "authorized" | "rejected" | null;
+  payload: TariffRequestPayload | null;
   created_at: string;
   resolved_at: string | null;
   resolved_by: string | null;

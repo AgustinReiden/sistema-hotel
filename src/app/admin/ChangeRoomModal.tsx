@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRight, BedDouble, Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowRight, BedDouble, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
   handleChangeRoom,
   handleLoadAvailableRoomsForReservation,
 } from "./actions";
+import { calculateReservationPriceBreakdown } from "@/lib/pricing";
+import type { ChangeRoomReason } from "@/lib/data";
 import type { Room } from "@/lib/types";
 
 type Props = {
@@ -16,7 +18,26 @@ type Props = {
   reservationId: string;
   clientName: string;
   currentRoomNumber: string;
+  checkInTarget: string | null;
+  checkOutTarget: string | null;
+  currentTotal: number;
+  currentBaseTotal: number;
+  currentDiscountAmount: number;
+  discountPercent: number;
 };
+
+const REASONS: { value: ChangeRoomReason; label: string; hint: string }[] = [
+  {
+    value: "guest_request",
+    label: "El cliente pidió el cambio",
+    hint: "Se aplica la tarifa de la nueva habitación.",
+  },
+  {
+    value: "room_defective",
+    label: "La habitación estaba mal",
+    hint: "Se aplica la tarifa de la nueva habitación y se avisa al admin, que puede autorizar mantener la anterior.",
+  },
+];
 
 export default function ChangeRoomModal({
   isOpen,
@@ -24,9 +45,16 @@ export default function ChangeRoomModal({
   reservationId,
   clientName,
   currentRoomNumber,
+  checkInTarget,
+  checkOutTarget,
+  currentTotal,
+  currentBaseTotal,
+  currentDiscountAmount,
+  discountPercent,
 }: Props) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
+  const [reason, setReason] = useState<ChangeRoomReason | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +67,7 @@ export default function ChangeRoomModal({
       setLoadingRooms(true);
       setError(null);
       setSelectedRoomId(null);
+      setReason(null);
       return handleLoadAvailableRoomsForReservation(reservationId);
     }).then((result) => {
       if (cancelled || !result) return;
@@ -55,25 +84,52 @@ export default function ChangeRoomModal({
     };
   }, [isOpen, reservationId]);
 
+  const selectedRoom = rooms.find((r) => r.id === selectedRoomId) ?? null;
+
+  // Recargos que no son base (minibar, medio día, etc.): se preservan al re-tarifar.
+  const surcharges = Math.max(
+    0,
+    Math.round((currentTotal - (currentBaseTotal - currentDiscountAmount)) * 100) / 100
+  );
+
+  const newTotal = useMemo(() => {
+    if (!selectedRoom || !checkInTarget || !checkOutTarget) return null;
+    const breakdown = calculateReservationPriceBreakdown({
+      basePrice: Number(selectedRoom.base_price) || 0,
+      checkIn: checkInTarget,
+      checkOut: checkOutTarget,
+      discountPercent,
+    });
+    return Math.round((breakdown.finalTotalPrice + surcharges) * 100) / 100;
+  }, [selectedRoom, checkInTarget, checkOutTarget, discountPercent, surcharges]);
+
   if (!isOpen) return null;
 
-  const selectedRoom = rooms.find((r) => r.id === selectedRoomId) ?? null;
+  const fmt = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
   const handleSubmit = async () => {
     if (!selectedRoomId) {
       setError("Seleccioná una habitación destino.");
       return;
     }
+    if (!reason) {
+      setError("Indicá el motivo del cambio.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
-    const result = await handleChangeRoom(reservationId, selectedRoomId);
+    const result = await handleChangeRoom(reservationId, selectedRoomId, reason);
     setSubmitting(false);
 
     if (!result.success) {
       setError(result.error);
       return;
     }
-    toast.success(`Movido a Hab. ${selectedRoom?.room_number}.`);
+    toast.success(
+      reason === "room_defective"
+        ? `Movido a Hab. ${selectedRoom?.room_number}. Se avisó al admin por la tarifa.`
+        : `Movido a Hab. ${selectedRoom?.room_number}.`
+    );
     onClose();
   };
 
@@ -157,15 +213,65 @@ export default function ChangeRoomModal({
           )}
 
           {selectedRoom && (
-            <div className="mt-5 bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between">
-              <div className="text-sm">
-                <p className="font-bold text-slate-800">Mover a Hab. {selectedRoom.room_number}</p>
-                <p className="text-xs text-slate-500">
-                  El precio total de la reserva no cambia.
+            <>
+              <div className="mt-5">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                  Motivo del cambio
                 </p>
+                <div className="space-y-2">
+                  {REASONS.map((opt) => (
+                    <label
+                      key={opt.value}
+                      className={`flex items-start gap-3 border rounded-xl p-3 cursor-pointer transition-colors ${
+                        reason === opt.value
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="reason"
+                        value={opt.value}
+                        checked={reason === opt.value}
+                        onChange={() => setReason(opt.value)}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0">
+                        <p className={`font-bold text-sm ${reason === opt.value ? "text-blue-700" : "text-slate-800"}`}>
+                          {opt.label}
+                        </p>
+                        <p className="text-xs text-slate-500">{opt.hint}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
-              <ArrowRight size={20} className="text-slate-400" />
-            </div>
+
+              <div className="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-3">
+                <div className="text-sm min-w-0">
+                  <p className="font-bold text-slate-800">Mover a Hab. {selectedRoom.room_number}</p>
+                  {newTotal !== null ? (
+                    <p className="text-xs text-slate-500">
+                      Nuevo total: <span className="font-semibold text-slate-700">{fmt(newTotal)}</span>
+                      {surcharges > 0 ? " (incluye extras ya cargados)" : ""}
+                      {" · antes "}{fmt(currentTotal)}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500">Se aplica la tarifa de la nueva habitación.</p>
+                  )}
+                </div>
+                <ArrowRight size={20} className="text-slate-400 shrink-0" />
+              </div>
+
+              {reason === "room_defective" && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                  <p className="text-xs text-amber-800">
+                    Se avisará al admin. Él podrá autorizar mantener la tarifa anterior ({fmt(currentTotal)}) o dejar la nueva.
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
           {error && (
@@ -185,7 +291,7 @@ export default function ChangeRoomModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={submitting || !selectedRoomId}
+            disabled={submitting || !selectedRoomId || !reason}
             className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-colors flex items-center gap-2"
           >
             {submitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}

@@ -8,6 +8,7 @@ import {
   assignWalkIn,
   cancelReservation,
   changeReservationRoom,
+  type ChangeRoomReason,
   confirmReservation,
   doCheckIn,
   doCheckout,
@@ -562,17 +563,21 @@ export async function handleUpdateReservation(
 
 export async function handleChangeRoom(
   reservationId: string,
-  newRoomId: number
+  newRoomId: number,
+  reason: ChangeRoomReason
 ): Promise<ActionResult> {
   try {
     if (!reservationId) throw new Error("Reserva invalida.");
     if (!Number.isInteger(newRoomId) || newRoomId <= 0)
       throw new Error("Habitacion destino invalida.");
-    await changeReservationRoom(reservationId, newRoomId);
+    if (reason !== "room_defective" && reason !== "guest_request")
+      throw new Error("Motivo de cambio invalido.");
+    await changeReservationRoom(reservationId, newRoomId, reason);
     revalidatePath("/admin");
     revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/caja");
+    revalidatePath("/admin/mantenimiento");
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cambiar de habitacion.");
