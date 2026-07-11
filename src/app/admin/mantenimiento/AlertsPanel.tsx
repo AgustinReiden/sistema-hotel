@@ -2,10 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { resolveAdminAlertAction } from "./actions";
+import {
+  authorizeOldTariffAction,
+  rejectOldTariffAction,
+  resolveAdminAlertAction,
+} from "./actions";
 import { formatHotelDateTime } from "@/lib/time";
 import type { AdminAlert } from "@/lib/types";
 
@@ -14,21 +18,27 @@ type Props = {
   hotelTimezone: string;
 };
 
+const TARIFF_KIND = "room_change_keep_old_tariff_request";
+
 export default function AlertsPanel({ alerts, hotelTimezone }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  const resolve = (id: number) => {
+  const run = (
+    id: number,
+    action: () => Promise<{ success: boolean; error?: string }>,
+    successMsg: string
+  ) => {
     setBusyId(id);
     startTransition(async () => {
-      const result = await resolveAdminAlertAction(id);
+      const result = await action();
       setBusyId(null);
       if (!result.success) {
-        toast.error(result.error);
+        toast.error(result.error ?? "No se pudo completar la acción.");
         return;
       }
-      toast.success("Alerta marcada como leída.");
+      toast.success(successMsg);
       router.refresh();
     });
   };
@@ -52,31 +62,79 @@ export default function AlertsPanel({ alerts, hotelTimezone }: Props) {
       </div>
 
       <ul className="space-y-2">
-        {alerts.map((a) => (
-          <li
-            key={a.id}
-            className="bg-white border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-4"
-          >
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-slate-800">{a.message}</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {formatHotelDateTime(a.created_at, hotelTimezone)}
-              </p>
-            </div>
-            <button
-              onClick={() => resolve(a.id)}
-              disabled={isPending && busyId === a.id}
-              className="shrink-0 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg flex items-center gap-1"
+        {alerts.map((a) => {
+          const isTariff = a.kind === TARIFF_KIND;
+          const busy = isPending && busyId === a.id;
+          return (
+            <li
+              key={a.id}
+              className="bg-white border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-4"
             >
-              {isPending && busyId === a.id ? (
-                <Loader2 size={14} className="animate-spin" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800">{a.message}</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {formatHotelDateTime(a.created_at, hotelTimezone)}
+                </p>
+              </div>
+
+              {isTariff ? (
+                <div className="shrink-0 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    onClick={() =>
+                      run(
+                        a.id,
+                        () => authorizeOldTariffAction(a.id),
+                        "Se mantuvo la tarifa anterior."
+                      )
+                    }
+                    disabled={busy}
+                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1"
+                  >
+                    {busy ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={14} />
+                    )}
+                    Autorizar tarifa anterior
+                  </button>
+                  <button
+                    onClick={() =>
+                      run(
+                        a.id,
+                        () => rejectOldTariffAction(a.id),
+                        "Se dejó la tarifa nueva."
+                      )
+                    }
+                    disabled={busy}
+                    className="px-3 py-2 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-60 text-slate-700 text-xs font-bold rounded-lg flex items-center justify-center gap-1"
+                  >
+                    <X size={14} />
+                    Rechazar
+                  </button>
+                </div>
               ) : (
-                <CheckCircle2 size={14} />
+                <button
+                  onClick={() =>
+                    run(
+                      a.id,
+                      () => resolveAdminAlertAction(a.id),
+                      "Alerta marcada como leída."
+                    )
+                  }
+                  disabled={busy}
+                  className="shrink-0 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg flex items-center gap-1"
+                >
+                  {busy ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <CheckCircle2 size={14} />
+                  )}
+                  Marcar leída
+                </button>
               )}
-              Marcar leída
-            </button>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

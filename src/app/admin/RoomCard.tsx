@@ -730,6 +730,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           reservationId={room.reservationId}
           clientName={room.client ?? "Reserva"}
           currentRoomNumber={room.number}
+          checkInTarget={room.check_in_target}
+          checkOutTarget={room.check_out_target}
+          currentTotal={room.totalPrice}
+          currentBaseTotal={room.baseTotalPrice}
+          currentDiscountAmount={room.discountAmount}
+          discountPercent={room.discountPercent}
         />
       )}
 
