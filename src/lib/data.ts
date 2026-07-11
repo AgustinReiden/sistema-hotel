@@ -8,16 +8,23 @@ import {
   buildDailyTotals,
   buildOccupancyHistogram,
   buildRevenueByRoomType,
+  buildRoomBreakdown,
   computeWindowKpis,
   countDaysInclusive,
   hotelRangeToUtc,
   pctDelta,
   previousPeriodRange,
+  summarizeRoomBreakdown,
   type CreatedReservation,
+  type CreatedRoomReservation,
   type DailyOccupancy,
   type DailyTotal,
   type NightlyReservation,
   type PaymentPoint,
+  type RoomBreakdownRow,
+  type RoomBreakdownTotals,
+  type RoomCleaning,
+  type RoomInfo,
 } from "./analytics";
 import type {
   AdminAlert,
@@ -1958,7 +1965,7 @@ export async function getManagementDashboardData(
     supabase
       .from("reservations")
       .select(
-        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, rooms(room_type)"
+        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, room_id, rooms(room_type)"
       )
       .in("status", ["confirmed", "checked_in", "checked_out"])
       .lt("check_in_target", unionWindow.endUtcExclusive)
@@ -2025,6 +2032,7 @@ export async function getManagementDashboardData(
     base_total_price: number | string | null;
     discount_amount: number | string | null;
     created_at: string;
+    room_id: number | string | null;
     rooms: { room_type: string } | { room_type: string }[] | null;
   };
 
@@ -2036,6 +2044,7 @@ export async function getManagementDashboardData(
     actualCheckOut: r.actual_check_out,
     baseTotalPrice: Number(r.base_total_price) || 0,
     discountAmount: Number(r.discount_amount) || 0,
+    roomId: Number(r.room_id) || 0,
     roomType: roomTypeOf(r.rooms),
     createdAt: r.created_at,
   }));
@@ -2144,6 +2153,121 @@ export async function getManagementDashboardData(
     cashDiscrepancyTotal,
     cleaningsByCategory,
     openAlerts: alertsRes.count ?? 0,
+  };
+}
+
+export type RoomBreakdownData = {
+  range: { from: string; to: string; days: number };
+  currency: string;
+  activeRooms: number;
+  rooms: RoomBreakdownRow[];
+  totals: RoomBreakdownTotals;
+};
+
+/**
+ * Métricas por habitación para el rango [startKey, endKey] (claves "YYYY-MM-DD" en zona
+ * del hotel). Alimenta el tablero "Por habitación". La agregación vive en las funciones
+ * puras de ./analytics (buildRoomBreakdown / summarizeRoomBreakdown); acá solo se traen
+ * las filas del período actual. Ventana y bucketing en zona del hotel (no UTC).
+ */
+export async function getRoomBreakdownData(
+  startKey: string,
+  endKey: string
+): Promise<RoomBreakdownData> {
+  const supabase = await createClient();
+  const settings = await getHotelSettings();
+  const tz = settings.timezone || "America/Argentina/Tucuman";
+  const currency = settings.currency || "ARS";
+
+  const win = hotelRangeToUtc(startKey, endKey, tz);
+
+  const [roomsRes, overlapRes, createdRes, cleaningRes] = await Promise.all([
+    supabase.from("rooms").select("id, room_number, room_type").eq("is_active", true),
+    // Estadías comprometidas que solapan el período.
+    supabase
+      .from("reservations")
+      .select(
+        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, room_id"
+      )
+      .in("status", ["confirmed", "checked_in", "checked_out"])
+      .lt("check_in_target", win.endUtcExclusive)
+      .gte("check_out_target", win.startUtc),
+    // Reservas creadas en el período (para cancelaciones por habitación).
+    supabase
+      .from("reservations")
+      .select("room_id, status, created_at")
+      .gte("created_at", win.startUtc)
+      .lt("created_at", win.endUtcExclusive),
+    // Limpiezas del período por habitación.
+    supabase
+      .from("room_cleaning_log")
+      .select("room_id, cleaned_at")
+      .gte("cleaned_at", win.startUtc)
+      .lt("cleaned_at", win.endUtcExclusive),
+  ]);
+
+  if (roomsRes.error) throw roomsRes.error;
+  if (overlapRes.error) throw overlapRes.error;
+
+  const rooms: RoomInfo[] = (
+    (roomsRes.data ?? []) as { id: number; room_number: string; room_type: string | null }[]
+  ).map((r) => ({ id: r.id, roomNumber: r.room_number, roomType: r.room_type ?? "—" }));
+  const roomTypeById = new Map(rooms.map((r) => [r.id, r.roomType]));
+
+  type RoomOverlapRow = {
+    status: ReservationStatus;
+    check_in_target: string;
+    check_out_target: string;
+    actual_check_in: string | null;
+    actual_check_out: string | null;
+    base_total_price: number | string | null;
+    discount_amount: number | string | null;
+    created_at: string;
+    room_id: number | string | null;
+  };
+
+  const reservationsOverlap: NightlyReservation[] = (
+    (overlapRes.data ?? []) as RoomOverlapRow[]
+  ).map((r) => {
+    const roomId = Number(r.room_id) || 0;
+    return {
+      status: r.status,
+      checkInTarget: r.check_in_target,
+      checkOutTarget: r.check_out_target,
+      actualCheckIn: r.actual_check_in,
+      actualCheckOut: r.actual_check_out,
+      baseTotalPrice: Number(r.base_total_price) || 0,
+      discountAmount: Number(r.discount_amount) || 0,
+      roomId,
+      roomType: roomTypeById.get(roomId) ?? "—",
+      createdAt: r.created_at,
+    };
+  });
+
+  const createdWithRoom: CreatedRoomReservation[] = (
+    (createdRes.data ?? []) as { room_id: number | string | null; status: ReservationStatus; created_at: string }[]
+  ).map((r) => ({ roomId: Number(r.room_id) || 0, status: r.status, createdAt: r.created_at }));
+
+  const cleanings: RoomCleaning[] = (
+    (cleaningRes.data ?? []) as { room_id: number | string | null; cleaned_at: string }[]
+  ).map((c) => ({ roomId: Number(c.room_id) || 0, cleanedAt: c.cleaned_at }));
+
+  const roomRows = buildRoomBreakdown({
+    rooms,
+    reservationsOverlap,
+    createdWithRoom,
+    cleanings,
+    rangeStartKey: startKey,
+    rangeEndKey: endKey,
+    tz,
+  });
+
+  return {
+    range: { from: startKey, to: endKey, days: countDaysInclusive(startKey, endKey) },
+    currency,
+    activeRooms: rooms.length,
+    rooms: roomRows,
+    totals: summarizeRoomBreakdown(roomRows),
   };
 }
 

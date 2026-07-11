@@ -13,6 +13,8 @@ import {
   YAxis,
 } from "recharts";
 import { formatMoney } from "@/lib/format";
+import type { MetricKey } from "@/lib/metric-glossary";
+import InfoTooltip from "./InfoTooltip";
 
 // Paleta categórica en orden fijo (no se cicla): cada entidad conserva su color.
 const CATEGORICAL = [
@@ -223,16 +225,21 @@ function HorizontalBars({
 function ChartCard({
   title,
   subtitle,
+  metric,
   children,
 }: {
   title: string;
   subtitle: string;
+  metric: MetricKey;
   children: React.ReactNode;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
       <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-        <h3 className="text-base font-bold text-slate-800">{title}</h3>
+        <h3 className="text-base font-bold text-slate-800 flex items-center gap-1.5">
+          {title}
+          <InfoTooltip metric={metric} />
+        </h3>
         <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>
       </div>
       <div className="p-5">{children}</div>
@@ -263,24 +270,24 @@ export default function DashboardCharts({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <ChartCard title="Ocupación por día" subtitle="% de habitaciones ocupadas (histórico del período)">
+      <ChartCard title="Ocupación por día" subtitle="% de habitaciones ocupadas (histórico del período)" metric="dailyOccupancy">
         <OccupancyTrend data={dailyOccupancy} />
       </ChartCard>
 
-      <ChartCard title="Caja cobrada por día" subtitle="Pagos registrados por día (zona del hotel)">
+      <ChartCard title="Caja cobrada por día" subtitle="Pagos registrados por día (zona del hotel)" metric="dailyCash">
         <CashTrend data={dailyCash} currency={currency} />
       </ChartCard>
 
-      <ChartCard title="Ingreso por tipo de habitación" subtitle="Alojamiento devengado en el período">
+      <ChartCard title="Ingreso por tipo de habitación" subtitle="Alojamiento devengado en el período" metric="revenueByRoomType">
         <HorizontalBars data={roomTypeData} currency={currency} />
       </ChartCard>
 
-      <ChartCard title="Cobros por método de pago" subtitle="Distribución de la caja cobrada">
+      <ChartCard title="Cobros por método de pago" subtitle="Distribución de la caja cobrada" metric="paymentMethods">
         <HorizontalBars data={methodData} currency={currency} colored />
       </ChartCard>
 
       {extraData.length > 0 && (
-        <ChartCard title="Ingresos extra" subtitle="Minibar, daños y media estadía">
+        <ChartCard title="Ingresos extra" subtitle="Minibar, daños y media estadía" metric="extraCharges">
           <HorizontalBars data={extraData} currency={currency} colored />
         </ChartCard>
       )}

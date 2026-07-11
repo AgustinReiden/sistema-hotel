@@ -16,8 +16,11 @@ import {
   buildOccupancyHistogram,
   buildDailyTotals,
   buildRevenueByRoomType,
+  buildRoomBreakdown,
+  summarizeRoomBreakdown,
   computeWindowKpis,
   type NightlyReservation,
+  type RoomInfo,
 } from "@/lib/analytics";
 
 const TZ = "America/Argentina/Tucuman"; // UTC-3, sin DST
@@ -31,6 +34,7 @@ function resv(partial: Partial<NightlyReservation> = {}): NightlyReservation {
     actualCheckOut: null,
     baseTotalPrice: 30000,
     discountAmount: 0,
+    roomId: 101,
     roomType: "Doble",
     createdAt: "2026-07-01T12:00:00-03:00",
     ...partial,
@@ -298,5 +302,94 @@ describe("computeWindowKpis", () => {
     expect(kpis.adr).toBe(0);
     expect(kpis.cancellationRate).toBe(0);
     expect(kpis.avgLengthOfStay).toBe(0);
+  });
+});
+
+describe("buildRoomBreakdown", () => {
+  const rooms: RoomInfo[] = [
+    { id: 101, roomNumber: "101", roomType: "Doble" },
+    { id: 102, roomNumber: "102", roomType: "Suite" },
+    { id: 103, roomNumber: "103", roomType: "Single" },
+  ];
+
+  // Rango [01..10] julio (10 días). Cada habitación: 10 noches disponibles.
+  const args = {
+    rooms,
+    reservationsOverlap: [
+      resv({
+        roomId: 101,
+        checkInTarget: "2026-07-02T14:00:00-03:00",
+        checkOutTarget: "2026-07-05T10:00:00-03:00", // 3 noches, perNight 10000
+        baseTotalPrice: 30000,
+      }),
+      resv({
+        roomId: 102,
+        roomType: "Suite",
+        checkInTarget: "2026-07-06T14:00:00-03:00",
+        checkOutTarget: "2026-07-08T10:00:00-03:00", // 2 noches, perNight 20000
+        baseTotalPrice: 40000,
+      }),
+    ],
+    createdWithRoom: [
+      { roomId: 102, status: "cancelled" as const, createdAt: "2026-07-04T10:00:00-03:00" }, // cuenta
+      { roomId: 101, status: "confirmed" as const, createdAt: "2026-07-02T10:00:00-03:00" }, // no cancelada
+      { roomId: 102, status: "cancelled" as const, createdAt: "2026-06-20T10:00:00-03:00" }, // fuera de rango
+    ],
+    cleanings: [
+      { roomId: 101, cleanedAt: "2026-07-03T09:00:00-03:00" },
+      { roomId: 101, cleanedAt: "2026-07-06T09:00:00-03:00" },
+      { roomId: 103, cleanedAt: "2026-07-04T09:00:00-03:00" },
+      { roomId: 101, cleanedAt: "2026-07-20T09:00:00-03:00" }, // fuera de rango
+    ],
+    rangeStartKey: "2026-07-01",
+    rangeEndKey: "2026-07-10",
+    tz: TZ,
+  };
+
+  it("calcula noches, ingreso, ADR y RevPAR por habitación", () => {
+    const rows = buildRoomBreakdown(args);
+    expect(rows.map((r) => r.roomNumber)).toEqual(["101", "102", "103"]); // ordenado
+
+    const r101 = rows.find((r) => r.roomId === 101)!;
+    expect(r101.roomNightsSold).toBe(3);
+    expect(r101.availableNights).toBe(10);
+    expect(r101.occupancyRate).toBeCloseTo(30);
+    expect(r101.lodgingRevenue).toBe(30000);
+    expect(r101.adr).toBe(10000);
+    expect(r101.revpar).toBe(3000); // 30000 / 10
+    expect(r101.reservations).toBe(1);
+    expect(r101.cancellations).toBe(0);
+    expect(r101.cleanings).toBe(2); // la del 20 queda afuera
+
+    const r102 = rows.find((r) => r.roomId === 102)!;
+    expect(r102.roomNightsSold).toBe(2);
+    expect(r102.lodgingRevenue).toBe(40000);
+    expect(r102.adr).toBe(20000);
+    expect(r102.revpar).toBe(4000);
+    expect(r102.cancellations).toBe(1); // solo la creada dentro del rango
+  });
+
+  it("una habitación sin ventas queda en cero pero con noches disponibles", () => {
+    const rows = buildRoomBreakdown(args);
+    const r103 = rows.find((r) => r.roomId === 103)!;
+    expect(r103.roomNightsSold).toBe(0);
+    expect(r103.availableNights).toBe(10);
+    expect(r103.occupancyRate).toBe(0);
+    expect(r103.revpar).toBe(0);
+    expect(r103.reservations).toBe(0);
+    expect(r103.cleanings).toBe(1);
+  });
+
+  it("summarizeRoomBreakdown suma filas y recomputa las tasas del total", () => {
+    const totals = summarizeRoomBreakdown(buildRoomBreakdown(args));
+    expect(totals.roomNightsSold).toBe(5); // 3 + 2
+    expect(totals.availableNights).toBe(30); // 3 hab × 10
+    expect(totals.lodgingRevenue).toBe(70000);
+    expect(totals.occupancyRate).toBeCloseTo((5 / 30) * 100);
+    expect(totals.adr).toBe(14000); // 70000 / 5
+    expect(totals.revpar).toBeCloseTo(2333.33); // 70000 / 30
+    expect(totals.reservations).toBe(2);
+    expect(totals.cancellations).toBe(1);
+    expect(totals.cleanings).toBe(3);
   });
 });
