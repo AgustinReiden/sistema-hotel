@@ -101,6 +101,7 @@ export type NightlyReservation = {
   actualCheckOut: string | null;
   baseTotalPrice: number;
   discountAmount: number;
+  roomId: number;
   roomType: string;
   createdAt: string;
 };
@@ -355,5 +356,152 @@ export function computeWindowKpis(input: {
     cancellationRate: reservationsCreatedCount > 0 ? (cancellations / reservationsCreatedCount) * 100 : 0,
     avgLengthOfStay: losCount > 0 ? round2(losSum / losCount) : 0,
     avgLeadTimeDays: leadCount > 0 ? round2(leadSum / leadCount) : 0,
+  };
+}
+
+// ───────────────────────────── Desglose por habitación ─────────────────────────────
+
+/** Identidad de una habitación activa (para el tablero por habitación). */
+export type RoomInfo = { id: number; roomNumber: string; roomType: string };
+
+/** Reserva creada, con la habitación asociada (para cancelaciones por habitación). */
+export type CreatedRoomReservation = {
+  roomId: number;
+  status: ReservationStatus;
+  createdAt: string;
+};
+
+/** Un registro de limpieza asociado a una habitación. */
+export type RoomCleaning = { roomId: number; cleanedAt: string };
+
+export type RoomBreakdownRow = {
+  roomId: number;
+  roomNumber: string;
+  roomType: string;
+  roomNightsSold: number;
+  availableNights: number;
+  occupancyRate: number;
+  lodgingRevenue: number;
+  adr: number;
+  revpar: number;
+  reservations: number;
+  cancellations: number;
+  cleanings: number;
+};
+
+/**
+ * Métricas por habitación en el rango [start, end] (inclusive). Cada habitación tiene
+ * `availableNights = días del período` (una unidad, disponible cada día). Reutiliza las
+ * mismas reglas de room-nights/ingreso que los KPIs globales, de modo que la suma de las
+ * filas coincide con el total del tablero general. Ordena por nº de habitación.
+ */
+export function buildRoomBreakdown(input: {
+  rooms: RoomInfo[];
+  reservationsOverlap: NightlyReservation[];
+  createdWithRoom: CreatedRoomReservation[];
+  cleanings: RoomCleaning[];
+  rangeStartKey: string;
+  rangeEndKey: string;
+  tz: string;
+}): RoomBreakdownRow[] {
+  const { rooms, reservationsOverlap, createdWithRoom, cleanings, rangeStartKey, rangeEndKey, tz } = input;
+  const days = countDaysInclusive(rangeStartKey, rangeEndKey);
+
+  const byId = new Map<number, RoomBreakdownRow>();
+  for (const rm of rooms) {
+    byId.set(rm.id, {
+      roomId: rm.id,
+      roomNumber: rm.roomNumber,
+      roomType: rm.roomType,
+      roomNightsSold: 0,
+      availableNights: days,
+      occupancyRate: 0,
+      lodgingRevenue: 0,
+      adr: 0,
+      revpar: 0,
+      reservations: 0,
+      cancellations: 0,
+      cleanings: 0,
+    });
+  }
+
+  for (const r of reservationsOverlap) {
+    if (r.status === "cancelled") continue;
+    const row = byId.get(r.roomId);
+    if (!row) continue;
+    const priced = occupancyInterval(r, "priced", tz);
+    const fullNights = daysBetweenKeys(priced.startKey, priced.endKey);
+    if (fullNights <= 0) continue; // media estadía / siesta: sin room-nights
+    const nights = reservationRoomNightsInRange(r, rangeStartKey, rangeEndKey, "priced", tz);
+    if (nights <= 0) continue;
+    row.roomNightsSold += nights;
+    row.lodgingRevenue += perNightLodging(r.baseTotalPrice, r.discountAmount, fullNights) * nights;
+    row.reservations += 1;
+  }
+
+  const inRange = (iso: string) => {
+    const k = hotelDateKey(iso, tz);
+    return k >= rangeStartKey && k <= rangeEndKey;
+  };
+  for (const c of createdWithRoom) {
+    if (c.status !== "cancelled" || !inRange(c.createdAt)) continue;
+    const row = byId.get(c.roomId);
+    if (row) row.cancellations += 1;
+  }
+  for (const cl of cleanings) {
+    if (!inRange(cl.cleanedAt)) continue;
+    const row = byId.get(cl.roomId);
+    if (row) row.cleanings += 1;
+  }
+
+  for (const row of byId.values()) {
+    row.lodgingRevenue = round2(row.lodgingRevenue);
+    row.occupancyRate = computeOccupancyRate(row.roomNightsSold, row.availableNights);
+    row.adr = round2(computeAdr(row.lodgingRevenue, row.roomNightsSold));
+    row.revpar = round2(computeRevpar(row.lodgingRevenue, row.availableNights));
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
+    a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
+  );
+}
+
+export type RoomBreakdownTotals = {
+  roomNightsSold: number;
+  availableNights: number;
+  occupancyRate: number;
+  lodgingRevenue: number;
+  adr: number;
+  revpar: number;
+  reservations: number;
+  cancellations: number;
+  cleanings: number;
+};
+
+/** Fila de totales del desglose por habitación (ocupación/ADR/RevPAR recomputados del total). */
+export function summarizeRoomBreakdown(rows: RoomBreakdownRow[]): RoomBreakdownTotals {
+  const acc = rows.reduce(
+    (a, r) => {
+      a.roomNightsSold += r.roomNightsSold;
+      a.availableNights += r.availableNights;
+      a.lodgingRevenue += r.lodgingRevenue;
+      a.reservations += r.reservations;
+      a.cancellations += r.cancellations;
+      a.cleanings += r.cleanings;
+      return a;
+    },
+    { roomNightsSold: 0, availableNights: 0, lodgingRevenue: 0, reservations: 0, cancellations: 0, cleanings: 0 }
+  );
+  const lodgingRevenue = round2(acc.lodgingRevenue);
+  return {
+    roomNightsSold: acc.roomNightsSold,
+    availableNights: acc.availableNights,
+    occupancyRate: computeOccupancyRate(acc.roomNightsSold, acc.availableNights),
+    lodgingRevenue,
+    adr: round2(computeAdr(lodgingRevenue, acc.roomNightsSold)),
+    revpar: round2(computeRevpar(lodgingRevenue, acc.availableNights)),
+    reservations: acc.reservations,
+    cancellations: acc.cancellations,
+    cleanings: acc.cleanings,
   };
 }
