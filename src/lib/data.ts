@@ -541,10 +541,13 @@ async function resolveAccountCreditByReservation(
   return map;
 }
 
-export async function getTimelineData(days = 7): Promise<TimelineData> {
+export async function getTimelineData(days = 7, startKey?: string): Promise<TimelineData> {
   const supabase = await createClient();
   const settings = await getHotelSettings();
   const tz = settings.timezone || "America/Argentina/Tucuman";
+
+  // La ventana visible se acota a un máximo de 14 días (evita rangos enormes por querystring).
+  const span = Math.min(Math.max(Math.trunc(days), 1), 14);
 
   // "Hoy" en la zona del hotel (NO la del servidor, que en prod es UTC): así la primera
   // columna del calendario no se corre un día durante la franja nocturna de Argentina
@@ -555,10 +558,12 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const today = new Date(localToISO(todayKey, "00:00", tz));
+  // Ancla de la primera columna: la fecha pedida (?start) si es válida, sino hoy.
+  const anchorKey = startKey && /^\d{4}-\d{2}-\d{2}$/.test(startKey) ? startKey : todayKey;
+  const today = new Date(localToISO(anchorKey, "00:00", tz));
 
   const end = new Date(today);
-  end.setDate(end.getDate() + days);
+  end.setDate(end.getDate() + span);
 
   const [roomsResult, reservationsResult] = await Promise.all([
     supabase.from("rooms").select("*").order("room_number"),
@@ -596,7 +601,7 @@ export async function getTimelineData(days = 7): Promise<TimelineData> {
     reservations,
     startDate: today,
     endDate: end,
-    daysCount: days,
+    daysCount: span,
   };
 }
 
