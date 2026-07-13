@@ -2,10 +2,11 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CreditCard, FileText, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
+import { CreditCard, FileText, Pencil, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
+import EditReservationModal from "../EditReservationModal";
 import { handleCancelReservation, handleCreateReservation } from "../actions";
 import { formatHotelDateTime } from "@/lib/time";
 import type { AssociatedClient, Reservation, Room, UserRole } from "@/lib/types";
@@ -145,6 +146,7 @@ export default function CalendarClient({
   const router = useRouter();
   const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -154,6 +156,7 @@ export default function CalendarClient({
   );
   const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
   const canCancel = role === "admin" || role === "receptionist";
+  const isAdmin = role === "admin";
 
   const openCreateModal = (roomId: number, dayKey: string) => {
     const checkOutKey = addDaysToKey(dayKey, 1);
@@ -189,6 +192,13 @@ export default function CalendarClient({
   };
 
   const selectedRoom = selectedReservation ? roomsById.get(selectedReservation.room_id) : null;
+  // Editar desde el calendario: recepción o admin ANTES del check-in (pendiente/confirmada);
+  // tras el check-in solo el admin (override). Las finalizadas/canceladas no llegan al calendario.
+  const canEditSelected =
+    selectedReservation != null &&
+    ((canCancel &&
+      (selectedReservation.status === "pending" || selectedReservation.status === "confirmed")) ||
+      (isAdmin && selectedReservation.status === "checked_in"));
 
   return (
     <>
@@ -424,13 +434,27 @@ export default function CalendarClient({
                   Habitacion {selectedRoom.room_number} - {selectedRoom.room_type}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedReservation(null)}
-                className="p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                <XCircle size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                {canEditSelected && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(selectedReservation.id);
+                      setSelectedReservation(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-brand-700"
+                  >
+                    <Pencil size={15} /> Editar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedReservation(null)}
+                  className="p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  <XCircle size={20} />
+                </button>
+              </div>
             </div>
 
             <div className="p-6 space-y-6">
@@ -540,6 +564,15 @@ export default function CalendarClient({
           </div>
         </div>
       )}
+      <EditReservationModal
+        isOpen={editingId !== null}
+        onClose={() => {
+          setEditingId(null);
+          router.refresh();
+        }}
+        reservationId={editingId ?? ""}
+        isAdmin={isAdmin}
+      />
     </>
   );
 }
