@@ -535,6 +535,27 @@ export type ShiftSummary = {
 
 export type CloseShiftPayload = { shiftId: string; actualCash: number; notes?: string };
 
+/**
+ * Reserva con la salida vencida que bloquea el cierre de caja. Se resuelve con
+ * una de tres salidas: ampliar la reserva, hacer el check-out, o reportar el
+ * conflicto al admin (rpc_report_shift_close_conflict).
+ */
+export type CloseShiftBlocker = {
+  reservation_id: string;
+  room_id: number;
+  room_number: string;
+  client_name: string | null;
+  effective_deadline: string;
+  hours_overdue: number;
+  balance_due: number;
+};
+
+export type CloseShiftBlockersResult = {
+  blockers: CloseShiftBlocker[];
+  /** Alertas de limpieza "ocupada sin reserva" sin resolver (aviso, no bloquea). */
+  occupied_alerts_count: number;
+};
+
 /** Una fila del export CSV fiscal: un check-out del turno. */
 export type CheckoutExportRow = {
   actual_check_out: string;
@@ -542,4 +563,6 @@ export type CheckoutExportRow = {
   client_dni: string | null;
   total_price: number;
   payment_method: PaymentMethod | "sin_cobro";
+  /** Nº de cierre correlativo del turno (para validar el import en el gestión). */
+  shift_number: number;
 };

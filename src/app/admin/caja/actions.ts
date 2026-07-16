@@ -4,14 +4,16 @@ import { revalidatePath } from "next/cache";
 
 import {
   closeCashShift,
+  getCloseShiftBlockers,
   getHotelSettings,
   getShiftCheckoutExport,
   openCashShift,
+  reportShiftCloseConflict,
 } from "@/lib/data";
 import { buildCheckoutCsv } from "@/lib/csv";
 import { parseActionError } from "@/lib/error-utils";
-import type { ActionResult } from "@/lib/types";
-import { closeShiftSchema } from "@/lib/validations";
+import type { ActionResult, CloseShiftBlockersResult } from "@/lib/types";
+import { closeShiftSchema, reportShiftConflictSchema } from "@/lib/validations";
 
 function revalidateCajaViews() {
   revalidatePath("/admin");
@@ -60,6 +62,41 @@ export async function closeShiftAction(input: {
     return { success: true, data: { ...result, shouldLogout } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cerrar la caja.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Reservas vencidas que bloquean el cierre + aviso de alertas de limpieza.
+ * Sin revalidate: es una lectura para el modal de cierre.
+ */
+export async function getCloseShiftBlockersAction(): Promise<
+  ActionResult<CloseShiftBlockersResult>
+> {
+  try {
+    const result = await getCloseShiftBlockers();
+    return { success: true, data: result };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudieron verificar las salidas pendientes.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Salida "reportar al admin" del guard de cierre: registra el conflicto de la
+ * reserva vencida (admin_alert) y desbloquea el cierre de caja.
+ */
+export async function reportShiftConflictAction(input: {
+  reservationId: string;
+  notes: string;
+}): Promise<ActionResult<{ alertId: number; alreadyReported: boolean }>> {
+  try {
+    const { reservationId, notes } = reportShiftConflictSchema.parse(input);
+    const result = await reportShiftCloseConflict(reservationId, notes);
+    revalidatePath("/admin/mantenimiento"); // el panel de alertas del admin
+    return { success: true, data: result };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo reportar el conflicto.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

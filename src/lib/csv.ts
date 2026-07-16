@@ -1,6 +1,7 @@
 // Armado del CSV fiscal de check-outs por turno. Formato AR (Excel-friendly):
 // separador ';', decimales con coma, UTF-8 con BOM, fecha DD/MM/AAAA, hora HH:MM.
 
+import { formatShiftCode } from "./format";
 import { formatHotelDate, formatHotelTime } from "./time";
 import type { CheckoutExportRow } from "./types";
 
@@ -16,6 +17,9 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   sin_cobro: "Sin cobro",
 };
 
+// "Turno" va AL FINAL para no correr las columnas que un importador ya mapee
+// por posición. Es el nº de cierre correlativo con el que el sistema de gestión
+// valida que se importó el turno correcto.
 const CSV_HEADERS = [
   "Fecha",
   "Hora",
@@ -23,6 +27,7 @@ const CSV_HEADERS = [
   "Cod. Cliente",
   "Monto",
   "Forma de pago",
+  "Turno",
 ];
 
 /** Escapa un campo para CSV con separador ';': envuelve en comillas y duplica comillas internas. */
@@ -64,6 +69,7 @@ export function buildCheckoutCsv(
         csvField(codCliente),
         csvField(monto),
         csvField(formaPago),
+        csvField(formatShiftCode(row.shift_number)),
       ].join(";")
     );
   }

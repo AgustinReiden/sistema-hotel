@@ -17,8 +17,13 @@ import {
   buildDailyTotals,
   buildRevenueByRoomType,
   buildRoomBreakdown,
+  buildGuestNightsSeries,
+  buildWeekdaySeasonality,
+  weekdayOfKey,
   summarizeRoomBreakdown,
   computeWindowKpis,
+  type DailyOccupancy,
+  type DailyTotal,
   type NightlyReservation,
   type RoomInfo,
 } from "@/lib/analytics";
@@ -37,6 +42,7 @@ function resv(partial: Partial<NightlyReservation> = {}): NightlyReservation {
     roomId: 101,
     roomType: "Doble",
     createdAt: "2026-07-01T12:00:00-03:00",
+    guestCount: 2,
     ...partial,
   };
 }
@@ -302,6 +308,163 @@ describe("computeWindowKpis", () => {
     expect(kpis.adr).toBe(0);
     expect(kpis.cancellationRate).toBe(0);
     expect(kpis.avgLengthOfStay).toBe(0);
+    expect(kpis.totalPaymentsIncomeNoVale).toBe(0);
+    expect(kpis.guestNights).toBe(0);
+    expect(kpis.avgGuestsPerNight).toBe(0);
+  });
+
+  it("excluye el vale blanco de la caja 'sin VB' pero no del total", () => {
+    const kpis = computeWindowKpis({
+      reservationsOverlap: [],
+      reservationsCreated: [],
+      payments: [
+        { amount: 5000, method: "cash", createdAt: "2026-07-03T12:00:00-03:00" },
+        { amount: 2000, method: "vale_blanco", createdAt: "2026-07-04T12:00:00-03:00" },
+        { amount: 3000, method: "mercado_pago", createdAt: "2026-07-05T12:00:00-03:00" },
+        { amount: 9000, method: "vale_blanco", createdAt: "2026-07-15T12:00:00-03:00" }, // fuera de rango
+      ],
+      rangeStartKey: "2026-07-01",
+      rangeEndKey: "2026-07-10",
+      activeRooms: 10,
+      tz: TZ,
+    });
+    expect(kpis.totalPaymentsIncome).toBe(10000); // 5000 + 2000 + 3000
+    expect(kpis.totalPaymentsIncomeNoVale).toBe(8000); // sin los 2000 de VB
+  });
+
+  it("cuenta pasajeros-noche en base física y excluye canceladas", () => {
+    const r1 = resv({
+      // 3 noches físicas (02..04), 2 pasajeros → 6 pax-noche
+      actualCheckIn: "2026-07-02T14:00:00-03:00",
+      actualCheckOut: "2026-07-05T10:00:00-03:00",
+      checkInTarget: "2026-07-02T14:00:00-03:00",
+      checkOutTarget: "2026-07-05T10:00:00-03:00",
+      guestCount: 2,
+    });
+    const r2 = resv({
+      // 4 noches target (08..11); en rango hasta el 10 → 3 noches, 3 pasajeros → 9 pax-noche
+      checkInTarget: "2026-07-08T14:00:00-03:00",
+      checkOutTarget: "2026-07-12T10:00:00-03:00",
+      guestCount: 3,
+    });
+    const cancelled = resv({ status: "cancelled", guestCount: 4 });
+
+    const kpis = computeWindowKpis({
+      reservationsOverlap: [r1, r2, cancelled],
+      reservationsCreated: [],
+      payments: [],
+      rangeStartKey: "2026-07-01",
+      rangeEndKey: "2026-07-10",
+      activeRooms: 10,
+      tz: TZ,
+    });
+    expect(kpis.guestNights).toBe(15); // 6 + 9
+    // 6 room-nights físicas (3 + 3) → 15 / 6 = 2.5
+    expect(kpis.avgGuestsPerNight).toBe(2.5);
+  });
+});
+
+describe("buildGuestNightsSeries", () => {
+  it("suma pasajeros por noche ocupada; el día de check-out no cuenta", () => {
+    const r1 = resv({
+      checkInTarget: "2026-07-02T14:00:00-03:00",
+      checkOutTarget: "2026-07-04T10:00:00-03:00", // noches 02 y 03
+      guestCount: 2,
+    });
+    const r2 = resv({
+      checkInTarget: "2026-07-03T14:00:00-03:00",
+      checkOutTarget: "2026-07-05T10:00:00-03:00", // noches 03 y 04
+      guestCount: 3,
+    });
+    const serie = buildGuestNightsSeries([r1, r2], "2026-07-01", "2026-07-05", TZ);
+    expect(serie).toEqual([
+      { date: "2026-07-01", total: 0 },
+      { date: "2026-07-02", total: 2 },
+      { date: "2026-07-03", total: 5 }, // 2 + 3
+      { date: "2026-07-04", total: 3 },
+      { date: "2026-07-05", total: 0 }, // día de check-out de r2
+    ]);
+  });
+
+  it("excluye canceladas y clampa al rango", () => {
+    const cancelled = resv({ status: "cancelled", guestCount: 5 });
+    const larga = resv({
+      checkInTarget: "2026-06-28T14:00:00-03:00",
+      checkOutTarget: "2026-07-03T10:00:00-03:00", // noches 06-28..07-02
+      guestCount: 2,
+    });
+    const serie = buildGuestNightsSeries([cancelled, larga], "2026-07-01", "2026-07-03", TZ);
+    expect(serie).toEqual([
+      { date: "2026-07-01", total: 2 },
+      { date: "2026-07-02", total: 2 },
+      { date: "2026-07-03", total: 0 },
+    ]);
+  });
+});
+
+describe("estacionalidad por día de la semana", () => {
+  it("weekdayOfKey normaliza a lunes-primero", () => {
+    expect(weekdayOfKey("2026-07-13")).toBe(0); // lunes
+    expect(weekdayOfKey("2026-07-18")).toBe(5); // sábado
+    expect(weekdayOfKey("2026-07-19")).toBe(6); // domingo
+    expect(weekdayOfKey("2026-07-01")).toBe(2); // miércoles
+  });
+
+  it("promedia por el número real de ocurrencias de cada día", () => {
+    // Rango 01..10 jul 2026: mié×2 (01,08), jue×2 (02,09), vie×2 (03,10),
+    // sáb/dom/lun/mar ×1 (04,05,06,07).
+    const days = [
+      "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04", "2026-07-05",
+      "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10",
+    ];
+    const dailyOccupancy: DailyOccupancy[] = days.map((date) => ({
+      date,
+      occupied: 5,
+      available: 10,
+      rate: 50,
+    }));
+    // Caja: 1000 el mié 01 y 3000 el mié 08 → promedio mié = 2000. Sáb 04: 700.
+    const dailyCash: DailyTotal[] = days.map((date) => ({
+      date,
+      total: date === "2026-07-01" ? 1000 : date === "2026-07-08" ? 3000 : date === "2026-07-04" ? 700 : 0,
+    }));
+
+    const stats = buildWeekdaySeasonality(dailyOccupancy, dailyCash);
+    expect(stats).toHaveLength(7);
+    expect(stats[0].label).toBe("Lun");
+
+    const mie = stats.find((s) => s.label === "Mié")!;
+    expect(mie.days).toBe(2);
+    expect(mie.avgOccupancyRate).toBe(50);
+    expect(mie.avgRevenue).toBe(2000); // (1000 + 3000) / 2
+
+    const sab = stats.find((s) => s.label === "Sáb")!;
+    expect(sab.days).toBe(1);
+    expect(sab.avgRevenue).toBe(700);
+
+    const lun = stats.find((s) => s.label === "Lun")!;
+    expect(lun.days).toBe(1);
+    expect(lun.avgOccupancyRate).toBe(50);
+    expect(lun.avgRevenue).toBe(0);
+  });
+
+  it("días de semana ausentes del rango quedan en cero", () => {
+    // Rango de 2 días: lun 13 y mar 14.
+    const dailyOccupancy: DailyOccupancy[] = [
+      { date: "2026-07-13", occupied: 8, available: 10, rate: 80 },
+      { date: "2026-07-14", occupied: 4, available: 10, rate: 40 },
+    ];
+    const dailyCash: DailyTotal[] = [
+      { date: "2026-07-13", total: 500 },
+      { date: "2026-07-14", total: 900 },
+    ];
+    const stats = buildWeekdaySeasonality(dailyOccupancy, dailyCash);
+    expect(stats.find((s) => s.label === "Lun")!.avgOccupancyRate).toBe(80);
+    expect(stats.find((s) => s.label === "Mar")!.avgRevenue).toBe(900);
+    const dom = stats.find((s) => s.label === "Dom")!;
+    expect(dom.days).toBe(0);
+    expect(dom.avgOccupancyRate).toBe(0);
+    expect(dom.avgRevenue).toBe(0);
   });
 });
 

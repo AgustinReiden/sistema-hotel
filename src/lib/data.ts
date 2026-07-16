@@ -6,9 +6,11 @@ import { localToISO } from "./format";
 import { hotelDateKey } from "./time";
 import {
   buildDailyTotals,
+  buildGuestNightsSeries,
   buildOccupancyHistogram,
   buildRevenueByRoomType,
   buildRoomBreakdown,
+  buildWeekdaySeasonality,
   computeWindowKpis,
   countDaysInclusive,
   hotelRangeToUtc,
@@ -25,6 +27,7 @@ import {
   type RoomBreakdownTotals,
   type RoomCleaning,
   type RoomInfo,
+  type WeekdayStat,
 } from "./analytics";
 import type {
   AdminAlert,
@@ -35,6 +38,7 @@ import type {
   CashShiftStatus,
   CheckoutExportRow,
   CleaningCategory,
+  CloseShiftBlockersResult,
   CleaningOutcome,
   CleaningType,
   CompanyPassenger,
@@ -1900,9 +1904,12 @@ export type KpiWithDelta = { current: number; previous: number; deltaPct: number
 export type DashboardKpis = {
   lodgingRevenue: KpiWithDelta;
   totalPaymentsIncome: KpiWithDelta;
+  totalPaymentsIncomeNoVale: KpiWithDelta;
   occupancyRate: KpiWithDelta;
   adr: KpiWithDelta;
   revpar: KpiWithDelta;
+  guestNights: KpiWithDelta;
+  avgGuestsPerNight: KpiWithDelta;
   reservationsCreated: KpiWithDelta;
   cancellationRate: KpiWithDelta;
   avgLengthOfStay: KpiWithDelta;
@@ -1918,6 +1925,8 @@ export type ManagementDashboardData = {
   // Series del período actual
   dailyOccupancy: DailyOccupancy[];
   dailyCash: DailyTotal[];
+  dailyGuestNights: DailyTotal[];
+  weekdaySeasonality: WeekdayStat[];
   // Breakdowns del período actual
   revenueByRoomType: { room_type: string; total: number }[];
   paymentMethods: { method: string; total: number }[];
@@ -1970,7 +1979,7 @@ export async function getManagementDashboardData(
     supabase
       .from("reservations")
       .select(
-        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, room_id, rooms(room_type)"
+        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, room_id, guest_count, rooms(room_type)"
       )
       .in("status", ["confirmed", "checked_in", "checked_out"])
       .lt("check_in_target", unionWindow.endUtcExclusive)
@@ -2038,6 +2047,7 @@ export async function getManagementDashboardData(
     discount_amount: number | string | null;
     created_at: string;
     room_id: number | string | null;
+    guest_count: number | string | null;
     rooms: { room_type: string } | { room_type: string }[] | null;
   };
 
@@ -2052,6 +2062,7 @@ export async function getManagementDashboardData(
     roomId: Number(r.room_id) || 0,
     roomType: roomTypeOf(r.rooms),
     createdAt: r.created_at,
+    guestCount: Math.max(1, Number(r.guest_count) || 1),
   }));
 
   const created: CreatedReservation[] = (
@@ -2071,9 +2082,12 @@ export async function getManagementDashboardData(
   const kpis: DashboardKpis = {
     lodgingRevenue: delta(cur.lodgingRevenue, prvKpis.lodgingRevenue),
     totalPaymentsIncome: delta(cur.totalPaymentsIncome, prvKpis.totalPaymentsIncome),
+    totalPaymentsIncomeNoVale: delta(cur.totalPaymentsIncomeNoVale, prvKpis.totalPaymentsIncomeNoVale),
     occupancyRate: delta(cur.occupancyRate, prvKpis.occupancyRate),
     adr: delta(cur.adr, prvKpis.adr),
     revpar: delta(cur.revpar, prvKpis.revpar),
+    guestNights: delta(cur.guestNights, prvKpis.guestNights),
+    avgGuestsPerNight: delta(cur.avgGuestsPerNight, prvKpis.avgGuestsPerNight),
     reservationsCreated: delta(cur.reservationsCreated, prvKpis.reservationsCreated),
     cancellationRate: delta(cur.cancellationRate, prvKpis.cancellationRate),
     avgLengthOfStay: delta(cur.avgLengthOfStay, prvKpis.avgLengthOfStay),
@@ -2082,6 +2096,7 @@ export async function getManagementDashboardData(
 
   // ── Series y breakdowns (solo período actual) ──
   const dailyOccupancy = buildOccupancyHistogram(overlap, startKey, endKey, activeRooms, tz);
+  const dailyGuestNights = buildGuestNightsSeries(overlap, startKey, endKey, tz);
 
   const currentPayments = payments.filter((p) => {
     const k = hotelDateKey(p.createdAt, tz);
@@ -2141,6 +2156,8 @@ export async function getManagementDashboardData(
     .map(([category, count]) => ({ category, count }))
     .sort((a, b) => b.count - a.count);
 
+  const weekdaySeasonality = buildWeekdaySeasonality(dailyOccupancy, dailyCash);
+
   return {
     range: { from: startKey, to: endKey, days: countDaysInclusive(startKey, endKey) },
     previousRange: { from: prev.start, to: prev.end },
@@ -2149,6 +2166,8 @@ export async function getManagementDashboardData(
     kpis,
     dailyOccupancy,
     dailyCash,
+    dailyGuestNights,
+    weekdaySeasonality,
     revenueByRoomType,
     paymentMethods,
     extraChargesByType,
@@ -2192,7 +2211,7 @@ export async function getRoomBreakdownData(
     supabase
       .from("reservations")
       .select(
-        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, room_id"
+        "status, check_in_target, check_out_target, actual_check_in, actual_check_out, base_total_price, discount_amount, created_at, room_id, guest_count"
       )
       .in("status", ["confirmed", "checked_in", "checked_out"])
       .lt("check_in_target", win.endUtcExclusive)
@@ -2229,6 +2248,7 @@ export async function getRoomBreakdownData(
     discount_amount: number | string | null;
     created_at: string;
     room_id: number | string | null;
+    guest_count: number | string | null;
   };
 
   const reservationsOverlap: NightlyReservation[] = (
@@ -2246,6 +2266,7 @@ export async function getRoomBreakdownData(
       roomId,
       roomType: roomTypeById.get(roomId) ?? "—",
       createdAt: r.created_at,
+      guestCount: Math.max(1, Number(r.guest_count) || 1),
     };
   });
 
@@ -2523,6 +2544,64 @@ export async function openCashShift(): Promise<string> {
   const { data, error } = await supabase.rpc("rpc_open_cash_shift");
   if (error) throw error;
   return data as string;
+}
+
+/**
+ * Reservas con la salida vencida que bloquean el cierre de caja + aviso de
+ * alertas de limpieza "ocupada sin reserva". Va por RPC (SECURITY DEFINER)
+ * porque la policy de SELECT de admin_alerts es admin-only y el recepcionista
+ * necesita ver ambas cosas en el modal de cierre.
+ */
+export async function getCloseShiftBlockers(): Promise<CloseShiftBlockersResult> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_close_shift_blockers");
+  if (error) throw error;
+  const raw = data as {
+    blockers?: Array<{
+      reservation_id: string;
+      room_id: number | string;
+      room_number: string;
+      client_name: string | null;
+      effective_deadline: string;
+      hours_overdue: number | string;
+      balance_due: number | string;
+    }>;
+    occupied_alerts_count?: number;
+  };
+  return {
+    blockers: (raw.blockers ?? []).map((b) => ({
+      reservation_id: b.reservation_id,
+      room_id: Number(b.room_id) || 0,
+      room_number: b.room_number,
+      client_name: b.client_name,
+      effective_deadline: b.effective_deadline,
+      hours_overdue: Number(b.hours_overdue) || 0,
+      balance_due: Number(b.balance_due) || 0,
+    })),
+    occupied_alerts_count: raw.occupied_alerts_count ?? 0,
+  };
+}
+
+/**
+ * Salida "reportar al admin" del guard de cierre: registra el conflicto de una
+ * reserva vencida como admin_alert (kind shift_close_overdue_reservation) y
+ * desbloquea el cierre mientras la alerta siga sin resolver. Idempotente.
+ */
+export async function reportShiftCloseConflict(
+  reservationId: string,
+  notes: string
+): Promise<{ alertId: number; alreadyReported: boolean }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_report_shift_close_conflict", {
+    p_reservation_id: reservationId,
+    p_notes: notes,
+  });
+  if (error) throw error;
+  const result = data as { alert_id: number; already_reported: boolean };
+  return {
+    alertId: Number(result.alert_id),
+    alreadyReported: Boolean(result.already_reported),
+  };
 }
 
 export async function closeCashShift(
@@ -2917,12 +2996,14 @@ export async function getShiftCheckoutExport(
     client_dni: string | null;
     total_price: number | string;
     payment_method: string;
+    shift_number: number | string;
   }>).map((r) => ({
     actual_check_out: r.actual_check_out,
     client_name: r.client_name,
     client_dni: r.client_dni,
     total_price: Number(r.total_price) || 0,
     payment_method: r.payment_method as CheckoutExportRow["payment_method"],
+    shift_number: Number(r.shift_number) || 0,
   }));
 }
 

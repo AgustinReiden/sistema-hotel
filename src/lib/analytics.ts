@@ -104,6 +104,8 @@ export type NightlyReservation = {
   roomId: number;
   roomType: string;
   createdAt: string;
+  /** Cantidad de pasajeros de la reserva (reservations.guest_count, mínimo 1). */
+  guestCount: number;
 };
 
 /** Reserva para el cohorte "creadas en el período" (pickup / cancelaciones). */
@@ -269,11 +271,17 @@ export function buildRevenueByRoomType(
 export type WindowKpis = {
   lodgingRevenue: number;
   totalPaymentsIncome: number;
+  /** Caja cobrada excluyendo Vale Blanco (el VB no es plata que entra). */
+  totalPaymentsIncomeNoVale: number;
   roomNightsSold: number;
   availableRoomNights: number;
   occupancyRate: number;
   adr: number;
   revpar: number;
+  /** Pasajeros-noche del período (base física: gente que realmente durmió). */
+  guestNights: number;
+  /** Promedio de pasajeros por habitación ocupada por noche. */
+  avgGuestsPerNight: number;
   reservationsCreated: number;
   cancellations: number;
   cancellationRate: number;
@@ -304,6 +312,8 @@ export function computeWindowKpis(input: {
 
   let lodgingRevenue = 0;
   let roomNightsSold = 0;
+  let guestNights = 0;
+  let physicalRoomNights = 0;
   let losSum = 0;
   let losCount = 0;
   let leadSum = 0;
@@ -321,6 +331,14 @@ export function computeWindowKpis(input: {
       lodgingRevenue += perNightLodging(r.baseTotalPrice, r.discountAmount, fullNights) * nightsInRange;
     }
 
+    // Pasajeros-noche: base física (gente que realmente durmió), consistente con
+    // el histograma de ocupación del gráfico.
+    const physNights = reservationRoomNightsInRange(r, rangeStartKey, rangeEndKey, "physical", tz);
+    if (physNights > 0) {
+      physicalRoomNights += physNights;
+      guestNights += physNights * Math.max(1, r.guestCount);
+    }
+
     // Estadía promedio (LOS): estadías cuyo ingreso real (physical) cae en el rango.
     const phys = occupancyInterval(r, "physical", tz);
     if (phys.startKey >= rangeStartKey && phys.startKey <= rangeEndKey) {
@@ -335,8 +353,12 @@ export function computeWindowKpis(input: {
   }
 
   const availableRoomNights = activeRooms * countDaysInclusive(rangeStartKey, rangeEndKey);
-  const totalPaymentsIncome = payments
-    .filter((p) => keyInRange(p.createdAt))
+  const paymentsInRange = payments.filter((p) => keyInRange(p.createdAt));
+  const totalPaymentsIncome = paymentsInRange.reduce((sum, p) => sum + p.amount, 0);
+  // "Sin VB": el vale blanco no es plata que entra; el gerente lo quiere poder
+  // mirar por separado de las ventas reales.
+  const totalPaymentsIncomeNoVale = paymentsInRange
+    .filter((p) => p.method !== "vale_blanco")
     .reduce((sum, p) => sum + p.amount, 0);
 
   const createdInRange = reservationsCreated.filter((r) => keyInRange(r.createdAt));
@@ -346,17 +368,109 @@ export function computeWindowKpis(input: {
   return {
     lodgingRevenue: round2(lodgingRevenue),
     totalPaymentsIncome: round2(totalPaymentsIncome),
+    totalPaymentsIncomeNoVale: round2(totalPaymentsIncomeNoVale),
     roomNightsSold,
     availableRoomNights,
     occupancyRate: computeOccupancyRate(roomNightsSold, availableRoomNights),
     adr: round2(computeAdr(lodgingRevenue, roomNightsSold)),
     revpar: round2(computeRevpar(lodgingRevenue, availableRoomNights)),
+    guestNights,
+    avgGuestsPerNight: physicalRoomNights > 0 ? round2(guestNights / physicalRoomNights) : 0,
     reservationsCreated: reservationsCreatedCount,
     cancellations,
     cancellationRate: reservationsCreatedCount > 0 ? (cancellations / reservationsCreatedCount) * 100 : 0,
     avgLengthOfStay: losCount > 0 ? round2(losSum / losCount) : 0,
     avgLeadTimeDays: leadCount > 0 ? round2(leadSum / leadCount) : 0,
   };
+}
+
+// ───────────────────────────── Pasajeros y estacionalidad ─────────────────────────────
+
+/**
+ * Pasajeros-noche por día del rango: cuánta gente durmió cada noche (base física).
+ * Clon de buildOccupancyHistogram sumando guest_count en lugar de 1.
+ */
+export function buildGuestNightsSeries(
+  reservations: NightlyReservation[],
+  rangeStartKey: string,
+  rangeEndKey: string,
+  tz: string
+): DailyTotal[] {
+  const map = new Map<string, number>();
+  for (const key of eachHotelDayKey(rangeStartKey, rangeEndKey)) map.set(key, 0);
+
+  for (const r of reservations) {
+    if (r.status === "cancelled") continue;
+    const { startKey, endKey } = occupancyInterval(r, "physical", tz);
+    if (daysBetweenKeys(startKey, endKey) <= 0) continue;
+    const guests = Math.max(1, r.guestCount);
+    let cur = maxKey(startKey, rangeStartKey);
+    const stop = minKey(endKey, addDaysToDateKey(rangeEndKey, 1)); // exclusivo
+    while (cur < stop) {
+      const prev = map.get(cur);
+      if (prev !== undefined) map.set(cur, prev + guests);
+      cur = addDaysToDateKey(cur, 1);
+    }
+  }
+
+  return eachHotelDayKey(rangeStartKey, rangeEndKey).map((date) => ({
+    date,
+    total: map.get(date) ?? 0,
+  }));
+}
+
+/** 0=lunes … 6=domingo, en espacio UTC de la clave (puro, inmune a tz). */
+export function weekdayOfKey(dateKey: string): number {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  // getUTCDay(): 0=domingo … 6=sábado → normalizamos a lunes-primero.
+  return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+}
+
+export const WEEKDAY_LABELS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+export type WeekdayStat = {
+  /** 0=lunes … 6=domingo. */
+  weekday: number;
+  label: string;
+  /** Cuántas veces aparece este día de semana en el rango. */
+  days: number;
+  avgOccupancyRate: number;
+  avgRevenue: number;
+};
+
+/**
+ * Estacionalidad por día de la semana: promedia la ocupación y la recaudación de
+ * las series diarias ya calculadas, agrupando por día de semana. Divide por el
+ * número REAL de ocurrencias de cada día (los rangos no múltiplos de 7 no
+ * distorsionan). Orden lunes-primero. Responde "¿los sábados se repiten?".
+ */
+export function buildWeekdaySeasonality(
+  dailyOccupancy: DailyOccupancy[],
+  dailyCash: DailyTotal[]
+): WeekdayStat[] {
+  const occSum = new Array(7).fill(0);
+  const occCount = new Array(7).fill(0);
+  const cashSum = new Array(7).fill(0);
+  const cashCount = new Array(7).fill(0);
+
+  for (const d of dailyOccupancy) {
+    const w = weekdayOfKey(d.date);
+    occSum[w] += d.rate;
+    occCount[w] += 1;
+  }
+  for (const d of dailyCash) {
+    const w = weekdayOfKey(d.date);
+    cashSum[w] += d.total;
+    cashCount[w] += 1;
+  }
+
+  return WEEKDAY_LABELS.map((label, weekday) => ({
+    weekday,
+    label,
+    days: Math.max(occCount[weekday], cashCount[weekday]),
+    avgOccupancyRate: occCount[weekday] > 0 ? round2(occSum[weekday] / occCount[weekday]) : 0,
+    avgRevenue: cashCount[weekday] > 0 ? round2(cashSum[weekday] / cashCount[weekday]) : 0,
+  }));
 }
 
 // ───────────────────────────── Desglose por habitación ─────────────────────────────

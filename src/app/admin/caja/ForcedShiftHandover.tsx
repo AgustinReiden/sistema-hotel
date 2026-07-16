@@ -35,6 +35,7 @@ export default function ForcedShiftHandover({
         checkoutsCount={checkoutsCount}
         afterClose="reopen"
         dismissable={false}
+        context="handover"
         notice={`La caja abierta la dejó ${quien}. Rendila (efectivo a ciegas) antes de poder operar.`}
       />
     </div>

@@ -249,6 +249,15 @@ export const closeShiftSchema = z.object({
     ),
 });
 
+export const reportShiftConflictSchema = z.object({
+  reservationId: z.string().uuid("El identificador de la reserva es invalido."),
+  notes: z
+    .string()
+    .trim()
+    .min(5, "Explica el conflicto en la nota (minimo 5 caracteres).")
+    .max(500, "La nota no puede superar los 500 caracteres."),
+});
+
 export const SUPPORTED_PHONE_COUNTRY_CODES = [
   "54",
   "55",
