@@ -34,6 +34,21 @@ export const METRIC_INFO = {
     what: "Plata que realmente entró en el período (todos los medios de pago), sin importar a qué reserva corresponde ni cuándo fue la estadía.",
     how: "Suma de todos los pagos registrados con fecha dentro del período, en la zona horaria del hotel.",
   },
+  totalPaymentsIncomeNoVale: {
+    title: "Caja sin Vale Blanco",
+    what: "La caja cobrada descontando los pagos con vale blanco, que no son plata que entra. Es la venta real en dinero del período.",
+    how: "Suma de los pagos del período excluyendo los de método Vale Blanco.",
+  },
+  guestNights: {
+    title: "Pasajeros-noche",
+    what: "Cuántas personas durmieron en el hotel en el período, contando cada noche. 2 personas × 3 noches = 6 pasajeros-noche.",
+    how: "Por cada reserva no cancelada: pasajeros de la reserva × noches reales dentro del período. Se suman todas.",
+  },
+  avgGuestsPerNight: {
+    title: "Promedio pax/noche",
+    what: "Cuántas personas duermen en promedio por habitación ocupada. Cerca de 1 = viajan solos; cerca de 2+ = parejas y familias.",
+    how: "Pasajeros-noche ÷ habitaciones-noche ocupadas (base física) del período.",
+  },
   accountsReceivable: {
     title: "Por cobrar",
     what: "Plata pendiente de las reservas activas (confirmadas o con huésped alojado). Es una foto de hoy, no del período elegido.",
@@ -88,6 +103,11 @@ export const METRIC_INFO = {
     title: "Caja cobrada por día",
     what: "Cómo se repartieron los cobros día a día.",
     how: "Suma de los pagos de cada día, en la zona horaria del hotel.",
+  },
+  weekdaySeasonality: {
+    title: "Estacionalidad semanal",
+    what: "Qué días de la semana trabajás más. Responde '¿los fines de semana se repiten?' para planificar personal y precios.",
+    how: "Se agrupan los días del período por día de la semana y se promedia la ocupación y la caja cobrada de cada uno.",
   },
   revenueByRoomType: {
     title: "Ingreso por tipo de habitación",

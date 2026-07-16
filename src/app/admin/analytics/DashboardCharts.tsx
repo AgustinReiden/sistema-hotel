@@ -49,11 +49,20 @@ const EXTRA_LABELS: Record<string, string> = {
 type OccupancyPoint = { date: string; occupied: number; available: number; rate: number };
 type DailyPoint = { date: string; total: number };
 type NamedTotal = { label: string; total: number };
+type WeekdayPoint = {
+  weekday: number;
+  label: string;
+  days: number;
+  avgOccupancyRate: number;
+  avgRevenue: number;
+};
 
 type Props = {
   currency: string;
   dailyOccupancy: OccupancyPoint[];
   dailyCash: DailyPoint[];
+  dailyGuestNights: DailyPoint[];
+  weekdaySeasonality: WeekdayPoint[];
   revenueByRoomType: { room_type: string; total: number }[];
   paymentMethods: { method: string; total: number }[];
   extraChargesByType: { charge_type: string; total: number }[];
@@ -168,6 +177,104 @@ function CashTrend({ data, currency }: { data: DailyPoint[]; currency: string })
   );
 }
 
+// ── Pasajeros-noche por día (área) ──
+function GuestNightsTrend({ data }: { data: DailyPoint[] }) {
+  if (data.length === 0 || data.every((d) => d.total === 0)) return <EmptyState />;
+  const chartData = data.map((d) => ({ ...d, label: shortDay(d.date) }));
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <AreaChart data={chartData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+        <defs>
+          <linearGradient id="guestGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+        <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} minTickGap={16} />
+        <YAxis tick={axisTick} tickLine={false} axisLine={false} width={44} allowDecimals={false} />
+        <Tooltip
+          cursor={{ stroke: "#cbd5e1", strokeWidth: 1 }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const p = payload[0].payload as DailyPoint & { label: string };
+            return (
+              <TooltipBox
+                title={p.label}
+                lines={[`${p.total} ${p.total === 1 ? "pasajero" : "pasajeros"} esa noche`]}
+              />
+            );
+          }}
+        />
+        <Area
+          type="monotone"
+          dataKey="total"
+          stroke="#6366f1"
+          strokeWidth={2}
+          fill="url(#guestGradient)"
+          dot={false}
+          activeDot={{ r: 4 }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Estacionalidad por día de la semana (barras dobles: ocupación % + caja $) ──
+function WeekdaySeasonalityChart({
+  data,
+  currency,
+}: {
+  data: WeekdayPoint[];
+  currency: string;
+}) {
+  if (data.length === 0 || data.every((d) => d.days === 0)) return <EmptyState />;
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ top: 10, right: 8, left: -12, bottom: 0 }} barCategoryGap="20%">
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+        <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} />
+        <YAxis
+          yAxisId="occ"
+          tick={axisTick}
+          tickLine={false}
+          axisLine={false}
+          width={44}
+          domain={[0, 100]}
+          tickFormatter={(v: number) => `${v}%`}
+        />
+        <YAxis
+          yAxisId="cash"
+          orientation="right"
+          tick={axisTick}
+          tickLine={false}
+          axisLine={false}
+          width={52}
+          tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`)}
+        />
+        <Tooltip
+          cursor={{ fill: "rgba(100,116,139,0.08)" }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const p = payload[0].payload as WeekdayPoint;
+            return (
+              <TooltipBox
+                title={`${p.label} (${p.days} ${p.days === 1 ? "día" : "días"} en el período)`}
+                lines={[
+                  `Ocupación promedio: ${p.avgOccupancyRate.toFixed(1)}%`,
+                  `Caja promedio: ${formatMoney(p.avgRevenue, currency)}`,
+                ]}
+              />
+            );
+          }}
+        />
+        <Bar yAxisId="occ" dataKey="avgOccupancyRate" fill={BRAND} radius={[4, 4, 0, 0]} maxBarSize={22} />
+        <Bar yAxisId="cash" dataKey="avgRevenue" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={22} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 // ── Barras horizontales por categoría (ingreso por tipo / método de pago) ──
 function HorizontalBars({
   data,
@@ -251,6 +358,8 @@ export default function DashboardCharts({
   currency,
   dailyOccupancy,
   dailyCash,
+  dailyGuestNights,
+  weekdaySeasonality,
   revenueByRoomType,
   paymentMethods,
   extraChargesByType,
@@ -276,6 +385,18 @@ export default function DashboardCharts({
 
       <ChartCard title="Caja cobrada por día" subtitle="Pagos registrados por día (zona del hotel)" metric="dailyCash">
         <CashTrend data={dailyCash} currency={currency} />
+      </ChartCard>
+
+      <ChartCard title="Pasajeros por noche" subtitle="Cuánta gente durmió cada noche del período" metric="guestNights">
+        <GuestNightsTrend data={dailyGuestNights} />
+      </ChartCard>
+
+      <ChartCard
+        title="Estacionalidad semanal"
+        subtitle="Ocupación (verde, %) y caja (violeta, $) promedio por día de la semana"
+        metric="weekdaySeasonality"
+      >
+        <WeekdaySeasonalityChart data={weekdaySeasonality} currency={currency} />
       </ChartCard>
 
       <ChartCard title="Ingreso por tipo de habitación" subtitle="Alojamiento devengado en el período" metric="revenueByRoomType">

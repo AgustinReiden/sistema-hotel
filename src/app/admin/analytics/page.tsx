@@ -12,6 +12,7 @@ import {
   Scale,
   Sparkles,
   TrendingUp,
+  Users,
   Wallet,
   XCircle,
   type LucideIcon,
@@ -91,6 +92,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   ];
 
   const secondary: SecondaryCard[] = [
+    { label: "Caja sin Vale Blanco", value: money(k.totalPaymentsIncomeNoVale.current), delta: k.totalPaymentsIncomeNoVale, good: "up", icon: Wallet, info: "totalPaymentsIncomeNoVale" },
+    { label: "Pasajeros-noche", value: num(k.guestNights.current), delta: k.guestNights, good: "up", icon: Users, info: "guestNights" },
+    { label: "Prom. pax/noche", value: k.avgGuestsPerNight.current.toFixed(1), delta: k.avgGuestsPerNight, good: "up", icon: Users, info: "avgGuestsPerNight" },
     { label: "Reservas nuevas", value: num(k.reservationsCreated.current), delta: k.reservationsCreated, good: "up", icon: CalendarCheck, info: "reservationsCreated" },
     { label: "Tasa de cancelación", value: `${k.cancellationRate.current.toFixed(1)}%`, delta: k.cancellationRate, good: "down", icon: XCircle, info: "cancellationRate" },
     { label: "Estadía promedio", value: `${k.avgLengthOfStay.current.toFixed(1)} noches`, delta: k.avgLengthOfStay, good: "up", icon: Moon, info: "avgLengthOfStay" },
@@ -165,6 +169,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           currency={data.currency}
           dailyOccupancy={data.dailyOccupancy}
           dailyCash={data.dailyCash}
+          dailyGuestNights={data.dailyGuestNights}
+          weekdaySeasonality={data.weekdaySeasonality}
           revenueByRoomType={data.revenueByRoomType}
           paymentMethods={data.paymentMethods}
           extraChargesByType={data.extraChargesByType}

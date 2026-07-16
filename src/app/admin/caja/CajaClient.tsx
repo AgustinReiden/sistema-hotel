@@ -280,6 +280,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
             totalsByMethod={summary.totalsByMethod}
             checkoutsCount={summary.checkoutsCount}
             afterClose={isAdmin ? "refresh" : "logout"}
+            hotelTimezone={hotelTimezone}
           />
         </>
       )}

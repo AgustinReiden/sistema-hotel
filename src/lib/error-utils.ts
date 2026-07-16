@@ -57,7 +57,10 @@ export function parseActionError(
     }
 
     if (error instanceof Error) {
-      return { error: error.message || fallbackMessage };
+      // PostgrestError extiende Error y trae el SQLSTATE en `code`: propagarlo
+      // para que el front pueda discriminar (P0003 caja cerrada, P0011 salidas
+      // vencidas, P0012 nota obligatoria) sin depender de regex sobre el mensaje.
+      return { error: error.message || fallbackMessage, code };
     }
 
     const message =
