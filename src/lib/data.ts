@@ -47,6 +47,10 @@ import type {
   CtaCteClientKind,
   CtaCteMovimiento,
   DiscountedClient,
+  FiscalSettings,
+  InvoiceRecord,
+  InvoiceableCheckoutRow,
+  PendingInvoiceRow,
   RegisterAccountPaymentPayload,
   Guest,
   GuestDirectoryEntry,
@@ -92,6 +96,7 @@ type DashboardData = {
     discount_amount: number;
     total_price: number;
     paid_amount: number;
+    associated_client_id: string | null;
   }[];
   /** reservationId -> el cliente facturable tiene cuenta corriente habilitada. */
   accountCreditByReservation: Record<string, boolean>;
@@ -493,6 +498,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     discount_amount: Number(r.discount_amount) || 0,
     total_price: Number(r.total_price) || 0,
     paid_amount: Number(r.paid_amount) || 0,
+    associated_client_id: r.associated_client_id ?? null,
   }));
 
   // Resolver, por reserva, si el cliente facturable (empresa o huésped) tiene cta cte habilitada.
@@ -3060,4 +3066,281 @@ export async function getPendingSolicitudesCount(): Promise<number> {
     .eq("status", "pending");
   if (error) return 0;
   return count ?? 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Facturación electrónica ARCA (mig 72)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getFiscalSettings(): Promise<FiscalSettings | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fiscal_settings")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  return {
+    id: 1,
+    enabled: Boolean(row.enabled),
+    environment: (row.environment as FiscalSettings["environment"]) ?? "homologacion",
+    cuit: (row.cuit as string | null) ?? null,
+    razon_social: (row.razon_social as string | null) ?? null,
+    domicilio_fiscal: (row.domicilio_fiscal as string | null) ?? null,
+    iibb: (row.iibb as string | null) ?? null,
+    inicio_actividades: (row.inicio_actividades as string | null) ?? null,
+    punto_venta: row.punto_venta === null ? null : Number(row.punto_venta),
+    cbte_tipo: Number(row.cbte_tipo) || 6,
+    concepto: Number(row.concepto) || 2,
+    iva_pct: Number(row.iva_pct) || 21,
+  };
+}
+
+export async function updateFiscalSettings(
+  fields: Partial<Omit<FiscalSettings, "id">>
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("fiscal_settings")
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  if (error) throw error;
+}
+
+export async function setFiscalInternalKey(key: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_set_fiscal_internal_key", { p_key: key });
+  if (error) throw error;
+}
+
+export async function createInvoiceDraft(
+  reservationId: string
+): Promise<{ invoiceId: string; status: string; reused: boolean }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_create_invoice_draft", {
+    p_reservation_id: reservationId,
+  });
+  if (error) throw error;
+  const r = data as { invoice_id: string; status: string; reused: boolean };
+  return { invoiceId: r.invoice_id, status: r.status, reused: Boolean(r.reused) };
+}
+
+/**
+ * Corrige el DNI de una reserva ya cerrada (checked_out) a los fines de re-facturar.
+ * Después, emitInvoice re-lee el DNI corregido. Rechaza si ya hay factura autorizada.
+ */
+export async function fixReservationDniForInvoice(
+  reservationId: string,
+  dni: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_fix_reservation_dni_for_invoice", {
+    p_reservation_id: reservationId,
+    p_dni: dni,
+  });
+  if (error) throw error;
+}
+
+/** Descarta una factura pendiente/rechazada (reversible: la reserva vuelve a facturable). */
+export async function discardInvoice(invoiceId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_discard_invoice", { p_invoice_id: invoiceId });
+  if (error) throw error;
+}
+
+/** Payload que devuelve rpc_begin_invoice_emission para armar el SOAP. */
+export type BeginEmissionPayload = {
+  invoice_id: string;
+  environment: FiscalSettings["environment"];
+  pto_vta: number;
+  cbte_tipo: number;
+  concepto: number;
+  cbte_nro: number;
+  cbte_fch: string; // yyyymmdd
+  doc_tipo: number;
+  doc_nro: string;
+  condicion_iva_receptor_id: number;
+  imp_total: number;
+  imp_neto: number;
+  imp_iva: number;
+  iva_id: number;
+  mon_id: string;
+  mon_cotiz: number;
+  fch_serv_desde: string; // yyyymmdd
+  fch_serv_hasta: string; // yyyymmdd
+  fch_vto_pago: string; // yyyymmdd
+  cuit: string;
+};
+
+export async function beginInvoiceEmission(
+  invoiceId: string,
+  cbteNro: number,
+  internalKey: string
+): Promise<BeginEmissionPayload> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_begin_invoice_emission", {
+    p_invoice_id: invoiceId,
+    p_cbte_nro: cbteNro,
+    p_internal_key: internalKey,
+  });
+  if (error) throw error;
+  const r = data as Record<string, unknown>;
+  return {
+    ...(r as unknown as BeginEmissionPayload),
+    cbte_nro: Number(r.cbte_nro),
+    imp_total: Number(r.imp_total),
+    imp_neto: Number(r.imp_neto),
+    imp_iva: Number(r.imp_iva),
+    mon_cotiz: Number(r.mon_cotiz) || 1,
+  };
+}
+
+export async function finalizeInvoice(input: {
+  invoiceId: string;
+  outcome: "authorized" | "rejected" | "pending" | "unknown";
+  cae?: string | null;
+  caeVto?: string | null; // "yyyy-mm-dd"
+  arcaResult?: unknown;
+  qrUrl?: string | null;
+  lastError?: string | null;
+  internalKey: string;
+}): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_finalize_invoice", {
+    p_invoice_id: input.invoiceId,
+    p_outcome: input.outcome,
+    p_cae: input.cae ?? null,
+    p_cae_vto: input.caeVto ?? null,
+    p_arca_result: input.arcaResult ?? null,
+    p_qr_url: input.qrUrl ?? null,
+    p_last_error: input.lastError ?? null,
+    p_internal_key: input.internalKey,
+  });
+  if (error) throw error;
+}
+
+export async function getArcaTa(
+  environment: FiscalSettings["environment"],
+  internalKey: string
+): Promise<{ token: string; sign: string; expiration_time: string } | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_get_arca_ta", {
+    p_environment: environment,
+    p_internal_key: internalKey,
+  });
+  if (error) throw error;
+  if (!data) return null;
+  return data as { token: string; sign: string; expiration_time: string };
+}
+
+export async function setArcaTa(input: {
+  environment: FiscalSettings["environment"];
+  token: string;
+  sign: string;
+  generationTime: string | null;
+  expirationTime: string;
+  internalKey: string;
+}): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_set_arca_ta", {
+    p_environment: input.environment,
+    p_token: input.token,
+    p_sign: input.sign,
+    p_generation_time: input.generationTime,
+    p_expiration_time: input.expirationTime,
+    p_internal_key: input.internalKey,
+  });
+  if (error) throw error;
+}
+
+export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const r = data as Record<string, unknown>;
+  return {
+    id: String(r.id),
+    reservation_id: String(r.reservation_id),
+    status: r.status as InvoiceRecord["status"],
+    environment: r.environment as InvoiceRecord["environment"],
+    pto_vta: Number(r.pto_vta),
+    cbte_tipo: Number(r.cbte_tipo),
+    concepto: Number(r.concepto),
+    cbte_nro: r.cbte_nro === null ? null : Number(r.cbte_nro),
+    cbte_fch: (r.cbte_fch as string | null) ?? null,
+    cae: (r.cae as string | null) ?? null,
+    cae_vto: (r.cae_vto as string | null) ?? null,
+    doc_tipo: Number(r.doc_tipo),
+    doc_nro: String(r.doc_nro),
+    condicion_iva_receptor_id: Number(r.condicion_iva_receptor_id),
+    receptor_nombre: (r.receptor_nombre as string | null) ?? null,
+    imp_total: Number(r.imp_total) || 0,
+    imp_neto: Number(r.imp_neto) || 0,
+    imp_iva: Number(r.imp_iva) || 0,
+    fch_serv_desde: String(r.fch_serv_desde),
+    fch_serv_hasta: String(r.fch_serv_hasta),
+    qr_url: (r.qr_url as string | null) ?? null,
+    last_error: (r.last_error as string | null) ?? null,
+    attempt_count: Number(r.attempt_count) || 0,
+  };
+}
+
+export async function listPendingInvoices(): Promise<PendingInvoiceRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_pending_invoices");
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    invoice_id: String(r.invoice_id),
+    reservation_id: String(r.reservation_id),
+    status: String(r.status),
+    room_number: String(r.room_number),
+    receptor_nombre: (r.receptor_nombre as string | null) ?? null,
+    imp_total: Number(r.imp_total) || 0,
+    attempt_count: Number(r.attempt_count) || 0,
+    last_error: (r.last_error as string | null) ?? null,
+    last_attempt_at: (r.last_attempt_at as string | null) ?? null,
+    created_at: String(r.created_at),
+  }));
+}
+
+export async function listInvoiceableCheckouts(): Promise<InvoiceableCheckoutRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_invoiceable_checkouts");
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    reservation_id: String(r.reservation_id),
+    room_number: String(r.room_number),
+    client_name: String(r.client_name),
+    client_dni: (r.client_dni as string | null) ?? null,
+    total_price: Number(r.total_price) || 0,
+    actual_check_out: String(r.actual_check_out),
+  }));
+}
+
+/** Facturas autorizadas recientes (para reimprimir desde /admin/fiscal). */
+export async function listTodayAuthorizedInvoices(): Promise<
+  Array<{ invoice_id: string; pto_vta: number; cbte_nro: number; receptor_nombre: string | null; imp_total: number }>
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("id, pto_vta, cbte_nro, receptor_nombre, imp_total, cbte_fch")
+    .eq("status", "authorized")
+    .order("updated_at", { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    invoice_id: String(r.id),
+    pto_vta: Number(r.pto_vta),
+    cbte_nro: Number(r.cbte_nro),
+    receptor_nombre: (r.receptor_nombre as string | null) ?? null,
+    imp_total: Number(r.imp_total) || 0,
+  }));
 }

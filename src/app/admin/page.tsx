@@ -9,6 +9,7 @@ import {
   getActiveAssociatedClients,
   getCurrentUserRole,
   getDashboardData,
+  getFiscalSettings,
   getPendingSolicitudesCount,
   getUnresolvedAdminAlertsCount,
 } from "@/lib/data";
@@ -38,6 +39,7 @@ type DashboardRoom = {
   halfDayPrice: number;
   hasArrivalToday: boolean;
   accountCreditEnabled: boolean;
+  billedToCompany: boolean;
 };
 
 function getDateKey(date: Date, timeZone: string) {
@@ -65,13 +67,15 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, accountCreditByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount] = await Promise.all([
+  const [{ rooms, reservations, accountCreditByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount, fiscalSettings] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
     getCurrentUserRole(),
     getPendingSolicitudesCount(),
     getUnresolvedAdminAlertsCount().catch(() => 0),
+    getFiscalSettings().catch(() => null),
   ]);
+  const fiscalEnabled = Boolean(fiscalSettings?.enabled);
   const isAdmin = role === "admin";
   const now = new Date();
   const todayKey = getDateKey(now, hotelSettings.timezone);
@@ -165,6 +169,9 @@ export default async function Dashboard() {
       accountCreditEnabled: reservationId
         ? Boolean(accountCreditByReservation[reservationId])
         : false,
+      billedToCompany: Boolean(
+        (activeReservation ?? confirmedReservation)?.associated_client_id
+      ),
     };
   });
 
@@ -270,6 +277,7 @@ export default async function Dashboard() {
               associatedClients={associatedClients}
               isAdmin={isAdmin}
               timezone={hotelSettings.timezone}
+              fiscalEnabled={fiscalEnabled}
             />
           ))}
         </div>

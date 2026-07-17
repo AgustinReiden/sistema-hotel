@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles, Percent } from 'lucide-react';
+import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles, Percent, FileText } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
 export default function Sidebar({ role, userEmail, hasOpenShift }: { role: string; userEmail: string; hasOpenShift?: boolean }) {
@@ -38,6 +38,10 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                     ) : (
                         <span className="text-[10px] font-bold text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded" title="Sin turno">CERRADA</span>
                     )}
+                </Link>
+                <Link href="/admin/fiscal" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                    <FileText size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
+                    <span className="font-medium">Facturación</span>
                 </Link>
 
                 {isAdmin && (

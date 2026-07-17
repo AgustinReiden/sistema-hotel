@@ -566,3 +566,81 @@ export type CheckoutExportRow = {
   /** Nº de cierre correlativo del turno (para validar el import en el gestión). */
   shift_number: number;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Facturación electrónica ARCA (mig 72)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type FiscalEnvironment = "homologacion" | "produccion";
+
+export type FiscalSettings = {
+  id: number;
+  enabled: boolean;
+  environment: FiscalEnvironment;
+  cuit: string | null;
+  razon_social: string | null;
+  domicilio_fiscal: string | null;
+  iibb: string | null;
+  inicio_actividades: string | null; // date
+  punto_venta: number | null;
+  cbte_tipo: number;
+  concepto: number;
+  iva_pct: number;
+};
+
+export type InvoiceRecord = {
+  id: string;
+  reservation_id: string;
+  status: "pending" | "processing" | "authorized" | "rejected";
+  environment: FiscalEnvironment;
+  pto_vta: number;
+  cbte_tipo: number;
+  concepto: number;
+  cbte_nro: number | null;
+  cbte_fch: string | null; // date
+  cae: string | null;
+  cae_vto: string | null; // date
+  doc_tipo: number;
+  doc_nro: string;
+  condicion_iva_receptor_id: number;
+  receptor_nombre: string | null;
+  imp_total: number;
+  imp_neto: number;
+  imp_iva: number;
+  fch_serv_desde: string; // date
+  fch_serv_hasta: string; // date
+  qr_url: string | null;
+  last_error: string | null;
+  attempt_count: number;
+};
+
+export type PendingInvoiceRow = {
+  invoice_id: string;
+  reservation_id: string;
+  status: string;
+  room_number: string;
+  receptor_nombre: string | null;
+  imp_total: number;
+  attempt_count: number;
+  last_error: string | null;
+  last_attempt_at: string | null;
+  created_at: string;
+};
+
+export type InvoiceableCheckoutRow = {
+  reservation_id: string;
+  room_number: string;
+  client_name: string;
+  client_dni: string | null;
+  total_price: number;
+  actual_check_out: string;
+};
+
+/** Resultado de emitInvoice para la UI (toast + acción). */
+export type EmitInvoiceOutcome = {
+  status: "authorized" | "rejected" | "pending" | "processing";
+  invoiceId: string | null;
+  cae?: string;
+  numero?: string;
+  userMessage: string;
+};
