@@ -209,7 +209,9 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
 
   // ¿Corresponde ofrecer factura tras este check-out? (el RPC re-valida igual)
   const shouldPromptInvoice = (paymentMethod?: string) =>
-    fiscalEnabled && !room.billedToCompany && paymentMethod !== "cuenta_corriente";
+    fiscalEnabled && !room.billedToCompany
+      && paymentMethod !== "cuenta_corriente"
+      && paymentMethod !== "vale_blanco";
 
   // Capturar los datos ANTES del await: el revalidate deja room.reservationId en null.
   // Con salida anticipada el total efectivo es el re-tarifado (la factura igual

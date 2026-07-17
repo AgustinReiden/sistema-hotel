@@ -20,6 +20,8 @@ import {
 } from "@/lib/arca/wsfe";
 import {
   createInvoiceDraft,
+  discardInvoice,
+  fixReservationDniForInvoice,
   getFiscalSettings,
   setFiscalInternalKey,
   updateFiscalSettings,
@@ -61,6 +63,40 @@ export async function retryInvoiceAction(
     return { success: true, data: outcome };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo reintentar la factura.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * "Corregir DNI" en una factura rechazada/pendiente: corrige el DNI de la reserva
+ * (aunque ya esté cerrada) y reintenta la emisión (que re-lee el DNI corregido).
+ */
+export async function fixInvoiceDniAndRetryAction(
+  invoiceId: string,
+  reservationId: string,
+  dni: string
+): Promise<ActionResult<EmitInvoiceOutcome>> {
+  try {
+    await fixReservationDniForInvoice(reservationId, dni);
+    const outcome = await emitInvoice(invoiceId);
+    revalidateFiscalViews();
+    return { success: true, data: outcome };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo corregir el DNI.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/** Descarta una factura pendiente/rechazada (la reserva vuelve a quedar facturable). */
+export async function discardInvoiceAction(
+  invoiceId: string
+): Promise<ActionResult> {
+  try {
+    await discardInvoice(invoiceId);
+    revalidateFiscalViews();
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo descartar la factura.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }
