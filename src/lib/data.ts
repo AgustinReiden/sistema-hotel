@@ -443,7 +443,8 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const [roomsResult, reservationsResult, incomeResult, settingsResult] =
     await Promise.all([
-      supabase.from("rooms").select("*").order("room_number"),
+      // Solo habitaciones activas: las desactivadas se ocultan de la grilla de recepcion.
+      supabase.from("rooms").select("*").eq("is_active", true).order("room_number"),
       supabase
         .from("reservations")
         .select("*")
@@ -570,7 +571,8 @@ export async function getTimelineData(days = 7, startKey?: string): Promise<Time
   end.setDate(end.getDate() + span);
 
   const [roomsResult, reservationsResult] = await Promise.all([
-    supabase.from("rooms").select("*").order("room_number"),
+    // Solo habitaciones activas: las desactivadas se ocultan del calendario.
+    supabase.from("rooms").select("*").eq("is_active", true).order("room_number"),
     supabase
       .from("reservations")
       .select("*")

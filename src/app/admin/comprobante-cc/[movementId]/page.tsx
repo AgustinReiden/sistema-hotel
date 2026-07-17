@@ -135,7 +135,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
         }
         .thermal { font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; background: white; color: #000; width: 72mm; max-width: 72mm; margin: 0 auto; line-height: 1.2; word-break: break-word; }
         .thermal-page { padding: 0 3mm; }
-        .thermal-feed { height: 10mm; }
+        .thermal-feed { height: 2mm; }
         .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
         .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
         .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 2px; text-align: center; letter-spacing: 0.6px; }

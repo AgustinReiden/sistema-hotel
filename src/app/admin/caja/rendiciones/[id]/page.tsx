@@ -326,7 +326,7 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
             padding-top: 4mm;
             border-top: 1px dashed #000;
           }
-          .thermal-feed { height: 10mm; }
+          .thermal-feed { height: 2mm; }
           .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
           .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 4px; }
           .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 0; text-align: center; letter-spacing: 0.6px; }

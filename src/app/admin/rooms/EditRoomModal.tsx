@@ -53,6 +53,7 @@ export default function EditRoomModal({
     const initialCategoryOptions = categories.length > 0 ? categories.map(toCategoryOption) : [getDefaultCategoryOption()];
 
     const [categoryOptions, setCategoryOptions] = useState<CategoryOption[]>(initialCategoryOptions);
+    const [roomNumber, setRoomNumber] = useState(room.room_number);
     const [roomType, setRoomType] = useState(room.room_type);
     const [capacity, setCapacity] = useState(getRoomCapacity(room).toString());
     const [bedsConfiguration, setBedsConfiguration] = useState(room.beds_configuration);
@@ -103,6 +104,13 @@ export default function EditRoomModal({
         setLoading(true);
         setError(null);
 
+        const trimmedRoomNumber = roomNumber.trim();
+        if (!trimmedRoomNumber) {
+            setError("El numero de habitacion es obligatorio.");
+            setLoading(false);
+            return;
+        }
+
         if (!roomType.trim()) {
             setError("La categoria es obligatoria.");
             setLoading(false);
@@ -130,6 +138,7 @@ export default function EditRoomModal({
             .filter((amenity) => amenity.length > 0);
 
         const result = await updateRoomAction(room.id, {
+            room_number: trimmedRoomNumber,
             room_type: roomType,
             capacity: parsedCapacity,
             beds_configuration: bedsConfiguration,
@@ -164,14 +173,30 @@ export default function EditRoomModal({
 
                 <div className="p-6 overflow-y-auto flex-1">
                     <form id="edit-room-form" onSubmit={handleSubmit} className="space-y-6">
-                        <div>
-                            <RoomTypeSelector
-                                value={roomType}
-                                roomTypes={categoryOptions.map((category) => category.name)}
-                                onChange={applyCategory}
-                                onAddCategory={handleAddCategory}
-                                label="Categoria"
-                            />
+                        <div className="grid grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Numero de Hab.</label>
+                                <input
+                                    type="text"
+                                    value={roomNumber}
+                                    onChange={(e) => setRoomNumber(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
+                                    placeholder="Ej. A-101"
+                                    required
+                                />
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Cambiar el numero no afecta reservas ni pagos historicos.
+                                </p>
+                            </div>
+                            <div>
+                                <RoomTypeSelector
+                                    value={roomType}
+                                    roomTypes={categoryOptions.map((category) => category.name)}
+                                    onChange={applyCategory}
+                                    onAddCategory={handleAddCategory}
+                                    label="Categoria"
+                                />
+                            </div>
                         </div>
 
                         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
