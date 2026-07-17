@@ -130,13 +130,16 @@ export default function FiscalSettingsPanel({ settings }: { settings: FiscalSett
           />
         </div>
         <div>
-          <label className="block text-sm font-bold text-slate-700 mb-1">Domicilio fiscal</label>
+          <label className="block text-sm font-bold text-slate-700 mb-1">Domicilio comercial</label>
           <input
             name="domicilio_fiscal"
             defaultValue={settings?.domicilio_fiscal ?? ""}
-            placeholder="RN16 km 491, Taco Pozo, Chaco"
+            placeholder="Ruta 16 492 - Taco Pozo, Chaco"
             className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none text-sm"
           />
+          <p className="text-[11px] text-slate-400 mt-1">
+            El que va impreso en la factura (el del punto de venta / establecimiento).
+          </p>
         </div>
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-1">Ingresos Brutos</label>

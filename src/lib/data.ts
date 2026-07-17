@@ -3125,6 +3125,29 @@ export async function createInvoiceDraft(
   return { invoiceId: r.invoice_id, status: r.status, reused: Boolean(r.reused) };
 }
 
+/**
+ * Corrige el DNI de una reserva ya cerrada (checked_out) a los fines de re-facturar.
+ * Después, emitInvoice re-lee el DNI corregido. Rechaza si ya hay factura autorizada.
+ */
+export async function fixReservationDniForInvoice(
+  reservationId: string,
+  dni: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_fix_reservation_dni_for_invoice", {
+    p_reservation_id: reservationId,
+    p_dni: dni,
+  });
+  if (error) throw error;
+}
+
+/** Descarta una factura pendiente/rechazada (reversible: la reserva vuelve a facturable). */
+export async function discardInvoice(invoiceId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_discard_invoice", { p_invoice_id: invoiceId });
+  if (error) throw error;
+}
+
 /** Payload que devuelve rpc_begin_invoice_emission para armar el SOAP. */
 export type BeginEmissionPayload = {
   invoice_id: string;

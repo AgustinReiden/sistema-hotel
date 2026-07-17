@@ -24,6 +24,13 @@
 .DS_Store
 *.pem
 
+# secretos fiscales ARCA (certificados y claves) — NUNCA se suben
+/arca/
+*.key
+*.crt
+*.csr
+*_B64.txt
+
 # debug
 npm-debug.log*
 yarn-debug.log*

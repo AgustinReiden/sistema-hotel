@@ -54,10 +54,14 @@ export default function InvoicePromptModal({ data, onClose }: Props) {
 
     const outcome = result.data!;
     if (outcome.status === "authorized") {
+      // Cubre tanto la emisión nueva como el caso "ya estaba facturada" (reimprime).
       toast.success(outcome.userMessage);
       if (outcome.invoiceId) openInvoicePrint(outcome.invoiceId);
     } else if (outcome.status === "rejected") {
-      toast.error(outcome.userMessage, { duration: 9000 });
+      toast.error(outcome.userMessage, {
+        description: "Corregí el DNI y reintentá desde Facturación → Pendientes y con error.",
+        duration: 9000,
+      });
     } else {
       toast.warning(outcome.userMessage, { duration: 9000 });
     }

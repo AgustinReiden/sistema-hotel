@@ -70,14 +70,22 @@ export default function PaymentModal({
   const debt = Math.max(0, numericTotal - numericPaid);
   const isCheckoutMode = Boolean(onSubmitPayment);
   const amountEditable = !isCheckoutMode;
+  // Solo mostrar el recuadro de descuento cuando hay un descuento real. NO comparar
+  // base vs total: un cargo extra sube el total por encima de la base y encendía un
+  // "Descuento aplicado" inexistente.
   const showDiscountBreakdown =
-    numericDiscountPercent > 0 || numericDiscountAmount > 0 || numericBaseTotal !== numericTotal;
+    numericDiscountPercent > 0 || numericDiscountAmount > 0;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [noOpenShift, setNoOpenShift] = useState(false);
   const [amount, setAmount] = useState(debt > 0 ? debt.toString() : "0");
   const [method, setMethod] = useState<PaymentMethod>("cash");
+
+  // En check-out el monto es el saldo exacto, derivado EN VIVO de las props (no del
+  // useState, que se congela al montar). Así, si se agrega un cargo extra mientras el
+  // modal está abierto, el "Monto a abonar" se actualiza y el check-out no se traba.
+  const displayAmount = isCheckoutMode ? String(debt) : amount;
 
   if (!isOpen) return null;
 
@@ -87,7 +95,8 @@ export default function PaymentModal({
     setError(null);
     setNoOpenShift(false);
 
-    const parsedAmount = parseFloat(amount);
+    // En check-out se cobra el saldo exacto (derivado en vivo); en pago suelto, lo tipeado.
+    const parsedAmount = isCheckoutMode ? debt : parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setError("El monto debe ser numerico y mayor a 0.");
       setLoading(false);
@@ -211,7 +220,7 @@ export default function PaymentModal({
                 type="number"
                 step="0.01"
                 min="0.01"
-                value={amount}
+                value={displayAmount}
                 onChange={(e) => setAmount(e.target.value)}
                 readOnly={!amountEditable}
                 className={`w-full px-4 py-3 rounded-xl border outline-none transition-all text-xl font-bold ${
@@ -251,11 +260,15 @@ export default function PaymentModal({
                   <CreditCard size={18} />
                   <span className="text-sm">Tarjeta</span>
                 </label>
-                <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "vale_blanco" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                  <input type="radio" name="method" value="vale_blanco" checked={method === "vale_blanco"} onChange={() => setMethod("vale_blanco")} className="sr-only" />
-                  <Banknote size={18} className="text-slate-400" />
-                  <span className="text-sm">Vale Blanco</span>
-                </label>
+                {/* Vale blanco (consumo interno) solo si NO hubo pagos previos: tiene que
+                    cubrir el total de una sola vez, sin combinar con otro medio. */}
+                {numericPaid === 0 && (
+                  <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "vale_blanco" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
+                    <input type="radio" name="method" value="vale_blanco" checked={method === "vale_blanco"} onChange={() => setMethod("vale_blanco")} className="sr-only" />
+                    <Banknote size={18} className="text-slate-400" />
+                    <span className="text-sm">Vale Blanco</span>
+                  </label>
+                )}
                 {accountCreditEnabled && (
                   <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cuenta_corriente" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
                     <input type="radio" name="method" value="cuenta_corriente" checked={method === "cuenta_corriente"} onChange={() => setMethod("cuenta_corriente")} className="sr-only" />
