@@ -1,5 +1,6 @@
-import { getHotelSettings } from "@/lib/data";
+import { getFiscalSettings, getHotelSettings } from "@/lib/data";
 import SettingsForm from "./SettingsForm";
+import FiscalSettingsPanel from "./FiscalSettingsPanel";
 import UsersPanel from "./UsersPanel";
 import { Settings } from "lucide-react";
 
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
     const settings = await getHotelSettings();
+    const fiscalSettings = await getFiscalSettings().catch(() => null);
 
     return (
         <div className="flex flex-col h-full">
@@ -29,6 +31,7 @@ export default async function SettingsPage() {
                     </div>
 
                     <SettingsForm settings={settings} />
+                    <FiscalSettingsPanel settings={fiscalSettings} />
                     <UsersPanel />
                 </div>
             </div>

@@ -21,6 +21,7 @@ import {
   handleExtendReservation,
 } from "./actions";
 import PaymentModal from "../components/PaymentModal";
+import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal";
 import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import type { AssociatedClient } from "@/lib/types";
@@ -49,10 +50,14 @@ type RoomCardProps = {
     halfDayPrice: number;
     hasArrivalToday: boolean;
     accountCreditEnabled: boolean;
+    /** La reserva activa es de una empresa (se factura A desde la oficina, no acá). */
+    billedToCompany: boolean;
   };
   associatedClients: AssociatedClient[];
   isAdmin?: boolean;
   timezone: string;
+  /** fiscal_settings.enabled: habilita el prompt "¿Emitir factura?" post check-out. */
+  fiscalEnabled?: boolean;
 };
 
 function openAccountVoucher(movementId: string) {
@@ -64,8 +69,9 @@ function openAccountVoucher(movementId: string) {
   );
 }
 
-export default function RoomCard({ room, associatedClients, isAdmin = false, timezone }: RoomCardProps) {
+export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
+  const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
@@ -201,9 +207,26 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     setIsCheckoutConfirmOpen(true);
   };
 
+  // ¿Corresponde ofrecer factura tras este check-out? (el RPC re-valida igual)
+  const shouldPromptInvoice = (paymentMethod?: string) =>
+    fiscalEnabled && !room.billedToCompany && paymentMethod !== "cuenta_corriente";
+
+  // Capturar los datos ANTES del await: el revalidate deja room.reservationId en null.
+  // Con salida anticipada el total efectivo es el re-tarifado (la factura igual
+  // toma reservations.total_price ya actualizado; esto es solo el subtítulo).
+  const buildInvoicePrompt = (): InvoicePromptData | null =>
+    room.reservationId
+      ? {
+          reservationId: room.reservationId,
+          clientName: room.client,
+          total: early ? early.newTotal : room.totalPrice,
+        }
+      : null;
+
   const executeCheckout = () => {
     const reservationId = room.reservationId;
     if (!reservationId) return;
+    const prompt = buildInvoicePrompt();
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
     startTransition(async () => {
@@ -220,6 +243,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           ? "Salida anticipada realizada."
           : "Check-out realizado correctamente."
       );
+      if (shouldPromptInvoice() && prompt) setInvoicePrompt(prompt);
     });
   };
 
@@ -232,6 +256,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   }) => {
     const reservationId = room.reservationId;
     if (!reservationId) return { success: false as const, error: "Reserva no encontrada." };
+    const prompt = buildInvoicePrompt();
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
     const result = await runCheckout({
@@ -246,6 +271,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       if (paymentMethod === "cuenta_corriente" && result.data?.movementId) {
         openAccountVoucher(result.data.movementId);
       }
+      if (shouldPromptInvoice(paymentMethod) && prompt) setInvoicePrompt(prompt);
     }
 
     return result;
@@ -579,6 +605,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           }
         />
       )}
+
+      <InvoicePromptModal data={invoicePrompt} onClose={() => setInvoicePrompt(null)} />
 
       {isEarlyModalOpen && earlyPreview && (
         <EarlyCheckoutModal
