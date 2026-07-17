@@ -8,7 +8,7 @@ import { getRoomCapacity } from "@/lib/rooms";
 import { Room, RoomCategory } from "@/lib/types";
 import EditRoomModal from "./EditRoomModal";
 import CreateRoomModal from "./CreateRoomModal";
-import { deleteRoomAction } from "./actions";
+import { deleteRoomAction, setRoomActiveAction } from "./actions";
 
 export default function RoomsClientTable({
     initialRooms,
@@ -23,9 +23,25 @@ export default function RoomsClientTable({
     const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [togglingId, setTogglingId] = useState<number | null>(null);
 
     const handleSaved = () => {
         router.refresh();
+    };
+
+    const handleToggleActive = async (room: Room) => {
+        const nextActive = !room.is_active;
+        setTogglingId(room.id);
+        const result = await setRoomActiveAction(room.id, nextActive);
+
+        if (result.success) {
+            toast.success(nextActive ? "Habitacion activada." : "Habitacion desactivada.");
+            router.refresh();
+        } else {
+            toast.error(result.error);
+        }
+
+        setTogglingId(null);
     };
 
     const handleDelete = async (id: number) => {
@@ -69,12 +85,13 @@ export default function RoomsClientTable({
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Camas</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Capacidad</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Imagen</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Estado</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Acciones</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {initialRooms.map((room) => (
-                            <tr key={room.id} className="hover:bg-slate-50/80 transition-colors group">
+                            <tr key={room.id} className={`transition-colors group ${room.is_active ? "hover:bg-slate-50/80" : "bg-slate-100/70"}`}>
                                 <td className="px-6 py-4 font-bold text-slate-800">{room.room_number}</td>
                                 <td className="px-6 py-4 text-slate-600 capitalize">{room.room_type}</td>
                                 <td className="px-6 py-4">
@@ -99,6 +116,26 @@ export default function RoomsClientTable({
                                             <ImageIcon size={16} />
                                         </span>
                                     )}
+                                </td>
+                                <td className="px-6 py-4">
+                                    <div className="flex items-center justify-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleToggleActive(room)}
+                                            disabled={togglingId === room.id}
+                                            role="switch"
+                                            aria-checked={room.is_active}
+                                            title={room.is_active ? "Activa (click para desactivar)" : "Inactiva (click para activar)"}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer disabled:opacity-50 ${room.is_active ? "bg-emerald-500" : "bg-slate-300"}`}
+                                        >
+                                            <span
+                                                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${room.is_active ? "translate-x-6" : "translate-x-1"}`}
+                                            />
+                                        </button>
+                                        <span className={`text-xs font-semibold w-14 ${room.is_active ? "text-emerald-600" : "text-slate-400"}`}>
+                                            {togglingId === room.id ? "..." : room.is_active ? "Activa" : "Inactiva"}
+                                        </span>
+                                    </div>
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <div className="flex items-center justify-end gap-2">

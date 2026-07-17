@@ -145,9 +145,13 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const autoPrint = sp.autoprint === "1";
   const requestedCopy =
     sp.copy === "duplicate" ? "duplicate" : sp.copy === "original" ? "original" : null;
-  // En autoimpresion se imprimen las dos copias (original + duplicado) en un unico
-  // trabajo de impresion; luego la ventana se cierra sola (ver ReceiptAutoPrint).
-  const copyMode = autoPrint ? "both" : requestedCopy ?? "both";
+  // En autoimpresion cada copia se imprime como un TRABAJO separado: primero el original
+  // y, encadenado via nextUrl, el duplicado. Asi la comandera guillotina al final de cada
+  // documento (corte entre copias) sin el salto de pagina que dejaba una hoja en blanco.
+  // En vista manual (sin autoprint) se muestran ambas copias con linea de corte punteada.
+  const copyMode: "both" | "original" | "duplicate" = autoPrint
+    ? requestedCopy ?? "original"
+    : requestedCopy ?? "both";
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -235,7 +239,13 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
         <ReceiptCopy key={copy.key} title={copy.title} firstCopy={index === 0} {...receiptData} />
       ))}
       <div className="thermal-feed" aria-hidden="true" />
-      {autoPrint && <ReceiptAutoPrint closeOnDone />}
+      {autoPrint &&
+        (copyMode === "original" ? (
+          // Tras imprimir el original, encadena el duplicado como segundo trabajo (corte entre copias).
+          <ReceiptAutoPrint nextUrl={`/admin/recibo/${paymentId}?autoprint=1&copy=duplicate`} />
+        ) : (
+          <ReceiptAutoPrint closeOnDone />
+        ))}
 
       <style>{`
         /* Comandera termica: ancho 80mm y alto automatico (= largo del contenido), sin
@@ -269,7 +279,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
           padding-top: 4mm;
           border-top: 1px dashed #000;
         }
-        .thermal-feed { height: 10mm; }
+        .thermal-feed { height: 2mm; }
         .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
         .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
         .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 2px; text-align: center; letter-spacing: 0.6px; }
@@ -281,8 +291,8 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
         .thermal .row.small { font-size: 9.5pt; font-weight: 700; }
         .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 13pt; font-weight: 900; margin: 6px 0 4px; }
         .thermal .note { font-size: 9.5pt; font-weight: 700; margin: 4px 0; }
-        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 8px 0 0; }
-        .thermal .footer.muted { color: #000; margin-top: 4px; }
+        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 6px 0 0; }
+        .thermal .footer.muted { color: #000; margin-top: 2px; }
       `}</style>
     </div>
   );

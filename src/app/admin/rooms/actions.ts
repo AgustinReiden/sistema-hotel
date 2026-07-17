@@ -130,12 +130,25 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
 
     const normalizedUpdateData: {
         category_id: number;
-        is_active: boolean;
+        room_number?: string;
+        is_active?: boolean;
         status?: Room["status"];
     } = {
         category_id: categoryResult.id,
-        is_active: roomData.is_active ?? true,
     };
+
+    // El numero de habitacion es editable (renombrar). El resto del sistema referencia la
+    // habitacion por id, asi que cambiar el texto no afecta reservas ni pagos historicos.
+    const trimmedRoomNumber = roomData.room_number?.trim();
+    if (trimmedRoomNumber) {
+        normalizedUpdateData.room_number = trimmedRoomNumber;
+    }
+
+    // Solo tocar is_active si viene explicito (el toggle va por setRoomActiveAction), para
+    // no reactivar una habitacion desactivada cada vez que se edita.
+    if (typeof roomData.is_active === "boolean") {
+        normalizedUpdateData.is_active = roomData.is_active;
+    }
 
     if (roomData.status) {
         normalizedUpdateData.status = roomData.status;
@@ -148,6 +161,10 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
 
     if (error) {
         console.error("Error updating room:", error);
+        // Colision de numero de habitacion (UNIQUE): mensaje claro en vez del generico.
+        if ((error as { code?: string }).code === "23505") {
+            return { success: false, error: "Ya existe una habitacion con ese numero.", code: "23505" };
+        }
         const parsed = parseActionError(error, "Hubo un error al actualizar la habitacion.");
         return { success: false, error: parsed.error, code: parsed.code };
     }
@@ -192,6 +209,9 @@ export async function createRoomAction(roomData: Partial<Room>): Promise<ActionR
 
     if (error) {
         console.error("Error creating room:", error);
+        if ((error as { code?: string }).code === "23505") {
+            return { success: false, error: "Ya existe una habitacion con ese numero.", code: "23505" };
+        }
         const parsed = parseActionError(error, "Hubo un error al crear la habitacion.");
         return { success: false, error: parsed.error, code: parsed.code };
     }
@@ -225,6 +245,66 @@ export async function deleteRoomAction(roomId: number): Promise<ActionResult> {
     }
 
     revalidatePath("/admin/rooms");
+    revalidatePath("/");
+
+    return { success: true };
+}
+
+// Estados de reserva que "ocupan" la habitacion (huesped adentro o reserva futura).
+// Coincide con lo que el calendario/grilla muestran como activo.
+const BLOCKING_RESERVATION_STATUSES = ["pending", "confirmed", "checked_in"];
+
+/**
+ * Activa/desactiva una habitacion (toggle liviano, sin tocar la categoria compartida).
+ * Al desactivar, bloquea si la habitacion tiene un huesped adentro o reservas futuras,
+ * para que nunca desaparezca de la vista una reserva viva.
+ */
+export async function setRoomActiveAction(roomId: number, isActive: boolean): Promise<ActionResult> {
+    const supabase = await createClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "No autorizado." };
+
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (!canManageRooms(profile?.role)) {
+        return { success: false, error: "Permisos insuficientes para modificar habitaciones." };
+    }
+
+    if (!isActive) {
+        const { data: blocking, error: checkError } = await supabase
+            .from("reservations")
+            .select("id")
+            .eq("room_id", roomId)
+            .in("status", BLOCKING_RESERVATION_STATUSES)
+            .limit(1);
+
+        if (checkError) {
+            const parsed = parseActionError(checkError, "No se pudo verificar las reservas de la habitacion.");
+            return { success: false, error: parsed.error, code: parsed.code };
+        }
+
+        if (blocking && blocking.length > 0) {
+            return {
+                success: false,
+                error: "No podes desactivar esta habitacion: tiene un huesped adentro o reservas futuras.",
+            };
+        }
+    }
+
+    const { error } = await supabase
+        .from("rooms")
+        .update({ is_active: isActive })
+        .eq("id", roomId);
+
+    if (error) {
+        console.error("Error toggling room is_active:", error);
+        const parsed = parseActionError(error, "Hubo un error al cambiar el estado de la habitacion.");
+        return { success: false, error: parsed.error, code: parsed.code };
+    }
+
+    revalidatePath("/admin/rooms");
+    revalidatePath("/admin");
+    revalidatePath("/admin/calendario");
     revalidatePath("/");
 
     return { success: true };
