@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isValidCuit } from "./arca/amounts";
+
 const optionalPhoneSchema = z.preprocess(
   (value) => {
     if (typeof value !== "string") return value;
@@ -329,3 +331,56 @@ export const hotelSettingsSchema = z.object({
   logo_url: z.string().url("Debe ser una URL valida.").or(z.string().startsWith("/", "Debe empezar con /")).optional().nullable(),
   confirmation_message_template: optionalTextAsNull(2000).optional(),
 });
+
+
+// ─────────────────────── Facturación electrónica ARCA ───────────────────────
+
+/** Config fiscal (panel admin). Si enabled=true, exige la config completa. */
+export const fiscalSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    environment: z.enum(["homologacion", "produccion"], {
+      message: "El ambiente debe ser homologacion o produccion.",
+    }),
+    cuit: z.preprocess(
+      (v) => (typeof v === "string" ? v.replace(/\D/g, "") : v),
+      z
+        .string()
+        .refine((v) => v === "" || (v.length === 11 && isValidCuit(v)), {
+          message: "El CUIT no es valido (11 digitos con digito verificador).",
+        })
+    ),
+    razon_social: z.string().trim().max(200, "Maximo 200 caracteres."),
+    domicilio_fiscal: z.string().trim().max(300, "Maximo 300 caracteres."),
+    iibb: z.string().trim().max(60, "Maximo 60 caracteres."),
+    inicio_actividades: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || /^\d{4}-\d{2}-\d{2}$/.test(v), {
+        message: "La fecha de inicio de actividades debe ser AAAA-MM-DD.",
+      }),
+    punto_venta: z.preprocess(
+      (v) => {
+        if (typeof v !== "string" || v.trim() === "") return undefined;
+        return Number(v.trim());
+      },
+      z
+        .number()
+        .int("El punto de venta debe ser un numero entero.")
+        .min(1, "El punto de venta debe ser 1 o mayor.")
+        .max(99998, "El punto de venta no puede superar 99998.")
+        .optional()
+    ),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.enabled) return;
+    if (!data.cuit) {
+      ctx.addIssue({ code: "custom", path: ["cuit"], message: "Para habilitar la facturacion falta el CUIT." });
+    }
+    if (!data.razon_social) {
+      ctx.addIssue({ code: "custom", path: ["razon_social"], message: "Para habilitar la facturacion falta la razon social." });
+    }
+    if (data.punto_venta === undefined) {
+      ctx.addIssue({ code: "custom", path: ["punto_venta"], message: "Para habilitar la facturacion falta el punto de venta." });
+    }
+  });
