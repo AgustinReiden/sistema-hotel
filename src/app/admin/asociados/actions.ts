@@ -15,6 +15,8 @@ type AssociatedClientFormPayload = {
   discountPercent: number;
   notes?: string;
   cuentaCorrienteHabilitada?: boolean;
+  condicionIva?: "responsable_inscripto" | "monotributo" | "consumidor_final";
+  domicilio?: string;
 };
 
 async function assertAdmin() {
@@ -61,6 +63,8 @@ export async function createAssociatedClientAction(
       discount_percent: validated.discountPercent,
       notes: validated.notes ?? null,
       cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
+      condicion_iva: validated.condicionIva ?? null,
+      domicilio: validated.domicilio ?? null,
     });
 
     if (error) throw error;
@@ -90,6 +94,8 @@ export async function updateAssociatedClientAction(
         discount_percent: validated.discountPercent,
         notes: validated.notes ?? null,
         cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
+        condicion_iva: validated.condicionIva ?? null,
+        domicilio: validated.domicilio ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

@@ -223,6 +223,52 @@ describe("buildFECAESolicitarEnvelope", () => {
   });
 });
 
+// ── Factura A (Responsable Inscripto con CUIT) ──
+const REQ_A: FecaeRequest = {
+  ...REQ,
+  cbteTipo: 1, // Factura A
+  docTipo: 80, // CUIT
+  docNro: "30707054537",
+  condicionIvaReceptorId: 1, // Responsable Inscripto
+};
+
+describe("buildFECAESolicitarEnvelope — Factura A", () => {
+  const xmlA = buildFECAESolicitarEnvelope(AUTH, REQ_A);
+
+  it("emite CbteTipo=1, DocTipo=80 y CUIT del receptor", () => {
+    expect(xmlA).toContain("<CbteTipo>1</CbteTipo>");
+    expect(xmlA).toContain("<DocTipo>80</DocTipo>");
+    expect(xmlA).toContain("<DocNro>30707054537</DocNro>");
+  });
+
+  it("CondicionIVAReceptorId=1 (RI) y misma alícuota 21% discriminada", () => {
+    expect(xmlA).toContain("<CondicionIVAReceptorId>1</CondicionIVAReceptorId>");
+    expect(xmlA).toContain("<Iva><AlicIva><Id>5</Id><BaseImp>100000.00</BaseImp><Importe>21000.00</Importe></AlicIva></Iva>");
+  });
+});
+
+describe("buildQrUrl — Factura A", () => {
+  it("refleja tipoCmp=1 y tipoDocRec=80", () => {
+    const url = buildQrUrl({
+      fecha: "2026-07-16",
+      cuit: 30123456789,
+      ptoVta: 3,
+      tipoCmp: 1,
+      nroCmp: 1235,
+      importe: 121000,
+      tipoDocRec: 80,
+      nroDocRec: 30707054537,
+      codAut: 76281234567890,
+    });
+    const json = JSON.parse(
+      Buffer.from(url.split("p=")[1], "base64").toString("utf8")
+    );
+    expect(json.tipoCmp).toBe(1);
+    expect(json.tipoDocRec).toBe(80);
+    expect(json.nroDocRec).toBe(30707054537);
+  });
+});
+
 const fecaeAprobada = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
 <soap:Body><FECAESolicitarResponse xmlns="http://ar.gov.afip.dif.FEV1/">

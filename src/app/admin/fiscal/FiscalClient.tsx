@@ -7,11 +7,11 @@ import { toast } from "sonner";
 
 import {
   discardInvoiceAction,
-  emitInvoiceForReservationAction,
   fixInvoiceDniAndRetryAction,
   retryInvoiceAction,
 } from "./actions";
-import { formatCbteNumero } from "@/lib/arca/amounts";
+import InvoicePromptModal, { type InvoicePromptData } from "../InvoicePromptModal";
+import { formatCbteNumero, isValidCuit } from "@/lib/arca/amounts";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type {
   EmitInvoiceOutcome,
@@ -27,6 +27,7 @@ type Props = {
     invoice_id: string;
     pto_vta: number;
     cbte_nro: number;
+    cbte_tipo: number;
     receptor_nombre: string | null;
     imp_total: number;
   }>;
@@ -56,6 +57,8 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
   // Mini-form de "Corregir DNI" abierto para una factura puntual.
   const [dniEditId, setDniEditId] = useState<string | null>(null);
   const [dniValue, setDniValue] = useState("");
+  // Modal A/B para emitir un check-out sin facturar (empresa o consumidor final).
+  const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
 
   const handleOutcome = (outcome: EmitInvoiceOutcome) => {
     if (outcome.status === "authorized") {
@@ -80,15 +83,23 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
     handleOutcome(result.data!);
   };
 
-  const emit = async (reservationId: string) => {
-    setBusyId(reservationId);
-    const result = await emitInvoiceForReservationAction(reservationId);
-    setBusyId(null);
-    if (!result.success) {
-      toast.error(result.error);
-      return;
-    }
-    handleOutcome(result.data!);
+  // Abre el modal A/B para un check-out sin facturar. El CUIT (si la reserva es de
+  // empresa) llega en client_dni; la condición IVA la elige el que factura.
+  const openEmitModal = (c: InvoiceableCheckoutRow) => {
+    const dniDigits = (c.client_dni ?? "").replace(/\D/g, "");
+    const isCuit = isValidCuit(dniDigits);
+    setInvoicePrompt({
+      reservationId: c.reservation_id,
+      clientName: c.client_name,
+      total: c.total_price,
+      aPrefill: {
+        razonSocial: c.client_name ?? "",
+        cuit: isCuit ? dniDigits : "",
+        condicionIva: "",
+        domicilio: "",
+      },
+      suggestA: isCuit,
+    });
   };
 
   const fixDni = async (invoiceId: string, reservationId: string) => {
@@ -269,15 +280,11 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
                   </div>
                   <button
                     type="button"
-                    onClick={() => emit(c.reservation_id)}
+                    onClick={() => openEmitModal(c)}
                     disabled={busyId !== null}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shrink-0"
                   >
-                    {busyId === c.reservation_id ? (
-                      <Loader2 className="animate-spin" size={14} />
-                    ) : (
-                      <FileText size={14} />
-                    )}
+                    <FileText size={14} />
                     Emitir factura
                   </button>
                 </li>
@@ -302,7 +309,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
                 <li key={a.invoice_id} className="py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-bold text-slate-800 truncate">
-                      Factura B {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
+                      Factura {a.cbte_tipo === 1 ? "A" : "B"} {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
                       {a.receptor_nombre ?? "Sin nombre"} — ${money(a.imp_total)}
                     </p>
                   </div>
@@ -320,6 +327,16 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
           )}
         </div>
       </section>
+
+      <InvoicePromptModal
+        key={invoicePrompt?.reservationId ?? "none"}
+        data={invoicePrompt}
+        startAtTipo
+        onClose={() => {
+          setInvoicePrompt(null);
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

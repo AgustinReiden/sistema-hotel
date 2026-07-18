@@ -340,6 +340,9 @@ export type ReservationHistoryPage = {
   totalPages: number;
 };
 
+/** Condición frente al IVA del receptor (RG 5616). Define A vs B: RI/Monotributo → A. */
+export type CondicionIva = "responsable_inscripto" | "monotributo" | "consumidor_final";
+
 export type AssociatedClient = {
   id: string;
   display_name: string;
@@ -350,6 +353,10 @@ export type AssociatedClient = {
   is_active: boolean;
   /** Habilitado a usar cuenta corriente (fiar). Por defecto false; solo admin lo cambia. */
   cuenta_corriente_habilitada: boolean;
+  /** Condición frente al IVA (para Factura A). null = no definida en la ficha. */
+  condicion_iva: CondicionIva | null;
+  /** Domicilio del receptor (para Factura A). null = no definido en la ficha. */
+  domicilio: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -604,6 +611,7 @@ export type InvoiceRecord = {
   doc_nro: string;
   condicion_iva_receptor_id: number;
   receptor_nombre: string | null;
+  receptor_domicilio: string | null;
   imp_total: number;
   imp_neto: number;
   imp_iva: number;
@@ -613,6 +621,20 @@ export type InvoiceRecord = {
   last_error: string | null;
   attempt_count: number;
 };
+
+/**
+ * Datos del receptor elegidos en el momento de facturar. B = consumidor final
+ * (usa el DNI de la reserva). A = Responsable Inscripto / Monotributo con CUIT.
+ */
+export type InvoiceReceptorInput =
+  | { tipo: "B" }
+  | {
+      tipo: "A";
+      cuit: string;
+      condicionIva: "responsable_inscripto" | "monotributo";
+      razonSocial: string;
+      domicilio: string;
+    };
 
 export type PendingInvoiceRow = {
   invoice_id: string;

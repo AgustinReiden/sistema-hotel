@@ -49,6 +49,7 @@ import type {
   DiscountedClient,
   FiscalSettings,
   InvoiceRecord,
+  InvoiceReceptorInput,
   InvoiceableCheckoutRow,
   PendingInvoiceRow,
   RegisterAccountPaymentPayload,
@@ -150,6 +151,8 @@ type AssociatedClientRow = {
   notes: string | null;
   is_active: boolean;
   cuenta_corriente_habilitada?: boolean | null;
+  condicion_iva?: string | null;
+  domicilio?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -171,6 +174,8 @@ function toAssociatedClient(row: AssociatedClientRow): AssociatedClient {
     notes: row.notes,
     is_active: row.is_active,
     cuenta_corriente_habilitada: Boolean(row.cuenta_corriente_habilitada),
+    condicion_iva: (row.condicion_iva as AssociatedClient["condicion_iva"] | undefined) ?? null,
+    domicilio: row.domicilio ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -3116,12 +3121,21 @@ export async function setFiscalInternalKey(key: string): Promise<void> {
 }
 
 export async function createInvoiceDraft(
-  reservationId: string
+  reservationId: string,
+  receptor?: InvoiceReceptorInput
 ): Promise<{ invoiceId: string; status: string; reused: boolean }> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_create_invoice_draft", {
-    p_reservation_id: reservationId,
-  });
+  // Default = Factura B (consumidor final con el DNI de la reserva). Para A se
+  // pasan CUIT + condición IVA + razón social (precargados o cargados a mano).
+  const params: Record<string, unknown> = { p_reservation_id: reservationId };
+  if (receptor?.tipo === "A") {
+    params.p_tipo = "A";
+    params.p_cuit = receptor.cuit;
+    params.p_condicion_iva = receptor.condicionIva;
+    params.p_razon_social = receptor.razonSocial;
+    params.p_domicilio = receptor.domicilio;
+  }
+  const { data, error } = await supabase.rpc("rpc_create_invoice_draft", params);
   if (error) throw error;
   const r = data as { invoice_id: string; status: string; reused: boolean };
   return { invoiceId: r.invoice_id, status: r.status, reused: Boolean(r.reused) };
@@ -3281,6 +3295,7 @@ export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord |
     doc_nro: String(r.doc_nro),
     condicion_iva_receptor_id: Number(r.condicion_iva_receptor_id),
     receptor_nombre: (r.receptor_nombre as string | null) ?? null,
+    receptor_domicilio: (r.receptor_domicilio as string | null) ?? null,
     imp_total: Number(r.imp_total) || 0,
     imp_neto: Number(r.imp_neto) || 0,
     imp_iva: Number(r.imp_iva) || 0,
@@ -3326,12 +3341,12 @@ export async function listInvoiceableCheckouts(): Promise<InvoiceableCheckoutRow
 
 /** Facturas autorizadas recientes (para reimprimir desde /admin/fiscal). */
 export async function listTodayAuthorizedInvoices(): Promise<
-  Array<{ invoice_id: string; pto_vta: number; cbte_nro: number; receptor_nombre: string | null; imp_total: number }>
+  Array<{ invoice_id: string; pto_vta: number; cbte_nro: number; cbte_tipo: number; receptor_nombre: string | null; imp_total: number }>
 > {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, pto_vta, cbte_nro, receptor_nombre, imp_total, cbte_fch")
+    .select("id, pto_vta, cbte_nro, cbte_tipo, receptor_nombre, imp_total, cbte_fch")
     .eq("status", "authorized")
     .order("updated_at", { ascending: false })
     .limit(30);
@@ -3340,6 +3355,7 @@ export async function listTodayAuthorizedInvoices(): Promise<
     invoice_id: String(r.id),
     pto_vta: Number(r.pto_vta),
     cbte_nro: Number(r.cbte_nro),
+    cbte_tipo: Number(r.cbte_tipo),
     receptor_nombre: (r.receptor_nombre as string | null) ?? null,
     imp_total: Number(r.imp_total) || 0,
   }));

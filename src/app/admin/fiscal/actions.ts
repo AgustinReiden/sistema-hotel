@@ -27,7 +27,7 @@ import {
   updateFiscalSettings,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import type { ActionResult, EmitInvoiceOutcome } from "@/lib/types";
+import type { ActionResult, EmitInvoiceOutcome, InvoiceReceptorInput } from "@/lib/types";
 import { fiscalSettingsSchema } from "@/lib/validations";
 
 function revalidateFiscalViews() {
@@ -38,12 +38,14 @@ function revalidateFiscalViews() {
 /**
  * Flujo del prompt SÍ/NO y de "Emitir" en /admin/fiscal: crea (o reusa) el
  * borrador vía RPC (que valida turno/DNI/exclusiones) y lo emite contra ARCA.
+ * `receptor` define B (consumidor final, default) o A (empresa/RI con CUIT).
  */
 export async function emitInvoiceForReservationAction(
-  reservationId: string
+  reservationId: string,
+  receptor?: InvoiceReceptorInput
 ): Promise<ActionResult<EmitInvoiceOutcome>> {
   try {
-    const draft = await createInvoiceDraft(reservationId);
+    const draft = await createInvoiceDraft(reservationId, receptor);
     const outcome = await emitInvoice(draft.invoiceId);
     revalidateFiscalViews();
     return { success: true, data: outcome };

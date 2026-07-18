@@ -40,6 +40,7 @@ type DashboardRoom = {
   hasArrivalToday: boolean;
   accountCreditEnabled: boolean;
   billedToCompany: boolean;
+  associatedClientId: string | null;
 };
 
 function getDateKey(date: Date, timeZone: string) {
@@ -172,6 +173,9 @@ export default async function Dashboard() {
       billedToCompany: Boolean(
         (activeReservation ?? confirmedReservation)?.associated_client_id
       ),
+      // Para el prefill de Factura A en el prompt post-checkout (el CUIT sale de la ficha).
+      associatedClientId:
+        (activeReservation ?? confirmedReservation)?.associated_client_id ?? null,
     };
   });
 

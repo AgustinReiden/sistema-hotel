@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Percent, Phone, StickyNote, UserRound, Wallet, X } from "lucide-react";
+import { CreditCard, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
-import type { AssociatedClient } from "@/lib/types";
+import type { AssociatedClient, CondicionIva } from "@/lib/types";
 
 type AssociatedClientModalProps = {
   isOpen: boolean;
@@ -16,6 +16,8 @@ type AssociatedClientModalProps = {
     discountPercent: number;
     notes?: string;
     cuentaCorrienteHabilitada: boolean;
+    condicionIva?: CondicionIva;
+    domicilio?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   initialClient?: AssociatedClient | null;
   title: string;
@@ -28,6 +30,8 @@ type FormState = {
   discountPercent: string;
   notes: string;
   cuentaCorrienteHabilitada: boolean;
+  condicionIva: CondicionIva | "";
+  domicilio: string;
 };
 
 function buildInitialState(initialClient?: AssociatedClient | null): FormState {
@@ -41,6 +45,8 @@ function buildInitialState(initialClient?: AssociatedClient | null): FormState {
         : "0",
     notes: initialClient?.notes ?? "",
     cuentaCorrienteHabilitada: initialClient?.cuenta_corriente_habilitada ?? false,
+    condicionIva: initialClient?.condicion_iva ?? "",
+    domicilio: initialClient?.domicilio ?? "",
   };
 }
 
@@ -73,6 +79,8 @@ export default function AssociatedClientModal({
         discountPercent: Number(form.discountPercent),
         notes: form.notes.trim() || undefined,
         cuentaCorrienteHabilitada: form.cuentaCorrienteHabilitada,
+        condicionIva: form.condicionIva || undefined,
+        domicilio: form.domicilio.trim() || undefined,
       });
 
       if (result.success) {
@@ -195,6 +203,54 @@ export default function AssociatedClientModal({
                 <option value="si">Sí — habilitada a fiar</option>
               </select>
               <p className="text-[11px] text-slate-500 mt-1">Habilita cerrar reservas a cuenta corriente.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-iva">
+                <span className="flex items-center gap-1.5">
+                  <Receipt size={14} />
+                  Condición frente al IVA
+                </span>
+              </label>
+              <select
+                id="associated-iva"
+                value={form.condicionIva}
+                onChange={(e) =>
+                  setForm((current) => ({
+                    ...current,
+                    condicionIva: e.target.value as FormState["condicionIva"],
+                  }))
+                }
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              >
+                <option value="">Sin definir</option>
+                <option value="responsable_inscripto">Responsable Inscripto</option>
+                <option value="monotributo">Monotributo</option>
+                <option value="consumidor_final">Consumidor Final</option>
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Define si se factura A (RI/Monotributo) o B. Se puede completar al facturar.
+              </p>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-domicilio">
+                <span className="flex items-center gap-1.5">
+                  <MapPin size={14} />
+                  Domicilio (para Factura A)
+                </span>
+              </label>
+              <input
+                id="associated-domicilio"
+                type="text"
+                value={form.domicilio}
+                onChange={(e) => setForm((current) => ({ ...current, domicilio: e.target.value }))}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                placeholder="Ej. Av. San Martín 1234, Taco Pozo, Chaco"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Domicilio del receptor en la factura. Se puede completar al facturar.
+              </p>
             </div>
 
             <div className="md:col-span-2">
