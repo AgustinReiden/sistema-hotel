@@ -1694,90 +1694,16 @@ export async function getCancellationReason(
 export async function extendReservation(reservationId: string, extraNights: number): Promise<void> {
   const supabase = await createClient();
 
-  // 1. Get current reservation
-  const { data: res, error: fetchErr } = await supabase
-    .from("reservations")
-    .select(
-      "room_id, status, check_in_target, check_out_target, total_price, base_total_price, discount_percent, discount_amount"
-    )
-    .eq("id", reservationId)
-    .single();
+  // Escritura vía RPC SECURITY DEFINER (mig 76): reproduce la re-tarifa preservando la tarifa
+  // congelada y los recargos, valida rol/estado y el solapamiento adentro. El UPDATE directo a
+  // reservations se cerró en la mig 77 (auditoría H-01) para que un recepcionista no pueda
+  // editar montos por PostgREST salteando estos guards.
+  const { error } = await supabase.rpc("rpc_extend_reservation", {
+    p_reservation_id: reservationId,
+    p_extra_nights: extraNights,
+  });
 
-  if (fetchErr) throw fetchErr;
-
-  // Guard de estado (la UI ya solo ofrece "Ampliar" en reservas activas, pero no dependemos
-  // solo del render): no permitir ampliar una reserva cancelada/finalizada.
-  if (res.status !== "confirmed" && res.status !== "checked_in") {
-    throw new Error("Solo se puede ampliar una reserva activa (confirmada o en estadía).");
-  }
-
-  const currentIn = new Date(res.check_in_target);
-  const currentOut = new Date(res.check_out_target);
-  const newOut = new Date(currentOut);
-  newOut.setDate(newOut.getDate() + extraNights);
-  const newOutString = newOut.toISOString();
-
-  // 2. Check overlap logic specifically for the extended days
-  const { data: overlapping, error: overlapErr } = await supabase
-    .from("reservations")
-    .select("id")
-    .eq("room_id", res.room_id)
-    .in("status", ACTIVE_RESERVATION_STATUSES)
-    .neq("id", reservationId) // Ignore itself
-    .or(`and(check_in_target.lt.${newOutString},check_out_target.gt.${currentOut.toISOString()})`);
-
-  if (overlapErr) throw overlapErr;
-
-  if (overlapping && overlapping.length > 0) {
-    throw new Error("No se puede ampliar la reserva porque la habitación ya está comprometida para esas fechas.");
-  }
-
-  // 3. Compute the actual nightly rate from the existing reservation
-  const currentTotal = Number(res.total_price) || 0;
-  const currentBaseTotal = Number(res.base_total_price) || currentTotal;
-  const currentDiscountPercent = Number(res.discount_percent) || 0;
-  const currentDiscountAmount = Number(res.discount_amount) || 0;
-  // Recargos ya cargados (extras del minibar, medio día, etc.) que NO forman parte de la base:
-  // se suman directo a total_price, así que hay que preservarlos al recalcular. Antes "ampliar"
-  // recalculaba el total desde la base y los borraba en silencio (pérdida de plata).
-  const existingNetBase = currentBaseTotal - currentDiscountAmount;
-  const surcharges = Math.max(0, Math.round((currentTotal - existingNetBase) * 100) / 100);
-  // Duration in ms → days (using floor to avoid floating-point issues with half-day checkout)
-  const existingNights = Math.max(1, Math.round(
-    (currentOut.getTime() - currentIn.getTime()) / (1000 * 60 * 60 * 24)
-  ));
-  const nightlyBaseRate = currentBaseTotal / existingNights;
-  const newBaseTotal = currentBaseTotal + extraNights * nightlyBaseRate;
-  const newDiscountAmount =
-    Math.round(((newBaseTotal * currentDiscountPercent) / 100) * 100) / 100;
-  const newTotal = newBaseTotal - newDiscountAmount + surcharges;
-
-  // 4. Update reservation
-  const { error: updateErr } = await supabase
-    .from("reservations")
-    .update({
-      check_out_target: newOutString,
-      base_total_price: newBaseTotal,
-      discount_percent: currentDiscountPercent,
-      discount_amount: newDiscountAmount,
-      total_price: newTotal,
-      // Ampliar mueve el checkout hacia adelante: cualquier late-checkout viejo deja de
-      // valer y hay que limpiarlo, si no el tablero marca un falso "Retraso Check-out".
-      late_check_out_until: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", reservationId);
-
-  if (updateErr) {
-    // Carrera con el constraint anti-solapamiento (EXCLUDE, errcode 23P01): traducir el mensaje
-    // crudo de Postgres a algo claro para el recepcionista.
-    if ((updateErr as { code?: string }).code === "23P01") {
-      throw new Error(
-        "No se puede ampliar: la habitación quedó comprometida para esas fechas."
-      );
-    }
-    throw updateErr;
-  }
+  if (error) throw error;
 }
 
 // ---- Solicitudes de Reserva ----
@@ -1902,10 +1828,11 @@ export async function getReservationWithRoom(reservationId: string) {
 
 export async function updateWhatsappStatus(reservationId: string, notified: boolean): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("reservations")
-    .update({ whatsapp_notified: notified })
-    .eq("id", reservationId);
+  // Vía RPC SECURITY DEFINER (mig 76): el UPDATE directo a reservations se cerró en la mig 77.
+  const { error } = await supabase.rpc("rpc_set_whatsapp_notified", {
+    p_reservation_id: reservationId,
+    p_notified: notified,
+  });
 
   if (error) throw error;
 }
