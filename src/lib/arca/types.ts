@@ -23,9 +23,9 @@ export type WsfeAuth = {
  */
 export type FecaeRequest = {
   ptoVta: number;
-  cbteTipo: number; // 6 = Factura B
+  cbteTipo: number; // 6 = Factura B · 1 = Factura A
   concepto: number; // 2 = Servicios
-  docTipo: number; // 96 = DNI
+  docTipo: number; // 96 = DNI · 80 = CUIT
   docNro: string; // solo dígitos
   cbteNro: number;
   cbteFch: string; // yyyymmdd
@@ -35,7 +35,7 @@ export type FecaeRequest = {
   ivaId: number; // 5 = 21%
   monId: string; // 'PES'
   monCotiz: number; // 1
-  /** RG 5616 — obligatorio desde 1/7/2025. 5 = Consumidor Final. */
+  /** RG 5616 — obligatorio desde 1/7/2025. 5 = Consumidor Final · 1 = RI · 6 = Monotributo. */
   condicionIvaReceptorId: number;
   fchServDesde: string; // yyyymmdd
   fchServHasta: string; // yyyymmdd

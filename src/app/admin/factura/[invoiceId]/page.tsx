@@ -1,4 +1,4 @@
-import { formatArcaDate, formatCbteNumero, formatCuit } from "@/lib/arca/amounts";
+import { formatCbteNumero, formatCuit } from "@/lib/arca/amounts";
 import { qrPngDataUrl } from "@/lib/arca/qr";
 import { getFiscalSettings, getHotelSettings, getInvoiceById } from "@/lib/data";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
@@ -23,10 +23,11 @@ function formatDateCol(value: string | null): string {
 }
 
 /**
- * Representación impresa de la Factura B (comandera térmica 80mm).
- * Solo se imprime si la factura está autorizada (tiene CAE). Cumple:
- * RG 1415 (datos formales), RG 4892 (QR) y RG 5614/Ley 27.743 (bloque de
- * Transparencia Fiscal al Consumidor con IVA contenido).
+ * Representación impresa de la factura (comandera térmica 80mm). Ramifica según
+ * el tipo: Factura B (consumidor final, DNI, IVA contenido + Transparencia Fiscal)
+ * o Factura A (Responsable Inscripto/Monotributo, CUIT, IVA discriminado, sin
+ * bloque de transparencia). Solo se imprime si está autorizada (tiene CAE). Cumple
+ * RG 1415 (datos formales), RG 4892 (QR) y, en B, RG 5614/Ley 27.743.
  */
 export default async function FacturaPage({ params, searchParams }: PageProps) {
   const { invoiceId } = await params;
@@ -62,6 +63,15 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
   const qrDataUrl = invoice.qr_url ? await qrPngDataUrl(invoice.qr_url) : null;
   const numero = formatCbteNumero(invoice.pto_vta, invoice.cbte_nro);
   const isHomo = invoice.environment === "homologacion";
+  // Factura A (Responsable Inscripto / Monotributo): CUIT + IVA discriminado, sin
+  // bloque de Transparencia Fiscal (ese es solo para B/C a consumidor final).
+  const isA = invoice.cbte_tipo === 1;
+  const receptorCondicion =
+    invoice.condicion_iva_receptor_id === 1
+      ? "IVA Responsable Inscripto"
+      : invoice.condicion_iva_receptor_id === 6
+        ? "Responsable Monotributo"
+        : "Consumidor Final";
 
   return (
     <div className="thermal">
@@ -91,8 +101,8 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
         <hr />
         {/* Tipo y número */}
         <div className="tipo-box">
-          <span className="tipo-letra">B</span>
-          <span className="tipo-cod">Cód. 06</span>
+          <span className="tipo-letra">{isA ? "A" : "B"}</span>
+          <span className="tipo-cod">{isA ? "Cód. 01" : "Cód. 06"}</span>
         </div>
         <h2>FACTURA</h2>
         <div className="row">
@@ -111,19 +121,25 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           <span>{invoice.receptor_nombre ?? "—"}</span>
         </div>
         <div className="row">
-          <span>DNI:</span>
-          <span>{invoice.doc_nro}</span>
+          <span>{isA ? "CUIT:" : "DNI:"}</span>
+          <span>{isA ? formatCuit(invoice.doc_nro) : invoice.doc_nro}</span>
         </div>
+        {isA && invoice.receptor_domicilio && (
+          <div className="row small">
+            <span>Domicilio:</span>
+            <span>{invoice.receptor_domicilio}</span>
+          </div>
+        )}
         <div className="row small">
           <span>Condición IVA:</span>
-          <span>Consumidor Final</span>
+          <span>{receptorCondicion}</span>
         </div>
 
         <hr />
         {/* Detalle (el WSFE factura totales; el detalle es de la representación) */}
         <div className="row">
           <span>HOSPEDAJE</span>
-          <span>${money(invoice.imp_total)}</span>
+          <span>${money(isA ? invoice.imp_neto : invoice.imp_total)}</span>
         </div>
         <div className="row small">
           <span>Período:</span>
@@ -132,25 +148,45 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           </span>
         </div>
 
-        <div className="total">
-          <span>TOTAL:</span>
-          <span>${money(invoice.imp_total)}</span>
-        </div>
+        {isA ? (
+          <>
+            {/* Factura A: IVA discriminado (Neto + IVA 21% + Total) */}
+            <div className="row">
+              <span>Neto Gravado:</span>
+              <span>${money(invoice.imp_neto)}</span>
+            </div>
+            <div className="row">
+              <span>IVA 21%:</span>
+              <span>${money(invoice.imp_iva)}</span>
+            </div>
+            <div className="total">
+              <span>TOTAL:</span>
+              <span>${money(invoice.imp_total)}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="total">
+              <span>TOTAL:</span>
+              <span>${money(invoice.imp_total)}</span>
+            </div>
 
-        {/* RG 5614 / Ley 27.743 — bloque obligatorio para RI a consumidor final */}
-        <div className="transparencia">
-          <p className="transparencia-title">
-            Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)
-          </p>
-          <div className="row small">
-            <span>IVA Contenido:</span>
-            <span>${money(invoice.imp_iva)}</span>
-          </div>
-          <div className="row small">
-            <span>Otros Impuestos Nacionales Indirectos:</span>
-            <span>$0,00</span>
-          </div>
-        </div>
+            {/* RG 5614 / Ley 27.743 — bloque obligatorio para RI a consumidor final */}
+            <div className="transparencia">
+              <p className="transparencia-title">
+                Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)
+              </p>
+              <div className="row small">
+                <span>IVA Contenido:</span>
+                <span>${money(invoice.imp_iva)}</span>
+              </div>
+              <div className="row small">
+                <span>Otros Impuestos Nacionales Indirectos:</span>
+                <span>$0,00</span>
+              </div>
+            </div>
+          </>
+        )}
 
         <hr />
         {/* Autorización */}

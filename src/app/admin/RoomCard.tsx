@@ -23,6 +23,7 @@ import {
 import PaymentModal from "../components/PaymentModal";
 import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal";
 import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
+import { isValidCuit } from "@/lib/arca/amounts";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import type { AssociatedClient } from "@/lib/types";
 
@@ -50,8 +51,10 @@ type RoomCardProps = {
     halfDayPrice: number;
     hasArrivalToday: boolean;
     accountCreditEnabled: boolean;
-    /** La reserva activa es de una empresa (se factura A desde la oficina, no acá). */
+    /** La reserva activa es de una empresa/convenio (associated_client_id presente). */
     billedToCompany: boolean;
+    /** id del asociado de la reserva activa (para precargar datos de Factura A). */
+    associatedClientId: string | null;
   };
   associatedClients: AssociatedClient[];
   isAdmin?: boolean;
@@ -207,23 +210,43 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     setIsCheckoutConfirmOpen(true);
   };
 
-  // ¿Corresponde ofrecer factura tras este check-out? (el RPC re-valida igual)
+  // ¿Corresponde ofrecer factura tras este check-out? (el RPC re-valida igual).
+  // Las empresas que pagan en caja ahora también entran (eligen A o B en el modal);
+  // cuenta corriente y vale blanco siguen fuera del flujo automático.
   const shouldPromptInvoice = (paymentMethod?: string) =>
-    fiscalEnabled && !room.billedToCompany
+    fiscalEnabled
       && paymentMethod !== "cuenta_corriente"
       && paymentMethod !== "vale_blanco";
 
   // Capturar los datos ANTES del await: el revalidate deja room.reservationId en null.
   // Con salida anticipada el total efectivo es el re-tarifado (la factura igual
   // toma reservations.total_price ya actualizado; esto es solo el subtítulo).
-  const buildInvoicePrompt = (): InvoicePromptData | null =>
-    room.reservationId
-      ? {
-          reservationId: room.reservationId,
-          clientName: room.client,
-          total: early ? early.newTotal : room.totalPrice,
-        }
+  const buildInvoicePrompt = (): InvoicePromptData | null => {
+    if (!room.reservationId) return null;
+    const company = room.associatedClientId
+      ? associatedClients.find((c) => c.id === room.associatedClientId) ?? null
       : null;
+    const companyCuit = (company?.document_id ?? "").replace(/\D/g, "");
+    const cuitPrefill = isValidCuit(companyCuit) ? companyCuit : "";
+    const condPrefill =
+      company?.condicion_iva === "responsable_inscripto" ||
+      company?.condicion_iva === "monotributo"
+        ? company.condicion_iva
+        : "";
+    return {
+      reservationId: room.reservationId,
+      clientName: room.client,
+      total: early ? early.newTotal : room.totalPrice,
+      aPrefill: {
+        razonSocial: company?.display_name ?? room.client ?? "",
+        cuit: cuitPrefill,
+        condicionIva: condPrefill,
+        domicilio: company?.domicilio ?? "",
+      },
+      // Sugerir A por defecto si es empresa con CUIT válido a mano.
+      suggestA: Boolean(company) && cuitPrefill !== "",
+    };
+  };
 
   const executeCheckout = () => {
     const reservationId = room.reservationId;
@@ -608,7 +631,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         />
       )}
 
-      <InvoicePromptModal data={invoicePrompt} onClose={() => setInvoicePrompt(null)} />
+      <InvoicePromptModal
+        key={invoicePrompt?.reservationId ?? "none"}
+        data={invoicePrompt}
+        onClose={() => setInvoicePrompt(null)}
+      />
 
       {isEarlyModalOpen && earlyPreview && (
         <EarlyCheckoutModal

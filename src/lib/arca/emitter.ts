@@ -256,12 +256,13 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
           internalKey,
         });
         const numero = formatCbteNumero(req.ptoVta, req.cbteNro);
+        const letra = req.cbteTipo === 1 ? "A" : "B";
         return {
           status: "authorized",
           invoiceId,
           cae: result.cae,
           numero,
-          userMessage: `Factura B ${numero} emitida (CAE ${result.cae}).`,
+          userMessage: `Factura ${letra} ${numero} emitida (CAE ${result.cae}).`,
         };
       }
 

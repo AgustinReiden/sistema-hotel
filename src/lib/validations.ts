@@ -211,6 +211,20 @@ export const associatedClientSchema = z.object({
     .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
   phone: optionalPhoneSchema,
   discountPercent: percentageSchema,
+  condicionIva: z
+    .preprocess(
+      (value) => (value === "" || value === null ? undefined : value),
+      z.enum(["responsable_inscripto", "monotributo", "consumidor_final"]).optional()
+    ),
+  domicilio: z
+    .preprocess(
+      (value) => {
+        if (typeof value !== "string") return value;
+        const trimmed = value.trim();
+        return trimmed === "" ? undefined : trimmed;
+      },
+      z.string().max(200, "El domicilio no puede superar los 200 caracteres.").optional()
+    ),
   notes: z
     .preprocess(
       (value) => {
