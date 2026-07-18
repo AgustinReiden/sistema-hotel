@@ -77,9 +77,24 @@ html {
   body {
     background: white !important;
   }
+  /* La hoja impresa debe medir el CONTENIDO, no la pantalla. El body (root layout) y el
+     contenedor del panel admin usan min-h-screen (min-height:100vh); en la comandera eso
+     fuerza una hoja del alto de la pantalla y sale un largo tramo en blanco tras el ticket. */
+  html,
+  body {
+    min-height: 0 !important;
+    height: auto !important;
+  }
+  .min-h-screen {
+    min-height: 0 !important;
+    height: auto !important;
+  }
   main,
   .print\:p-0 {
     padding: 0 !important;
+  }
+  main {
+    overflow: visible !important;
   }
   .print\:max-w-none {
     max-width: none !important;
