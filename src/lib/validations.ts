@@ -214,7 +214,7 @@ export const associatedClientSchema = z.object({
   condicionIva: z
     .preprocess(
       (value) => (value === "" || value === null ? undefined : value),
-      z.enum(["responsable_inscripto", "monotributo", "consumidor_final"]).optional()
+      z.enum(["responsable_inscripto", "monotributo", "consumidor_final", "exento"]).optional()
     ),
   domicilio: z
     .preprocess(

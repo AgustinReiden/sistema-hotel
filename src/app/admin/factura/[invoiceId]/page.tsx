@@ -63,15 +63,27 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
   const qrDataUrl = invoice.qr_url ? await qrPngDataUrl(invoice.qr_url) : null;
   const numero = formatCbteNumero(invoice.pto_vta, invoice.cbte_nro);
   const isHomo = invoice.environment === "homologacion";
-  // Factura A (Responsable Inscripto / Monotributo): CUIT + IVA discriminado, sin
-  // bloque de Transparencia Fiscal (ese es solo para B/C a consumidor final).
+  // Factura A (Responsable Inscripto / Monotributo): IVA discriminado. El receptor
+  // lleva CUIT cuando doc_tipo=80 (A, o B a Exento); DNI para consumidor final.
   const isA = invoice.cbte_tipo === 1;
+  const isCuit = invoice.doc_tipo === 80;
+  const isConsumidorFinal = invoice.condicion_iva_receptor_id === 5;
+  const isMonotributo = invoice.condicion_iva_receptor_id === 6;
   const receptorCondicion =
     invoice.condicion_iva_receptor_id === 1
       ? "IVA Responsable Inscripto"
-      : invoice.condicion_iva_receptor_id === 6
-        ? "Responsable Monotributo"
-        : "Consumidor Final";
+      : invoice.condicion_iva_receptor_id === 4
+        ? "IVA Sujeto Exento"
+        : invoice.condicion_iva_receptor_id === 6
+          ? "Responsable Monotributo"
+          : "Consumidor Final";
+  const ivaPctLabel = invoice.iva_id === 5 ? "21%" : ""; // 5 = 21% (único que se usa)
+  // RG 4919 / Ley 27.618: leyenda obligatoria en Factura A a un Monotributista.
+  // Texto a confirmar por el contador antes de producción.
+  const leyendaLey27618 =
+    "El crédito fiscal discriminado en el presente comprobante sólo podrá ser " +
+    "computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para " +
+    "Pequeños Contribuyentes de la Ley N° 27.618.";
 
   return (
     <div className="thermal">
@@ -113,6 +125,10 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           <span>Fecha:</span>
           <span>{formatDateCol(invoice.cbte_fch)}</span>
         </div>
+        <div className="row">
+          <span>Cond. venta:</span>
+          <span>Contado</span>
+        </div>
 
         <hr />
         {/* Receptor */}
@@ -121,10 +137,10 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           <span>{invoice.receptor_nombre ?? "—"}</span>
         </div>
         <div className="row">
-          <span>{isA ? "CUIT:" : "DNI:"}</span>
-          <span>{isA ? formatCuit(invoice.doc_nro) : invoice.doc_nro}</span>
+          <span>{isCuit ? "CUIT:" : "DNI:"}</span>
+          <span>{isCuit ? formatCuit(invoice.doc_nro) : invoice.doc_nro}</span>
         </div>
-        {isA && invoice.receptor_domicilio && (
+        {isCuit && invoice.receptor_domicilio && (
           <div className="row small">
             <span>Domicilio:</span>
             <span>{invoice.receptor_domicilio}</span>
@@ -150,13 +166,13 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
 
         {isA ? (
           <>
-            {/* Factura A: IVA discriminado (Neto + IVA 21% + Total) */}
+            {/* Factura A: IVA discriminado (Neto + IVA + Total) */}
             <div className="row">
               <span>Neto Gravado:</span>
               <span>${money(invoice.imp_neto)}</span>
             </div>
             <div className="row">
-              <span>IVA 21%:</span>
+              <span>IVA {ivaPctLabel}:</span>
               <span>${money(invoice.imp_iva)}</span>
             </div>
             <div className="total">
@@ -171,21 +187,30 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
               <span>${money(invoice.imp_total)}</span>
             </div>
 
-            {/* RG 5614 / Ley 27.743 — bloque obligatorio para RI a consumidor final */}
-            <div className="transparencia">
-              <p className="transparencia-title">
-                Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)
-              </p>
-              <div className="row small">
-                <span>IVA Contenido:</span>
-                <span>${money(invoice.imp_iva)}</span>
+            {/* RG 5614 / Ley 27.743 — Transparencia Fiscal: solo a consumidor final. */}
+            {isConsumidorFinal && (
+              <div className="transparencia">
+                <p className="transparencia-title">
+                  Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)
+                </p>
+                <div className="row small">
+                  <span>IVA Contenido:</span>
+                  <span>${money(invoice.imp_iva)}</span>
+                </div>
+                <div className="row small">
+                  <span>Otros Impuestos Nacionales Indirectos:</span>
+                  <span>$0,00</span>
+                </div>
               </div>
-              <div className="row small">
-                <span>Otros Impuestos Nacionales Indirectos:</span>
-                <span>$0,00</span>
-              </div>
-            </div>
+            )}
           </>
+        )}
+
+        {/* RG 4919 / Ley 27.618 — leyenda obligatoria en Factura A a un Monotributista. */}
+        {isMonotributo && (
+          <div className="leyenda">
+            <p>{leyendaLey27618}</p>
+          </div>
         )}
 
         <hr />
@@ -250,6 +275,8 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
         .tipo-cod { font-size: 8pt; font-weight: 700; }
         .transparencia { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; }
         .transparencia-title { font-size: 8pt; font-weight: 800; text-align: center; margin: 0 0 2px; }
+        .leyenda { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; font-size: 7.5pt; font-weight: 700; text-align: justify; }
+        .leyenda p { margin: 0; }
         .qr-wrap { display: flex; justify-content: center; margin: 6px 0 2px; }
         .qr { width: 30mm; height: 30mm; }
         .homo-band { font-size: 9pt; font-weight: 900; text-align: center; border: 2px dashed #000; padding: 2px 4px; margin: 4px 0; }

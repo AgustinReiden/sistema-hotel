@@ -6,31 +6,31 @@ import { toast } from "sonner";
 
 import { emitInvoiceForReservationAction } from "./fiscal/actions";
 import { isValidCuit } from "@/lib/arca/amounts";
-import type { EmitInvoiceOutcome, InvoiceReceptorInput } from "@/lib/types";
+import type { EmitInvoiceOutcome, InvoiceReceptorInput, ReceptorCondicionCuit } from "@/lib/types";
 
 export type InvoicePromptData = {
   reservationId: string;
   clientName: string | null;
   total: number;
-  /** Prefill para Factura A (empresa asociada o CUIT ya cargado en la reserva). */
+  /** Prefill para el receptor con CUIT (empresa de la ficha o CUIT ya en la reserva). */
   aPrefill: {
     razonSocial: string;
     cuit: string;
-    condicionIva: "responsable_inscripto" | "monotributo" | "";
+    condicionIva: ReceptorCondicionCuit | "";
     domicilio: string;
   };
-  /** true si es empresa con CUIT válido → sugerir A por defecto. */
+  /** true si es empresa con CUIT válido → sugerir el camino con CUIT por defecto. */
   suggestA: boolean;
 };
 
 type Props = {
   data: InvoicePromptData | null;
   onClose: () => void;
-  /** Empezar en la elección A/B (para /admin/fiscal, donde ya apretaron "Emitir"). */
+  /** Empezar en la elección de tipo (para /admin/fiscal, donde ya apretaron "Emitir"). */
   startAtTipo?: boolean;
 };
 
-type Step = "ask" | "tipo" | "formA";
+type Step = "ask" | "tipo" | "formCuit";
 
 function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -47,12 +47,12 @@ function openInvoicePrint(invoiceId: string) {
 
 /**
  * Prompt post check-out "¿Emitir factura?". El playero aprieta SÍ → elige el tipo:
- * B (consumidor final, usa el DNI de la reserva) o A (empresa / Responsable
- * Inscripto: se cargan/confirman CUIT + condición IVA + razón social, precargados
- * si la reserva es de una empresa de la ficha). Si ARCA no responde, la factura
- * queda pendiente en /admin/fiscal — el check-out ya está hecho y no se traba.
- */
-/**
+ * Consumidor Final (Factura B con el DNI de la reserva) o "con CUIT". En el camino
+ * con CUIT la condición IVA deriva el comprobante: Responsable Inscripto / Monotributo
+ * → Factura A; IVA Sujeto Exento → Factura B con CUIT. Los datos se precargan si la
+ * reserva es de una empresa de la ficha. Si ARCA no responde, la factura queda
+ * pendiente en /admin/fiscal — el check-out ya está hecho y no se traba.
+ *
  * El estado se inicializa desde `data` en el montaje; el padre pasa `key` (el
  * reservationId) para que se remonte fresco cada vez que abre un prompt nuevo.
  */
@@ -62,11 +62,14 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const [form, setForm] = useState(() => ({
     razonSocial: data?.aPrefill.razonSocial ?? "",
     cuit: data?.aPrefill.cuit ?? "",
-    condicionIva: (data?.aPrefill.condicionIva ?? "") as "responsable_inscripto" | "monotributo" | "",
+    condicionIva: (data?.aPrefill.condicionIva ?? "") as ReceptorCondicionCuit | "",
     domicilio: data?.aPrefill.domicilio ?? "",
   }));
 
   if (!data) return null;
+
+  // La condición IVA deriva el comprobante: exento → B; RI/Monotributo → A.
+  const derivedLetra = form.condicionIva === "exento" ? "B" : form.condicionIva ? "A" : null;
 
   const handleOutcome = (outcome: EmitInvoiceOutcome) => {
     if (outcome.status === "authorized") {
@@ -98,7 +101,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     handleOutcome(result.data!);
   };
 
-  const submitFormA = () => {
+  const submitFormCuit = () => {
     const cuitDigits = form.cuit.replace(/\D/g, "");
     if (!form.razonSocial.trim()) {
       toast.error("Ingresá la razón social del receptor.");
@@ -108,7 +111,11 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       toast.error("El CUIT no es válido (11 dígitos con dígito verificador).");
       return;
     }
-    if (form.condicionIva !== "responsable_inscripto" && form.condicionIva !== "monotributo") {
+    if (
+      form.condicionIva !== "responsable_inscripto" &&
+      form.condicionIva !== "monotributo" &&
+      form.condicionIva !== "exento"
+    ) {
       toast.error("Elegí la condición frente al IVA.");
       return;
     }
@@ -117,9 +124,9 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       return;
     }
     emit({
-      tipo: "A",
-      cuit: cuitDigits,
+      tipo: "cuit",
       condicionIva: form.condicionIva,
+      cuit: cuitDigits,
       razonSocial: form.razonSocial.trim(),
       domicilio: form.domicilio.trim(),
     });
@@ -135,7 +142,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800">
-                {step === "formA" ? "Datos para Factura A" : "¿Emitir factura?"}
+                {step === "formCuit" ? "Datos de facturación" : "¿Emitir factura?"}
               </h2>
               <p className="text-slate-500 text-sm font-medium">
                 {data.clientName ?? "Huésped"} — ${formatMoney(data.total)}
@@ -181,7 +188,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
           ) : step === "tipo" ? (
             <>
               <p className="text-sm font-semibold text-slate-600 mb-4 text-center">
-                ¿Qué comprobante?
+                ¿A quién se le factura?
               </p>
               <div className="grid grid-cols-1 gap-3">
                 <button
@@ -195,13 +202,15 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 >
                   <User size={22} className="text-slate-500 shrink-0" />
                   <div>
-                    <p className="font-bold text-slate-800">Factura B</p>
-                    <p className="text-xs text-slate-500">Consumidor final (usa el DNI de la reserva).</p>
+                    <p className="font-bold text-slate-800">Consumidor Final</p>
+                    <p className="text-xs text-slate-500">
+                      Factura B con el DNI de la reserva.
+                    </p>
                   </div>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setStep("formA")}
+                  onClick={() => setStep("formCuit")}
                   className={`flex items-center gap-3 p-4 rounded-2xl border-2 text-left transition-colors ${
                     data.suggestA
                       ? "border-emerald-500 bg-emerald-50 hover:bg-emerald-100"
@@ -210,9 +219,9 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 >
                   <Building2 size={22} className="text-slate-500 shrink-0" />
                   <div>
-                    <p className="font-bold text-slate-800">Factura A</p>
+                    <p className="font-bold text-slate-800">Con CUIT</p>
                     <p className="text-xs text-slate-500">
-                      Empresa o Responsable Inscripto (con CUIT).
+                      Empresa / Responsable Inscripto / Monotributo / Exento.
                     </p>
                   </div>
                 </button>
@@ -226,7 +235,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               </button>
             </>
           ) : (
-            // step === "formA"
+            // step === "formCuit"
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="fa-razon">
@@ -273,7 +282,13 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                   <option value="">Elegí…</option>
                   <option value="responsable_inscripto">Responsable Inscripto</option>
                   <option value="monotributo">Monotributo</option>
+                  <option value="exento">IVA Sujeto Exento</option>
                 </select>
+                {derivedLetra && (
+                  <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+                    Se emitirá Factura {derivedLetra}.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="fa-domicilio">
@@ -299,10 +314,10 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 </button>
                 <button
                   type="button"
-                  onClick={submitFormA}
+                  onClick={submitFormCuit}
                   className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 transition-colors shadow-md shadow-emerald-600/20"
                 >
-                  Emitir Factura A
+                  {derivedLetra ? `Emitir Factura ${derivedLetra}` : "Emitir factura"}
                 </button>
               </div>
             </div>

@@ -340,8 +340,14 @@ export type ReservationHistoryPage = {
   totalPages: number;
 };
 
-/** Condición frente al IVA del receptor (RG 5616). Define A vs B: RI/Monotributo → A. */
-export type CondicionIva = "responsable_inscripto" | "monotributo" | "consumidor_final";
+/**
+ * Condición frente al IVA del receptor (RG 5616). Define el comprobante:
+ * RI/Monotributo → Factura A; Exento → Factura B con CUIT; Consumidor Final → Factura B con DNI.
+ */
+export type CondicionIva = "responsable_inscripto" | "monotributo" | "consumidor_final" | "exento";
+
+/** Condiciones que se facturan con CUIT (razón social + domicilio del receptor). */
+export type ReceptorCondicionCuit = "responsable_inscripto" | "monotributo" | "exento";
 
 export type AssociatedClient = {
   id: string;
@@ -615,6 +621,7 @@ export type InvoiceRecord = {
   imp_total: number;
   imp_neto: number;
   imp_iva: number;
+  iva_id: number; // 5 = 21%
   fch_serv_desde: string; // date
   fch_serv_hasta: string; // date
   qr_url: string | null;
@@ -623,15 +630,17 @@ export type InvoiceRecord = {
 };
 
 /**
- * Datos del receptor elegidos en el momento de facturar. B = consumidor final
- * (usa el DNI de la reserva). A = Responsable Inscripto / Monotributo con CUIT.
+ * Datos del receptor elegidos en el momento de facturar.
+ * - "B": consumidor final, usa el DNI de la reserva (Factura B).
+ * - "cuit": receptor con CUIT; la condición IVA deriva el comprobante
+ *   (RI/Monotributo → Factura A; Exento → Factura B con CUIT).
  */
 export type InvoiceReceptorInput =
   | { tipo: "B" }
   | {
-      tipo: "A";
+      tipo: "cuit";
+      condicionIva: ReceptorCondicionCuit;
       cuit: string;
-      condicionIva: "responsable_inscripto" | "monotributo";
       razonSocial: string;
       domicilio: string;
     };
