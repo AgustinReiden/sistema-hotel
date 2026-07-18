@@ -2488,24 +2488,45 @@ type ListShiftsFilters = {
   to?: string;
   userId?: string;
   status?: CashShiftStatus;
-  limit?: number;
+  page?: number;
+  pageSize?: number;
+  /** Rol ya resuelto por el caller, para evitar un getCurrentUserRole() extra. */
+  role?: UserRole;
 };
 
+export type ShiftsPage = {
+  shifts: CashShift[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+// Columnas explicitas: cash_shifts no tiene JSONB pesado, pero evitamos traer
+// mas de lo que la tabla de rendiciones muestra.
+const SHIFT_COLUMNS =
+  "id, shift_number, opened_at, closed_at, opened_by, closed_by, opening_cash, expected_cash, actual_cash, discrepancy, notes, status";
+
 /**
- * Lista de turnos con el nombre del recepcionista que abrió/cerró.
+ * Lista paginada de turnos con el nombre del recepcionista que abrió/cerró.
  * Si el usuario actual es `receptionist`, filtra a sus propios turnos.
  * Si es `admin`, devuelve todos. (También hay RLS policy por dueño.)
  *
  * Usamos una query aparte a profiles porque cash_shifts.opened_by referencia
  * auth.users, no profiles, y PostgREST no puede embeber sin FK directo.
  */
-export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashShift[]> {
+export async function listShifts(filters: ListShiftsFilters = {}): Promise<ShiftsPage> {
   const supabase = await createClient();
-  const role = await getCurrentUserRole();
+  const role = filters.role ?? (await getCurrentUserRole());
+
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.max(1, filters.pageSize ?? 15);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
 
   let query = supabase
     .from("cash_shifts")
-    .select("*")
+    .select(SHIFT_COLUMNS, { count: "exact" })
     .order("opened_at", { ascending: false });
 
   if (role !== "admin") {
@@ -2521,13 +2542,16 @@ export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashS
   if (filters.to) query = query.lte("opened_at", filters.to);
   if (filters.userId) query = query.eq("opened_by", filters.userId);
   if (filters.status) query = query.eq("status", filters.status);
-  if (filters.limit) query = query.limit(filters.limit);
 
-  const { data, error } = await query;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
   if (error) throw error;
 
+  const total = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const shifts = ((data ?? []) as CashShiftRow[]).map(toCashShift);
-  if (shifts.length === 0) return shifts;
+  if (shifts.length === 0) return { shifts, total, page, pageSize, totalPages };
 
   const userIds = new Set<string>();
   for (const s of shifts) {
@@ -2545,11 +2569,17 @@ export async function listShifts(filters: ListShiftsFilters = {}): Promise<CashS
     nameById.set(p.id, p.full_name);
   }
 
-  return shifts.map((s) => ({
-    ...s,
-    opened_by_name: nameById.get(s.opened_by) ?? null,
-    closed_by_name: s.closed_by ? nameById.get(s.closed_by) ?? null : null,
-  }));
+  return {
+    shifts: shifts.map((s) => ({
+      ...s,
+      opened_by_name: nameById.get(s.opened_by) ?? null,
+      closed_by_name: s.closed_by ? nameById.get(s.closed_by) ?? null : null,
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages,
+  };
 }
 
 export async function openCashShift(): Promise<string> {
