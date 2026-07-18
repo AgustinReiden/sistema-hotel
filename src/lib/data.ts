@@ -3155,11 +3155,13 @@ export async function createInvoiceDraft(
   receptor?: InvoiceReceptorInput
 ): Promise<{ invoiceId: string; status: string; reused: boolean }> {
   const supabase = await createClient();
-  // Default = Factura B (consumidor final con el DNI de la reserva). Para A se
-  // pasan CUIT + condición IVA + razón social (precargados o cargados a mano).
+  // Default = Factura B (consumidor final con el DNI de la reserva). Para receptores
+  // con CUIT se pasa la condición IVA (que deriva A o B en el RPC) + razón social +
+  // domicilio (precargados de la ficha o cargados a mano).
   const params: Record<string, unknown> = { p_reservation_id: reservationId };
-  if (receptor?.tipo === "A") {
-    params.p_tipo = "A";
+  if (receptor?.tipo === "cuit") {
+    // p_tipo es vestigial (el RPC decide por condición IVA); lo mandamos por compat.
+    params.p_tipo = receptor.condicionIva === "exento" ? "B" : "A";
     params.p_cuit = receptor.cuit;
     params.p_condicion_iva = receptor.condicionIva;
     params.p_razon_social = receptor.razonSocial;
@@ -3329,6 +3331,7 @@ export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord |
     imp_total: Number(r.imp_total) || 0,
     imp_neto: Number(r.imp_neto) || 0,
     imp_iva: Number(r.imp_iva) || 0,
+    iva_id: Number(r.iva_id) || 5,
     fch_serv_desde: String(r.fch_serv_desde),
     fch_serv_hasta: String(r.fch_serv_hasta),
     qr_url: (r.qr_url as string | null) ?? null,

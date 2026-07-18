@@ -247,6 +247,26 @@ describe("buildFECAESolicitarEnvelope — Factura A", () => {
   });
 });
 
+// ── Factura B a IVA Sujeto Exento (con CUIT) ──
+const REQ_EXENTO: FecaeRequest = {
+  ...REQ,
+  cbteTipo: 6, // Factura B
+  docTipo: 80, // CUIT
+  docNro: "30707054537",
+  condicionIvaReceptorId: 4, // IVA Sujeto Exento
+};
+
+describe("buildFECAESolicitarEnvelope — Factura B a Exento", () => {
+  const xmlE = buildFECAESolicitarEnvelope(AUTH, REQ_EXENTO);
+
+  it("emite CbteTipo=6, DocTipo=80 (CUIT) y CondicionIVAReceptorId=4", () => {
+    expect(xmlE).toContain("<CbteTipo>6</CbteTipo>");
+    expect(xmlE).toContain("<DocTipo>80</DocTipo>");
+    expect(xmlE).toContain("<DocNro>30707054537</DocNro>");
+    expect(xmlE).toContain("<CondicionIVAReceptorId>4</CondicionIVAReceptorId>");
+  });
+});
+
 describe("buildQrUrl — Factura A", () => {
   it("refleja tipoCmp=1 y tipoDocRec=80", () => {
     const url = buildQrUrl({

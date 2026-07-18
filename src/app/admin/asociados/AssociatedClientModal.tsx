@@ -226,6 +226,7 @@ export default function AssociatedClientModal({
                 <option value="">Sin definir</option>
                 <option value="responsable_inscripto">Responsable Inscripto</option>
                 <option value="monotributo">Monotributo</option>
+                <option value="exento">IVA Sujeto Exento</option>
                 <option value="consumidor_final">Consumidor Final</option>
               </select>
               <p className="text-[11px] text-slate-500 mt-1">

@@ -15,7 +15,7 @@ type AssociatedClientFormPayload = {
   discountPercent: number;
   notes?: string;
   cuentaCorrienteHabilitada?: boolean;
-  condicionIva?: "responsable_inscripto" | "monotributo" | "consumidor_final";
+  condicionIva?: "responsable_inscripto" | "monotributo" | "consumidor_final" | "exento";
   domicilio?: string;
 };
 

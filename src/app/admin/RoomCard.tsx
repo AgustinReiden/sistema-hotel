@@ -230,7 +230,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const cuitPrefill = isValidCuit(companyCuit) ? companyCuit : "";
     const condPrefill =
       company?.condicion_iva === "responsable_inscripto" ||
-      company?.condicion_iva === "monotributo"
+      company?.condicion_iva === "monotributo" ||
+      company?.condicion_iva === "exento"
         ? company.condicion_iva
         : "";
     return {
