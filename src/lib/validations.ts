@@ -305,7 +305,33 @@ export const publicBookingSchema = z.object({
     .regex(/^\d{6,14}$/, "El telefono debe tener entre 6 y 14 digitos."),
   checkIn: z.string().min(1, "La fecha de entrada es requerida."),
   checkOut: z.string().min(1, "La fecha de salida es requerida."),
-});
+})
+  // Espeja los topes de rpc_public_create_reservation (migracion 49): NUNCA mas
+  // estricto que el backend, solo para dar el error antes en el formulario.
+  .superRefine((data, ctx) => {
+    const inMs = Date.parse(data.checkIn);
+    const outMs = Date.parse(data.checkOut);
+    // Formato invalido: lo maneja el backend (aca solo validamos rangos).
+    if (Number.isNaN(inMs) || Number.isNaN(outMs)) return;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    if (outMs <= inMs) {
+      ctx.addIssue({ code: "custom", path: ["checkOut"], message: "La fecha de salida debe ser posterior a la de entrada." });
+    }
+    if ((outMs - inMs) / DAY_MS > 30) {
+      ctx.addIssue({ code: "custom", path: ["checkOut"], message: "La estadia no puede superar los 30 dias." });
+    }
+    if (inMs - Date.now() > 365 * DAY_MS) {
+      ctx.addIssue({ code: "custom", path: ["checkIn"], message: "La reserva no puede ser con mas de un año de anticipacion." });
+    }
+    // Debe ser a futuro. Lenient (compara contra el inicio del dia de hoy) para no
+    // rechazar reservas del mismo dia que el backend igual acepta.
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    if (inMs < todayStart.getTime()) {
+      ctx.addIssue({ code: "custom", path: ["checkIn"], message: "La reserva debe ser para una fecha futura." });
+    }
+  });
 
 export const hotelSettingsSchema = z.object({
   name: z.string().trim().min(3, "El nombre del hotel debe tener al menos 3 caracteres."),
@@ -393,6 +419,17 @@ export const fiscalSettingsSchema = z
     }
     if (!data.razon_social) {
       ctx.addIssue({ code: "custom", path: ["razon_social"], message: "Para habilitar la facturacion falta la razon social." });
+    }
+    // Datos formales del emisor exigidos por RG 1415 en la representacion impresa
+    // (auditoria B4): no se puede habilitar sin ellos.
+    if (!data.domicilio_fiscal) {
+      ctx.addIssue({ code: "custom", path: ["domicilio_fiscal"], message: "Para habilitar la facturacion falta el domicilio fiscal." });
+    }
+    if (!data.inicio_actividades) {
+      ctx.addIssue({ code: "custom", path: ["inicio_actividades"], message: "Para habilitar la facturacion falta la fecha de inicio de actividades." });
+    }
+    if (!data.iibb) {
+      ctx.addIssue({ code: "custom", path: ["iibb"], message: "Para habilitar la facturacion falta Ingresos Brutos (numero, 'Exento' o 'No corresponde')." });
     }
     if (data.punto_venta === undefined) {
       ctx.addIssue({ code: "custom", path: ["punto_venta"], message: "Para habilitar la facturacion falta el punto de venta." });
