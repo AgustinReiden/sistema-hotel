@@ -3228,6 +3228,31 @@ export async function setArcaTa(input: {
   if (error) throw error;
 }
 
+/**
+ * IDs de facturas 'processing' estancadas (con número asignado y sin intento
+ * reciente) de un ambiente, excluyendo una. Sirve para el auto-destrabado de
+ * numeración (auditoría B7): una factura vieja en 'processing' retiene su número
+ * y bloquea la emisión del resto. La policy "Staff read invoices" permite el SELECT.
+ */
+export async function getStaleProcessingInvoiceIds(
+  environment: FiscalSettings["environment"],
+  excludeInvoiceId: string,
+  staleBeforeIso: string
+): Promise<string[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("environment", environment)
+    .eq("status", "processing")
+    .not("cbte_nro", "is", null)
+    .lt("last_attempt_at", staleBeforeIso)
+    .neq("id", excludeInvoiceId)
+    .limit(10);
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => String(r.id));
+}
+
 export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord | null> {
   const supabase = await createClient();
   const { data, error } = await supabase

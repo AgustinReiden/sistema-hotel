@@ -266,14 +266,20 @@ describe("associatedClientSchema", () => {
 });
 
 describe("publicBookingSchema", () => {
+  // Fechas dinamicas: el schema ahora valida futuro/horizonte contra la fecha real.
+  const isoDay = (daysAhead: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysAhead);
+    return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  };
   const validInput = {
     roomType: "Doble",
     clientName: "Ana Garcia",
     clientDni: "12345678",
     phoneCountryCode: "54",
     phoneLocal: "3814123456",
-    checkIn: "2026-05-01",
-    checkOut: "2026-05-03",
+    checkIn: isoDay(10),
+    checkOut: isoDay(12),
   };
 
   it("accepts valid public booking data", () => {
@@ -311,6 +317,35 @@ describe("publicBookingSchema", () => {
   it("rejects unsupported country code", () => {
     expect(() =>
       publicBookingSchema.parse({ ...validInput, phoneCountryCode: "1" })
+    ).toThrow();
+  });
+
+  it("rejects checkOut on or before checkIn", () => {
+    expect(() =>
+      publicBookingSchema.parse({ ...validInput, checkIn: isoDay(10), checkOut: isoDay(10) })
+    ).toThrow();
+  });
+
+  it("rejects stays longer than 30 nights", () => {
+    expect(() =>
+      publicBookingSchema.parse({ ...validInput, checkIn: isoDay(5), checkOut: isoDay(40) })
+    ).toThrow();
+  });
+
+  it("accepts a 30-night stay (boundary)", () => {
+    const result = publicBookingSchema.parse({ ...validInput, checkIn: isoDay(5), checkOut: isoDay(35) });
+    expect(result.roomType).toBe("Doble");
+  });
+
+  it("rejects bookings more than a year ahead", () => {
+    expect(() =>
+      publicBookingSchema.parse({ ...validInput, checkIn: isoDay(400), checkOut: isoDay(402) })
+    ).toThrow();
+  });
+
+  it("rejects past check-in dates", () => {
+    expect(() =>
+      publicBookingSchema.parse({ ...validInput, checkIn: isoDay(-5), checkOut: isoDay(2) })
     ).toThrow();
   });
 });

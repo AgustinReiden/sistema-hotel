@@ -90,9 +90,10 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
       <div className="thermal-page">
         {isHomo && <div className="homo-band">COMPROBANTE DE PRUEBA — SIN VALOR FISCAL</div>}
 
-        {/* Emisor (RG 1415) */}
+        {/* Emisor (RG 1415) — el domicilio fiscal es obligatorio para habilitar la
+            facturación (ver validación), así que no se cae a la dirección del hotel. */}
         <h1>{fiscal?.razon_social || hotel?.name || "Hotel El Refugio"}</h1>
-        <p className="addr">{fiscal?.domicilio_fiscal || hotel?.address || ""}</p>
+        <p className="addr">{fiscal?.domicilio_fiscal || ""}</p>
         <div className="row small">
           <span>CUIT:</span>
           <span>{formatCuit(fiscal?.cuit)}</span>

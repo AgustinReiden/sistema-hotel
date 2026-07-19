@@ -53,4 +53,40 @@ describe("buildCheckoutCsv", () => {
     const lines = csv.split("\r\n");
     expect(lines[1]).toContain(";1234,50;Sin cobro;000007");
   });
+
+  it("neutraliza inyección de fórmulas en Cliente (= + - @ TAB CR) anteponiendo apóstrofo", () => {
+    for (const prefix of ["=", "+", "-", "@", "\t", "\r"]) {
+      const csv = buildCheckoutCsv([row({ client_name: `${prefix}HYPERLINK("http://evil")` })], TZ);
+      const fields = csv.replace(/^﻿/, "").split("\r\n")[1].split(";");
+      // El campo Cliente arranca con apóstrofo (o comilla de quoting seguida de apóstrofo).
+      const cliente = fields[2];
+      expect(cliente.replace(/^"/, "").startsWith("'")).toBe(true);
+    }
+  });
+
+  it("neutraliza fórmulas también en Cod. Cliente (DNI)", () => {
+    const csv = buildCheckoutCsv([row({ client_dni: "=1+1" })], TZ);
+    const fields = csv.replace(/^﻿/, "").split("\r\n")[1].split(";");
+    expect(fields[3].replace(/^"/, "").startsWith("'")).toBe(true);
+  });
+
+  it("no toca nombres/DNI legítimos: quedan byte-idénticos", () => {
+    const csv = buildCheckoutCsv([row({ client_name: "Juan Pérez", client_dni: "30123456" })], TZ);
+    const fields = csv.replace(/^﻿/, "").split("\r\n")[1].split(";");
+    expect(fields[2]).toBe("Juan Pérez");
+    expect(fields[3]).toBe("30123456");
+  });
+
+  it("combina neutralización de fórmula con quoting cuando hay ';' o comillas", () => {
+    const csv = buildCheckoutCsv([row({ client_name: '=cmd;evil"x' })], TZ);
+    const line = csv.replace(/^﻿/, "").split("\r\n")[1];
+    // Lleva apóstrofo (neutralización) y va entrecomillado por el ';'/comilla interna.
+    expect(line).toContain('"\'=cmd;evil""x"');
+  });
+
+  it("NO neutraliza el Monto negativo (empieza con '-' pero es un importe, no texto)", () => {
+    const csv = buildCheckoutCsv([row({ total_price: -1234.5 })], TZ);
+    const fields = csv.replace(/^﻿/, "").split("\r\n")[1].split(";");
+    expect(fields[4]).toBe("-1234,50");
+  });
 });

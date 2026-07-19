@@ -19,6 +19,7 @@ import {
   finalizeInvoice,
   getArcaTa,
   getInvoiceById,
+  getStaleProcessingInvoiceIds,
   setArcaTa,
   type BeginEmissionPayload,
 } from "@/lib/data";
@@ -106,6 +107,88 @@ function requestFromPayload(p: BeginEmissionPayload): FecaeRequest {
   };
 }
 
+/**
+ * Consulta a ARCA si un comprobante 'processing' existe (FECompConsultar) y
+ * reconcilia: si ARCA lo tiene y matchea (importe ±0.01 y documento), recupera el
+ * CAE; si no, libera el número. Read-only + finalize idempotente: NO re-emite ni
+ * duplica. Mismo criterio que el recovery de la propia factura (ver más abajo).
+ */
+async function reconcileProcessingInvoice(
+  inv: NonNullable<Awaited<ReturnType<typeof getInvoiceById>>>,
+  wsfeUrl: string,
+  auth: WsfeAuth,
+  cuit: string,
+  internalKey: string
+): Promise<void> {
+  if (inv.status !== "processing" || !inv.cbte_nro) return;
+  const xml = await callWsfe(
+    wsfeUrl,
+    "FECompConsultar",
+    buildFECompConsultarEnvelope(auth, inv.pto_vta, inv.cbte_tipo, inv.cbte_nro)
+  );
+  const found = parseFECompConsultarResponse(xml);
+  if (found && Math.abs(found.impTotal - inv.imp_total) < 0.01 && found.docNro === inv.doc_nro) {
+    const qrUrl = buildQrUrl({
+      fecha: isoFromArcaDate(found.cbteFch) ?? found.cbteFch,
+      cuit: Number(cuit),
+      ptoVta: inv.pto_vta,
+      tipoCmp: inv.cbte_tipo,
+      nroCmp: found.cbteNro,
+      importe: inv.imp_total,
+      tipoDocRec: inv.doc_tipo,
+      nroDocRec: Number(inv.doc_nro),
+      codAut: Number(found.cae),
+    });
+    await finalizeInvoice({
+      invoiceId: inv.id,
+      outcome: "authorized",
+      cae: found.cae,
+      caeVto: isoFromArcaDate(found.caeVto),
+      arcaResult: { recovered: true, sweep: true, consulta: found },
+      qrUrl,
+      internalKey,
+    });
+  } else {
+    await finalizeInvoice({
+      invoiceId: inv.id,
+      outcome: "pending",
+      lastError: "Auto-destrabado: intento anterior sin outcome; ARCA no tiene el comprobante.",
+      internalKey,
+    });
+  }
+}
+
+/**
+ * Barre las facturas 'processing' estancadas (>2 min sin intento) del ambiente y
+ * les libera/recupera el número (auditoría B7): así una factura trabada no bloquea
+ * la emisión del resto. Best-effort: cualquier fallo por-factura (incl. la carrera
+ * de que otro emitInvoice la finalice primero) se ignora; nunca corta la emisión.
+ */
+async function sweepStaleProcessing(
+  environment: FiscalEnvironment,
+  wsfeUrl: string,
+  auth: WsfeAuth,
+  cuit: string,
+  internalKey: string,
+  excludeInvoiceId: string
+): Promise<void> {
+  const staleBeforeIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  let ids: string[];
+  try {
+    ids = await getStaleProcessingInvoiceIds(environment, excludeInvoiceId, staleBeforeIso);
+  } catch {
+    return; // sin DB no hay barrido; la emisión sigue igual
+  }
+  for (const id of ids) {
+    try {
+      const inv = await getInvoiceById(id);
+      if (inv) await reconcileProcessingInvoice(inv, wsfeUrl, auth, cuit, internalKey);
+    } catch {
+      // carrera con otro emitInvoice / red / etc.: ignorar, es limpieza best-effort
+    }
+  }
+}
+
 export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome> {
   const internalKey = getArcaInternalKey();
   if (!internalKey) {
@@ -147,6 +230,10 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
       };
     }
     const auth: WsfeAuth = { token: ta.token, sign: ta.sign, cuit };
+
+    // Auto-destrabado: antes de asignar número, liberar el que retienen facturas
+    // 'processing' estancadas de este ambiente (si no, colisionan la numeración).
+    await sweepStaleProcessing(environment, wsfeUrl, auth, cuit, internalKey, invoiceId);
 
     // ── Recovery: intento anterior con outcome desconocido ──
     if (invoice.status === "processing" && invoice.cbte_nro) {
@@ -302,12 +389,17 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
       userMessage: "No se pudo emitir por conflicto de numeración. Reintentá desde Facturación.",
     };
   } catch (error) {
+    // Colisión de numeración (unique_violation): otra factura retiene el número.
+    // Traducir a algo accionable en vez del mensaje crudo de Postgres.
+    const pgCode = (error as { code?: string } | null)?.code;
     const message =
-      error instanceof ArcaNetworkError
-        ? "ARCA no está respondiendo. La factura quedó pendiente — reintentá desde Facturación."
-        : error instanceof Error
-          ? error.message
-          : "Error inesperado al emitir la factura.";
+      pgCode === "23505"
+        ? "Hay otra factura en verificación que quedó reteniendo el número. Reintentá esa primero desde Facturación (En verificación) y volvé a intentar esta."
+        : error instanceof ArcaNetworkError
+          ? "ARCA no está respondiendo. La factura quedó pendiente — reintentá desde Facturación."
+          : error instanceof Error
+            ? error.message
+            : "Error inesperado al emitir la factura.";
 
     // Mejor esfuerzo: si la invoice quedó en processing por un fallo previo al
     // envío, liberarla a pending para que el reintento no espere el TTL.

@@ -37,6 +37,23 @@ function csvField(value: string): string {
   return needsQuote ? `"${escaped}"` : escaped;
 }
 
+/**
+ * Neutraliza la inyección de fórmulas (CSV injection) para texto libre controlado
+ * por el usuario. Si el valor arranca con un carácter que Excel/LibreOffice
+ * interpretan como fórmula (= + - @, TAB o CR), antepone un apóstrofo para que la
+ * celda quede como texto y no se ejecute. Recién después aplica el quoting normal
+ * (entrecomillar por sí solo NO desactiva la fórmula).
+ *
+ * Usar SOLO en campos untrusted (nombre y documento del cliente, cargables por un
+ * anónimo en la reserva pública). NO usar en montos: un importe negativo empieza
+ * con '-' y quedaría corrompido para el importador fiscal. Los nombres/DNI
+ * legítimos nunca arrancan con esos caracteres, así que las filas reales no cambian.
+ */
+function csvTextField(value: string): string {
+  const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return csvField(neutralized);
+}
+
 /** Monto con coma decimal, sin separador de miles (más seguro para importadores fiscales). */
 function formatAmountAr(n: number): string {
   return n.toFixed(2).replace(".", ",");
@@ -65,8 +82,8 @@ export function buildCheckoutCsv(
       [
         csvField(fecha),
         csvField(hora),
-        csvField(cliente),
-        csvField(codCliente),
+        csvTextField(cliente),
+        csvTextField(codCliente),
         csvField(monto),
         csvField(formaPago),
         csvField(formatShiftCode(row.shift_number)),
