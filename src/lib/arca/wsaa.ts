@@ -10,6 +10,8 @@
 import { XMLParser } from "fast-xml-parser";
 import forge from "node-forge";
 
+import { arcaDispatcher } from "./dispatcher";
+
 import { ArcaNetworkError, ArcaUnknownOutcomeError, type ArcaEnvironment, type TaData } from "./types";
 
 const xmlEscape = (s: string) =>
@@ -139,7 +141,9 @@ export async function loginWsaa(
       },
       body: envelope,
       signal: AbortSignal.timeout(15_000),
-    });
+      // TLS legacy de ARCA (DH 1024) — ver dispatcher.ts.
+      dispatcher: arcaDispatcher(),
+    } as RequestInit);
   } catch (error) {
     // El login no emite comprobantes: cualquier fallo acá es retryable.
     throw new ArcaNetworkError("No se pudo conectar con WSAA (ARCA).", { cause: error });
