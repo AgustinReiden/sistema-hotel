@@ -4,6 +4,8 @@
 
 import { XMLParser } from "fast-xml-parser";
 
+import { arcaDispatcher } from "./dispatcher";
+
 import {
   ArcaNetworkError,
   ArcaUnknownOutcomeError,
@@ -248,7 +250,9 @@ export async function callWsfe(
       },
       body: envelope,
       signal: AbortSignal.timeout(15_000),
-    });
+      // TLS legacy de ARCA (DH 1024) — ver dispatcher.ts.
+      dispatcher: arcaDispatcher(),
+    } as RequestInit);
   } catch (error) {
     const cause = error as { name?: string; cause?: { code?: string } };
     const code = cause?.cause?.code ?? "";
