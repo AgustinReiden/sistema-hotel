@@ -1,6 +1,6 @@
-import { formatCbteNumero, formatCuit } from "@/lib/arca/amounts";
+import { cbteLetra, formatCbteNumero, formatCuit, isNotaCredito } from "@/lib/arca/amounts";
 import { qrPngDataUrl } from "@/lib/arca/qr";
-import { getFiscalSettings, getHotelSettings, getInvoiceById } from "@/lib/data";
+import { getFiscalSettings, getHotelSettings, getInvoiceById, getInvoiceStays } from "@/lib/data";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
 
 export const dynamic = "force-dynamic";
@@ -60,12 +60,25 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
     );
   }
 
+  // Consolidada (mig 79): cubre N estadías. El detalle sólo va al impreso —
+  // WSFEv1 no recibe renglones, únicamente totales.
+  const isConsolidada = invoice.kind === "consolidada";
+  const stays = isConsolidada ? await getInvoiceStays(invoice.id).catch(() => []) : [];
+
+  // Nota de crédito (mig 80): anula el comprobante referenciado. AFIP lo exige en
+  // el <CbtesAsoc> del envío y RG 1415 en la representación impresa.
+  const isNC = isNotaCredito(invoice.cbte_tipo);
+  const anulado = invoice.nota_credito_de
+    ? await getInvoiceById(invoice.nota_credito_de).catch(() => null)
+    : null;
+
   const qrDataUrl = invoice.qr_url ? await qrPngDataUrl(invoice.qr_url) : null;
   const numero = formatCbteNumero(invoice.pto_vta, invoice.cbte_nro);
   const isHomo = invoice.environment === "homologacion";
   // Factura A (Responsable Inscripto / Monotributo): IVA discriminado. El receptor
   // lleva CUIT cuando doc_tipo=80 (A, o B a Exento); DNI para consumidor final.
-  const isA = invoice.cbte_tipo === 1;
+  // Letra: A = Factura A (1) y NC A (3) → IVA discriminado. B = Factura B (6) y NC B (8).
+  const isA = cbteLetra(invoice.cbte_tipo) === "A";
   const isCuit = invoice.doc_tipo === 80;
   const isConsumidorFinal = invoice.condicion_iva_receptor_id === 5;
   const isMonotributo = invoice.condicion_iva_receptor_id === 6;
@@ -115,9 +128,25 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
         {/* Tipo y número */}
         <div className="tipo-box">
           <span className="tipo-letra">{isA ? "A" : "B"}</span>
-          <span className="tipo-cod">{isA ? "Cód. 01" : "Cód. 06"}</span>
+          <span className="tipo-cod">Cód. {String(invoice.cbte_tipo).padStart(2, "0")}</span>
         </div>
-        <h2>FACTURA</h2>
+        <h2>
+          {isNC
+            ? "NOTA DE CRÉDITO"
+            : isConsolidada
+              ? "FACTURA (CUENTA CORRIENTE)"
+              : "FACTURA"}
+        </h2>
+        {isNC && anulado?.cbte_nro !== null && anulado !== null && (
+          <div className="row small">
+            <span>Anula:</span>
+            <span>
+              {cbteLetra(anulado.cbte_tipo)}{" "}
+              {formatCbteNumero(anulado.pto_vta, anulado.cbte_nro ?? 0)} del{" "}
+              {anulado.cbte_fch ? formatDateCol(anulado.cbte_fch) : "—"}
+            </span>
+          </div>
+        )}
         <div className="row">
           <span>Nro:</span>
           <span>{numero}</span>
@@ -154,16 +183,42 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
 
         <hr />
         {/* Detalle (el WSFE factura totales; el detalle es de la representación) */}
-        <div className="row">
-          <span>HOSPEDAJE</span>
-          <span>${money(isA ? invoice.imp_neto : invoice.imp_total)}</span>
-        </div>
-        <div className="row small">
-          <span>Período:</span>
-          <span>
-            {formatDateCol(invoice.fch_serv_desde)} al {formatDateCol(invoice.fch_serv_hasta)}
-          </span>
-        </div>
+        {isConsolidada ? (
+          <>
+            <div className="row">
+              <span>DETALLE DE ESTADÍAS</span>
+              <span>{stays.length}</span>
+            </div>
+            {stays.map((s) => (
+              <div className="row small" key={s.reservation_id}>
+                <span>
+                  Hab. {s.room_number ?? "—"} · {formatDateCol(s.fch_desde)} al{" "}
+                  {formatDateCol(s.fch_hasta)}
+                </span>
+                <span>${money(s.amount)}</span>
+              </div>
+            ))}
+            <div className="row small">
+              <span>Período:</span>
+              <span>
+                {formatDateCol(invoice.fch_serv_desde)} al {formatDateCol(invoice.fch_serv_hasta)}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="row">
+              <span>HOSPEDAJE</span>
+              <span>${money(isA ? invoice.imp_neto : invoice.imp_total)}</span>
+            </div>
+            <div className="row small">
+              <span>Período:</span>
+              <span>
+                {formatDateCol(invoice.fch_serv_desde)} al {formatDateCol(invoice.fch_serv_hasta)}
+              </span>
+            </div>
+          </>
+        )}
 
         {isA ? (
           <>

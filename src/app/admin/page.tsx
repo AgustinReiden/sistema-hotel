@@ -3,6 +3,16 @@ import { AlertTriangle, ClipboardList, Sparkles } from "lucide-react";
 import { isAfter } from "date-fns";
 
 import { formatHotelShortDateTime, formatHotelWeekdayDate } from "@/lib/time";
+import type { FacturacionModo, InvoiceReceptorPrefill, PaymentMethod } from "@/lib/types";
+
+const EMPTY_INVOICE_PREFILL: InvoiceReceptorPrefill = {
+  razonSocial: "",
+  cuit: "",
+  condicionIva: "",
+  domicilio: "",
+  suggestA: false,
+  complete: false,
+};
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
 import {
@@ -41,6 +51,12 @@ type DashboardRoom = {
   accountCreditEnabled: boolean;
   billedToCompany: boolean;
   associatedClientId: string | null;
+  /** Cuándo se le factura al cliente de esta reserva (mig 79). */
+  facturacionModo: FacturacionModo;
+  /** Datos de facturación de la ficha, ya resueltos (mig 81). */
+  invoicePrefill: InvoiceReceptorPrefill;
+  /** Métodos de los pagos ya registrados: definen si facturar es obligatorio (mig 83). */
+  priorPaymentMethods: PaymentMethod[];
 };
 
 function getDateKey(date: Date, timeZone: string) {
@@ -68,7 +84,7 @@ function isRoomConfirmedToday(
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, accountCreditByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount, fiscalSettings] = await Promise.all([
+  const [{ rooms, reservations, accountCreditByReservation, facturacionModoByReservation, invoicePrefillByReservation, priorPaymentMethodsByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount, fiscalSettings] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
     getCurrentUserRole(),
@@ -176,6 +192,15 @@ export default async function Dashboard() {
       // Para el prefill de Factura A en el prompt post-checkout (el CUIT sale de la ficha).
       associatedClientId:
         (activeReservation ?? confirmedReservation)?.associated_client_id ?? null,
+      facturacionModo: reservationId
+        ? facturacionModoByReservation[reservationId] ?? "por_checkout"
+        : "por_checkout",
+      invoicePrefill: reservationId
+        ? invoicePrefillByReservation[reservationId] ?? EMPTY_INVOICE_PREFILL
+        : EMPTY_INVOICE_PREFILL,
+      priorPaymentMethods: reservationId
+        ? priorPaymentMethodsByReservation[reservationId] ?? []
+        : [],
     };
   });
 

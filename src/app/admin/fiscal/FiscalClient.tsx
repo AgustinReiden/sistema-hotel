@@ -2,18 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, FileMinus, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
   discardInvoiceAction,
+  emitCreditNoteAction,
   fixInvoiceDniAndRetryAction,
   retryInvoiceAction,
 } from "./actions";
 import InvoicePromptModal, { type InvoicePromptData } from "../InvoicePromptModal";
-import { formatCbteNumero, isValidCuit } from "@/lib/arca/amounts";
+import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito, isValidCuit } from "@/lib/arca/amounts";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type {
+  AuthorizedInvoiceRow,
   EmitInvoiceOutcome,
   InvoiceableCheckoutRow,
   PendingInvoiceRow,
@@ -23,14 +25,7 @@ type Props = {
   enabled: boolean;
   pending: PendingInvoiceRow[];
   invoiceable: InvoiceableCheckoutRow[];
-  authorized: Array<{
-    invoice_id: string;
-    pto_vta: number;
-    cbte_nro: number;
-    cbte_tipo: number;
-    receptor_nombre: string | null;
-    imp_total: number;
-  }>;
+  authorized: AuthorizedInvoiceRow[];
 };
 
 function money(n: number) {
@@ -59,6 +54,8 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
   const [dniValue, setDniValue] = useState("");
   // Modal A/B para emitir un check-out sin facturar (empresa o consumidor final).
   const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
+  // Comprobante que se va a anular con nota de crédito (confirmación previa).
+  const [ncTarget, setNcTarget] = useState<AuthorizedInvoiceRow | null>(null);
 
   const handleOutcome = (outcome: EmitInvoiceOutcome) => {
     if (outcome.status === "authorized") {
@@ -80,6 +77,19 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
       toast.error(result.error);
       return;
     }
+    handleOutcome(result.data!);
+  };
+
+  // Nota de crédito: anula el comprobante y libera la estadía para re-facturar.
+  const emitCreditNote = async (target: AuthorizedInvoiceRow) => {
+    setBusyId(target.invoice_id);
+    const result = await emitCreditNoteAction(target.invoice_id);
+    setBusyId(null);
+    if (!result.success) {
+      toast.error(result.error, { duration: 9000 });
+      return;
+    }
+    setNcTarget(null);
     handleOutcome(result.data!);
   };
 
@@ -165,14 +175,19 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
             <ul className="divide-y divide-slate-100">
               {pending.map((p) => {
                 const canEdit = p.status === "rejected" || p.status === "pending";
+                // Una consolidada no cuelga de una reserva: no hay DNI que corregir.
+                // El const local mantiene el narrowing dentro de los callbacks.
+                const reservationId = p.reservation_id;
+                const canFixDni = canEdit && reservationId !== null;
+                const isConsolidada = reservationId === null;
                 const editing = dniEditId === p.invoice_id;
                 return (
                   <li key={p.invoice_id} className="py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="font-bold text-slate-800 truncate">
-                          Hab. {p.room_number} — {p.receptor_nombre ?? "Sin nombre"} — $
-                          {money(p.imp_total)}
+                          {isConsolidada ? "Consolidada" : `Hab. ${p.room_number}`} —{" "}
+                          {p.receptor_nombre ?? "Sin nombre"} — ${money(p.imp_total)}
                         </p>
                         <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
                           <AlertTriangle size={12} className="text-amber-500 shrink-0" />
@@ -182,7 +197,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {canEdit && (
+                        {canFixDni && (
                           <button
                             type="button"
                             onClick={() => {
@@ -222,7 +237,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
                         )}
                       </div>
                     </div>
-                    {editing && (
+                    {editing && reservationId !== null && (
                       <div className="mt-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
                         <input
                           type="text"
@@ -235,7 +250,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
                         />
                         <button
                           type="button"
-                          onClick={() => fixDni(p.invoice_id, p.reservation_id)}
+                          onClick={() => fixDni(p.invoice_id, reservationId)}
                           disabled={busyId !== null}
                           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
                         >
@@ -298,35 +313,110 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
           <h3 className="text-base font-bold text-slate-800">Emitidas recientes</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Reimprimí la representación con QR.</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Reimprimí la representación con QR. Si una factura salió mal, anulala con nota de crédito
+            y volvé a emitirla.
+          </p>
         </div>
         <div className="p-5">
           {authorized.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-2">Todavía no hay facturas emitidas.</p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {authorized.map((a) => (
-                <li key={a.invoice_id} className="py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-800 truncate">
-                      Factura {a.cbte_tipo === 1 ? "A" : "B"} {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
-                      {a.receptor_nombre ?? "Sin nombre"} — ${money(a.imp_total)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => openInvoicePrint(a.invoice_id)}
-                    className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 shrink-0"
-                  >
-                    <Printer size={14} />
-                    Reimprimir
-                  </button>
-                </li>
-              ))}
+              {authorized.map((a) => {
+                const esNc = isNotaCredito(a.cbte_tipo);
+                const anulada = a.anulada_at !== null;
+                return (
+                  <li key={a.invoice_id} className="py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-800 truncate">
+                        {cbteNombre(a.cbte_tipo)} {cbteLetra(a.cbte_tipo)}{" "}
+                        {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
+                        {a.receptor_nombre ?? "Sin nombre"} — ${money(a.imp_total)}
+                      </p>
+                      {anulada && (
+                        <p className="text-[11px] font-bold text-rose-600 mt-0.5">
+                          ANULADA por nota de crédito
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!esNc && !anulada && (
+                        <button
+                          type="button"
+                          onClick={() => setNcTarget(a)}
+                          disabled={busyId !== null}
+                          className="px-3 py-2 border border-rose-200 text-rose-700 text-sm font-bold rounded-lg hover:bg-rose-50 disabled:opacity-60 transition-colors flex items-center gap-1.5"
+                          title="Anular con nota de crédito"
+                        >
+                          <FileMinus size={14} />
+                          Nota de crédito
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => openInvoicePrint(a.invoice_id)}
+                        className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
+                      >
+                        <Printer size={14} />
+                        Reimprimir
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       </section>
+
+      {/* Confirmación de nota de crédito: es irreversible y genera un 3er papel. */}
+      {ncTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <FileMinus size={20} className="text-rose-600" />
+              <h3 className="text-lg font-black text-slate-800">Anular con nota de crédito</h3>
+            </div>
+            <p className="text-sm text-slate-600">
+              Se va a emitir una <strong>nota de crédito {cbteLetra(ncTarget.cbte_tipo)}</strong> que
+              anula la {cbteNombre(ncTarget.cbte_tipo).toLowerCase()}{" "}
+              <strong>
+                {cbteLetra(ncTarget.cbte_tipo)} {formatCbteNumero(ncTarget.pto_vta, ncTarget.cbte_nro)}
+              </strong>{" "}
+              de ${money(ncTarget.imp_total)}.
+            </p>
+            <ul className="text-xs text-slate-500 mt-3 space-y-1 list-disc pl-4">
+              <li>La factura original NO se borra: AFIP conserva las dos.</li>
+              <li>Después vas a poder volver a emitir la factura correcta.</li>
+              <li>Es sólo fiscal: no devuelve plata ni toca la caja.</li>
+            </ul>
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => setNcTarget(null)}
+                disabled={busyId !== null}
+                className="flex-1 py-3 border-2 border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 disabled:opacity-60 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => emitCreditNote(ncTarget)}
+                disabled={busyId !== null}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                {busyId === ncTarget.invoice_id ? (
+                  <Loader2 className="animate-spin" size={16} />
+                ) : (
+                  <FileMinus size={16} />
+                )}
+                Emitir nota de crédito
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <InvoicePromptModal
         key={invoicePrompt?.reservationId ?? "none"}

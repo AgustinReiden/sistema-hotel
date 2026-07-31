@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
+import { isValidCuit } from "@/lib/arca/amounts";
 import { parseActionError } from "@/lib/error-utils";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionResult, GuestRecord } from "@/lib/types";
+import type { ActionResult, CondicionIva, GuestRecord } from "@/lib/types";
 
 export type GuestRecordPayload = {
   fullName: string;
@@ -17,6 +18,12 @@ export type GuestRecordPayload = {
   profession?: string | null;
   discountPercent: number;
   cuentaCorrienteHabilitada: boolean;
+  facturacionModo?: "por_checkout" | "consolidada" | "no_factura";
+  // Datos de facturación (mig 81). El CUIT es OTRO número que documentId (el DNI).
+  condicionIva?: CondicionIva | null;
+  cuit?: string | null;
+  razonSocial?: string | null;
+  domicilioFiscal?: string | null;
 };
 
 async function assertAdmin() {
@@ -51,7 +58,7 @@ export async function loadGuestRecordAction(id: string): Promise<ActionResult<Gu
     const { data, error } = await supabase
       .from("guests")
       .select(
-        "id, full_name, document_type, document_id, phone, address, locality, nationality, profession, discount_percent, cuenta_corriente_habilitada"
+        "id, full_name, document_type, document_id, phone, address, locality, nationality, profession, discount_percent, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, cuit, razon_social, domicilio_fiscal"
       )
       .eq("id", id)
       .maybeSingle();
@@ -63,6 +70,7 @@ export async function loadGuestRecordAction(id: string): Promise<ActionResult<Gu
         ...data,
         discount_percent: Number(data.discount_percent ?? 0),
         cuenta_corriente_habilitada: Boolean(data.cuenta_corriente_habilitada),
+        facturacion_modo: data.facturacion_modo ?? "por_checkout",
       } as GuestRecord,
     };
   } catch (error: unknown) {
@@ -82,6 +90,15 @@ export async function updateGuestAction(
     if (fullName.length < 2) {
       return { success: false, error: "El nombre debe tener al menos 2 caracteres." };
     }
+    // El CUIT sólo se valida si lo cargaron: la mayoría de los huéspedes no tiene.
+    const cuitDigits = (payload.cuit ?? "").replace(/\D/g, "");
+    if (cuitDigits && !isValidCuit(cuitDigits)) {
+      return {
+        success: false,
+        error: "El CUIT no es válido (11 dígitos con dígito verificador).",
+      };
+    }
+
     const percent = Number(payload.discountPercent);
     if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
       return { success: false, error: "El descuento debe estar entre 0 y 100." };
@@ -100,6 +117,11 @@ export async function updateGuestAction(
         profession: clean(payload.profession),
         discount_percent: percent,
         cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
+        facturacion_modo: payload.facturacionModo ?? "por_checkout",
+        condicion_iva: payload.condicionIva || null,
+        cuit: cuitDigits || null,
+        razon_social: clean(payload.razonSocial),
+        domicilio_fiscal: clean(payload.domicilioFiscal),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

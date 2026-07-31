@@ -71,6 +71,21 @@ export function formatCbteNumero(ptoVta: number, cbteNro: number): string {
   return `${String(ptoVta).padStart(5, "0")}-${String(cbteNro).padStart(8, "0")}`;
 }
 
+/** true para notas de crédito: 3 = NC A, 8 = NC B. */
+export function isNotaCredito(cbteTipo: number): boolean {
+  return cbteTipo === 3 || cbteTipo === 8;
+}
+
+/** Letra del comprobante. A: Factura A (1) y NC A (3). B: Factura B (6) y NC B (8). */
+export function cbteLetra(cbteTipo: number): "A" | "B" {
+  return cbteTipo === 1 || cbteTipo === 3 ? "A" : "B";
+}
+
+/** "Factura" | "Nota de crédito", para toasts y títulos. */
+export function cbteNombre(cbteTipo: number): string {
+  return isNotaCredito(cbteTipo) ? "Nota de crédito" : "Factura";
+}
+
 /** CUIT con guiones para el impreso: 30123456789 → 30-12345678-9. */
 export function formatCuit(cuit: string | null | undefined): string {
   const d = (cuit ?? "").replace(/\D/g, "");

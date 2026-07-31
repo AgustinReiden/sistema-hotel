@@ -4,8 +4,13 @@ import { useState } from "react";
 import { ArrowLeft, Building2, FileText, Loader2, User, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { emitInvoiceForReservationAction } from "./fiscal/actions";
-import { isValidCuit } from "@/lib/arca/amounts";
+import {
+  declineInvoiceAction,
+  emitInvoiceForReservationAction,
+  lookupReceptorByCuitAction,
+} from "./fiscal/actions";
+import { formatCuit, isValidCuit } from "@/lib/arca/amounts";
+import { initialInvoiceStep, stepAfterYes, type InvoiceStep } from "@/lib/billing";
 import type { EmitInvoiceOutcome, InvoiceReceptorInput, ReceptorCondicionCuit } from "@/lib/types";
 
 export type InvoicePromptData = {
@@ -21,6 +26,14 @@ export type InvoicePromptData = {
   };
   /** true si es empresa con CUIT válido → sugerir el camino con CUIT por defecto. */
   suggestA: boolean;
+  /**
+   * Se cobró por tarjeta, transferencia o Mercado Pago: hay rastro bancario, así
+   * que facturar no es opcional y el paso SÍ/NO no se muestra (mig 83). El
+   * enforcement real está en `rpc_decline_invoice` (P0032).
+   */
+  mandatory?: boolean;
+  /** La ficha ya tiene los 4 datos fiscales: se confirma en vez de preguntar el tipo. */
+  prefillComplete?: boolean;
 };
 
 type Props = {
@@ -29,8 +42,6 @@ type Props = {
   /** Empezar en la elección de tipo (para /admin/fiscal, donde ya apretaron "Emitir"). */
   startAtTipo?: boolean;
 };
-
-type Step = "ask" | "tipo" | "formCuit";
 
 function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -57,8 +68,15 @@ function openInvoicePrint(invoiceId: string) {
  * reservationId) para que se remonte fresco cada vez que abre un prompt nuevo.
  */
 export default function InvoicePromptModal({ data, onClose, startAtTipo = false }: Props) {
-  const [step, setStep] = useState<Step>(startAtTipo ? "tipo" : "ask");
+  const mandatory = Boolean(data?.mandatory);
+  const prefillComplete = Boolean(data?.prefillComplete);
+
+  const [step, setStep] = useState<InvoiceStep>(() =>
+    initialInvoiceStep({ startAtTipo, mandatory, prefillComplete })
+  );
   const [emitting, setEmitting] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupFuente, setLookupFuente] = useState<string | null>(null);
   const [form, setForm] = useState(() => ({
     razonSocial: data?.aPrefill.razonSocial ?? "",
     cuit: data?.aPrefill.cuit ?? "",
@@ -100,6 +118,57 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     }
     handleOutcome(result.data!);
   };
+
+  /**
+   * "No facturar" queda REGISTRADO (mig 80): el playero no puede cambiarlo después,
+   * sólo el administrador. Por eso se confirma antes. Si el registro falla, igual
+   * se cierra: el check-out ya está hecho y no se traba por esto.
+   */
+  const confirmNo = async () => {
+    if (emitting) return;
+    setEmitting(true);
+    const result = await declineInvoiceAction(data.reservationId);
+    setEmitting(false);
+    if (!result.success) toast.error(result.error);
+    onClose();
+  };
+
+  /**
+   * Al completar un CUIT válido busca si ya se le facturó antes (ficha de empresa,
+   * de huésped, o la última factura) y completa el resto. Es exactamente el pedido
+   * de "si ya se facturó al cliente, que traiga los datos solo".
+   */
+  const onCuitChange = async (raw: string) => {
+    const digits = raw.replace(/\D/g, "").slice(0, 11);
+    setForm((f) => ({ ...f, cuit: digits }));
+    setLookupFuente(null);
+    if (!isValidCuit(digits)) return;
+
+    setLookingUp(true);
+    const result = await lookupReceptorByCuitAction(digits);
+    setLookingUp(false);
+    if (!result.success || !result.data?.found) return;
+
+    const found = result.data;
+    setLookupFuente(found.fuente);
+    // No pisa lo que el usuario ya escribió a mano.
+    setForm((f) => ({
+      ...f,
+      razonSocial: f.razonSocial.trim() || found.razon_social || "",
+      condicionIva: f.condicionIva || found.condicion_iva || "",
+      domicilio: f.domicilio.trim() || found.domicilio || "",
+    }));
+  };
+
+  /** Emite con lo que ya está en la ficha, sin volver a preguntar nada. */
+  const emitFromPrefill = () =>
+    emit({
+      tipo: "cuit",
+      condicionIva: data.aPrefill.condicionIva as ReceptorCondicionCuit,
+      cuit: data.aPrefill.cuit,
+      razonSocial: data.aPrefill.razonSocial,
+      domicilio: data.aPrefill.domicilio,
+    });
 
   const submitFormCuit = () => {
     const cuitDigits = form.cuit.replace(/\D/g, "");
@@ -168,25 +237,99 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => setStep("tipo")}
+                  onClick={() => setStep(stepAfterYes(prefillComplete))}
                   className="py-6 bg-emerald-600 hover:bg-emerald-700 text-white text-2xl font-black rounded-2xl transition-colors"
                 >
                   SÍ
                 </button>
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={() => setStep("confirmNo")}
                   className="py-6 border-2 border-slate-200 text-slate-600 hover:bg-slate-50 text-2xl font-black rounded-2xl transition-colors"
                 >
                   NO
                 </button>
               </div>
               <p className="text-[11px] text-slate-400 mt-4 text-center">
-                Si elegís NO, podés emitirla igual desde Facturación mientras dure tu turno.
+                La factura fiscal sale con la fecha y hora de ahora: se emite en el momento.
               </p>
+            </>
+          ) : step === "confirmNo" ? (
+            <>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <p className="text-sm font-bold text-amber-900">
+                  Si confirmás, esta estadía queda SIN factura fiscal.
+                </p>
+                <p className="text-xs text-amber-800 mt-1.5">
+                  No vas a poder emitirla más tarde: la decisión se registra y sólo el administrador
+                  puede cambiarla. Si el huésped la pide, elegí SÍ ahora.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setStep("ask")}
+                  className="py-5 border-2 border-slate-200 text-slate-600 hover:bg-slate-50 text-base font-black rounded-2xl transition-colors"
+                >
+                  Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmNo()}
+                  className="py-5 bg-slate-700 hover:bg-slate-800 text-white text-base font-black rounded-2xl transition-colors"
+                >
+                  No facturar
+                </button>
+              </div>
+            </>
+          ) : step === "confirmDirecto" ? (
+            // La ficha ya tiene todo: se muestra qué sale y se confirma con un clic.
+            // El "Cambiar" existe porque el pasajero de una empresa puede querer la
+            // factura a nombre propio, y una vez emitida sólo se arregla con NC.
+            <>
+              {mandatory && (
+                <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3 text-center">
+                  Se cobró por medio bancario: esta estadía se factura sí o sí.
+                </p>
+              )}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">
+                  Se va a emitir
+                </p>
+                <p className="text-2xl font-black text-slate-800 mt-1">
+                  Factura {data.aPrefill.condicionIva === "exento" ? "B" : "A"}
+                </p>
+                <p className="text-sm font-bold text-slate-700 mt-2">{data.aPrefill.razonSocial}</p>
+                <p className="text-xs text-slate-500 font-mono">
+                  CUIT {formatCuit(data.aPrefill.cuit)}
+                </p>
+                <p className="text-xs text-slate-500">{data.aPrefill.domicilio}</p>
+                <p className="text-lg font-black text-slate-800 mt-2">
+                  ${formatMoney(data.total)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void emitFromPrefill()}
+                className="w-full mt-4 py-5 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-black rounded-2xl transition-colors"
+              >
+                Emitir
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep("tipo")}
+                className="mt-3 w-full text-xs font-semibold text-slate-400 hover:text-slate-600"
+              >
+                Cambiar tipo o datos
+              </button>
             </>
           ) : step === "tipo" ? (
             <>
+              {mandatory && (
+                <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3 text-center">
+                  Se cobró por medio bancario: esta estadía se factura sí o sí.
+                </p>
+              )}
               <p className="text-sm font-semibold text-slate-600 mb-4 text-center">
                 ¿A quién se le factura?
               </p>
@@ -226,17 +369,64 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                   </div>
                 </button>
               </div>
+              {/* Con pago bancario no hay a dónde volver: el SÍ/NO no existe. */}
               <button
                 type="button"
-                onClick={() => (startAtTipo ? onClose() : setStep("ask"))}
+                onClick={() => {
+                  if (prefillComplete) setStep("confirmDirecto");
+                  else if (startAtTipo || mandatory) onClose();
+                  else setStep("ask");
+                }}
                 className="mt-4 flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-600"
               >
-                <ArrowLeft size={14} /> {startAtTipo ? "Cancelar" : "Volver"}
+                <ArrowLeft size={14} />{" "}
+                {prefillComplete || !(startAtTipo || mandatory) ? "Volver" : "Cancelar"}
               </button>
             </>
           ) : (
             // step === "formCuit"
             <div className="space-y-4">
+              {/* El CUIT va PRIMERO: es el dato que identifica al receptor y el que
+                  trae el resto solo si ya se le facturó antes. */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="fa-cuit">
+                  CUIT
+                </label>
+                <div className="relative">
+                  <input
+                    id="fa-cuit"
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    value={form.cuit}
+                    onChange={(e) => void onCuitChange(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    placeholder="11 dígitos"
+                  />
+                  {lookingUp && (
+                    <Loader2
+                      size={16}
+                      className="animate-spin text-slate-400 absolute right-3 top-1/2 -translate-y-1/2"
+                    />
+                  )}
+                </div>
+                {form.cuit.length === 11 && !isValidCuit(form.cuit) && (
+                  <p className="text-[11px] text-rose-600 font-semibold mt-1">
+                    El dígito verificador no cierra: revisá el CUIT.
+                  </p>
+                )}
+                {lookupFuente && (
+                  <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+                    Datos traídos de{" "}
+                    {lookupFuente === "empresa"
+                      ? "la ficha de la empresa"
+                      : lookupFuente === "huesped"
+                        ? "la ficha del huésped"
+                        : "una factura anterior"}
+                    .
+                  </p>
+                )}
+              </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="fa-razon">
                   Razón social
@@ -248,20 +438,6 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                   onChange={(e) => setForm((f) => ({ ...f, razonSocial: e.target.value }))}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                   placeholder="Ej. Transportes del Norte S.A."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="fa-cuit">
-                  CUIT
-                </label>
-                <input
-                  id="fa-cuit"
-                  type="text"
-                  inputMode="numeric"
-                  value={form.cuit}
-                  onChange={(e) => setForm((f) => ({ ...f, cuit: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                  placeholder="30-12345678-9"
                 />
               </div>
               <div>

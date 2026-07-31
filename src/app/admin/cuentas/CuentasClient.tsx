@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, DollarSign, Loader2, ScrollText, Search, UserRound, Wallet, X } from "lucide-react";
+import { Building2, DollarSign, FileText, Loader2, ScrollText, Search, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { loadCtaCteAccountAction, registerAccountPaymentAction } from "./actions";
@@ -91,6 +92,13 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
                     >
                       <ScrollText size={18} />
                     </button>
+                    <Link
+                      href={`/admin/fiscal/consolidada?kind=${a.kind}&id=${a.id}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
+                      title="Emitir factura consolidada de las estadías sin facturar"
+                    >
+                      <FileText size={16} /> Facturar
+                    </Link>
                     <button
                       onClick={() => setPayTarget(a)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"

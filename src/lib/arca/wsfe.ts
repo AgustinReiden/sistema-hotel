@@ -77,6 +77,12 @@ export function buildFECAESolicitarEnvelope(auth: WsfeAuth, req: FecaeRequest): 
       `<MonCotiz>${req.monCotiz}</MonCotiz>`,
       // RG 5616 (obligatorio desde 1/7/2025): condición de IVA del receptor.
       `<CondicionIVAReceptorId>${req.condicionIvaReceptorId}</CondicionIVAReceptorId>`,
+      // Comprobante asociado: obligatorio en la nota de crédito (identifica lo que
+      // cancela). El orden importa — el schema de FECAEDetRequest es una secuencia y
+      // CbtesAsoc va entre CondicionIVAReceptorId e Iva.
+      req.cbteAsoc
+        ? `<CbtesAsoc><CbteAsoc><Tipo>${req.cbteAsoc.tipo}</Tipo><PtoVta>${req.cbteAsoc.ptoVta}</PtoVta><Nro>${req.cbteAsoc.nro}</Nro><CbteFch>${req.cbteAsoc.fecha}</CbteFch></CbteAsoc></CbtesAsoc>`
+        : "",
       `<Iva><AlicIva><Id>${req.ivaId}</Id><BaseImp>${money(req.impNeto)}</BaseImp><Importe>${money(req.impIva)}</Importe></AlicIva></Iva>`,
       `</FECAEDetRequest></FeDetReq>`,
       `</FeCAEReq>`,

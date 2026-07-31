@@ -19,7 +19,10 @@ import {
   parseFECompUltimoAutorizadoResponse,
 } from "@/lib/arca/wsfe";
 import {
+  createCreditNoteDraft,
+  lookupReceptorByCuit,
   createInvoiceDraft,
+  declineInvoice,
   discardInvoice,
   fixReservationDniForInvoice,
   getFiscalSettings,
@@ -27,7 +30,12 @@ import {
   updateFiscalSettings,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import type { ActionResult, EmitInvoiceOutcome, InvoiceReceptorInput } from "@/lib/types";
+import type {
+  ActionResult,
+  EmitInvoiceOutcome,
+  InvoiceReceptorInput,
+  ReceptorLookup,
+} from "@/lib/types";
 import { fiscalSettingsSchema } from "@/lib/validations";
 
 function revalidateFiscalViews() {
@@ -99,6 +107,58 @@ export async function discardInvoiceAction(
     return { success: true };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo descartar la factura.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Nota de crédito que anula un comprobante ya emitido (punto 2 del gerente).
+ * Es SÓLO FISCAL: no devuelve plata ni toca la caja. Al obtener CAE, la factura
+ * queda anulada y sus estadías vuelven a ser facturables — por eso después se
+ * puede emitir la factura correcta.
+ */
+export async function emitCreditNoteAction(
+  invoiceId: string
+): Promise<ActionResult<EmitInvoiceOutcome>> {
+  try {
+    const draft = await createCreditNoteDraft(invoiceId);
+    const outcome = await emitInvoice(draft.invoiceId);
+    revalidateFiscalViews();
+    revalidatePath("/admin/fiscal/control");
+    return { success: true, data: outcome };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo emitir la nota de credito.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * El playero eligió NO en el prompt del check-out. Queda registrado para que no
+ * pueda cambiarlo después (punto 1); el administrador sí puede.
+ */
+/**
+ * Busca los datos de un receptor ya conocido por su CUIT (ficha de empresa, de
+ * huésped, o la última factura que se le emitió). Se llama al tipear el CUIT.
+ */
+export async function lookupReceptorByCuitAction(
+  cuit: string
+): Promise<ActionResult<ReceptorLookup>> {
+  try {
+    const data = await lookupReceptorByCuit(cuit);
+    return { success: true, data };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo buscar el CUIT.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+export async function declineInvoiceAction(reservationId: string): Promise<ActionResult> {
+  try {
+    await declineInvoice(reservationId);
+    revalidateFiscalViews();
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo registrar la decision.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

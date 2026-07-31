@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { CreditCard, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
-import type { AssociatedClient, CondicionIva } from "@/lib/types";
+import type { AssociatedClient, CondicionIva, FacturacionModo } from "@/lib/types";
 
 type AssociatedClientModalProps = {
   isOpen: boolean;
@@ -18,6 +18,7 @@ type AssociatedClientModalProps = {
     cuentaCorrienteHabilitada: boolean;
     condicionIva?: CondicionIva;
     domicilio?: string;
+    facturacionModo?: FacturacionModo;
   }) => Promise<{ success: boolean; error?: string }>;
   initialClient?: AssociatedClient | null;
   title: string;
@@ -32,6 +33,7 @@ type FormState = {
   cuentaCorrienteHabilitada: boolean;
   condicionIva: CondicionIva | "";
   domicilio: string;
+  facturacionModo: FacturacionModo;
 };
 
 function buildInitialState(initialClient?: AssociatedClient | null): FormState {
@@ -47,6 +49,7 @@ function buildInitialState(initialClient?: AssociatedClient | null): FormState {
     cuentaCorrienteHabilitada: initialClient?.cuenta_corriente_habilitada ?? false,
     condicionIva: initialClient?.condicion_iva ?? "",
     domicilio: initialClient?.domicilio ?? "",
+    facturacionModo: initialClient?.facturacion_modo ?? "por_checkout",
   };
 }
 
@@ -81,6 +84,7 @@ export default function AssociatedClientModal({
         cuentaCorrienteHabilitada: form.cuentaCorrienteHabilitada,
         condicionIva: form.condicionIva || undefined,
         domicilio: form.domicilio.trim() || undefined,
+        facturacionModo: form.facturacionModo,
       });
 
       if (result.success) {
@@ -203,6 +207,34 @@ export default function AssociatedClientModal({
                 <option value="si">Sí — habilitada a fiar</option>
               </select>
               <p className="text-[11px] text-slate-500 mt-1">Habilita cerrar reservas a cuenta corriente.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-facturacion">
+                <span className="flex items-center gap-1.5">
+                  <Receipt size={14} />
+                  Facturación
+                </span>
+              </label>
+              <select
+                id="associated-facturacion"
+                value={form.facturacionModo}
+                onChange={(e) =>
+                  setForm((current) => ({
+                    ...current,
+                    facturacionModo: e.target.value as FacturacionModo,
+                  }))
+                }
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              >
+                <option value="por_checkout">Factura por cada check-out</option>
+                <option value="consolidada">Factura consolidada (la emite el admin)</option>
+                <option value="no_factura">No se factura</option>
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Consolidada: las estadías no se facturan al cerrar; se juntan en una sola factura
+                desde Control de facturación.
+              </p>
             </div>
 
             <div>

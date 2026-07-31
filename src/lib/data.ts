@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "./supabase/server";
+import { isValidCuit } from "./arca/amounts";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import { localToISO } from "./format";
 import { hotelDateKey } from "./time";
@@ -48,10 +49,20 @@ import type {
   CtaCteMovimiento,
   DiscountedClient,
   FiscalSettings,
+  AuthorizedInvoiceRow,
+  BillingControlRow,
+  BillingPendingCounts,
+  CcChargeToInvoiceRow,
+  ConsolidatedInvoicePayload,
+  FacturacionModo,
+  InvoiceKind,
   InvoiceRecord,
   InvoiceReceptorInput,
+  InvoiceReceptorPrefill,
+  InvoiceStayRow,
   InvoiceableCheckoutRow,
   PendingInvoiceRow,
+  ReceptorLookup,
   RegisterAccountPaymentPayload,
   Guest,
   GuestDirectoryEntry,
@@ -101,6 +112,12 @@ type DashboardData = {
   }[];
   /** reservationId -> el cliente facturable tiene cuenta corriente habilitada. */
   accountCreditByReservation: Record<string, boolean>;
+  /** reservationId -> cuándo se le factura al cliente facturable (mig 79). */
+  facturacionModoByReservation: Record<string, FacturacionModo>;
+  /** reservationId -> datos de facturación de la ficha, para precargar (mig 81). */
+  invoicePrefillByReservation: Record<string, InvoiceReceptorPrefill>;
+  /** reservationId -> métodos de sus pagos ya registrados (mig 83). */
+  priorPaymentMethodsByReservation: Record<string, PaymentMethod[]>;
   todayIncome: number;
   hotelSettings: HotelSettings;
 };
@@ -153,6 +170,7 @@ type AssociatedClientRow = {
   cuenta_corriente_habilitada?: boolean | null;
   condicion_iva?: string | null;
   domicilio?: string | null;
+  facturacion_modo?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -176,6 +194,7 @@ function toAssociatedClient(row: AssociatedClientRow): AssociatedClient {
     cuenta_corriente_habilitada: Boolean(row.cuenta_corriente_habilitada),
     condicion_iva: (row.condicion_iva as AssociatedClient["condicion_iva"] | undefined) ?? null,
     domicilio: row.domicilio ?? null,
+    facturacion_modo: (row.facturacion_modo as FacturacionModo | undefined) ?? "por_checkout",
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -506,55 +525,174 @@ export async function getDashboardData(): Promise<DashboardData> {
     associated_client_id: r.associated_client_id ?? null,
   }));
 
-  // Resolver, por reserva, si el cliente facturable (empresa o huésped) tiene cta cte habilitada.
-  const accountCreditByReservation = await resolveAccountCreditByReservation(supabase, rawReservations);
+  // Resolver, por reserva, el contexto de facturación del cliente (empresa o huésped).
+  const {
+    credit: accountCreditByReservation,
+    modo: facturacionModoByReservation,
+    prefill: invoicePrefillByReservation,
+  } = await resolveBillingContextByReservation(supabase, rawReservations);
+
+  // Métodos de los pagos YA registrados de cada reserva. Es la única fuente
+  // confiable para saber si se cobró por medio bancario: en un check-out con saldo
+  // cero (seña o pago adelantado) la pantalla no tiene ningún método a mano.
+  const priorPaymentMethodsByReservation = await resolvePriorPaymentMethods(
+    supabase,
+    rawReservations.map((r) => r.id)
+  );
 
   const todayIncome = incomeResult.error ? 0 : Number(incomeResult.data || 0);
   const hotelSettings = settingsResult.data as HotelSettings;
 
-  return { rooms, reservations, accountCreditByReservation, todayIncome, hotelSettings };
+  return {
+    rooms,
+    reservations,
+    accountCreditByReservation,
+    facturacionModoByReservation,
+    invoicePrefillByReservation,
+    priorPaymentMethodsByReservation,
+    todayIncome,
+    hotelSettings,
+  };
 }
 
 /**
- * Para un set de reservas, devuelve un mapa reservationId -> el cliente facturable
- * (associated_client_id ?? guest_id) tiene cuenta corriente habilitada.
+ * reservationId -> métodos distintos de sus pagos ya registrados. Lo usa el
+ * check-out para decidir si la facturación es obligatoria (medio bancario) y para
+ * no ofrecer factura cuando la estadía se pagó con vale blanco.
  */
-async function resolveAccountCreditByReservation(
+async function resolvePriorPaymentMethods(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  rows: { id: string; associated_client_id: string | null; guest_id: string | null }[]
-): Promise<Record<string, boolean>> {
+  reservationIds: string[]
+): Promise<Record<string, PaymentMethod[]>> {
+  const map: Record<string, PaymentMethod[]> = {};
+  if (reservationIds.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("payments")
+    .select("reservation_id, payment_method")
+    .in("reservation_id", reservationIds);
+  if (error) throw error;
+
+  for (const row of (data ?? []) as { reservation_id: string; payment_method: PaymentMethod }[]) {
+    const list = map[row.reservation_id] ?? (map[row.reservation_id] = []);
+    if (!list.includes(row.payment_method)) list.push(row.payment_method);
+  }
+  return map;
+}
+
+type BillingClientRow = {
+  id: string;
+  cuenta_corriente_habilitada: boolean;
+  facturacion_modo?: string | null;
+  condicion_iva?: string | null;
+  /** Empresa: el CUIT vive en document_id. Huésped: en `cuit` (document_id es el DNI). */
+  document_id?: string | null;
+  cuit?: string | null;
+  display_name?: string | null;
+  full_name?: string | null;
+  razon_social?: string | null;
+  domicilio?: string | null;
+  domicilio_fiscal?: string | null;
+};
+
+const EMPTY_PREFILL: InvoiceReceptorPrefill = {
+  razonSocial: "",
+  cuit: "",
+  condicionIva: "",
+  domicilio: "",
+  suggestA: false,
+  complete: false,
+};
+
+/** Datos de facturación de una ficha, normalizados para el modal del check-out. */
+function toInvoicePrefill(
+  client: BillingClientRow | undefined,
+  fallbackName: string | null
+): InvoiceReceptorPrefill {
+  if (!client) return { ...EMPTY_PREFILL, razonSocial: fallbackName ?? "" };
+
+  // El CUIT sale de document_id (empresa) o de cuit (huésped) — nunca del
+  // document_id del huésped, que es el DNI y no sirve como CUIT.
+  const digits = (client.document_id ?? client.cuit ?? "").replace(/\D/g, "");
+  const cuit = isValidCuit(digits) ? digits : "";
+  const cond = client.condicion_iva;
+  const razonSocial =
+    client.display_name ?? client.razon_social ?? client.full_name ?? fallbackName ?? "";
+  const condicionIva =
+    cond === "responsable_inscripto" || cond === "monotributo" || cond === "exento" ? cond : "";
+  const domicilio = client.domicilio ?? client.domicilio_fiscal ?? "";
+  return {
+    razonSocial,
+    cuit,
+    condicionIva,
+    domicilio,
+    suggestA: cuit !== "",
+    // Los cuatro datos que exige emitir con CUIT. Con esto se saltea la pregunta
+    // del tipo y se pasa directo a confirmar qué se emite (mig 83).
+    complete: cuit !== "" && condicionIva !== "" && razonSocial !== "" && domicilio !== "",
+  };
+}
+
+/**
+ * Para un set de reservas, resuelve contra el cliente facturable
+ * (associated_client_id ?? guest_id) tres cosas:
+ *   · credit  → tiene cuenta corriente habilitada
+ *   · modo    → cuándo se le emite factura fiscal (mig 79)
+ *   · prefill → datos de facturación de la ficha (mig 81, punto 3)
+ * Se resuelven juntas porque salen de las mismas dos consultas.
+ */
+async function resolveBillingContextByReservation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  rows: {
+    id: string;
+    associated_client_id: string | null;
+    guest_id: string | null;
+    client_name?: string | null;
+  }[]
+): Promise<{
+  credit: Record<string, boolean>;
+  modo: Record<string, FacturacionModo>;
+  prefill: Record<string, InvoiceReceptorPrefill>;
+}> {
   const companyIds = [...new Set(rows.map((r) => r.associated_client_id).filter(Boolean))] as string[];
   const guestIds = [...new Set(rows.map((r) => r.guest_id).filter(Boolean))] as string[];
 
   const [companyRes, guestRes] = await Promise.all([
     companyIds.length
-      ? supabase.from("associated_clients").select("id, cuenta_corriente_habilitada").in("id", companyIds)
+      ? supabase
+          .from("associated_clients")
+          .select(
+            "id, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, document_id, display_name, domicilio"
+          )
+          .in("id", companyIds)
       : Promise.resolve({ data: [], error: null }),
     guestIds.length
-      ? supabase.from("guests").select("id, cuenta_corriente_habilitada").in("id", guestIds)
+      ? supabase
+          .from("guests")
+          .select(
+            "id, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, cuit, full_name, razon_social, domicilio_fiscal"
+          )
+          .in("id", guestIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
-  const enabledCompany = new Set(
-    ((companyRes.data ?? []) as { id: string; cuenta_corriente_habilitada: boolean }[])
-      .filter((c) => c.cuenta_corriente_habilitada)
-      .map((c) => c.id)
-  );
-  const enabledGuest = new Set(
-    ((guestRes.data ?? []) as { id: string; cuenta_corriente_habilitada: boolean }[])
-      .filter((g) => g.cuenta_corriente_habilitada)
-      .map((g) => g.id)
-  );
+  const byCompany = new Map(((companyRes.data ?? []) as BillingClientRow[]).map((c) => [c.id, c]));
+  const byGuest = new Map(((guestRes.data ?? []) as BillingClientRow[]).map((g) => [g.id, g]));
 
-  const map: Record<string, boolean> = {};
+  const credit: Record<string, boolean> = {};
+  const modo: Record<string, FacturacionModo> = {};
+  const prefill: Record<string, InvoiceReceptorPrefill> = {};
   for (const r of rows) {
-    map[r.id] = r.associated_client_id
-      ? enabledCompany.has(r.associated_client_id)
+    const client = r.associated_client_id
+      ? byCompany.get(r.associated_client_id)
       : r.guest_id
-        ? enabledGuest.has(r.guest_id)
-        : false;
+        ? byGuest.get(r.guest_id)
+        : undefined;
+    credit[r.id] = Boolean(client?.cuenta_corriente_habilitada);
+    modo[r.id] = (client?.facturacion_modo as FacturacionModo | undefined) ?? "por_checkout";
+    prefill[r.id] = toInvoicePrefill(client, r.client_name ?? null);
   }
-  return map;
+  return { credit, modo, prefill };
 }
 
 export async function getTimelineData(days = 7, startKey?: string): Promise<TimelineData> {
@@ -2549,6 +2687,9 @@ export async function getCloseShiftBlockers(): Promise<CloseShiftBlockersResult>
       balance_due: Number(b.balance_due) || 0,
     })),
     occupied_alerts_count: raw.occupied_alerts_count ?? 0,
+    // Reusa el listado que ya aplica el gate de turno: son exactamente los
+    // check-outs que este usuario todavía puede facturar antes de cerrar.
+    unbilled_count: (await listInvoiceableCheckouts().catch(() => [])).length,
   };
 }
 
@@ -3144,6 +3285,11 @@ export type BeginEmissionPayload = {
   fch_serv_desde: string; // yyyymmdd
   fch_serv_hasta: string; // yyyymmdd
   fch_vto_pago: string; // yyyymmdd
+  /** Sólo en notas de crédito: comprobante que se anula (bloque CbtesAsoc). */
+  cbte_asoc_tipo: number | null;
+  cbte_asoc_pto_vta: number | null;
+  cbte_asoc_nro: number | null;
+  cbte_asoc_fch: string | null; // yyyymmdd
   cuit: string;
 };
 
@@ -3167,6 +3313,11 @@ export async function beginInvoiceEmission(
     imp_neto: Number(r.imp_neto),
     imp_iva: Number(r.imp_iva),
     mon_cotiz: Number(r.mon_cotiz) || 1,
+    // Sólo vienen con valor en las notas de crédito (bloque CbtesAsoc).
+    cbte_asoc_tipo: r.cbte_asoc_tipo == null ? null : Number(r.cbte_asoc_tipo),
+    cbte_asoc_pto_vta: r.cbte_asoc_pto_vta == null ? null : Number(r.cbte_asoc_pto_vta),
+    cbte_asoc_nro: r.cbte_asoc_nro == null ? null : Number(r.cbte_asoc_nro),
+    cbte_asoc_fch: r.cbte_asoc_fch == null ? null : String(r.cbte_asoc_fch),
   };
 }
 
@@ -3265,7 +3416,10 @@ export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord |
   const r = data as Record<string, unknown>;
   return {
     id: String(r.id),
-    reservation_id: String(r.reservation_id),
+    reservation_id: r.reservation_id === null ? null : String(r.reservation_id),
+    kind: (r.kind as InvoiceRecord["kind"] | undefined) ?? "checkout",
+    nota_credito_de: r.nota_credito_de == null ? null : String(r.nota_credito_de),
+    anulada_at: r.anulada_at == null ? null : String(r.anulada_at),
     status: r.status as InvoiceRecord["status"],
     environment: r.environment as InvoiceRecord["environment"],
     pto_vta: Number(r.pto_vta),
@@ -3298,7 +3452,7 @@ export async function listPendingInvoices(): Promise<PendingInvoiceRow[]> {
   if (error) throw error;
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     invoice_id: String(r.invoice_id),
-    reservation_id: String(r.reservation_id),
+    reservation_id: r.reservation_id === null ? null : String(r.reservation_id),
     status: String(r.status),
     room_number: String(r.room_number),
     receptor_nombre: (r.receptor_nombre as string | null) ?? null,
@@ -3324,14 +3478,12 @@ export async function listInvoiceableCheckouts(): Promise<InvoiceableCheckoutRow
   }));
 }
 
-/** Facturas autorizadas recientes (para reimprimir desde /admin/fiscal). */
-export async function listTodayAuthorizedInvoices(): Promise<
-  Array<{ invoice_id: string; pto_vta: number; cbte_nro: number; cbte_tipo: number; receptor_nombre: string | null; imp_total: number }>
-> {
+/** Comprobantes autorizados recientes (para reimprimir/anular desde /admin/fiscal). */
+export async function listTodayAuthorizedInvoices(): Promise<AuthorizedInvoiceRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, pto_vta, cbte_nro, cbte_tipo, receptor_nombre, imp_total, cbte_fch")
+    .select("id, pto_vta, cbte_nro, cbte_tipo, receptor_nombre, imp_total, cbte_fch, kind, anulada_at")
     .eq("status", "authorized")
     .order("updated_at", { ascending: false })
     .limit(30);
@@ -3343,5 +3495,250 @@ export async function listTodayAuthorizedInvoices(): Promise<
     cbte_tipo: Number(r.cbte_tipo),
     receptor_nombre: (r.receptor_nombre as string | null) ?? null,
     imp_total: Number(r.imp_total) || 0,
+    kind: (r.kind as InvoiceKind | undefined) ?? "checkout",
+    anulada_at: r.anulada_at == null ? null : String(r.anulada_at),
   }));
+}
+
+/**
+ * Nota de crédito que anula un comprobante autorizado (mig 80). Devuelve el id
+ * para que el llamador lo pase a emitInvoice, igual que cualquier otro draft.
+ */
+export async function createCreditNoteDraft(
+  invoiceId: string
+): Promise<{ invoiceId: string; cbteTipo: number; reused: boolean }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_create_credit_note_draft", {
+    p_invoice_id: invoiceId,
+  });
+  if (error) throw error;
+  const r = (data ?? {}) as Record<string, unknown>;
+  return {
+    invoiceId: String(r.invoice_id),
+    cbteTipo: Number(r.cbte_tipo) || 8,
+    reused: Boolean(r.reused),
+  };
+}
+
+/** Registra que en el check-out se eligió NO facturar (punto 1, mig 80). */
+export async function declineInvoice(reservationId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_decline_invoice", {
+    p_reservation_id: reservationId,
+  });
+  if (error) throw error;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Facturación de cuenta corriente: consolidada y control (mig 79)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Estadías que cubre una factura. Las de check-out devuelven una sola fila; las
+ * consolidadas, N. Es el detalle que se imprime (a ARCA no va: WSFEv1 sólo recibe
+ * totales, no renglones).
+ */
+export async function getInvoiceStays(invoiceId: string): Promise<InvoiceStayRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("invoice_reservations")
+    .select("reservation_id, room_number, amount, fch_desde, fch_hasta")
+    .eq("invoice_id", invoiceId)
+    .is("unlinked_at", null)
+    .order("fch_desde", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    reservation_id: String(r.reservation_id),
+    room_number: (r.room_number as string | null) ?? null,
+    amount: Number(r.amount) || 0,
+    fch_desde: String(r.fch_desde),
+    fch_hasta: String(r.fch_hasta),
+  }));
+}
+
+/**
+ * Datos de facturación de las fichas habilitadas a cuenta corriente, indexados
+ * por `${kind}:${id}`. Lo usa la pantalla de factura consolidada para precargar
+ * el receptor y anticipar la letra, tanto para empresas como para huéspedes.
+ */
+export async function getCtaCteBillingProfiles(): Promise<Record<string, InvoiceReceptorPrefill>> {
+  const supabase = await createClient();
+  const [companyRes, guestRes] = await Promise.all([
+    supabase
+      .from("associated_clients")
+      .select("id, cuenta_corriente_habilitada, condicion_iva, document_id, display_name, domicilio")
+      .eq("cuenta_corriente_habilitada", true),
+    supabase
+      .from("guests")
+      .select("id, cuenta_corriente_habilitada, condicion_iva, cuit, full_name, razon_social, domicilio_fiscal")
+      .eq("cuenta_corriente_habilitada", true),
+  ]);
+
+  const map: Record<string, InvoiceReceptorPrefill> = {};
+  for (const c of (companyRes.data ?? []) as BillingClientRow[]) {
+    map[`company:${c.id}`] = toInvoicePrefill(c, null);
+  }
+  for (const g of (guestRes.data ?? []) as BillingClientRow[]) {
+    map[`guest:${g.id}`] = toInvoicePrefill(g, null);
+  }
+  return map;
+}
+
+/** Cargos de cuenta corriente de un cliente pendientes de facturar (admin). */
+export async function listCcChargesToInvoice(
+  kind: CtaCteClientKind,
+  clientId: string,
+  from?: string,
+  to?: string
+): Promise<CcChargeToInvoiceRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_cc_charges_to_invoice", {
+    p_kind: kind,
+    p_client_id: clientId,
+    p_from: from ?? null,
+    p_to: to ?? null,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    reservation_id: String(r.reservation_id),
+    movimiento_id: String(r.movimiento_id),
+    room_number: (r.room_number as string | null) ?? null,
+    passenger: (r.passenger as string | null) ?? null,
+    fch_desde: String(r.fch_desde),
+    fch_hasta: String(r.fch_hasta),
+    amount: Number(r.amount) || 0,
+    total_price: Number(r.total_price) || 0,
+    actual_check_out: String(r.actual_check_out),
+    mixed_payment: Boolean(r.mixed_payment),
+  }));
+}
+
+/**
+ * Crea el draft de una factura consolidada (N estadías → 1 comprobante). Devuelve
+ * el id para que el llamador lo pase a emitInvoice(), igual que el flujo normal.
+ */
+export async function createConsolidatedInvoiceDraft(
+  payload: ConsolidatedInvoicePayload
+): Promise<{ invoiceId: string; impTotal: number; count: number; cbteTipo: number }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_create_consolidated_invoice_draft", {
+    p_kind: payload.kind,
+    p_client_id: payload.clientId,
+    p_reservation_ids: payload.reservationIds,
+    p_cuit: payload.cuit ?? null,
+    p_condicion_iva: payload.condicionIva ?? null,
+    p_razon_social: payload.razonSocial ?? null,
+    p_domicilio: payload.domicilio ?? null,
+  });
+  if (error) throw error;
+  const r = (data ?? {}) as Record<string, unknown>;
+  return {
+    invoiceId: String(r.invoice_id),
+    impTotal: Number(r.imp_total) || 0,
+    count: Number(r.count) || 0,
+    cbteTipo: Number(r.cbte_tipo) || 6,
+  };
+}
+
+/** Listado de control: qué está facturado y qué no, en un rango (admin). */
+export async function listBillingControl(
+  from: string,
+  to: string,
+  clientKind?: CtaCteClientKind,
+  clientId?: string
+): Promise<BillingControlRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_billing_control", {
+    p_from: from,
+    p_to: to,
+    p_client_kind: clientKind ?? null,
+    p_client_id: clientId ?? null,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    reservation_id: String(r.reservation_id),
+    room_number: String(r.room_number),
+    client_name: String(r.client_name),
+    cliente: String(r.cliente),
+    client_kind: (r.client_kind as CtaCteClientKind | null) ?? null,
+    client_id: r.client_id === null ? null : String(r.client_id),
+    actual_check_out: String(r.actual_check_out),
+    fch_desde: String(r.fch_desde),
+    fch_hasta: String(r.fch_hasta),
+    total_price: Number(r.total_price) || 0,
+    cargo_cc: r.cargo_cc === null ? null : Number(r.cargo_cc),
+    cierre: r.cierre as BillingControlRow["cierre"],
+    facturacion_modo: r.facturacion_modo as FacturacionModo,
+    estado: r.estado as BillingControlRow["estado"],
+    invoice_id: r.invoice_id === null ? null : String(r.invoice_id),
+    invoice_kind: (r.invoice_kind as BillingControlRow["invoice_kind"]) ?? null,
+    invoice_status: (r.invoice_status as string | null) ?? null,
+    cbte_tipo: r.cbte_tipo === null ? null : Number(r.cbte_tipo),
+    pto_vta: r.pto_vta === null ? null : Number(r.pto_vta),
+    cbte_nro: r.cbte_nro === null ? null : Number(r.cbte_nro),
+    imp_total: r.imp_total === null ? null : Number(r.imp_total),
+    external_ref: (r.external_ref as string | null) ?? null,
+    bancario: Boolean(r.bancario),
+  }));
+}
+
+/**
+ * Datos de un receptor ya conocido, por CUIT. Se consulta al tipear el CUIT en el
+ * paso "con CUIT": si ya se le facturó antes, se completa solo (mig 83).
+ */
+export async function lookupReceptorByCuit(cuit: string): Promise<ReceptorLookup> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_lookup_receptor_by_cuit", { p_cuit: cuit });
+  if (error) throw error;
+  const r = (data ?? {}) as Record<string, unknown>;
+  return {
+    found: Boolean(r.found),
+    fuente: (r.fuente as ReceptorLookup["fuente"]) ?? null,
+    razon_social: (r.razon_social as string | null) ?? null,
+    condicion_iva: (r.condicion_iva as ReceptorLookup["condicion_iva"]) ?? null,
+    domicilio: (r.domicilio as string | null) ?? null,
+  };
+}
+
+/**
+ * Marca una estadía como facturada FUERA del sistema (portal de ARCA u otro).
+ * Deja constancia del comprobante y de quién lo afirmó, y la estadía deja de
+ * figurar como pendiente en todos los listados (mig 82).
+ */
+export async function markInvoicedExternally(
+  reservationId: string,
+  ref: string,
+  fecha?: string,
+  notes?: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_mark_invoiced_externally", {
+    p_reservation_id: reservationId,
+    p_ref: ref,
+    p_fecha: fecha ?? null,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
+}
+
+/** Deshace la marca externa (no la borra: queda el rastro). */
+export async function unmarkInvoicedExternally(reservationId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_unmark_invoiced_externally", {
+    p_reservation_id: reservationId,
+  });
+  if (error) throw error;
+}
+
+/** Cuánto queda sin facturar en los últimos `days` días (badge del admin). */
+export async function countBillingPending(days = 60): Promise<BillingPendingCounts> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_count_billing_pending", { p_days: days });
+  if (error) throw error;
+  const r = (data ?? {}) as Record<string, unknown>;
+  return {
+    falta: Number(r.falta) || 0,
+    pendiente_consolidada: Number(r.pendiente_consolidada) || 0,
+    dias: Number(r.dias) || days,
+  };
 }

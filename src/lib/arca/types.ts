@@ -21,9 +21,21 @@ export type WsfeAuth = {
  * Pedido de CAE para UN comprobante (FECAESolicitar con CantReg=1).
  * Fechas en formato ARCA `yyyymmdd` (zona del hotel).
  */
+/**
+ * Comprobante asociado (bloque `CbtesAsoc`). AFIP lo EXIGE en las notas de crédito:
+ * identifica el comprobante que se cancela. `Cuit` y `CbteFch` son opcionales en el
+ * schema; mandamos la fecha porque ayuda a ARCA a matchear.
+ */
+export type CbteAsoc = {
+  tipo: number; // 6 = Factura B · 1 = Factura A
+  ptoVta: number;
+  nro: number;
+  fecha: string; // yyyymmdd
+};
+
 export type FecaeRequest = {
   ptoVta: number;
-  cbteTipo: number; // 6 = Factura B · 1 = Factura A
+  cbteTipo: number; // 6 = Factura B · 1 = Factura A · 8 = NC B · 3 = NC A
   concepto: number; // 2 = Servicios
   docTipo: number; // 96 = DNI · 80 = CUIT
   docNro: string; // solo dígitos
@@ -40,6 +52,8 @@ export type FecaeRequest = {
   fchServDesde: string; // yyyymmdd
   fchServHasta: string; // yyyymmdd
   fchVtoPago: string; // yyyymmdd
+  /** Sólo en notas de crédito: el comprobante que se anula. */
+  cbteAsoc?: CbteAsoc | null;
 };
 
 export type WsfeObservacion = { code: number; msg: string };

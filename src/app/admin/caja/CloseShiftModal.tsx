@@ -11,6 +11,7 @@ import {
   CreditCard,
   DoorOpen,
   EyeOff,
+  FileText,
   Flag,
   Landmark,
   Loader2,
@@ -120,6 +121,8 @@ export default function CloseShiftModal({
   // Paso 1: salidas vencidas que bloquean el cierre (guard "bloqueo con salida").
   const [blockers, setBlockers] = useState<CloseShiftBlocker[] | null>(null);
   const [occupiedAlerts, setOccupiedAlerts] = useState(0);
+  // Check-outs del turno que quedaron sin facturar: avisa, no bloquea.
+  const [unbilledCount, setUnbilledCount] = useState(0);
   const [blockersError, setBlockersError] = useState<string | null>(null);
   const [checkingBlockers, setCheckingBlockers] = useState(false);
   // Acción expandida en una card de bloqueo (mini-form de ampliar o de reporte).
@@ -149,6 +152,7 @@ export default function CloseShiftModal({
     }
     setBlockers(result.data!.blockers);
     setOccupiedAlerts(result.data!.occupied_alerts_count);
+    setUnbilledCount(result.data!.unbilled_count);
     setExpanded(null);
     setActionError(null);
   }, []);
@@ -382,6 +386,20 @@ export default function CloseShiftModal({
         <div className="text-sm font-semibold text-amber-800">
           Limpieza marcó {occupiedAlerts === 1 ? "1 habitación ocupada" : `${occupiedAlerts} habitaciones ocupadas`}{" "}
           sin reserva activa. Podés cerrar igual; el administrador ya fue notificado.
+        </div>
+      </div>
+    ) : null;
+
+  // Cerrado el turno, el playero ya no puede facturar estos check-outs: tiene que
+  // pedírselo al administrador. Por eso el aviso va acá y no después.
+  const unbilledBanner =
+    unbilledCount > 0 ? (
+      <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
+        <FileText size={18} className="text-rose-500 shrink-0 mt-0.5" />
+        <div className="text-sm font-semibold text-rose-800">
+          Te {unbilledCount === 1 ? "queda 1 check-out" : `quedan ${unbilledCount} check-outs`} de
+          este turno <strong>sin facturar</strong>. Si corresponde facturarlos, hacelo desde
+          Facturación <strong>antes de cerrar</strong> — después sólo puede el administrador.
         </div>
       </div>
     ) : null;
@@ -623,6 +641,7 @@ export default function CloseShiftModal({
             </div>
           )}
           {occupiedBanner}
+          {unbilledBanner}
           <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-start gap-3">
             <EyeOff size={18} className="text-slate-400 shrink-0 mt-0.5" />
             <div className="text-sm text-slate-600">
