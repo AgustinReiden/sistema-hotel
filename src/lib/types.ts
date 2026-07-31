@@ -277,6 +277,17 @@ export type GuestRecord = {
   profession: string | null;
   discount_percent: number;
   cuenta_corriente_habilitada: boolean;
+  /** Cuándo se le factura: al cerrar cada estadía, consolidado, o nunca (mig 79). */
+  facturacion_modo: FacturacionModo;
+  // ── Datos de facturación (mig 81, punto 3 del gerente) ──
+  /** Condición frente al IVA. null = consumidor final (Factura B con DNI). */
+  condicion_iva: CondicionIva | null;
+  /** CUIT para Factura A. Es OTRO número que `document_id`, que es el DNI. */
+  cuit: string | null;
+  /** Razón social si factura a nombre de un comercio; si no, se usa full_name. */
+  razon_social: string | null;
+  /** Domicilio fiscal (RG 1415). Puede diferir de `address`, el particular. */
+  domicilio_fiscal: string | null;
 };
 
 /** Tipo de cliente con cuenta corriente: empresa (associated_clients) o huésped (guests). */
@@ -349,6 +360,43 @@ export type CondicionIva = "responsable_inscripto" | "monotributo" | "consumidor
 /** Condiciones que se facturan con CUIT (razón social + domicilio del receptor). */
 export type ReceptorCondicionCuit = "responsable_inscripto" | "monotributo" | "exento";
 
+/**
+ * Datos de facturación resueltos desde la ficha del cliente —empresa o huésped—
+ * para precargar el modal del check-out (mig 81, punto 3 del gerente).
+ */
+export type InvoiceReceptorPrefill = {
+  razonSocial: string;
+  /** Sólo dígitos, y sólo si pasa el dígito verificador. "" si no hay CUIT usable. */
+  cuit: string;
+  condicionIva: ReceptorCondicionCuit | "";
+  domicilio: string;
+  /** true si la ficha ya tiene CUIT válido → sugerir el camino "con CUIT". */
+  suggestA: boolean;
+  /**
+   * true si la ficha tiene los CUATRO datos que exige emitir con CUIT. Con esto
+   * no se pregunta el tipo: se muestra qué se emite y se confirma (mig 83).
+   */
+  complete: boolean;
+};
+
+/** Datos de un receptor ya conocido, buscado por CUIT al facturar (mig 83). */
+export type ReceptorLookup = {
+  found: boolean;
+  /** De dónde salieron los datos, para poder decírselo al que factura. */
+  fuente: "empresa" | "huesped" | "factura" | null;
+  razon_social: string | null;
+  condicion_iva: ReceptorCondicionCuit | null;
+  domicilio: string | null;
+};
+
+/**
+ * Cuándo se le emite factura fiscal al cliente (mig 79).
+ * - "por_checkout": se ofrece factura al cerrar, incluso si va a cuenta corriente.
+ * - "consolidada": no se factura al cerrar; el admin junta N estadías en una factura.
+ * - "no_factura": nunca se factura (consumo interno, convenios sin comprobante fiscal).
+ */
+export type FacturacionModo = "por_checkout" | "consolidada" | "no_factura";
+
 export type AssociatedClient = {
   id: string;
   display_name: string;
@@ -363,6 +411,8 @@ export type AssociatedClient = {
   condicion_iva: CondicionIva | null;
   /** Domicilio del receptor (para Factura A). null = no definido en la ficha. */
   domicilio: string | null;
+  /** Cuándo se le factura: al cerrar cada estadía, consolidado, o nunca (mig 79). */
+  facturacion_modo: FacturacionModo;
   created_at: string;
   updated_at: string;
 };
@@ -567,6 +617,12 @@ export type CloseShiftBlockersResult = {
   blockers: CloseShiftBlocker[];
   /** Alertas de limpieza "ocupada sin reserva" sin resolver (aviso, no bloquea). */
   occupied_alerts_count: number;
+  /**
+   * Check-outs de este turno que quedaron sin facturar y todavía se pueden
+   * facturar desde acá (mig 82). Es un AVISO, no un bloqueo: no facturar puede
+   * ser una decisión legítima, y trabar el cierre de caja por esto sería peor.
+   */
+  unbilled_count: number;
 };
 
 /** Una fila del export CSV fiscal: un check-out del turno. */
@@ -601,10 +657,24 @@ export type FiscalSettings = {
   iva_pct: number;
 };
 
+/**
+ * Tipo interno de comprobante.
+ * - "checkout": cubre UNA estadía; cuelga de la reserva y del turno de caja (mig 79).
+ * - "consolidada": cubre N estadías de cuenta corriente; sin reserva ni turno (mig 79).
+ * - "nota_credito": anula otro comprobante; lo referencia en `nota_credito_de` (mig 80).
+ */
+export type InvoiceKind = "checkout" | "consolidada" | "nota_credito";
+
 export type InvoiceRecord = {
   id: string;
-  reservation_id: string;
-  status: "pending" | "processing" | "authorized" | "rejected";
+  /** null en consolidadas y notas de crédito: no cuelgan de una reserva. */
+  reservation_id: string | null;
+  kind: InvoiceKind;
+  /** Sólo en notas de crédito: id del comprobante que anula (mig 80). */
+  nota_credito_de: string | null;
+  /** Con valor si una nota de crédito ya anuló este comprobante (mig 80). */
+  anulada_at: string | null;
+  status: "pending" | "processing" | "authorized" | "rejected" | "discarded";
   environment: FiscalEnvironment;
   pto_vta: number;
   cbte_tipo: number;
@@ -647,8 +717,10 @@ export type InvoiceReceptorInput =
 
 export type PendingInvoiceRow = {
   invoice_id: string;
-  reservation_id: string;
+  /** null en las consolidadas (no hay reserva ni "corregir DNI" posible). */
+  reservation_id: string | null;
   status: string;
+  /** "CONSOLIDADA" cuando la factura no cuelga de una habitación. */
   room_number: string;
   receptor_nombre: string | null;
   imp_total: number;
@@ -665,6 +737,117 @@ export type InvoiceableCheckoutRow = {
   client_dni: string | null;
   total_price: number;
   actual_check_out: string;
+};
+
+/** Comprobante con CAE, para reimprimir o anular con nota de crédito. */
+export type AuthorizedInvoiceRow = {
+  invoice_id: string;
+  pto_vta: number;
+  cbte_nro: number;
+  /** 1 = Factura A · 6 = Factura B · 3 = NC A · 8 = NC B. */
+  cbte_tipo: number;
+  receptor_nombre: string | null;
+  imp_total: number;
+  kind: InvoiceKind;
+  /** Con valor si ya fue anulado por una nota de crédito. */
+  anulada_at: string | null;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Facturación de cuenta corriente: consolidada y control (mig 79)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Una estadía cubierta por una factura. En las de check-out hay exactamente una. */
+export type InvoiceStayRow = {
+  reservation_id: string;
+  room_number: string | null;
+  amount: number;
+  fch_desde: string; // date
+  fch_hasta: string; // date
+};
+
+/** Un cargo de cuenta corriente pendiente de facturar (selector de la consolidada). */
+export type CcChargeToInvoiceRow = {
+  reservation_id: string;
+  movimiento_id: string;
+  room_number: string | null;
+  passenger: string | null;
+  fch_desde: string; // date
+  fch_hasta: string; // date
+  /** Lo que se factura: el CARGO a cuenta corriente, no total_price. */
+  amount: number;
+  total_price: number;
+  actual_check_out: string;
+  /** true si hubo cobro en caja además del cargo: se factura sólo el cargo. */
+  mixed_payment: boolean;
+};
+
+/**
+ * Estado fiscal de una estadía en el listado de control.
+ * "no_corresponde" y "pendiente_consolidada" son estados sanos; "falta" es el que
+ * hay que perseguir.
+ */
+export type BillingControlEstado =
+  | "facturado"
+  | "facturado_consolidado"
+  /** El admin marcó que se facturó fuera del sistema (ARCA u otro) — mig 82. */
+  | "facturado_externo"
+  | "en_proceso"
+  | "pendiente_consolidada"
+  | "no_corresponde"
+  | "falta";
+
+/** Cómo se cerró la estadía (define si el cargo va a caja o a cuenta corriente). */
+export type BillingControlCierre = "caja" | "cuenta_corriente" | "vale_blanco";
+
+/** Una fila del listado de control facturado/no facturado. */
+export type BillingControlRow = {
+  reservation_id: string;
+  room_number: string;
+  client_name: string;
+  /** Nombre del cliente facturable (empresa o huésped) o el de la reserva. */
+  cliente: string;
+  client_kind: CtaCteClientKind | null;
+  client_id: string | null;
+  actual_check_out: string;
+  fch_desde: string; // date
+  fch_hasta: string; // date
+  total_price: number;
+  /** Σ cargos a cuenta corriente de la estadía; null si cerró por caja. */
+  cargo_cc: number | null;
+  cierre: BillingControlCierre;
+  facturacion_modo: FacturacionModo;
+  estado: BillingControlEstado;
+  invoice_id: string | null;
+  invoice_kind: InvoiceKind | null;
+  invoice_status: string | null;
+  cbte_tipo: number | null;
+  pto_vta: number | null;
+  cbte_nro: number | null;
+  imp_total: number | null;
+  /** Comprobante externo declarado por el admin, si la marcó como facturada afuera. */
+  external_ref: string | null;
+  /** Se cobró por tarjeta/transferencia/MP: facturarla no es opcional (mig 83). */
+  bancario: boolean;
+};
+
+/** Cuánto queda sin facturar, para el badge del admin (mig 82). */
+export type BillingPendingCounts = {
+  falta: number;
+  pendiente_consolidada: number;
+  dias: number;
+};
+
+/** Datos para emitir una factura consolidada (pantalla del admin). */
+export type ConsolidatedInvoicePayload = {
+  kind: CtaCteClientKind;
+  clientId: string;
+  reservationIds: string[];
+  /** Receptor: si se omite, sale de la ficha del cliente. */
+  cuit?: string;
+  condicionIva?: ReceptorCondicionCuit;
+  razonSocial?: string;
+  domicilio?: string;
 };
 
 /** Resultado de emitInvoice para la UI (toast + acción). */

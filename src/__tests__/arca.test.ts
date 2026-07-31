@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   arcaDateFromIso,
   arcaDateFromDateKey,
+  cbteLetra,
+  cbteNombre,
   computeAmounts,
   formatArcaDate,
   formatCbteNumero,
   formatCuit,
+  isNotaCredito,
   isValidCuit,
   parseDniForArca,
 } from "@/lib/arca/amounts";
@@ -63,6 +66,27 @@ describe("computeAmounts (IVA incluido)", () => {
       const { neto, iva } = computeAmounts(total, 21);
       expect(Math.round((neto + iva) * 100)).toBe(Math.round(total * 100));
     }
+  });
+
+  // Factura consolidada (mig 79): el importe es la SUMA de N cargos de cuenta
+  // corriente. El neto se calcula sobre ese total, nunca sumando netos por
+  // estadía — si no, el redondeo por fila desarma invoices_amounts_add_up.
+  it("consolidada: neto + iva == total sobre la suma de N cargos", () => {
+    const cargos = [18500.5, 27300, 9999.99, 45000.25, 12345.67, 33333.33, 7800.4, 61200.8];
+    for (let n = 1; n <= cargos.length; n++) {
+      const total = Number(cargos.slice(0, n).reduce((sum, c) => sum + c, 0).toFixed(2));
+      const { neto, iva } = computeAmounts(total, 21);
+      expect(Math.round((neto + iva) * 100)).toBe(Math.round(total * 100));
+    }
+  });
+
+  it("consolidada: sumar netos por estadía NO cuadra (por eso se redondea sobre el total)", () => {
+    const cargos = [100, 100, 100];
+    const total = 300;
+    const netosPorFila = cargos.reduce((sum, c) => sum + computeAmounts(c, 21).neto, 0);
+    // 82.64 * 3 = 247.92, pero el neto correcto de 300 es 247.93.
+    expect(netosPorFila).not.toBe(computeAmounts(total, 21).neto);
+    expect(Math.round((computeAmounts(total, 21).neto + computeAmounts(total, 21).iva) * 100)).toBe(30000);
   });
 });
 
@@ -220,6 +244,78 @@ describe("buildFECAESolicitarEnvelope", () => {
     expect(xml).toContain("<CantReg>1</CantReg>");
     expect(xml).toContain("<CbteDesde>1235</CbteDesde><CbteHasta>1235</CbteHasta>");
     expect(xml).toContain("<Cuit>30123456789</Cuit>");
+  });
+
+  it("una factura NO lleva CbtesAsoc", () => {
+    expect(xml).not.toContain("CbtesAsoc");
+  });
+});
+
+// ── Nota de crédito B (anula una Factura B) ──
+const REQ_NC_B: FecaeRequest = {
+  ...REQ,
+  cbteTipo: 8, // Nota de Crédito B
+  cbteNro: 4,
+  cbteAsoc: { tipo: 6, ptoVta: 3, nro: 1235, fecha: "20260716" },
+};
+
+describe("buildFECAESolicitarEnvelope — Nota de crédito", () => {
+  const xmlNc = buildFECAESolicitarEnvelope(AUTH, REQ_NC_B);
+
+  it("emite CbteTipo=8 y el bloque CbtesAsoc con el comprobante que anula", () => {
+    expect(xmlNc).toContain("<CbteTipo>8</CbteTipo>");
+    expect(xmlNc).toContain(
+      "<CbtesAsoc><CbteAsoc><Tipo>6</Tipo><PtoVta>3</PtoVta><Nro>1235</Nro><CbteFch>20260716</CbteFch></CbteAsoc></CbtesAsoc>"
+    );
+  });
+
+  it("respeta el orden del schema: CbtesAsoc entre CondicionIVAReceptorId e Iva", () => {
+    const posCond = xmlNc.indexOf("<CondicionIVAReceptorId>");
+    const posAsoc = xmlNc.indexOf("<CbtesAsoc>");
+    const posIva = xmlNc.indexOf("<Iva>");
+    expect(posCond).toBeGreaterThan(-1);
+    expect(posAsoc).toBeGreaterThan(posCond);
+    expect(posIva).toBeGreaterThan(posAsoc);
+  });
+
+  it("mantiene el receptor y los importes del comprobante anulado", () => {
+    expect(xmlNc).toContain("<DocTipo>96</DocTipo>");
+    expect(xmlNc).toContain("<DocNro>30123456</DocNro>");
+    expect(xmlNc).toContain("<ImpTotal>121000.00</ImpTotal>");
+  });
+
+  it("nota de crédito A: CbteTipo=3 y asociado tipo 1", () => {
+    const xmlNcA = buildFECAESolicitarEnvelope(AUTH, {
+      ...REQ,
+      cbteTipo: 3,
+      docTipo: 80,
+      docNro: "30707054537",
+      condicionIvaReceptorId: 1,
+      cbteAsoc: { tipo: 1, ptoVta: 3, nro: 77, fecha: "20260720" },
+    });
+    expect(xmlNcA).toContain("<CbteTipo>3</CbteTipo>");
+    expect(xmlNcA).toContain("<Tipo>1</Tipo><PtoVta>3</PtoVta><Nro>77</Nro>");
+  });
+});
+
+describe("letra y nombre del comprobante", () => {
+  it("A para Factura A (1) y NC A (3); B para Factura B (6) y NC B (8)", () => {
+    expect(cbteLetra(1)).toBe("A");
+    expect(cbteLetra(3)).toBe("A");
+    expect(cbteLetra(6)).toBe("B");
+    expect(cbteLetra(8)).toBe("B");
+  });
+
+  it("isNotaCredito sólo para 3 y 8", () => {
+    expect(isNotaCredito(3)).toBe(true);
+    expect(isNotaCredito(8)).toBe(true);
+    expect(isNotaCredito(1)).toBe(false);
+    expect(isNotaCredito(6)).toBe(false);
+  });
+
+  it("cbteNombre distingue factura de nota de crédito", () => {
+    expect(cbteNombre(6)).toBe("Factura");
+    expect(cbteNombre(8)).toBe("Nota de crédito");
   });
 });
 

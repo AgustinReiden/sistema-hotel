@@ -1,6 +1,6 @@
 import Sidebar from './Sidebar';
 import { createClient } from "@/lib/supabase/server";
-import { getActiveOpenShift, getShiftSummary } from "@/lib/data";
+import { countBillingPending, getActiveOpenShift, getShiftSummary } from "@/lib/data";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 import IdleLogout from "./IdleLogout";
 import ForcedShiftHandover from "./caja/ForcedShiftHandover";
@@ -64,10 +64,22 @@ export default async function AdminLayout({
         );
     }
 
+    // Contador de "falta facturar" para el badge del admin: el listado de control
+    // sólo sirve si alguien lo mira, y este número es lo que hace que lo miren.
+    const unbilledCount =
+        role === "admin"
+            ? await countBillingPending().then((c) => c.falta).catch(() => 0)
+            : 0;
+
     return (
         <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
             {role === "receptionist" && <IdleLogout />}
-            <Sidebar role={role} userEmail={userEmail} hasOpenShift={!!openShift} />
+            <Sidebar
+                role={role}
+                userEmail={userEmail}
+                hasOpenShift={!!openShift}
+                unbilledCount={unbilledCount}
+            />
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
                 <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
                 {children}

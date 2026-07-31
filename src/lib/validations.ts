@@ -216,6 +216,11 @@ export const associatedClientSchema = z.object({
       (value) => (value === "" || value === null ? undefined : value),
       z.enum(["responsable_inscripto", "monotributo", "consumidor_final", "exento"]).optional()
     ),
+  facturacionModo: z
+    .preprocess(
+      (value) => (value === "" || value === null || value === undefined ? "por_checkout" : value),
+      z.enum(["por_checkout", "consolidada", "no_factura"])
+    ),
   domicilio: z
     .preprocess(
       (value) => {

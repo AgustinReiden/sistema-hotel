@@ -25,7 +25,13 @@ import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal
 import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
 import { isValidCuit } from "@/lib/arca/amounts";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
-import type { AssociatedClient } from "@/lib/types";
+import { isBankPaymentMethod } from "@/lib/billing";
+import type {
+  AssociatedClient,
+  FacturacionModo,
+  InvoiceReceptorPrefill,
+  PaymentMethod,
+} from "@/lib/types";
 
 type RoomCardProps = {
   room: {
@@ -55,6 +61,12 @@ type RoomCardProps = {
     billedToCompany: boolean;
     /** id del asociado de la reserva activa (para precargar datos de Factura A). */
     associatedClientId: string | null;
+    /** Cuándo se le factura al cliente de la reserva activa (mig 79). */
+    facturacionModo: FacturacionModo;
+    /** Datos del receptor tomados de la ficha del cliente (mig 81). */
+    invoicePrefill: InvoiceReceptorPrefill;
+    /** Métodos de los pagos ya registrados de la reserva activa (mig 83). */
+    priorPaymentMethods: PaymentMethod[];
   };
   associatedClients: AssociatedClient[];
   isAdmin?: boolean;
@@ -210,42 +222,55 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     setIsCheckoutConfirmOpen(true);
   };
 
+  // Todos los métodos que tocaron esta reserva: los pagos ya registrados (seña o
+  // pago adelantado) más el cobro de este check-out, si lo hubo. En un check-out
+  // con saldo cero el segundo no existe, y el primero es lo único que hay.
+  const paymentMethodsOf = (paymentMethod?: string) =>
+    paymentMethod ? [...room.priorPaymentMethods, paymentMethod] : room.priorPaymentMethods;
+
+  /** Consumo interno: no se factura, venga de donde venga el vale. */
+  const hasValeBlanco = (paymentMethod?: string) =>
+    paymentMethodsOf(paymentMethod).includes("vale_blanco");
+
+  /** Cobrado por medio bancario ⇒ facturar no es opcional (mig 83). */
+  const isInvoiceMandatory = (paymentMethod?: string) =>
+    paymentMethodsOf(paymentMethod).some(isBankPaymentMethod);
+
   // ¿Corresponde ofrecer factura tras este check-out? (el RPC re-valida igual).
-  // Las empresas que pagan en caja ahora también entran (eligen A o B en el modal);
-  // cuenta corriente y vale blanco siguen fuera del flujo automático.
+  // Las empresas que pagan en caja también entran (eligen A o B en el modal).
+  // Cuenta corriente depende de la ficha: sólo se factura al cerrar si está en
+  // "por_checkout"; con "consolidada" la estadía espera a la que junta varias (mig 79).
   const shouldPromptInvoice = (paymentMethod?: string) =>
     fiscalEnabled
-      && paymentMethod !== "cuenta_corriente"
-      && paymentMethod !== "vale_blanco";
+      && !hasValeBlanco(paymentMethod)
+      && room.facturacionModo !== "no_factura"
+      && (paymentMethod !== "cuenta_corriente" || room.facturacionModo === "por_checkout");
 
   // Capturar los datos ANTES del await: el revalidate deja room.reservationId en null.
   // Con salida anticipada el total efectivo es el re-tarifado (la factura igual
   // toma reservations.total_price ya actualizado; esto es solo el subtítulo).
-  const buildInvoicePrompt = (): InvoicePromptData | null => {
+  //
+  // Los datos del receptor vienen resueltos del server desde la ficha del cliente
+  // —empresa o huésped— (mig 81, punto 3): el playero no los dicta de nuevo.
+  const buildInvoicePrompt = (paymentMethod?: string): InvoicePromptData | null => {
     if (!room.reservationId) return null;
-    const company = room.associatedClientId
-      ? associatedClients.find((c) => c.id === room.associatedClientId) ?? null
-      : null;
-    const companyCuit = (company?.document_id ?? "").replace(/\D/g, "");
-    const cuitPrefill = isValidCuit(companyCuit) ? companyCuit : "";
-    const condPrefill =
-      company?.condicion_iva === "responsable_inscripto" ||
-      company?.condicion_iva === "monotributo" ||
-      company?.condicion_iva === "exento"
-        ? company.condicion_iva
-        : "";
+    const prefill = room.invoicePrefill;
     return {
       reservationId: room.reservationId,
       clientName: room.client,
       total: early ? early.newTotal : room.totalPrice,
       aPrefill: {
-        razonSocial: company?.display_name ?? room.client ?? "",
-        cuit: cuitPrefill,
-        condicionIva: condPrefill,
-        domicilio: company?.domicilio ?? "",
+        razonSocial: prefill.razonSocial || room.client || "",
+        cuit: prefill.cuit,
+        condicionIva: prefill.condicionIva,
+        domicilio: prefill.domicilio,
       },
-      // Sugerir A por defecto si es empresa con CUIT válido a mano.
-      suggestA: Boolean(company) && cuitPrefill !== "",
+      // Sugerir el camino "con CUIT" si la ficha ya trae uno válido.
+      suggestA: prefill.suggestA,
+      // Cobrado por tarjeta/transferencia/MP: no se muestra el SÍ/NO (mig 83).
+      mandatory: isInvoiceMandatory(paymentMethod),
+      // Ficha completa: se saltea el tipo y se confirma qué se emite.
+      prefillComplete: prefill.complete,
     };
   };
 
@@ -282,7 +307,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   }) => {
     const reservationId = room.reservationId;
     if (!reservationId) return { success: false as const, error: "Reserva no encontrada." };
-    const prompt = buildInvoicePrompt();
+    const prompt = buildInvoicePrompt(paymentMethod);
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
     const result = await runCheckout({

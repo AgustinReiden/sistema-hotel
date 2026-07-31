@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Loader2, Percent, UserRound, Wallet, X } from "lucide-react";
+import { CreditCard, Loader2, Percent, Receipt, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { loadGuestRecordAction, updateGuestAction, type GuestRecordPayload } from "./actions";
@@ -26,6 +26,11 @@ const emptyForm: GuestRecordPayload = {
   profession: "",
   discountPercent: 0,
   cuentaCorrienteHabilitada: false,
+  facturacionModo: "por_checkout",
+  condicionIva: null,
+  cuit: null,
+  razonSocial: null,
+  domicilioFiscal: null,
 };
 
 export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProps) {
@@ -53,6 +58,11 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
           profession: g.profession ?? "",
           discountPercent: g.discount_percent ?? 0,
           cuentaCorrienteHabilitada: g.cuenta_corriente_habilitada ?? false,
+          facturacionModo: g.facturacion_modo ?? "por_checkout",
+          condicionIva: g.condicion_iva ?? null,
+          cuit: g.cuit ?? null,
+          razonSocial: g.razon_social ?? null,
+          domicilioFiscal: g.domicilio_fiscal ?? null,
         });
       } else {
         toast.error(result.success ? "No se encontró el huésped." : result.error);
@@ -197,6 +207,28 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                 </select>
               </div>
               <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Receipt size={14} />
+                    Facturación
+                  </span>
+                </label>
+                <select
+                  value={form.facturacionModo ?? "por_checkout"}
+                  onChange={(e) =>
+                    set({ facturacionModo: e.target.value as GuestRecordPayload["facturacionModo"] })
+                  }
+                  className={inputClass}
+                >
+                  <option value="por_checkout">Factura por cada check-out</option>
+                  <option value="consolidada">Factura consolidada (la emite el admin)</option>
+                  <option value="no_factura">No se factura</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Consolidada: las estadías a cuenta corriente se juntan en una sola factura.
+                </p>
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Localidad</label>
                 <input
                   type="text"
@@ -235,6 +267,72 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                   className={inputClass}
                   placeholder="Opcional"
                 />
+              </div>
+            </div>
+
+            {/* Datos de facturación: se precargan solos en el check-out (mig 81). */}
+            <div className="pt-4 border-t border-slate-100">
+              <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mb-1">
+                <Receipt size={15} />
+                Datos de facturación
+              </h4>
+              <p className="text-xs text-slate-500 mb-3">
+                Sólo si pide Factura A o B con CUIT. Se precargan al facturar el check-out, para no
+                tener que dictarlos cada vez. Si se deja vacío, se factura B con el DNI.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Condición frente al IVA
+                  </label>
+                  <select
+                    value={form.condicionIva ?? ""}
+                    onChange={(e) =>
+                      set({ condicionIva: (e.target.value || null) as GuestRecordPayload["condicionIva"] })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="">Consumidor final (sin definir)</option>
+                    <option value="responsable_inscripto">Responsable Inscripto</option>
+                    <option value="monotributo">Monotributo</option>
+                    <option value="exento">IVA Sujeto Exento</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">CUIT</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.cuit ?? ""}
+                    onChange={(e) => set({ cuit: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                    className={inputClass}
+                    placeholder="11 dígitos (distinto del DNI)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Razón social
+                  </label>
+                  <input
+                    type="text"
+                    value={form.razonSocial ?? ""}
+                    onChange={(e) => set({ razonSocial: e.target.value })}
+                    className={inputClass}
+                    placeholder="Si factura a nombre de un comercio"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Domicilio fiscal
+                  </label>
+                  <input
+                    type="text"
+                    value={form.domicilioFiscal ?? ""}
+                    onChange={(e) => set({ domicilioFiscal: e.target.value })}
+                    className={inputClass}
+                    placeholder="Si es distinto del particular"
+                  />
+                </div>
               </div>
             </div>
 

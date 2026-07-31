@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles, Percent, FileText } from 'lucide-react';
+import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardCheck, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles, Percent, FileText } from 'lucide-react';
 import LogoutButton from './LogoutButton';
 
-export default function Sidebar({ role, userEmail, hasOpenShift }: { role: string; userEmail: string; hasOpenShift?: boolean }) {
+export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount = 0 }: { role: string; userEmail: string; hasOpenShift?: boolean; unbilledCount?: number }) {
     const isAdmin = role === 'admin';
 
     return (
@@ -74,6 +74,15 @@ export default function Sidebar({ role, userEmail, hasOpenShift }: { role: strin
                         <Link href="/admin/cuentas" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <CircleDollarSign size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
                             <span className="font-medium">Cuenta Corriente</span>
+                        </Link>
+                        <Link href="/admin/fiscal/control" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
+                            <ClipboardCheck size={18} className={`mr-3 transition-colors ${unbilledCount > 0 ? 'text-rose-400' : 'group-hover:text-emerald-400'}`} />
+                            <span className="font-medium flex-1">Control de facturación</span>
+                            {unbilledCount > 0 && (
+                                <span className="text-[10px] font-bold text-rose-300 bg-rose-950/50 px-1.5 py-0.5 rounded" title={`${unbilledCount} estadías sin facturar en los últimos 60 días`}>
+                                    {unbilledCount}
+                                </span>
+                            )}
                         </Link>
                         <Link href="/admin/settings" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
                             <Settings size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />

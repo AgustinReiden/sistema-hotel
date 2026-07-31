@@ -43,6 +43,11 @@ export async function updateSession(request: NextRequest) {
   const isAdminPath = pathname.startsWith("/admin");
   const isMaintenancePath = pathname.startsWith("/maintenance");
   const isSettingsPath = pathname.startsWith("/admin/settings");
+  // Facturación consolidada y control fiscal: sólo admin (mig 79). Las páginas ya
+  // redirigen por su cuenta; esto es defensa en profundidad.
+  const isAdminOnlyFiscalPath =
+    pathname.startsWith("/admin/fiscal/consolidada") ||
+    pathname.startsWith("/admin/fiscal/control");
   const isForbiddenPath = pathname.startsWith("/forbidden");
   const isProtectedPath = isAdminPath || isMaintenancePath;
 
@@ -84,8 +89,8 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // /admin/settings — sólo admin
-  if (isSettingsPath && role !== "admin") {
+  // /admin/settings y facturación consolidada/control — sólo admin
+  if ((isSettingsPath || isAdminOnlyFiscalPath) && role !== "admin") {
     return NextResponse.redirect(new URL("/forbidden", request.url));
   }
 

@@ -25,7 +25,7 @@ import {
 } from "@/lib/data";
 import type { EmitInvoiceOutcome, FiscalEnvironment } from "@/lib/types";
 
-import { formatCbteNumero } from "./amounts";
+import { cbteLetra, cbteNombre, formatCbteNumero } from "./amounts";
 import { ARCA_ENDPOINTS, getArcaCertPem, getArcaInternalKey, getArcaKeyPem } from "./config";
 import { buildQrUrl } from "./qr";
 import {
@@ -104,6 +104,15 @@ function requestFromPayload(p: BeginEmissionPayload): FecaeRequest {
     fchServDesde: p.fch_serv_desde,
     fchServHasta: p.fch_serv_hasta,
     fchVtoPago: p.fch_vto_pago,
+    cbteAsoc:
+      p.cbte_asoc_tipo !== null && p.cbte_asoc_nro !== null && p.cbte_asoc_fch !== null
+        ? {
+            tipo: p.cbte_asoc_tipo,
+            ptoVta: p.cbte_asoc_pto_vta ?? p.pto_vta,
+            nro: p.cbte_asoc_nro,
+            fecha: p.cbte_asoc_fch,
+          }
+        : null,
   };
 }
 
@@ -211,7 +220,7 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
         invoiceId,
         cae: invoice.cae ?? undefined,
         numero: formatCbteNumero(invoice.pto_vta, invoice.cbte_nro ?? 0),
-        userMessage: "La factura ya estaba emitida.",
+        userMessage: `${cbteNombre(invoice.cbte_tipo)} ya emitida.`,
       };
     }
 
@@ -343,13 +352,12 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
           internalKey,
         });
         const numero = formatCbteNumero(req.ptoVta, req.cbteNro);
-        const letra = req.cbteTipo === 1 ? "A" : "B";
         return {
           status: "authorized",
           invoiceId,
           cae: result.cae,
           numero,
-          userMessage: `Factura ${letra} ${numero} emitida (CAE ${result.cae}).`,
+          userMessage: `${cbteNombre(req.cbteTipo)} ${cbteLetra(req.cbteTipo)} ${numero} emitida (CAE ${result.cae}).`,
         };
       }
 

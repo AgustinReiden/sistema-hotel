@@ -17,6 +17,7 @@ type AssociatedClientFormPayload = {
   cuentaCorrienteHabilitada?: boolean;
   condicionIva?: "responsable_inscripto" | "monotributo" | "consumidor_final" | "exento";
   domicilio?: string;
+  facturacionModo?: "por_checkout" | "consolidada" | "no_factura";
 };
 
 async function assertAdmin() {
@@ -65,6 +66,7 @@ export async function createAssociatedClientAction(
       cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
       condicion_iva: validated.condicionIva ?? null,
       domicilio: validated.domicilio ?? null,
+      facturacion_modo: validated.facturacionModo,
     });
 
     if (error) throw error;
@@ -96,6 +98,7 @@ export async function updateAssociatedClientAction(
         cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
         condicion_iva: validated.condicionIva ?? null,
         domicilio: validated.domicilio ?? null,
+        facturacion_modo: validated.facturacionModo,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
