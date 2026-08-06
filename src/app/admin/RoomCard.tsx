@@ -55,7 +55,12 @@ type RoomCardProps = {
     paidAmount: number;
     basePrice: number;
     halfDayPrice: number;
-    hasArrivalToday: boolean;
+    /** Hay una reserva esperando el check-in (de hoy o de días anteriores). */
+    hasPendingArrival: boolean;
+    /** Esa llegada quedó de un día anterior: el check-in no se hizo a tiempo. */
+    arrivalIsOverdue: boolean;
+    /** Día de entrada reservado, para mostrarlo cuando la llegada está atrasada. */
+    arrivalDateLabel: string | null;
     accountCreditEnabled: boolean;
     /** La reserva activa es de una empresa/convenio (associated_client_id presente). */
     billedToCompany: boolean;
@@ -107,7 +112,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   } | null>(null);
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
-  const isConfirmedArrival = room.hasArrivalToday;
+  const isConfirmedArrival = room.hasPendingArrival;
+  const isOverdueArrival = isConfirmedArrival && room.arrivalIsOverdue;
   // Cuando el cobro es "salida anticipada", el PaymentModal usa los montos recalculados.
   const early = checkoutMode === "early" ? earlyPreview?.breakdown ?? null : null;
 
@@ -396,11 +402,13 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
 
   return (
     <div
-      className={`relative bg-white rounded-xl border transition-all duration-300 shadow-sm hover:shadow-md ${room.isLate ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200"}`}
+      className={`relative bg-white rounded-xl border transition-all duration-300 shadow-sm hover:shadow-md ${room.isLate || isOverdueArrival ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200"}`}
     >
       <div
         className={`p-3 border-b flex justify-between items-start rounded-t-xl ${room.status === "available"
-          ? "bg-slate-50 border-slate-100"
+          ? isOverdueArrival
+            ? "bg-amber-50 border-amber-100"
+            : "bg-slate-50 border-slate-100"
           : room.status === "occupied"
             ? room.isLate
               ? "bg-amber-50 border-amber-100"
@@ -415,7 +423,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
 
         <div
           className={`px-2.5 py-1 rounded-full text-xs font-bold border ${room.status === "available"
-            ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+            ? isOverdueArrival
+              ? "bg-amber-500 text-white border-amber-600 shadow-sm"
+              : isConfirmedArrival
+                ? "bg-green-100 text-green-700 border-green-200"
+                : "bg-emerald-100 text-emerald-700 border-emerald-200"
             : room.status === "occupied"
               ? room.isLate
                 ? "bg-amber-500 text-white border-amber-600 shadow-sm"
@@ -425,7 +437,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 : "bg-slate-200 text-slate-600 border-slate-300"
             }`}
         >
-          {room.status === "available" && "Disponible"}
+          {room.status === "available" &&
+            (isOverdueArrival ? "Falta Check-In" : isConfirmedArrival ? "Llega Hoy" : "Disponible")}
           {room.status === "occupied" &&
             (room.isLate
               ? "Retraso Check-out"
@@ -541,15 +554,47 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           <div className="flex flex-col items-center justify-center py-4 gap-2">
             {isConfirmedArrival ? (
               <>
-                <div className="w-full bg-green-50 border border-green-200 rounded-lg p-3 text-center mb-1">
-                  <p className="text-xs text-green-600 font-bold uppercase tracking-wide mb-0.5">Reserva para Hoy</p>
-                  <p className="text-sm font-semibold text-green-800 truncate">{room.client}</p>
-                  <p className="text-xs text-green-600 mt-0.5">Check-out: {room.checkout}</p>
+                <div
+                  className={`w-full rounded-lg p-3 text-center mb-1 border ${isOverdueArrival
+                    ? "bg-amber-50 border-amber-300"
+                    : "bg-green-50 border-green-200"
+                    }`}
+                >
+                  <p
+                    className={`text-xs font-bold uppercase tracking-wide mb-0.5 ${isOverdueArrival ? "text-amber-700" : "text-green-600"
+                      }`}
+                  >
+                    {isOverdueArrival ? "Falta el Check-In" : "Reserva para Hoy"}
+                  </p>
+                  <p
+                    className={`text-sm font-semibold truncate ${isOverdueArrival ? "text-amber-900" : "text-green-800"
+                      }`}
+                  >
+                    {room.client}
+                  </p>
+                  {isOverdueArrival && room.arrivalDateLabel && (
+                    <p className="text-xs font-bold text-amber-700 mt-1">
+                      Entrada reservada: {room.arrivalDateLabel}
+                    </p>
+                  )}
+                  <p
+                    className={`text-xs mt-0.5 ${isOverdueArrival ? "text-amber-600" : "text-green-600"}`}
+                  >
+                    Check-out: {room.checkout}
+                  </p>
                 </div>
+                {isOverdueArrival && (
+                  <p className="w-full text-[11px] text-amber-700 text-center leading-snug -mt-0.5 mb-0.5">
+                    La habitación está reservada. No la asignes a otro pasajero.
+                  </p>
+                )}
                 <button
                   onClick={onCheckIn}
                   disabled={isPending}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
+                  className={`w-full disabled:opacity-50 text-white px-3 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm ${isOverdueArrival
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-green-600 hover:bg-green-700"
+                    }`}
                 >
                   Hacer Check-In Automático
                 </button>

@@ -32,6 +32,9 @@ export default async function CalendarPage({
     ]);
 
   const tz = hotelSettings.timezone || "America/Argentina/Tucuman";
+  // "Ahora" del servidor: el cliente lo usa para decidir qué llegadas ya se pueden
+  // registrar, sin depender del reloj de la PC de recepción.
+  const nowIso = new Date().toISOString();
   const dateKeyFmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     year: "numeric",
@@ -66,6 +69,7 @@ export default async function CalendarPage({
           rooms={rooms}
           reservations={reservations}
           startDateKey={startDateKey}
+          nowIso={nowIso}
           timezone={tz}
           daysCount={daysCount}
           role={role}

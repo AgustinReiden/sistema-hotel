@@ -2,7 +2,8 @@ import Link from "next/link";
 import { AlertTriangle, ClipboardList, Sparkles } from "lucide-react";
 import { isAfter } from "date-fns";
 
-import { formatHotelShortDateTime, formatHotelWeekdayDate } from "@/lib/time";
+import { findPendingArrival } from "@/lib/arrivals";
+import { formatHotelShortDate, formatHotelShortDateTime, formatHotelWeekdayDate } from "@/lib/time";
 import type { FacturacionModo, InvoiceReceptorPrefill, PaymentMethod } from "@/lib/types";
 
 const EMPTY_INVOICE_PREFILL: InvoiceReceptorPrefill = {
@@ -47,7 +48,12 @@ type DashboardRoom = {
   paidAmount: number;
   basePrice: number;
   halfDayPrice: number;
-  hasArrivalToday: boolean;
+  /** Hay una reserva esperando el check-in (de hoy o de días anteriores). */
+  hasPendingArrival: boolean;
+  /** Esa llegada quedó de un día anterior: nadie le hizo el check-in a tiempo. */
+  arrivalIsOverdue: boolean;
+  /** Día de entrada reservado, para mostrarlo cuando la llegada está atrasada. */
+  arrivalDateLabel: string | null;
   accountCreditEnabled: boolean;
   billedToCompany: boolean;
   associatedClientId: string | null;
@@ -59,28 +65,8 @@ type DashboardRoom = {
   priorPaymentMethods: PaymentMethod[];
 };
 
-function getDateKey(date: Date, timeZone: string) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
-
 function isRoomOccupiedNow(reservation: { status: string }) {
   return reservation.status === "checked_in";
-}
-
-function isRoomConfirmedToday(
-  reservation: { status: string; check_in_target: string },
-  todayKey: string,
-  timeZone: string
-) {
-  return (
-    reservation.status === "confirmed" &&
-    getDateKey(new Date(reservation.check_in_target), timeZone) === todayKey
-  );
 }
 
 export default async function Dashboard() {
@@ -95,7 +81,6 @@ export default async function Dashboard() {
   const fiscalEnabled = Boolean(fiscalSettings?.enabled);
   const isAdmin = role === "admin";
   const now = new Date();
-  const todayKey = getDateKey(now, hotelSettings.timezone);
 
   let lateCheckoutsCount = 0;
 
@@ -104,11 +89,12 @@ export default async function Dashboard() {
     const activeReservation = roomReservations.find((reservation) =>
       isRoomOccupiedNow(reservation)
     );
-    const confirmedReservation = !activeReservation && room.status === "available"
-      ? roomReservations.find((reservation) =>
-        isRoomConfirmedToday(reservation, todayKey, hotelSettings.timezone)
-      )
-      : undefined;
+    // Llegada pendiente: la reserva sigue esperando el check-in aunque el día de
+    // entrada haya sido ayer (el pasajero entró de noche y nadie lo registró).
+    const pendingArrival = !activeReservation && room.status === "available"
+      ? findPendingArrival(roomReservations, now, hotelSettings.timezone)
+      : null;
+    const confirmedReservation = pendingArrival?.reservation;
 
     let status = room.status;
     let isLate = false;
@@ -182,7 +168,11 @@ export default async function Dashboard() {
       paidAmount,
       basePrice: room.base_price,
       halfDayPrice: room.half_day_price,
-      hasArrivalToday: Boolean(confirmedReservation),
+      hasPendingArrival: Boolean(pendingArrival),
+      arrivalIsOverdue: Boolean(pendingArrival?.isOverdue),
+      arrivalDateLabel: confirmedReservation
+        ? formatHotelShortDate(confirmedReservation.check_in_target, hotelSettings.timezone)
+        : null,
       accountCreditEnabled: reservationId
         ? Boolean(accountCreditByReservation[reservationId])
         : false,
