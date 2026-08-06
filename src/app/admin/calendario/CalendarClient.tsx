@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CreditCard, FileText, Pencil, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
+import { CreditCard, FileText, LogIn, Pencil, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
 import EditReservationModal from "../EditReservationModal";
-import { handleCancelReservation, handleCreateReservation } from "../actions";
-import { formatHotelDateTime } from "@/lib/time";
+import { handleCancelReservation, handleCheckIn, handleCreateReservation } from "../actions";
+import { isPendingArrival } from "@/lib/arrivals";
+import { formatHotelDateTime, formatHotelShortDate } from "@/lib/time";
 import type { AssociatedClient, Reservation, Room, UserRole } from "@/lib/types";
 
 // ── Fechas por CLAVE "YYYY-MM-DD" en la zona del hotel, independientes de la tz del
@@ -57,6 +58,8 @@ type CalendarClientProps = {
   reservations: Reservation[];
   /** Clave "YYYY-MM-DD" de la primera columna (hoy en la zona del hotel). */
   startDateKey: string;
+  /** "Ahora" según el servidor: define qué llegadas están habilitadas para el check-in. */
+  nowIso: string;
   timezone: string;
   daysCount: number;
   role: UserRole;
@@ -87,7 +90,9 @@ const ROW_HEIGHT = 34;
 const BAR_TOP = 3;
 const BAR_HEIGHT = 26;
 
-function getReservationPalette(category: "active" | "next" | "future" | "pending") {
+type ReservationCategory = "active" | "next" | "future" | "pending" | "overdue";
+
+function getReservationPalette(category: ReservationCategory) {
   switch (category) {
     case "pending":
       return { from: "#94a3b8", to: "#64748b" }; // slate (grey)
@@ -97,6 +102,8 @@ function getReservationPalette(category: "active" | "next" | "future" | "pending
       return { from: "#fbbf24", to: "#f59e0b" }; // amber (yellow)
     case "future":
       return { from: "#60a5fa", to: "#3b82f6" }; // blue
+    case "overdue":
+      return { from: "#fb7185", to: "#e11d48" }; // rose (red): falta el check-in
   }
 }
 
@@ -136,6 +143,7 @@ export default function CalendarClient({
   rooms,
   reservations,
   startDateKey,
+  nowIso,
   timezone,
   daysCount,
   role,
@@ -191,7 +199,47 @@ export default function CalendarClient({
     });
   };
 
+  const handleCheckInSelectedReservation = () => {
+    if (!selectedReservation) return;
+
+    startTransition(async () => {
+      const result = await handleCheckIn(selectedReservation.id);
+
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success("Check-in realizado correctamente.");
+      setSelectedReservation(null);
+      router.refresh();
+    });
+  };
+
   const selectedRoom = selectedReservation ? roomsById.get(selectedReservation.room_id) : null;
+  // Check-in desde el calendario: es donde la recepción mira las llegadas del día.
+  // Antes había que salir al dashboard, y si el pasajero había entrado el día
+  // anterior la reserva ni siquiera aparecía ahí: la única salida era cancelarla
+  // y volver a cargarla como si entrara hoy (perdiendo la noche ya usada).
+  const selectedIsPendingArrival =
+    selectedReservation != null && isPendingArrival(selectedReservation, nowIso, timezone);
+  const selectedArrivalIsOverdue =
+    selectedReservation != null &&
+    selectedIsPendingArrival &&
+    hotelDateKeyOf(selectedReservation.check_in_target, timezone) <
+      hotelDateKeyOf(nowIso, timezone);
+  // La habitación tiene que estar libre: si está ocupada, en limpieza o fuera de
+  // servicio, primero hay que resolver eso (el RPC lo rechaza igual).
+  const selectedRoomBlockReason =
+    selectedRoom?.status === "occupied"
+      ? "La habitación figura ocupada. Hacé el check-out del pasajero anterior."
+      : selectedRoom?.status === "cleaning"
+        ? "La habitación está en limpieza. Mantenimiento tiene que marcarla lista."
+        : selectedRoom?.status === "maintenance"
+          ? "La habitación está fuera de servicio por mantenimiento."
+          : null;
+  const canCheckInSelected =
+    canCancel && selectedIsPendingArrival && selectedRoomBlockReason === null;
   // Editar desde el calendario: recepción o admin ANTES del check-in (pendiente/confirmada);
   // tras el check-in solo el admin (override). Las finalizadas/canceladas no llegan al calendario.
   const canEditSelected =
@@ -242,6 +290,10 @@ export default function CalendarClient({
             <span className="w-3 h-3 rounded-full bg-slate-400" />
             Pendiente
           </span>
+          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-rose-200 px-3 py-1.5 font-semibold text-rose-700">
+            <span className="w-3 h-3 rounded-full bg-rose-500" />
+            Falta check-in
+          </span>
         </div>
         <p className="text-sm text-slate-500">
           Click en una fecha vacia para reservar. Click sobre una barra o checkout para ver la reserva.
@@ -286,12 +338,19 @@ export default function CalendarClient({
               .filter((placement): placement is ReservationPlacement => placement !== null);
 
             let foundNext = false;
-            const categoryMap = new Map<string, "active" | "next" | "future" | "pending">();
+            const categoryMap = new Map<string, ReservationCategory>();
             roomReservations.forEach((r) => {
               if (r.status === "pending") {
                 categoryMap.set(r.id, "pending");
               } else if (r.status === "checked_in") {
                 categoryMap.set(r.id, "active");
+              } else if (isPendingArrival(r, nowIso, timezone) && !foundNext) {
+                // El día de entrada ya pasó y sigue sin check-in: se marca en rojo
+                // para que recepción la vea de lejos y la registre.
+                const isOverdue =
+                  hotelDateKeyOf(r.check_in_target, timezone) < hotelDateKeyOf(nowIso, timezone);
+                categoryMap.set(r.id, isOverdue ? "overdue" : "next");
+                foundNext = true;
               } else {
                 if (!foundNext) {
                   categoryMap.set(r.id, "next");
@@ -388,7 +447,13 @@ export default function CalendarClient({
                               {placement.reservation.client_name}
                             </p>
                             <p className="text-[7px] uppercase font-black tracking-widest text-white/90 drop-shadow-md whitespace-nowrap leading-none mt-0.5">
-                              {placement.reservation.status === "checked_in" ? "En estadia" : (placement.reservation.status === "pending" ? "Pendiente" : "Confirmada")}
+                              {category === "overdue"
+                                ? "Falta check-in"
+                                : placement.reservation.status === "checked_in"
+                                  ? "En estadia"
+                                  : placement.reservation.status === "pending"
+                                    ? "Pendiente"
+                                    : "Confirmada"}
                             </p>
                           </div>
                         )}
@@ -458,6 +523,52 @@ export default function CalendarClient({
             </div>
 
             <div className="p-6 space-y-6">
+              {selectedIsPendingArrival && (
+                <div
+                  className={`rounded-xl border p-4 ${selectedArrivalIsOverdue
+                    ? "border-amber-300 bg-amber-50"
+                    : "border-green-200 bg-green-50"
+                    }`}
+                >
+                  <p
+                    className={`text-sm font-bold ${selectedArrivalIsOverdue ? "text-amber-900" : "text-green-800"
+                      }`}
+                  >
+                    {selectedArrivalIsOverdue
+                      ? "Esta reserva sigue esperando el check-in"
+                      : "El pasajero llega hoy"}
+                  </p>
+                  <p
+                    className={`text-sm mt-1 ${selectedArrivalIsOverdue ? "text-amber-800" : "text-green-700"
+                      }`}
+                  >
+                    {selectedArrivalIsOverdue
+                      ? `La entrada estaba reservada para el ${formatHotelShortDate(
+                        selectedReservation.check_in_target,
+                        timezone
+                      )}. Hacé el check-in acá: la reserva y las noches ya cargadas se mantienen. No hace falta cancelarla ni volver a cargarla.`
+                      : "Cuando se presente en el mostrador, registrá la entrada."}
+                  </p>
+                  {selectedRoomBlockReason ? (
+                    <p className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600">
+                      {selectedRoomBlockReason}
+                    </p>
+                  ) : canCheckInSelected ? (
+                    <button
+                      type="button"
+                      onClick={handleCheckInSelectedReservation}
+                      disabled={isPending}
+                      className={`mt-3 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-50 ${selectedArrivalIsOverdue
+                        ? "bg-amber-600 hover:bg-amber-700"
+                        : "bg-green-600 hover:bg-green-700"
+                        }`}
+                    >
+                      <LogIn size={16} /> Hacer Check-In
+                    </button>
+                  ) : null}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-xl border border-slate-200 p-4">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-3">Pasajero</p>
