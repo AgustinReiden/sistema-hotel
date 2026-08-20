@@ -57,6 +57,10 @@ type DashboardRoom = {
   accountCreditEnabled: boolean;
   billedToCompany: boolean;
   associatedClientId: string | null;
+  /** Pasajero de la empresa ya cargado; null = lo pide el check-in (mig 88). */
+  companyPassengerId: string | null;
+  /** DNI del huesped/pasajero de la reserva activa. */
+  clientDni: string | null;
   /** Cuándo se le factura al cliente de esta reserva (mig 79). */
   facturacionModo: FacturacionModo;
   /** Datos de facturación de la ficha, ya resueltos (mig 81). */
@@ -182,6 +186,9 @@ export default async function Dashboard() {
       // Para el prefill de Factura A en el prompt post-checkout (el CUIT sale de la ficha).
       associatedClientId:
         (activeReservation ?? confirmedReservation)?.associated_client_id ?? null,
+      companyPassengerId:
+        (activeReservation ?? confirmedReservation)?.company_passenger_id ?? null,
+      clientDni: (activeReservation ?? confirmedReservation)?.client_dni ?? null,
       facturacionModo: reservationId
         ? facturacionModoByReservation[reservationId] ?? "por_checkout"
         : "por_checkout",

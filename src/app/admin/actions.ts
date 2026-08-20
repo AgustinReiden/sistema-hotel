@@ -43,6 +43,7 @@ import {
 import type {
   ActionResult,
   AssignWalkInPayload,
+  CheckInPassengerInput,
   CompanyPassenger,
   CreateReservationPayload,
   GuestDirectoryEntry,
@@ -50,7 +51,7 @@ import type {
   PaymentMethod,
   Room,
 } from "@/lib/types";
-import { assignWalkInSchema, createReservationSchema } from "@/lib/validations";
+import { assignWalkInSchema, checkInSchema, createReservationSchema } from "@/lib/validations";
 
 type CheckoutPayload = {
   reservationId: string;
@@ -81,9 +82,18 @@ export async function handleLateCheckOut(
   }
 }
 
-export async function handleCheckIn(reservationId: string): Promise<ActionResult> {
+/**
+ * Check-in. En una reserva de EMPRESA hay que mandar al pasajero que se presenta en el
+ * mostrador (mig 88): la reserva se cargo a nombre de la empresa porque cuando reservo
+ * todavia no sabia a quien mandaba. En una reserva de persona alcanza con el id.
+ */
+export async function handleCheckIn(
+  reservationId: string,
+  passenger?: CheckInPassengerInput
+): Promise<ActionResult> {
   try {
-    await doCheckIn(reservationId);
+    const validated = checkInSchema.parse({ reservationId, ...passenger });
+    await doCheckIn(validated);
     revalidatePath("/admin");
     revalidateCalendarViews();
     revalidatePath("/admin/guests");

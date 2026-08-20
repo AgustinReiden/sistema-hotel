@@ -31,6 +31,7 @@ import {
   type WeekdayStat,
 } from "./analytics";
 import type {
+  CheckInPayload,
   AdminAlert,
   AssignWalkInPayload,
   AssociatedClient,
@@ -109,6 +110,9 @@ type DashboardData = {
     total_price: number;
     paid_amount: number;
     associated_client_id: string | null;
+    /** En una reserva de empresa, null = el pasajero todavia no se cargo (mig 88). */
+    company_passenger_id: string | null;
+    client_dni: string | null;
   }[];
   /** reservationId -> el cliente facturable tiene cuenta corriente habilitada. */
   accountCreditByReservation: Record<string, boolean>;
@@ -504,6 +508,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     total_price: number | string;
     paid_amount: number | string;
     associated_client_id: string | null;
+    company_passenger_id: string | null;
+    client_dni: string | null;
     guest_id: string | null;
   }[];
 
@@ -523,6 +529,9 @@ export async function getDashboardData(): Promise<DashboardData> {
     total_price: Number(r.total_price) || 0,
     paid_amount: Number(r.paid_amount) || 0,
     associated_client_id: r.associated_client_id ?? null,
+    // Reserva de empresa con esto en null = el pasajero todavia no se cargo (mig 88).
+    company_passenger_id: r.company_passenger_id ?? null,
+    client_dni: r.client_dni ?? null,
   }));
 
   // Resolver, por reserva, el contexto de facturación del cliente (empresa o huésped).
@@ -1211,10 +1220,27 @@ export async function applyLateCheckOut(
   };
 }
 
-export async function doCheckIn(reservationId: string): Promise<void> {
+/**
+ * Check-in. En una reserva de EMPRESA el pasajero que se hospeda se carga recien aca
+ * (mig 88): el RPC hace find-or-create en company_passengers y pisa los client_* de la
+ * reserva, que hasta ese momento quedaban a nombre de la empresa. En una reserva de
+ * persona el huesped ya vino del alta y no se manda nada.
+ */
+export async function doCheckIn({ reservationId, ...passenger }: CheckInPayload): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("rpc_staff_checkin_reservation", {
     p_reservation_id: reservationId,
+    p_passenger_name: passenger.passengerName?.trim() || null,
+    p_passenger_dni: passenger.passengerDni?.trim() || null,
+    p_passenger_phone: passenger.passengerPhone?.trim() || null,
+    p_company_passenger_id: passenger.companyPassengerId || null,
+    p_guest_profession: passenger.guestProfession || null,
+    p_guest_address: passenger.guestAddress || null,
+    p_guest_locality: passenger.guestLocality || null,
+    p_guest_nationality: passenger.guestNationality || null,
+    p_guest_doc_type: passenger.guestDocType || null,
+    p_guest_birth_date: passenger.guestBirthDate || null,
+    p_guest_vehicle: passenger.guestVehicle || null,
   });
   if (error) throw error;
 }
@@ -1400,10 +1426,12 @@ export async function staffCreateReservation(
   if (input.mode === "company") {
     params.p_associated_client_id = input.associatedClientId;
     params.p_company_passenger_id = input.companyPassengerId || null;
-    // El humano que se hospeda es el pasajero de la empresa.
-    params.p_client_name = input.passengerName;
-    params.p_client_dni = input.passengerDni;
-    params.p_client_phone = input.passengerPhone || null;
+    // El humano que se hospeda es el pasajero de la empresa. Va vacio en el alta normal:
+    // la empresa reserva sin saber a quien manda y el pasajero se carga en el check-in
+    // (mig 88). Sin pasajero, el RPC deja la reserva a nombre de la empresa.
+    params.p_client_name = input.passengerName?.trim() || null;
+    params.p_client_dni = input.passengerDni?.trim() || null;
+    params.p_client_phone = input.passengerPhone?.trim() || null;
   } else {
     params.p_associated_client_id = null;
     params.p_company_passenger_id = null;

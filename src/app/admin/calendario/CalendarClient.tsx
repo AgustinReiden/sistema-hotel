@@ -7,10 +7,17 @@ import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
 import EditReservationModal from "../EditReservationModal";
+import CompanyCheckInModal from "../CompanyCheckInModal";
 import { handleCancelReservation, handleCheckIn, handleCreateReservation } from "../actions";
 import { isPendingArrival } from "@/lib/arrivals";
 import { formatHotelDateTime, formatHotelShortDate } from "@/lib/time";
-import type { AssociatedClient, Reservation, Room, UserRole } from "@/lib/types";
+import type {
+  AssociatedClient,
+  CheckInPassengerInput,
+  Reservation,
+  Room,
+  UserRole,
+} from "@/lib/types";
 
 // ── Fechas por CLAVE "YYYY-MM-DD" en la zona del hotel, independientes de la tz del
 // navegador o del servidor. Así el calendario no se corre un día en la franja nocturna
@@ -156,6 +163,7 @@ export default function CalendarClient({
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const days = useMemo(
@@ -199,11 +207,11 @@ export default function CalendarClient({
     });
   };
 
-  const handleCheckInSelectedReservation = () => {
+  const runCheckIn = (passenger?: CheckInPassengerInput) => {
     if (!selectedReservation) return;
 
     startTransition(async () => {
-      const result = await handleCheckIn(selectedReservation.id);
+      const result = await handleCheckIn(selectedReservation.id, passenger);
 
       if (!result.success) {
         toast.error(result.error);
@@ -211,9 +219,21 @@ export default function CalendarClient({
       }
 
       toast.success("Check-in realizado correctamente.");
+      setIsCompanyCheckInOpen(false);
       setSelectedReservation(null);
       router.refresh();
     });
+  };
+
+  // Reserva de empresa: la estadía está a nombre de la empresa hasta que alguien se
+  // presenta, así que el check-in pregunta primero quién entra (mig 88).
+  const handleCheckInSelectedReservation = () => {
+    if (!selectedReservation) return;
+    if (selectedReservation.associated_client_id) {
+      setIsCompanyCheckInOpen(true);
+      return;
+    }
+    runCheckIn();
   };
 
   const selectedRoom = selectedReservation ? roomsById.get(selectedReservation.room_id) : null;
@@ -223,6 +243,11 @@ export default function CalendarClient({
   // y volver a cargarla como si entrara hoy (perdiendo la noche ya usada).
   const selectedIsPendingArrival =
     selectedReservation != null && isPendingArrival(selectedReservation, nowIso, timezone);
+  /** Reserva de empresa que todavía no tiene un humano cargado (mig 88). */
+  const selectedPassengerPending =
+    selectedReservation != null &&
+    selectedReservation.associated_client_id != null &&
+    selectedReservation.company_passenger_id == null;
   const selectedArrivalIsOverdue =
     selectedReservation != null &&
     selectedIsPendingArrival &&
@@ -578,6 +603,11 @@ export default function CalendarClient({
                       <div>
                         <p className="text-xs text-slate-400">Nombre</p>
                         <p className="font-semibold text-slate-800">{selectedReservation.client_name}</p>
+                        {selectedPassengerPending && (
+                          <p className="text-[11px] font-semibold text-sky-700">
+                            Reserva de la empresa · el pasajero se carga en el check-in
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
@@ -684,6 +714,28 @@ export default function CalendarClient({
         reservationId={editingId ?? ""}
         isAdmin={isAdmin}
       />
+
+      {isCompanyCheckInOpen && selectedReservation?.associated_client_id && (
+        <CompanyCheckInModal
+          onClose={() => setIsCompanyCheckInOpen(false)}
+          onConfirm={runCheckIn}
+          companyId={selectedReservation.associated_client_id}
+          companyName={
+            associatedClients.find((c) => c.id === selectedReservation.associated_client_id)
+              ?.display_name ?? selectedReservation.client_name
+          }
+          roomNumber={selectedRoom?.room_number ?? ""}
+          initialPassenger={
+            selectedReservation.company_passenger_id
+              ? {
+                  name: selectedReservation.client_name,
+                  dni: selectedReservation.client_dni ?? "",
+                }
+              : null
+          }
+          isSubmitting={isPending}
+        />
+      )}
     </>
   );
 }

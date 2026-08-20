@@ -155,6 +155,8 @@ export type PublicRoomOffer = {
 export type Reservation = {
   id: string;
   associated_client_id: string | null;
+  /** Pasajero de la empresa ya cargado. null en una reserva de empresa sin pasajero aun (mig 88). */
+  company_passenger_id: string | null;
   client_name: string;
   client_phone: string | null;
   client_dni: string | null;
@@ -457,8 +459,9 @@ export type GuestRegistryInput = {
  * Alta de reserva. La reserva es PERSONA o EMPRESA:
  * - person: la persona (huesped) se hospeda y queda en client_*; su descuento personal se aplica
  *   si se eligio del padron (guestId). Vive en la tabla guests (se crea sola).
- * - company: la reserva va por una Empresa/Convenio (su descuento se aplica) y el pasajero real
- *   (passenger*) es quien se hospeda; vive en la tabla company_passengers (dedup por empresa).
+ * - company: la reserva va por una Empresa/Convenio (su descuento se aplica). El pasajero real
+ *   (passenger*) es OPCIONAL: la empresa reserva con semanas de anticipacion y todavia no sabe a
+ *   quien manda, asi que se carga recien en el check-in (mig 88). Vive en company_passengers.
  */
 export type CreateReservationPayload =
   | ({
@@ -480,8 +483,9 @@ export type CreateReservationPayload =
       associatedClientId: string;
       /** Id del pasajero si se eligio de la lista de la empresa; null/undefined si es nuevo. */
       companyPassengerId?: string | null;
-      passengerName: string;
-      passengerDni: string;
+      /** Vacios en el alta normal: el pasajero se define en el check-in. */
+      passengerName?: string;
+      passengerDni?: string;
       passengerPhone?: string;
       checkIn: string;
       checkOut: string;
@@ -498,6 +502,24 @@ export type CompanyPassenger = {
   created_at: string;
   updated_at: string;
 };
+
+/**
+ * Check-in de una reserva. En una reserva de empresa el pasajero se carga recien aca
+ * (mig 88): la empresa reserva sin saber a quien manda. En una reserva de persona el
+ * huesped ya vino del alta y no se manda nada extra.
+ */
+export type CheckInPayload = {
+  reservationId: string;
+} & CheckInPassengerInput;
+
+/** Datos del pasajero que entra por una empresa (se cargan en el check-in). */
+export type CheckInPassengerInput = {
+  /** Id del pasajero si se eligio de la lista de la empresa; undefined si es nuevo. */
+  companyPassengerId?: string | null;
+  passengerName?: string;
+  passengerDni?: string;
+  passengerPhone?: string;
+} & GuestRegistryInput;
 
 /** Una fila de la seccion Descuentos: un huesped o una empresa con descuento asignado. */
 export type DiscountedClient = {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignWalkInSchema,
   associatedClientSchema,
+  checkInSchema,
   createReservationSchema,
   hotelSettingsSchema,
   publicBookingSchema,
@@ -186,12 +187,30 @@ describe("createReservationSchema", () => {
     expect(result.passengerDni).toBe("30123456");
   });
 
-  it("rejects a company reservation without passenger data", () => {
+  // La empresa reserva con semanas de anticipacion sin saber a quien manda: el pasajero
+  // se carga en el check-in (mig 88).
+  it("accepts a company reservation without passenger data", () => {
+    const result = createReservationSchema.parse({
+      mode: "company",
+      roomId: 1,
+      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+      passengerName: "",
+      passengerDni: "",
+      checkIn: "2026-04-01T14:00:00.000Z",
+      checkOut: "2026-04-03T10:00:00.000Z",
+    });
+    if (result.mode !== "company") throw new Error("Expected company mode");
+    expect(result.passengerName).toBeUndefined();
+    expect(result.passengerDni).toBeUndefined();
+  });
+
+  it("rejects a company reservation with a passenger name but no dni", () => {
     expect(() =>
       createReservationSchema.parse({
         mode: "company",
         roomId: 1,
         associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+        passengerName: "Juan Perez",
         checkIn: "2026-04-01T14:00:00.000Z",
         checkOut: "2026-04-03T10:00:00.000Z",
       })
@@ -237,6 +256,42 @@ describe("createReservationSchema", () => {
     expect(() =>
       createReservationSchema.parse({ ...validPerson, checkIn: "not-a-date" })
     ).toThrow();
+  });
+});
+
+// Check-in: en una reserva de empresa es donde se identifica al humano que entra (mig 88).
+describe("checkInSchema", () => {
+  const reservationId = "550e8400-e29b-41d4-a716-446655440000";
+
+  it("accepts a check-in with only the reservation id", () => {
+    const result = checkInSchema.parse({ reservationId });
+    expect(result.reservationId).toBe(reservationId);
+    expect(result.passengerName).toBeUndefined();
+    expect(result.passengerDni).toBeUndefined();
+  });
+
+  it("accepts a check-in with the company passenger", () => {
+    const result = checkInSchema.parse({
+      reservationId,
+      companyPassengerId: "550e8400-e29b-41d4-a716-446655440001",
+      passengerName: "Juan Perez",
+      passengerDni: "30123456",
+      passengerPhone: "3814123456",
+      guestLocality: "Salta",
+    });
+    expect(result.passengerName).toBe("Juan Perez");
+    expect(result.passengerDni).toBe("30123456");
+    expect(result.companyPassengerId).toBe("550e8400-e29b-41d4-a716-446655440001");
+    expect(result.guestLocality).toBe("Salta");
+  });
+
+  it("rejects half a passenger", () => {
+    expect(() => checkInSchema.parse({ reservationId, passengerName: "Juan Perez" })).toThrow();
+    expect(() => checkInSchema.parse({ reservationId, passengerDni: "30123456" })).toThrow();
+  });
+
+  it("rejects an invalid reservation id", () => {
+    expect(() => checkInSchema.parse({ reservationId: "no-es-uuid" })).toThrow();
   });
 });
 

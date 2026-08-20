@@ -16,7 +16,6 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-import CompanyPassengerSelector from "./CompanyPassengerSelector";
 import ClientSearch from "./ClientSearch";
 import DateTimePickerField from "./DateTimePickerField";
 import GuestDniHint from "./GuestDniHint";
@@ -25,7 +24,6 @@ import { fetchAvailableRoomsAction, searchGuestsAction } from "./actions";
 import { calculateReservationPriceBreakdown, resolveEffectiveDiscountPercent } from "@/lib/pricing";
 import type {
   AssociatedClient,
-  CompanyPassenger,
   CreateReservationPayload,
   GuestDirectoryEntry,
   GuestRegistryInput,
@@ -63,11 +61,8 @@ type ReservationFormState = {
   clientDni: string;
   clientPhone: string;
   guestDiscountPercent: number;
-  // Empresa
+  // Empresa (el pasajero que se hospeda se carga recien en el check-in)
   associatedClientId: string;
-  companyPassengerId: string | null;
-  passengerName: string;
-  passengerDni: string;
   // Compartido
   roomId: number | "";
   checkIn: string;
@@ -117,9 +112,6 @@ function buildInitialState(
     clientPhone: "",
     guestDiscountPercent: 0,
     associatedClientId: "",
-    companyPassengerId: null,
-    passengerName: "",
-    passengerDni: "",
     roomId: initialValues?.roomId ?? "",
     checkIn: initialValues?.checkIn ?? defaults.checkIn,
     checkOut: initialValues?.checkOut ?? defaults.checkOut,
@@ -242,9 +234,6 @@ export default function NewReservationModal({
       guestDiscountPercent: entry.discount_percent ?? 0,
       // Limpia cualquier rastro de empresa al pasar a persona.
       associatedClientId: "",
-      companyPassengerId: null,
-      passengerName: "",
-      passengerDni: "",
     }));
     setRegistry((current) => ({
       ...current,
@@ -265,9 +254,6 @@ export default function NewReservationModal({
       ...current,
       mode: "company",
       associatedClientId: company.id,
-      companyPassengerId: null,
-      passengerName: "",
-      passengerDni: "",
     }));
     setDniMatch(null);
   };
@@ -288,19 +274,7 @@ export default function NewReservationModal({
       ...current,
       mode: "person",
       associatedClientId: "",
-      companyPassengerId: null,
-      passengerName: "",
-      passengerDni: "",
     }));
-
-  const handlePassengerSelect = (p: CompanyPassenger) => {
-    setForm((current) => ({
-      ...current,
-      companyPassengerId: p.id,
-      passengerName: p.full_name,
-      passengerDni: p.document_id ?? "",
-    }));
-  };
 
   if (!isOpen) return null;
 
@@ -344,10 +318,9 @@ export default function NewReservationModal({
     Boolean(form.clientFirstName.trim()) &&
     Boolean(form.clientLastName.trim()) &&
     Boolean(form.clientDni.trim());
-  const companyComplete =
-    Boolean(form.associatedClientId) &&
-    Boolean(form.passengerName.trim()) &&
-    Boolean(form.passengerDni.trim());
+  // La reserva de empresa se confirma solo con la empresa: quien viaja se carga en el
+  // check-in, porque cuando la empresa reserva todavia no sabe a quien manda.
+  const companyComplete = Boolean(form.associatedClientId);
   const clientComplete = form.mode === "person" ? personComplete : companyComplete;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -364,15 +337,9 @@ export default function NewReservationModal({
       toast.error("Cargá nombre, apellido y DNI del huésped.");
       return;
     }
-    if (form.mode === "company") {
-      if (!form.associatedClientId) {
-        toast.error("Seleccioná la empresa/convenio.");
-        return;
-      }
-      if (!form.passengerName.trim() || !form.passengerDni.trim()) {
-        toast.error("Cargá el nombre y el DNI del pasajero.");
-        return;
-      }
+    if (form.mode === "company" && !form.associatedClientId) {
+      toast.error("Seleccioná la empresa/convenio.");
+      return;
     }
 
     setIsSubmitting(true);
@@ -380,16 +347,14 @@ export default function NewReservationModal({
       const payload: CreateReservationPayload =
         form.mode === "company"
           ? {
+              // Sin pasajero: la reserva queda a nombre de la empresa hasta el check-in,
+              // y los datos de registro son del humano que entre, asi que van con el.
               mode: "company",
               roomId: Number(form.roomId),
               associatedClientId: form.associatedClientId,
-              companyPassengerId: form.companyPassengerId ?? undefined,
-              passengerName: form.passengerName.trim(),
-              passengerDni: form.passengerDni.trim(),
               checkIn: new Date(form.checkIn).toISOString(),
               checkOut: new Date(form.checkOut).toISOString(),
               guestCount: form.guestCount,
-              ...registry,
             }
           : {
               mode: "person",
@@ -568,61 +533,17 @@ export default function NewReservationModal({
                   </button>
                 </div>
 
-                {/* Pasajero real que se hospeda (tabla aparte de la empresa) */}
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">
-                    Pasajero que se hospeda <span className="text-red-500">*</span>
-                  </p>
-                  <CompanyPassengerSelector
-                    key={form.associatedClientId}
-                    companyId={form.associatedClientId}
-                    onSelect={handlePassengerSelect}
-                  />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="passengerName" className="block text-xs font-semibold text-slate-600 mb-1">
-                        Nombre del pasajero <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        id="passengerName"
-                        type="text"
-                        value={form.passengerName}
-                        onChange={(e) =>
-                          setForm((current) => ({
-                            ...current,
-                            passengerName: e.target.value,
-                            companyPassengerId: null,
-                          }))
-                        }
-                        className={inputClass}
-                        placeholder="Ej. Juan Pérez"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="passengerDni" className="block text-xs font-semibold text-slate-600 mb-1">
-                        DNI del pasajero <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        id="passengerDni"
-                        type="text"
-                        value={form.passengerDni}
-                        onChange={(e) =>
-                          setForm((current) => ({
-                            ...current,
-                            passengerDni: e.target.value,
-                            companyPassengerId: null,
-                          }))
-                        }
-                        className={inputClass}
-                        placeholder="Ej. 30123456"
-                      />
-                    </div>
+                {/* El pasajero se define en el check-in: al reservar la empresa todavia
+                    no sabe a quien manda (los preventistas rotan). */}
+                <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 flex items-start gap-3">
+                  <UserRound size={16} className="text-sky-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-bold text-sky-900">Pasajero: se carga en el check-in</p>
+                    <p className="text-xs text-sky-800">
+                      La reserva queda a nombre de la empresa. Cuando la persona se presente en el
+                      mostrador, el check-in te pide su nombre y DNI.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-500">
-                    {form.companyPassengerId
-                      ? "Pasajero de la empresa seleccionado."
-                      : "Si no figura, se crea en la lista de la empresa al confirmar."}
-                  </p>
                 </div>
               </div>
             )}
@@ -722,11 +643,13 @@ export default function NewReservationModal({
             </p>
           </div>
 
-          <GuestRegistryFields
-            value={registry}
-            onChange={(patch) => setRegistry((current) => ({ ...current, ...patch }))}
-            idPrefix="reserva"
-          />
+          {form.mode === "person" && (
+            <GuestRegistryFields
+              value={registry}
+              onChange={(patch) => setRegistry((current) => ({ ...current, ...patch }))}
+              idPrefix="reserva"
+            />
+          )}
 
           {pricePreview && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">

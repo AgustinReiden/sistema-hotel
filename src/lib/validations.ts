@@ -105,7 +105,8 @@ const clientDniSchema = z
   .min(6, "El DNI o CUIT debe tener al menos 6 caracteres.")
   .max(60, "Maximo 60 caracteres.");
 
-// Datos del pasajero real: obligatorios cuando la reserva va a nombre de un asociado.
+// Datos del pasajero real: obligatorios en el check-in de una reserva de empresa
+// (walk-in incluido), porque ahi el pasajero ya esta en el mostrador.
 const requiredPassengerName = z
   .string()
   .trim()
@@ -116,6 +117,17 @@ const requiredPassengerDni = z
   .trim()
   .min(6, "El DNI/CUIT del pasajero es obligatorio (minimo 6 caracteres).")
   .max(60, "Maximo 60 caracteres.");
+
+// En el ALTA de una reserva de empresa el pasajero no se conoce todavia (mig 88): los
+// campos viajan vacios y la reserva queda a nombre de la empresa.
+const optionalPassengerName = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  requiredPassengerName.optional()
+);
+const optionalPassengerDni = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  requiredPassengerDni.optional()
+);
 
 const optionalDateText = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
@@ -189,15 +201,41 @@ export const createReservationSchema = z
       mode: z.literal("company"),
       associatedClientId: associatedClientIdSchema,
       companyPassengerId: optionalUuid("El pasajero seleccionado es invalido."),
-      passengerName: requiredPassengerName,
-      passengerDni: requiredPassengerDni,
+      passengerName: optionalPassengerName,
+      passengerDni: optionalPassengerDni,
       passengerPhone: optionalPhoneSchema,
       ...checkInOutFields,
+    })
+    // O viene el pasajero completo (nombre + DNI) o no viene ninguno: media carga deja
+    // una estadia con un nombre sin documento, que despues no se puede facturar.
+    .refine((data) => Boolean(data.passengerName) === Boolean(data.passengerDni), {
+      message: "Para cargar el pasajero hacen falta el nombre y el DNI.",
+      path: ["passengerDni"],
     }),
   ])
   .refine((data) => new Date(data.checkIn) < new Date(data.checkOut), {
     message: "La fecha de salida debe ser posterior a la fecha de entrada.",
     path: ["checkOut"],
+  });
+
+/**
+ * Check-in de una reserva. En una reserva de EMPRESA viaja el pasajero que se presenta
+ * en el mostrador (mig 88); en una de persona no viaja nada mas que el id. El servidor
+ * es el que sabe si la reserva es de empresa, asi que aca los campos son opcionales y
+ * el RPC rechaza el check-in de empresa si no hay pasajero.
+ */
+export const checkInSchema = z
+  .object({
+    reservationId: z.string().uuid("La reserva seleccionada es invalida."),
+    companyPassengerId: optionalUuid("El pasajero seleccionado es invalido."),
+    passengerName: optionalPassengerName,
+    passengerDni: optionalPassengerDni,
+    passengerPhone: optionalPhoneSchema,
+    ...guestRegistrySchemaFields,
+  })
+  .refine((data) => Boolean(data.passengerName) === Boolean(data.passengerDni), {
+    message: "Para cargar el pasajero hacen falta el nombre y el DNI.",
+    path: ["passengerDni"],
   });
 
 export const associatedClientSchema = z.object({
