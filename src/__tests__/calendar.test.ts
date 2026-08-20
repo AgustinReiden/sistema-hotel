@@ -8,6 +8,7 @@ function makeReservation(overrides: Partial<Reservation> & { id: string; room_id
     id: overrides.id,
     room_id: overrides.room_id,
     associated_client_id: overrides.associated_client_id ?? null,
+    company_passenger_id: overrides.company_passenger_id ?? null,
     client_name: overrides.client_name ?? "Test Guest",
     client_phone: overrides.client_phone ?? null,
     client_dni: overrides.client_dni ?? null,

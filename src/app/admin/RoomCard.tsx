@@ -5,6 +5,7 @@ import { BedDouble, Clock, Pencil, Plus, Replace } from "lucide-react";
 import { toast } from "sonner";
 
 import WalkInModal from "./WalkInModal";
+import CompanyCheckInModal from "./CompanyCheckInModal";
 import ExtraChargesModal from "./ExtraChargesModal";
 import ChangeRoomModal from "./ChangeRoomModal";
 import EditReservationModal from "./EditReservationModal";
@@ -28,6 +29,7 @@ import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import { isBankPaymentMethod } from "@/lib/billing";
 import type {
   AssociatedClient,
+  CheckInPassengerInput,
   FacturacionModo,
   InvoiceReceptorPrefill,
   PaymentMethod,
@@ -66,6 +68,10 @@ type RoomCardProps = {
     billedToCompany: boolean;
     /** id del asociado de la reserva activa (para precargar datos de Factura A). */
     associatedClientId: string | null;
+    /** Pasajero de la empresa ya cargado; null = se pide en el check-in (mig 88). */
+    companyPassengerId: string | null;
+    /** DNI del huesped/pasajero de la reserva activa (para precargar el check-in). */
+    clientDni: string | null;
     /** Cuándo se le factura al cliente de la reserva activa (mig 79). */
     facturacionModo: FacturacionModo;
     /** Datos del receptor tomados de la ficha del cliente (mig 81). */
@@ -93,6 +99,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   const [isPending, startTransition] = useTransition();
   const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
+  const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
   const [isCheckoutConfirmOpen, setIsCheckoutConfirmOpen] = useState(false);
@@ -110,6 +117,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     reservedUntilLabel: string;
     departureLabel: string;
   } | null>(null);
+
+  const reservationCompany = room.associatedClientId
+    ? associatedClients.find((client) => client.id === room.associatedClientId) ?? null
+    : null;
+  /** Reserva de empresa cuya estadía todavía no tiene un humano cargado (mig 88). */
+  const passengerPending = room.billedToCompany && !room.companyPassengerId;
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
   const isConfirmedArrival = room.hasPendingArrival;
@@ -144,17 +157,28 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     };
   };
 
-  const onCheckIn = () => {
+  const runCheckIn = (passenger?: CheckInPassengerInput) => {
     const reservationId = room.reservationId;
     if (!reservationId) return;
     startTransition(async () => {
-      const result = await handleCheckIn(reservationId);
+      const result = await handleCheckIn(reservationId, passenger);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
+      setIsCompanyCheckInOpen(false);
       toast.success("Check-in realizado correctamente.");
     });
+  };
+
+  // Reserva de empresa: la estadía está a nombre de la empresa hasta que alguien se
+  // presenta. El check-in es el que pregunta quién entra (mig 88).
+  const onCheckIn = () => {
+    if (room.billedToCompany && room.associatedClientId) {
+      setIsCompanyCheckInOpen(true);
+      return;
+    }
+    runCheckIn();
   };
 
   const onSetMaintenance = () => {
@@ -572,6 +596,14 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                   >
                     {room.client}
                   </p>
+                  {passengerPending && (
+                    <p
+                      className={`text-[11px] font-semibold mt-0.5 ${isOverdueArrival ? "text-amber-700" : "text-green-700"
+                        }`}
+                    >
+                      Empresa · el pasajero se carga al entrar
+                    </p>
+                  )}
                   {isOverdueArrival && room.arrivalDateLabel && (
                     <p className="text-xs font-bold text-amber-700 mt-1">
                       Entrada reservada: {room.arrivalDateLabel}
@@ -596,7 +628,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                     : "bg-green-600 hover:bg-green-700"
                     }`}
                 >
-                  Hacer Check-In Automático
+                  {passengerPending ? "Hacer Check-In" : "Hacer Check-In Automático"}
                 </button>
                 <button
                   onClick={onCancelReservation}
@@ -671,6 +703,20 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           </div>
         )}
       </div>
+
+      {isCompanyCheckInOpen && room.associatedClientId && (
+        <CompanyCheckInModal
+          onClose={() => setIsCompanyCheckInOpen(false)}
+          onConfirm={runCheckIn}
+          companyId={room.associatedClientId}
+          companyName={reservationCompany?.display_name ?? room.client ?? "Empresa"}
+          roomNumber={room.number}
+          initialPassenger={
+            passengerPending ? null : { name: room.client ?? "", dni: room.clientDni ?? "" }
+          }
+          isSubmitting={isPending}
+        />
+      )}
 
       <WalkInModal
         isOpen={isWalkInModalOpen}
