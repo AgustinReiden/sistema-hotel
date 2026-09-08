@@ -16,6 +16,7 @@ type AssociatedClientFormPayload = {
   notes?: string;
   cuentaCorrienteHabilitada?: boolean;
   condicionIva?: "responsable_inscripto" | "monotributo" | "consumidor_final" | "exento";
+  razonSocial?: string;
   domicilio?: string;
   facturacionModo?: "por_checkout" | "consolidada" | "no_factura";
 };
@@ -65,6 +66,7 @@ export async function createAssociatedClientAction(
       notes: validated.notes ?? null,
       cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
       condicion_iva: validated.condicionIva ?? null,
+      razon_social: validated.razonSocial ?? null,
       domicilio: validated.domicilio ?? null,
       facturacion_modo: validated.facturacionModo,
     });
@@ -97,6 +99,7 @@ export async function updateAssociatedClientAction(
         notes: validated.notes ?? null,
         cuenta_corriente_habilitada: Boolean(payload.cuentaCorrienteHabilitada),
         condicion_iva: validated.condicionIva ?? null,
+        razon_social: validated.razonSocial ?? null,
         domicilio: validated.domicilio ?? null,
         facturacion_modo: validated.facturacionModo,
         updated_at: new Date().toISOString(),
@@ -163,6 +166,37 @@ export async function loadAssociatedClientLedgerAction(
     return { success: true, data: ledger };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cargar la ficha del asociado.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Empresas que ya tienen ese CUIT (mig 94). El CUIT dejó de ser único porque un
+ * contribuyente puede ser dos cuentas del hotel (dos áreas de la misma empresa),
+ * así que el guard contra cargar dos veces la misma empresa se resolvió acá: la
+ * pantalla avisa y pide confirmar en vez de rechazar.
+ */
+export async function findCompaniesByDocumentAction(
+  documentId: string,
+  excludeId?: string
+): Promise<ActionResult<{ id: string; display_name: string }[]>> {
+  try {
+    const supabase = await assertAdmin();
+    const digits = documentId.replace(/\D/g, "");
+    if (digits.length < 7) return { success: true, data: [] };
+
+    const { data, error } = await supabase
+      .from("associated_clients")
+      .select("id, display_name, document_id");
+    if (error) throw error;
+
+    const matches = ((data ?? []) as { id: string; display_name: string; document_id: string }[])
+      .filter((c) => c.document_id.replace(/\D/g, "") === digits && c.id !== excludeId)
+      .map((c) => ({ id: c.id, display_name: c.display_name }));
+
+    return { success: true, data: matches };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo verificar el CUIT.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

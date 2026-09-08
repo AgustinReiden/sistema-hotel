@@ -411,6 +411,12 @@ export type AssociatedClient = {
   cuenta_corriente_habilitada: boolean;
   /** Condición frente al IVA (para Factura A). null = no definida en la ficha. */
   condicion_iva: CondicionIva | null;
+  /**
+   * Nombre legal del receptor de la factura (mig 94). Es OTRO campo que
+   * `display_name`, que es el nombre operativo con el que recepción llama al
+   * cliente ("JUFEC - DROGUERIA"). Vacío = se usa `display_name`.
+   */
+  razon_social: string | null;
   /** Domicilio del receptor (para Factura A). null = no definido en la ficha. */
   domicilio: string | null;
   /** Cuándo se le factura: al cerrar cada estadía, consolidado, o nunca (mig 79). */

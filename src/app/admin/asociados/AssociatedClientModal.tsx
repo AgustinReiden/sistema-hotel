@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
+import { AlertTriangle, CreditCard, Loader2, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AssociatedClient, CondicionIva, FacturacionModo } from "@/lib/types";
+import { findCompaniesByDocumentAction } from "./actions";
 
 type AssociatedClientModalProps = {
   isOpen: boolean;
@@ -17,6 +18,7 @@ type AssociatedClientModalProps = {
     notes?: string;
     cuentaCorrienteHabilitada: boolean;
     condicionIva?: CondicionIva;
+    razonSocial?: string;
     domicilio?: string;
     facturacionModo?: FacturacionModo;
   }) => Promise<{ success: boolean; error?: string }>;
@@ -32,6 +34,7 @@ type FormState = {
   notes: string;
   cuentaCorrienteHabilitada: boolean;
   condicionIva: CondicionIva | "";
+  razonSocial: string;
   domicilio: string;
   facturacionModo: FacturacionModo;
 };
@@ -48,6 +51,7 @@ function buildInitialState(initialClient?: AssociatedClient | null): FormState {
     notes: initialClient?.notes ?? "",
     cuentaCorrienteHabilitada: initialClient?.cuenta_corriente_habilitada ?? false,
     condicionIva: initialClient?.condicion_iva ?? "",
+    razonSocial: initialClient?.razon_social ?? "",
     domicilio: initialClient?.domicilio ?? "",
     facturacionModo: initialClient?.facturacion_modo ?? "por_checkout",
   };
@@ -62,16 +66,33 @@ export default function AssociatedClientModal({
 }: AssociatedClientModalProps) {
   const [form, setForm] = useState<FormState>(() => buildInitialState(initialClient));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Aviso de CUIT repetido (mig 94): el CUIT ya no es único porque un contribuyente
+  // puede ser dos áreas de la misma empresa. El guard pasa a ser una confirmación.
+  const [duplicados, setDuplicados] = useState<{ id: string; display_name: string }[] | null>(null);
+  const [chequeando, setChequeando] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialClient));
+    setDuplicados(null);
   }, [isOpen, initialClient]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Primera pasada: si el CUIT ya lo tiene otra empresa, se avisa y se espera
+    // confirmación. Ya confirmado (duplicados !== null) se guarda derecho.
+    if (duplicados === null) {
+      setChequeando(true);
+      const check = await findCompaniesByDocumentAction(form.documentId.trim(), initialClient?.id);
+      setChequeando(false);
+      const encontrados = check.success ? check.data ?? [] : [];
+      setDuplicados(encontrados);
+      if (encontrados.length > 0) return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -83,6 +104,7 @@ export default function AssociatedClientModal({
         notes: form.notes.trim() || undefined,
         cuentaCorrienteHabilitada: form.cuentaCorrienteHabilitada,
         condicionIva: form.condicionIva || undefined,
+        razonSocial: form.razonSocial.trim() || undefined,
         domicilio: form.domicilio.trim() || undefined,
         facturacionModo: form.facturacionModo,
       });
@@ -147,10 +169,30 @@ export default function AssociatedClientModal({
                 type="text"
                 required
                 value={form.documentId}
-                onChange={(e) => setForm((current) => ({ ...current, documentId: e.target.value }))}
+                onChange={(e) => {
+                  setDuplicados(null);
+                  setForm((current) => ({ ...current, documentId: e.target.value }));
+                }}
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
                 placeholder="Ej. 30-12345678-9"
               />
+              {duplicados && duplicados.length > 0 && (
+                <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                    <AlertTriangle size={13} className="shrink-0" />
+                    Ya existe una empresa con este CUIT
+                  </p>
+                  <ul className="mt-1 text-xs text-amber-800 list-disc list-inside">
+                    {duplicados.map((d) => (
+                      <li key={d.id}>{d.display_name}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 text-xs text-amber-800">
+                    Si es <strong>otra área de la misma empresa</strong>, está bien: las dos
+                    facturan al mismo CUIT. Volvé a guardar para confirmar.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div>
@@ -267,6 +309,28 @@ export default function AssociatedClientModal({
             </div>
 
             <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-razon-social">
+                <span className="flex items-center gap-1.5">
+                  <Receipt size={14} />
+                  Razón social (para la factura)
+                </span>
+              </label>
+              <input
+                id="associated-razon-social"
+                type="text"
+                value={form.razonSocial}
+                onChange={(e) => setForm((current) => ({ ...current, razonSocial: e.target.value }))}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                placeholder={form.displayName.trim() || "Ej. JUFEC S.A."}
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                El nombre legal, que puede ser distinto del de arriba. Dos áreas de la misma
+                empresa se llaman distinto acá adentro pero facturan con la misma razón social.
+                Vacío: se usa el nombre de la empresa.
+              </p>
+            </div>
+
+            <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-domicilio">
                 <span className="flex items-center gap-1.5">
                   <MapPin size={14} />
@@ -319,10 +383,24 @@ export default function AssociatedClientModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !form.displayName.trim() || !form.documentId.trim()}
+              disabled={
+                isSubmitting || chequeando || !form.displayName.trim() || !form.documentId.trim()
+              }
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
-              {isSubmitting ? "Guardando..." : initialClient ? "Guardar Cambios" : "Crear Empresa / Convenio"}
+              {chequeando ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 size={15} className="animate-spin" /> Verificando CUIT…
+                </span>
+              ) : isSubmitting ? (
+                "Guardando..."
+              ) : duplicados && duplicados.length > 0 ? (
+                "Sí, es otra área: guardar"
+              ) : initialClient ? (
+                "Guardar Cambios"
+              ) : (
+                "Crear Empresa / Convenio"
+              )}
             </button>
           </div>
         </form>

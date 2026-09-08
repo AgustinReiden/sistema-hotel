@@ -79,7 +79,7 @@ un comprobante con datos inválidos, que es lo correcto. Pero hay que cargarlos.
 | Cliente | Estadías | Monto | Problema |
 |---|---:|---:|---|
 | JUFEC SA - PERFUMERIA | 70 | $3.960.000 | Sin condición IVA |
-| JUFEC - DROGUERIA | 34 | $1.870.000 | Sin condición IVA **y CUIT inválido** (`30629421462`) |
+| JUFEC - DROGUERIA | 34 | $1.870.000 | Sin condición IVA. Su CUIT inválido **ya se corrigió** (mig 94) |
 | MUNIC TACO POZO | 9 | $1.710.000 | Cargado como huésped con un **CUIT en el campo del DNI** |
 | H CLINICAL ARGENTINA S.A | 8 | $360.000 | Sin condición IVA |
 | COMISARIA TACO POZO | 1 | $70.000 | Exento, pero **CUIT inválido** (`30999175707`) |
@@ -89,10 +89,40 @@ un comprobante con datos inválidos, que es lo correcto. Pero hay que cargarlos.
 
 Dos cosas que valen la pena mirar:
 
-- El CUIT de **JUFEC DROGUERIA** es el de PERFUMERIA con el último dígito cambiado
-  (`...463` → `...462`). Tiene toda la pinta de un error de tipeo al dar de alta la segunda.
+- El CUIT de **JUFEC DROGUERIA** no era un typo: era la única forma de cargar la segunda
+  área, porque `document_id` tenía un índice **único** y las dos áreas comparten CUIT. El
+  modelo estaba mal, no el dato — ver C-03. Corregido en la migración 94.
 - **Qué condición IVA le corresponde a cada uno lo decidís vos o el contador.** No lo adivino:
   emitir la letra equivocada sólo se arregla con nota de crédito.
+
+---
+
+### 🔴 C-03 — El CUIT era clave única de cliente, y eso obligaba a inventar números.
+
+**Qué pasaba.** `associated_clients.document_id` tenía un índice **único** y se usaba a la
+vez como identificador del cliente y como CUIT del receptor. JUFEC opera como dos áreas
+(Droguería y Perfumería) que fiscalmente son la misma empresa: el hotel las necesita como dos
+cuentas corrientes, pero la segunda no entraba. Se la cargó con el CUIT de la primera
+cambiándole el último dígito, y ese número no pasa el módulo 11 → esa cuenta ($1.870.000 en
+34 estadías) no se podía facturar.
+
+**El supuesto equivocado:** el CUIT identifica a un **contribuyente**, no a un cliente. Un
+contribuyente puede ser dos cuentas del hotel y recibir dos facturas; eso es normal y legal.
+Forzar unicidad sobre el CUIT empuja a inventar datos fiscales, que es exactamente lo que
+pasó. Y `document_id` no valida nada más que "6 caracteres", así que también entraron un CUIT
+de 13 dígitos y otro con el verificador mal.
+
+**Estado: CORREGIDO** en la migración 94. El índice pasa a no-único (se conserva para buscar
+por CUIT), el aviso de duplicado se mueve al alta como confirmación visible ("ya existe X con
+este CUIT, ¿es otra área de la misma empresa?"), y el alta ahora valida de verdad: DNI de 7-8
+dígitos o CUIT de 11 con verificador. Las dos JUFEC quedaron con el CUIT real.
+
+**De paso, un defecto que iba a salir en la primera factura:** `associated_clients` no tenía
+**razón social**. El receptor salía de `display_name`, que es el nombre operativo con el que
+recepción llama al cliente — la Factura A de la droguería habría salido a nombre de "JUFEC -
+DROGUERIA" en vez del nombre legal, y RG 1415 pide la razón social. Ahora es un campo propio
+que cae a `display_name` cuando está vacío, así que para los clientes donde son lo mismo no
+cambia nada. **Hay que cargarla en las dos JUFEC antes de facturar.**
 
 ---
 
@@ -212,16 +242,20 @@ En una auditoría los resultados negativos valen tanto como los hallazgos:
 
 1. **Cargar la condición IVA** de JUFEC PERFUMERIA, JUFEC DROGUERIA y H CLINICAL. Se hace
    desde el formulario de `/admin/fiscal/consolidada` y queda guardado en la ficha.
-2. **Corregir los CUIT inválidos**: JUFEC DROGUERIA, COMISARIA TACO POZO, COMPAÑÍA LA LEGUA.
-3. **Arreglar MUNIC TACO POZO y EL HORNERO**: tienen un CUIT metido en el campo del DNI. El
+2. **Corregir los CUIT inválidos** que quedan: COMISARIA TACO POZO (`30999175707`) y
+   COMPAÑÍA LA LEGUA (`30-7070916787-8`, 13 dígitos). El de JUFEC DROGUERIA ya se arregló.
+   No los deduje yo: adivinar un CUIT en un comprobante fiscal no es una opción.
+3. **Cargar la razón social** de las dos JUFEC (el nombre legal, que es el mismo para las
+   dos áreas).
+4. **Arreglar MUNIC TACO POZO y EL HORNERO**: tienen un CUIT metido en el campo del DNI. El
    CUIT va en su propio campo (`cuit`), y hay que elegirles condición IVA.
-4. **Definir el modo de facturación** de los clientes de cuenta corriente que quedaron en
+5. **Definir el modo de facturación** de los clientes de cuenta corriente que quedaron en
    `por_checkout`.
-5. **Confirmar con el contador** el texto de la leyenda de la Ley 27.618.
-6. **Decidir qué hacer con el atraso**: 199 estadías de caja + 135 de cuenta corriente sin
+6. **Confirmar con el contador** el texto de la leyenda de la Ley 27.618.
+7. **Decidir qué hacer con el atraso**: 199 estadías de caja + 135 de cuenta corriente sin
    comprobante. Al prender la facturación, el badge del sidebar y `/admin/fiscal/control` lo
    van a mostrar todo junto. Es el objetivo, pero conviene saberlo antes.
-7. **Probar en homologación** antes de la primera factura real. Requiere poner
+8. **Probar en homologación** antes de la primera factura real. Requiere poner
    `fiscal_settings.environment = 'homologacion'` temporalmente — no lo toqué porque es
    configuración de producción y es tu decisión.
 
