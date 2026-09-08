@@ -114,6 +114,15 @@ export type CreatedReservation = { status: ReservationStatus; createdAt: string 
 /** Un pago para bucketing por día / por método. */
 export type PaymentPoint = { amount: number; method: string; createdAt: string };
 
+/**
+ * Métodos de `payments` que NO son plata que entra:
+ *  - vale_blanco: consumo interno del hotel.
+ *  - cuenta_corriente: fiado. El check-out a cta cte no genera pago, así que una
+ *    fila así es un cobro mal cargado; contarla como caja infla los ingresos y
+ *    esconde la deuda. Se la trata como fiado hasta que se corrija el dato.
+ */
+export const NON_CASH_METHODS = new Set(["vale_blanco", "cuenta_corriente"]);
+
 export type OccupancyBasis = "physical" | "priced";
 
 /**
@@ -271,7 +280,10 @@ export function buildRevenueByRoomType(
 export type WindowKpis = {
   lodgingRevenue: number;
   totalPaymentsIncome: number;
-  /** Caja cobrada excluyendo Vale Blanco (el VB no es plata que entra). */
+  /**
+   * Caja cobrada dejando solo plata de verdad: sin vale blanco (consumo interno) y
+   * sin los pagos marcados `cuenta_corriente` (son fiado, no cobranza).
+   */
   totalPaymentsIncomeNoVale: number;
   roomNightsSold: number;
   availableRoomNights: number;
@@ -355,10 +367,10 @@ export function computeWindowKpis(input: {
   const availableRoomNights = activeRooms * countDaysInclusive(rangeStartKey, rangeEndKey);
   const paymentsInRange = payments.filter((p) => keyInRange(p.createdAt));
   const totalPaymentsIncome = paymentsInRange.reduce((sum, p) => sum + p.amount, 0);
-  // "Sin VB": el vale blanco no es plata que entra; el gerente lo quiere poder
-  // mirar por separado de las ventas reales.
+  // Plata de verdad: ni el vale blanco (consumo interno) ni un pago marcado
+  // `cuenta_corriente` (que es fiado) entran a la caja. Ver NON_CASH_METHODS.
   const totalPaymentsIncomeNoVale = paymentsInRange
-    .filter((p) => p.method !== "vale_blanco")
+    .filter((p) => !NON_CASH_METHODS.has(p.method))
     .reduce((sum, p) => sum + p.amount, 0);
 
   const createdInRange = reservationsCreated.filter((r) => keyInRange(r.createdAt));
@@ -618,4 +630,132 @@ export function summarizeRoomBreakdown(rows: RoomBreakdownRow[]): RoomBreakdownT
     cancellations: acc.cancellations,
     cleanings: acc.cleanings,
   };
+}
+
+// ─────────────────────── Cierre de ventas del período ───────────────────────
+//
+// El tablero mezclaba tres bases distintas (devengado por noche, caja por fecha de
+// pago, y foto de hoy) y por eso "la venta" nunca daba igual a "cobrado + impago".
+// Este bloque agrega la única cohorte donde la cuenta CIERRA exacto: las estadías
+// que se cerraron (check-out real) dentro del período. Para cada una vale la
+// invariante que garantizan los RPCs de cobro y check-out:
+//
+//     total_price = Σ pagos + Σ cargos a cuenta corriente + saldo pendiente
+//
+// El "fiado a cuenta corriente" es justamente la pata que faltaba: plata vendida
+// que no entró por caja y que tampoco figura en el saldo de la reserva (el
+// check-out a cta cte deja la reserva saldada y muda la deuda a la cuenta).
+
+/** Una estadía cerrada (check-out real) con su liquidación ya agregada. */
+export type ClosedStay = {
+  actualCheckOut: string;
+  /** Venta final de la estadía: alojamiento neto de descuento + extras. */
+  totalPrice: number;
+  baseTotalPrice: number;
+  discountAmount: number;
+  paidAmount: number;
+  /** Pagos con plata de verdad (cualquier método salvo vale blanco). */
+  paymentsMoney: number;
+  /** Pagos con vale blanco (consumo interno: no es plata que entra). */
+  paymentsVale: number;
+  /** Cargado a la cuenta corriente del cliente al cerrar (fiado). */
+  creditCharged: number;
+};
+
+export type SalesSettlement = {
+  stays: number;
+  /** Venta total de las estadías cerradas en el período (alojamiento + extras). */
+  sales: number;
+  lodging: number;
+  extras: number;
+  collectedMoney: number;
+  vale: number;
+  credit: number;
+  pending: number;
+  /** sales − (collectedMoney + vale + credit + pending). Cero = los libros cierran. */
+  unreconciled: number;
+};
+
+/**
+ * Liquidación de las estadías cerradas dentro de [rangeStart, rangeEnd] (inclusive),
+ * bucketeadas por el día del hotel del check-out real. `unreconciled` es el testigo:
+ * si sale distinto de 0 hay filas inconsistentes y el tablero lo tiene que mostrar
+ * en vez de disimularlo.
+ */
+export function buildSalesSettlement(
+  stays: ClosedStay[],
+  rangeStartKey: string,
+  rangeEndKey: string,
+  tz: string
+): SalesSettlement {
+  const acc = {
+    stays: 0,
+    sales: 0,
+    lodging: 0,
+    extras: 0,
+    collectedMoney: 0,
+    vale: 0,
+    credit: 0,
+    pending: 0,
+  };
+
+  for (const s of stays) {
+    const key = hotelDateKey(s.actualCheckOut, tz);
+    if (key < rangeStartKey || key > rangeEndKey) continue;
+    const lodging = s.baseTotalPrice - s.discountAmount;
+    acc.stays += 1;
+    acc.sales += s.totalPrice;
+    acc.lodging += lodging;
+    acc.extras += s.totalPrice - lodging;
+    acc.collectedMoney += s.paymentsMoney;
+    acc.vale += s.paymentsVale;
+    acc.credit += s.creditCharged;
+    acc.pending += s.totalPrice - s.paidAmount;
+  }
+
+  const sales = round2(acc.sales);
+  const collectedMoney = round2(acc.collectedMoney);
+  const vale = round2(acc.vale);
+  const credit = round2(acc.credit);
+  const pending = round2(acc.pending);
+
+  return {
+    stays: acc.stays,
+    sales,
+    lodging: round2(acc.lodging),
+    extras: round2(acc.extras),
+    collectedMoney,
+    vale,
+    credit,
+    pending,
+    unreconciled: round2(sales - (collectedMoney + vale + credit + pending)),
+  };
+}
+
+/** Un movimiento de cuenta corriente para bucketear por período. */
+export type AccountMovementPoint = { tipo: "cargo" | "pago"; amount: number; createdAt: string };
+
+/** Lo que se fió y lo que se cobró de cuenta corriente dentro del período. */
+export type AccountFlow = { charged: number; collected: number };
+
+/**
+ * Flujo de cuenta corriente del período. `collected` es plata que entró de verdad
+ * (empresas saldando su cuenta) y que NO pasa por `payments` ni por el arqueo, así
+ * que sin esto quedaba invisible en todo el tablero.
+ */
+export function sumAccountMovements(
+  movements: AccountMovementPoint[],
+  rangeStartKey: string,
+  rangeEndKey: string,
+  tz: string
+): AccountFlow {
+  let charged = 0;
+  let collected = 0;
+  for (const m of movements) {
+    const key = hotelDateKey(m.createdAt, tz);
+    if (key < rangeStartKey || key > rangeEndKey) continue;
+    if (m.tipo === "cargo") charged += m.amount;
+    else collected += m.amount;
+  }
+  return { charged: round2(charged), collected: round2(collected) };
 }

@@ -269,7 +269,10 @@ export default function PaymentModal({
                     <span className="text-sm">Vale Blanco</span>
                   </label>
                 )}
-                {accountCreditEnabled && (
+                {/* Cta. Cte. solo en el check-out: fiar no es un pago suelto, genera
+                    el cargo en la cuenta del cliente. Fuera del check-out el RPC lo
+                    rechaza (mig 89); mejor ni ofrecerlo. */}
+                {accountCreditEnabled && isCheckoutMode && (
                   <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cuenta_corriente" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
                     <input type="radio" name="method" value="cuenta_corriente" checked={method === "cuenta_corriente"} onChange={() => setMethod("cuenta_corriente")} className="sr-only" />
                     <Wallet size={18} className="text-purple-500" />

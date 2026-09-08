@@ -43,6 +43,8 @@ type ShiftCopyProps = {
   checkoutsCount: number;
   cobradoRows: Array<[string, number]>;
   totalIncome: number;
+  /** Fiado a cuenta corriente en el turno. No es cobrado: va aparte del TOTAL. */
+  creditCharged: number;
   paymentsList: Array<{
     id: string;
     time: string;
@@ -72,6 +74,7 @@ function ShiftCopy(props: ShiftCopyProps) {
     checkoutsCount,
     cobradoRows,
     totalIncome,
+    creditCharged,
     paymentsList,
     notes,
     printedAt,
@@ -119,6 +122,15 @@ function ShiftCopy(props: ShiftCopyProps) {
         <span>TOTAL:</span>
         <span>{money(totalIncome)}</span>
       </p>
+      {creditCharged > 0 && (
+        <>
+          <p className="row">
+            <span>Fiado cta cte:</span>
+            <span>{money(creditCharged)}</span>
+          </p>
+          <p className="row small indent">no cobrado, va a la cuenta</p>
+        </>
+      )}
 
       <hr />
       <p className="section">ARQUEO EFECTIVO</p>
@@ -213,15 +225,22 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
   }
 
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
-  const { shift, totalsByMethod, totalIncome, checkoutsCount, payments, openedByEmail, closedByEmail } =
-    summary;
+  const {
+    shift,
+    totalsByMethod,
+    totalIncome,
+    creditCharged,
+    checkoutsCount,
+    payments,
+    openedByEmail,
+    closedByEmail,
+  } = summary;
   // Medios fijos que siempre salen (aunque den 0) + los eventuales que tuvieron
   // movimiento. "Tarjeta" agrupa credito + debito.
   const cobradoRows: Array<[string, number]> = [
     ["Efectivo", totalsByMethod.cash],
     ["Tarjeta", totalsByMethod.credit_card + totalsByMethod.debit_card],
     ["Vale Blanco", totalsByMethod.vale_blanco],
-    ["Cta Cte", totalsByMethod.cuenta_corriente],
     ...(
       [
         ["Mercado Pago", totalsByMethod.mercado_pago],
@@ -245,6 +264,7 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     checkoutsCount,
     cobradoRows,
     totalIncome,
+    creditCharged,
     paymentsList: payments.map((payment) => ({
       id: payment.id,
       time: formatHotelTime(payment.created_at, tz),

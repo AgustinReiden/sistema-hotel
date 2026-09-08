@@ -278,6 +278,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
             shiftId={summary.shift.id}
             shiftNumber={summary.shift.shift_number}
             totalsByMethod={summary.totalsByMethod}
+            creditCharged={summary.creditCharged}
             checkoutsCount={summary.checkoutsCount}
             afterClose={isAdmin ? "refresh" : "logout"}
             hotelTimezone={hotelTimezone}
