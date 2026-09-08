@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, DollarSign, FileText, Loader2, ScrollText, Search, UserRound, Wallet, X } from "lucide-react";
+import { Building2, DollarSign, FileText, Loader2, Printer, ScrollText, Search, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { loadCtaCteAccountAction, registerAccountPaymentAction } from "./actions";
@@ -11,6 +11,16 @@ import type { CtaCteAccount, CtaCteMovimiento } from "@/lib/types";
 
 function money(n: number) {
   return `$${Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+}
+
+/** Comprobante de cta cte (el que firma el cliente), en la misma ventana que usa RoomCard. */
+function openAccountVoucher(movementId: string) {
+  if (typeof window === "undefined") return;
+  window.open(
+    `/admin/comprobante-cc/${movementId}?autoprint=1`,
+    `comprobante-cc-${movementId}`,
+    "width=420,height=720"
+  );
 }
 
 function BalanceTag({ balance }: { balance: number }) {
@@ -328,12 +338,27 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
                       {m.notes ? ` · ${m.notes}` : ""}
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 font-bold ${m.tipo === "cargo" ? "text-red-600" : "text-emerald-600"}`}
-                  >
-                    {m.tipo === "cargo" ? "+" : "−"}
-                    {money(m.amount)}
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`font-bold ${m.tipo === "cargo" ? "text-red-600" : "text-emerald-600"}`}
+                    >
+                      {m.tipo === "cargo" ? "+" : "−"}
+                      {money(m.amount)}
+                    </span>
+                    {/* El comprobante que firma el cliente ya existía, pero sólo se
+                        abría solo al cerrar el check-out: sin esto no había forma de
+                        reimprimirlo después. */}
+                    {m.tipo === "cargo" && m.reservation_id && (
+                      <button
+                        type="button"
+                        onClick={() => openAccountVoucher(m.id)}
+                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Reimprimir el comprobante de cuenta corriente"
+                      >
+                        <Printer size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

@@ -1,4 +1,5 @@
 import { cbteLetra, formatCbteNumero, formatCuit, isNotaCredito } from "@/lib/arca/amounts";
+import { defaultStayDescription } from "@/lib/billing";
 import { qrPngDataUrl } from "@/lib/arca/qr";
 import { getFiscalSettings, getHotelSettings, getInvoiceById, getInvoiceStays } from "@/lib/data";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
@@ -60,17 +61,26 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
     );
   }
 
-  // Consolidada (mig 79): cubre N estadías. El detalle sólo va al impreso —
-  // WSFEv1 no recibe renglones, únicamente totales.
-  const isConsolidada = invoice.kind === "consolidada";
-  const stays = isConsolidada ? await getInvoiceStays(invoice.id).catch(() => []) : [];
-
   // Nota de crédito (mig 80): anula el comprobante referenciado. AFIP lo exige en
   // el <CbtesAsoc> del envío y RG 1415 en la representación impresa.
   const isNC = isNotaCredito(invoice.cbte_tipo);
   const anulado = invoice.nota_credito_de
     ? await getInvoiceById(invoice.nota_credito_de).catch(() => null)
     : null;
+
+  // Consolidada (mig 79): cubre N estadías. El detalle sólo va al impreso —
+  // WSFEv1 no recibe renglones, únicamente totales.
+  // La NC de una consolidada tiene que decir lo mismo que la factura que anula, y
+  // sus estadías cuelgan del comprobante original (que la NC ya desvinculó).
+  const isConsolidada = invoice.kind === "consolidada" || anulado?.kind === "consolidada";
+  const stays = !isConsolidada
+    ? []
+    : invoice.kind === "consolidada"
+      ? await getInvoiceStays(invoice.id).catch(() => [])
+      : await getInvoiceStays(invoice.nota_credito_de as string, true).catch(() => []);
+  // La NC hereda la nota del comprobante que anula: los dos papeles tienen que
+  // decir lo mismo.
+  const detalleNota = invoice.detalle_nota ?? (isNC ? anulado?.detalle_nota ?? null : null);
 
   const qrDataUrl = invoice.qr_url ? await qrPngDataUrl(invoice.qr_url) : null;
   const numero = formatCbteNumero(invoice.pto_vta, invoice.cbte_nro);
@@ -191,10 +201,9 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
             </div>
             {stays.map((s) => (
               <div className="row small" key={s.reservation_id}>
-                <span>
-                  Hab. {s.room_number ?? "—"} · {formatDateCol(s.fch_desde)} al{" "}
-                  {formatDateCol(s.fch_hasta)}
-                </span>
+                {/* Texto congelado al emitir (mig 93). Las facturas anteriores no
+                    lo tienen y caen al automático, que es lo que mostraban. */}
+                <span>{s.descripcion ?? defaultStayDescription(s)}</span>
                 <span>${money(s.amount)}</span>
               </div>
             ))}
@@ -204,6 +213,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
                 {formatDateCol(invoice.fch_serv_desde)} al {formatDateCol(invoice.fch_serv_hasta)}
               </span>
             </div>
+            {detalleNota && <p className="nota">{detalleNota}</p>}
           </>
         ) : (
           <>
@@ -331,6 +341,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
         .tipo-cod { font-size: 8pt; font-weight: 700; }
         .transparencia { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; }
         .transparencia-title { font-size: 8pt; font-weight: 800; text-align: center; margin: 0 0 2px; }
+        .thermal .nota { font-size: 9pt; font-weight: 700; margin: 3px 0 1px; word-break: break-word; }
         .leyenda { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; font-size: 7.5pt; font-weight: 700; text-align: justify; }
         .leyenda p { margin: 0; }
         .qr-wrap { display: flex; justify-content: center; margin: 6px 0 2px; }

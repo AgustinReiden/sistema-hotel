@@ -732,6 +732,8 @@ export type InvoiceRecord = {
   qr_url: string | null;
   last_error: string | null;
   attempt_count: number;
+  /** Nota libre al pie del detalle, escrita por el admin al emitir (mig 93). */
+  detalle_nota: string | null;
 };
 
 /**
@@ -799,10 +801,28 @@ export type InvoiceStayRow = {
   amount: number;
   fch_desde: string; // date
   fch_hasta: string; // date
+  /**
+   * Texto impreso de la línea, congelado al emitir (mig 93). NULL en las
+   * facturas anteriores a esa migración: el impreso cae al texto automático.
+   */
+  descripcion: string | null;
 };
 
-/** Un cargo de cuenta corriente pendiente de facturar (selector de la consolidada). */
-export type CcChargeToInvoiceRow = {
+/** Estado fiscal de una estadía de cuenta corriente. */
+export type CcStayEstado =
+  | "pendiente"
+  | "en_proceso"
+  | "facturado"
+  | "facturado_consolidado"
+  /** El admin declaró que se facturó fuera del sistema (mig 82). */
+  | "facturado_externo";
+
+/**
+ * Una estadía de cuenta corriente de un cliente, facturada o no (mig 90). Antes
+ * la lista traía sólo lo pendiente; ahora trae todo, porque controlar una cuenta
+ * corriente es ver también lo que ya salió y con qué comprobante.
+ */
+export type CcAccountStayRow = {
   reservation_id: string;
   movimiento_id: string;
   room_number: string | null;
@@ -815,6 +835,17 @@ export type CcChargeToInvoiceRow = {
   actual_check_out: string;
   /** true si hubo cobro en caja además del cargo: se factura sólo el cargo. */
   mixed_payment: boolean;
+  /** Se puede tildar para incluirla en una consolidada nueva. */
+  facturable: boolean;
+  estado: CcStayEstado;
+  invoice_id: string | null;
+  invoice_kind: InvoiceKind | null;
+  invoice_status: string | null;
+  cbte_tipo: number | null;
+  pto_vta: number | null;
+  cbte_nro: number | null;
+  cbte_fch: string | null; // date
+  external_ref: string | null;
 };
 
 /**
@@ -883,6 +914,14 @@ export type ConsolidatedInvoicePayload = {
   condicionIva?: ReceptorCondicionCuit;
   razonSocial?: string;
   domicilio?: string;
+  /**
+   * Texto impreso de cada línea (mig 93). Los importes NO se mandan: salen del
+   * cargo de cuenta corriente, así que el detalle nunca puede contradecir el
+   * total que después lleva CAE.
+   */
+  detalle?: { reservationId: string; descripcion: string }[];
+  /** Nota libre al pie del detalle. */
+  nota?: string;
 };
 
 /** Resultado de emitInvoice para la UI (toast + acción). */

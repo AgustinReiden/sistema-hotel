@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 
 import { emitInvoice } from "@/lib/arca/emitter";
-import { createConsolidatedInvoiceDraft, listCcChargesToInvoice } from "@/lib/data";
+import { createConsolidatedInvoiceDraft, listCcAccountStays } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import type {
   ActionResult,
-  CcChargeToInvoiceRow,
+  CcAccountStayRow,
   ConsolidatedInvoicePayload,
   CtaCteClientKind,
   EmitInvoiceOutcome,
@@ -20,16 +20,19 @@ function revalidateFiscalViews() {
   revalidatePath("/admin/cuentas");
 }
 
-/** Cargos de cuenta corriente del cliente que todavía no tienen comprobante fiscal. */
-export async function loadCcChargesAction(
+/**
+ * Estadías de cuenta corriente del cliente: las pendientes de facturar y las que
+ * ya salieron, con su comprobante (mig 90 y 93).
+ */
+export async function loadCcAccountStaysAction(
   kind: CtaCteClientKind,
   clientId: string
-): Promise<ActionResult<CcChargeToInvoiceRow[]>> {
+): Promise<ActionResult<CcAccountStayRow[]>> {
   try {
-    const rows = await listCcChargesToInvoice(kind, clientId);
+    const rows = await listCcAccountStays(kind, clientId);
     return { success: true, data: rows };
   } catch (error: unknown) {
-    const parsed = parseActionError(error, "No se pudieron cargar las estadías a facturar.");
+    const parsed = parseActionError(error, "No se pudieron cargar las estadías de la cuenta.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }
