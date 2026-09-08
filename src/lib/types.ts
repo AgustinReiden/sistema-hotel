@@ -555,6 +555,13 @@ export type AssignWalkInPayload =
       stayType?: WalkInStayType;
     } & GuestRegistryInput);
 
+/**
+ * Cómo se salda una estadía. OJO: `cuenta_corriente` es una forma de CERRAR el
+ * check-out (fiar), no un medio de pago: no genera fila en `payments` sino un cargo
+ * en la cuenta del cliente. Desde la migración 89 la base lo prohíbe en
+ * payments.payment_method por CHECK, así que solo puede viajar a los RPCs de
+ * check-out (rpc_staff_checkout_reservation / rpc_staff_early_checkout).
+ */
 export type PaymentMethod = "cash" | "credit_card" | "debit_card" | "bank_transfer" | "other" | "mercado_pago" | "vale_blanco" | "cuenta_corriente";
 
 export type Payment = {
@@ -613,6 +620,12 @@ export type ShiftSummary = {
   totalsByMethod: Record<PaymentMethod, number>;
   totalIncome: number;
   cashIncome: number;
+  /**
+   * Fiado a cuenta corriente en este turno: Σ cargos de las reservas cuyo check-out
+   * quedó ligado al turno. No es plata cobrada y no entra en totalIncome, pero es
+   * parte de lo que se cerró en el turno y el recepcionista lo tiene que ver.
+   */
+  creditCharged: number;
   payments: ShiftPaymentRow[];
   openedByEmail: string | null;
   closedByEmail: string | null;

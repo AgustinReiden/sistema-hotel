@@ -8,6 +8,8 @@ type Props = {
   shiftNumber: number;
   openedByName: string | null;
   totalsByMethod: Record<PaymentMethod, number>;
+  /** Fiado a cuenta corriente del turno que se está rindiendo. */
+  creditCharged: number;
   checkoutsCount: number;
 };
 
@@ -21,6 +23,7 @@ export default function ForcedShiftHandover({
   shiftNumber,
   openedByName,
   totalsByMethod,
+  creditCharged,
   checkoutsCount,
 }: Props) {
   const quien = openedByName ?? "otro usuario";
@@ -32,6 +35,7 @@ export default function ForcedShiftHandover({
         shiftId={shiftId}
         shiftNumber={shiftNumber}
         totalsByMethod={totalsByMethod}
+        creditCharged={creditCharged}
         checkoutsCount={checkoutsCount}
         afterClose="reopen"
         dismissable={false}

@@ -11,17 +11,23 @@ import {
   buildOccupancyHistogram,
   buildRevenueByRoomType,
   buildRoomBreakdown,
+  buildSalesSettlement,
   buildWeekdaySeasonality,
   computeWindowKpis,
+  sumAccountMovements,
   countDaysInclusive,
   hotelRangeToUtc,
   pctDelta,
   previousPeriodRange,
   summarizeRoomBreakdown,
+  type AccountFlow,
+  type AccountMovementPoint,
+  type ClosedStay,
   type CreatedReservation,
   type CreatedRoomReservation,
   type DailyOccupancy,
   type DailyTotal,
+  type SalesSettlement,
   type NightlyReservation,
   type PaymentPoint,
   type RoomBreakdownRow,
@@ -2008,6 +2014,12 @@ export async function updateWhatsappStatus(reservationId: string, notified: bool
 export type KpiWithDelta = { current: number; previous: number; deltaPct: number | null };
 
 export type DashboardKpis = {
+  /** Venta cerrada del período: total de las estadías con check-out en el rango. */
+  closedSales: KpiWithDelta;
+  /** De esa venta, lo que entró en plata (sin vale blanco). */
+  closedCollectedMoney: KpiWithDelta;
+  /** De esa venta, lo que se fió a cuenta corriente. */
+  closedCredit: KpiWithDelta;
   lodgingRevenue: KpiWithDelta;
   totalPaymentsIncome: KpiWithDelta;
   totalPaymentsIncomeNoVale: KpiWithDelta;
@@ -2037,6 +2049,13 @@ export type ManagementDashboardData = {
   revenueByRoomType: { room_type: string; total: number }[];
   paymentMethods: { method: string; total: number }[];
   extraChargesByType: { charge_type: string; total: number }[];
+  /**
+   * Cierre de ventas del período: la única cuenta que da exacta
+   * (venta = dinero + vale blanco + fiado + saldo). Ver buildSalesSettlement.
+   */
+  settlement: SalesSettlement;
+  /** Movimientos de cuenta corriente del período: lo fiado y lo cobrado. */
+  accountFlow: AccountFlow;
   // Cobranzas (snapshot actual, no acotado al rango)
   accountsReceivable: number;
   currentAccountDebt: number;
@@ -2073,6 +2092,8 @@ export async function getManagementDashboardData(
     overlapRes,
     createdRes,
     paymentsRes,
+    closedRes,
+    ccMovRes,
     extrasRes,
     shiftsRes,
     cleaningRes,
@@ -2102,10 +2123,31 @@ export async function getManagementDashboardData(
       .select("amount, payment_method, created_at")
       .gte("created_at", unionWindow.startUtc)
       .lt("created_at", unionWindow.endUtcExclusive),
-    // Recargos extra del período actual.
+    // Estadías CERRADAS (check-out real) en la ventana unión, con su liquidación:
+    // pagos por método y cargos a cuenta corriente. Es la cohorte donde la venta ya
+    // está terminada y cierra exacto contra cobrado + fiado + saldo.
+    supabase
+      .from("reservations")
+      .select(
+        "actual_check_out, total_price, base_total_price, discount_amount, paid_amount, payments(amount, payment_method), cuenta_corriente_movimientos(amount, tipo)"
+      )
+      .eq("status", "checked_out")
+      .not("actual_check_out", "is", null)
+      .gte("actual_check_out", unionWindow.startUtc)
+      .lt("actual_check_out", unionWindow.endUtcExclusive),
+    // Movimientos de cuenta corriente de la ventana unión: lo que se fió y lo que
+    // las empresas pagaron a cuenta (plata real que no pasa por `payments`).
+    supabase
+      .from("cuenta_corriente_movimientos")
+      .select("tipo, amount, created_at")
+      .gte("created_at", unionWindow.startUtc)
+      .lt("created_at", unionWindow.endUtcExclusive),
+    // Recargos extra del período actual. Las reservas canceladas quedan fuera: sus
+    // cargos nunca se vendieron y ensuciaban el gráfico de extras.
     supabase
       .from("extra_charges")
-      .select("charge_type, amount, created_at")
+      .select("charge_type, amount, created_at, reservations!inner(status)")
+      .neq("reservations.status", "cancelled")
       .gte("created_at", current.startUtc)
       .lt("created_at", current.endUtcExclusive),
     // Arqueos cerrados en el período (discrepancias).
@@ -2135,7 +2177,11 @@ export async function getManagementDashboardData(
       .is("resolved_at", null),
   ]);
 
-  if (overlapRes.error) throw overlapRes.error;
+  // Un error acá no puede quedar en silencio: mostraría $0 como si fuera un dato
+  // real, que es exactamente lo que hacía desconfiar del tablero.
+  for (const res of [overlapRes, paymentsRes, closedRes, ccMovRes, extrasRes, receivableRes]) {
+    if (res.error) throw res.error;
+  }
 
   const activeRooms = (roomsRes.data ?? []).length;
 
@@ -2179,6 +2225,52 @@ export async function getManagementDashboardData(
     (paymentsRes.data ?? []) as { amount: number | string; payment_method: string; created_at: string }[]
   ).map((p) => ({ amount: Number(p.amount) || 0, method: p.payment_method, createdAt: p.created_at }));
 
+  type ClosedRow = {
+    actual_check_out: string;
+    total_price: number | string | null;
+    base_total_price: number | string | null;
+    discount_amount: number | string | null;
+    paid_amount: number | string | null;
+    payments: { amount: number | string; payment_method: string }[] | null;
+    cuenta_corriente_movimientos: { amount: number | string; tipo: string }[] | null;
+  };
+
+  const closedStays: ClosedStay[] = ((closedRes.data ?? []) as unknown as ClosedRow[]).map((r) => {
+    const pays = r.payments ?? [];
+    const sumPays = (keep: (method: string) => boolean) =>
+      pays.reduce((sum, p) => (keep(p.payment_method) ? sum + (Number(p.amount) || 0) : sum), 0);
+    // Un pago con método `cuenta_corriente` es fiado mal cargado: suma como crédito,
+    // nunca como plata cobrada (ver NON_CASH_METHODS en ./analytics).
+    const credited =
+      sumPays((m) => m === "cuenta_corriente") +
+      (r.cuenta_corriente_movimientos ?? []).reduce(
+        (sum, m) => (m.tipo === "cargo" ? sum + (Number(m.amount) || 0) : sum),
+        0
+      );
+    return {
+      actualCheckOut: r.actual_check_out,
+      totalPrice: Number(r.total_price) || 0,
+      baseTotalPrice: Number(r.base_total_price) || 0,
+      discountAmount: Number(r.discount_amount) || 0,
+      paidAmount: Number(r.paid_amount) || 0,
+      paymentsMoney: sumPays((m) => m !== "vale_blanco" && m !== "cuenta_corriente"),
+      paymentsVale: sumPays((m) => m === "vale_blanco"),
+      creditCharged: credited,
+    };
+  });
+
+  const ccMovements: AccountMovementPoint[] = (
+    (ccMovRes.data ?? []) as { tipo: string; amount: number | string; created_at: string }[]
+  ).map((m) => ({
+    tipo: m.tipo === "pago" ? "pago" : "cargo",
+    amount: Number(m.amount) || 0,
+    createdAt: m.created_at,
+  }));
+
+  const settlement = buildSalesSettlement(closedStays, startKey, endKey, tz);
+  const prevSettlement = buildSalesSettlement(closedStays, prev.start, prev.end, tz);
+  const accountFlow = sumAccountMovements(ccMovements, startKey, endKey, tz);
+
   // ── KPIs con comparación período vs. período (mismos datos, dos sub-rangos) ──
   const kpiArgs = { reservationsOverlap: overlap, reservationsCreated: created, payments, activeRooms, tz };
   const cur = computeWindowKpis({ ...kpiArgs, rangeStartKey: startKey, rangeEndKey: endKey });
@@ -2186,6 +2278,9 @@ export async function getManagementDashboardData(
   const delta = (a: number, b: number): KpiWithDelta => ({ current: a, previous: b, deltaPct: pctDelta(a, b) });
 
   const kpis: DashboardKpis = {
+    closedSales: delta(settlement.sales, prevSettlement.sales),
+    closedCollectedMoney: delta(settlement.collectedMoney, prevSettlement.collectedMoney),
+    closedCredit: delta(settlement.credit, prevSettlement.credit),
     lodgingRevenue: delta(cur.lodgingRevenue, prvKpis.lodgingRevenue),
     totalPaymentsIncome: delta(cur.totalPaymentsIncome, prvKpis.totalPaymentsIncome),
     totalPaymentsIncomeNoVale: delta(cur.totalPaymentsIncomeNoVale, prvKpis.totalPaymentsIncomeNoVale),
@@ -2277,6 +2372,8 @@ export async function getManagementDashboardData(
     revenueByRoomType,
     paymentMethods,
     extraChargesByType,
+    settlement,
+    accountFlow,
     accountsReceivable,
     currentAccountDebt,
     topDebtors,
@@ -2539,6 +2636,22 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
 
   if (checkoutsError) throw checkoutsError;
 
+  // Fiado del turno: cargos a cuenta corriente de los check-outs rendidos acá. No
+  // pasa por `payments` (por eso no toca el arqueo), pero sin mostrarlo la rendición
+  // esconde plata vendida.
+  const { data: creditData, error: creditError } = await supabase
+    .from("cuenta_corriente_movimientos")
+    .select("amount, reservations!inner(checkout_cash_shift_id)")
+    .eq("tipo", "cargo")
+    .eq("reservations.checkout_cash_shift_id", shiftId);
+
+  if (creditError) throw creditError;
+
+  const creditCharged = ((creditData ?? []) as { amount: number | string }[]).reduce(
+    (sum, m) => sum + (Number(m.amount) || 0),
+    0
+  );
+
   const totalsByMethod: Record<PaymentMethod, number> = {
     cash: 0,
     credit_card: 0,
@@ -2570,6 +2683,7 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
     totalsByMethod,
     totalIncome,
     cashIncome,
+    creditCharged: Math.round((creditCharged + Number.EPSILON) * 100) / 100,
     payments,
     openedByEmail,
     closedByEmail,
@@ -3612,7 +3726,15 @@ export async function getCtaCteBillingProfiles(): Promise<Record<string, Invoice
   return map;
 }
 
-/** Cargos de cuenta corriente de un cliente pendientes de facturar (admin). */
+/**
+ * Cargos de cuenta corriente de un cliente pendientes de facturar (admin).
+ *
+ * La RPC devuelve TODAS las estadías de cuenta corriente del cliente con su estado
+ * de facturación; el filtro por `facturable` vive acá. Ojo: se llamaba
+ * `rpc_list_cc_charges_to_invoice` y en PROD había sido reemplazada por
+ * `rpc_list_cc_account_stays` sin que quedara migración ni se actualizara este
+ * llamado, así que la pantalla venía fallando (ver migración 90).
+ */
 export async function listCcChargesToInvoice(
   kind: CtaCteClientKind,
   clientId: string,
@@ -3620,25 +3742,27 @@ export async function listCcChargesToInvoice(
   to?: string
 ): Promise<CcChargeToInvoiceRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_list_cc_charges_to_invoice", {
+  const { data, error } = await supabase.rpc("rpc_list_cc_account_stays", {
     p_kind: kind,
     p_client_id: clientId,
     p_from: from ?? null,
     p_to: to ?? null,
   });
   if (error) throw error;
-  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-    reservation_id: String(r.reservation_id),
-    movimiento_id: String(r.movimiento_id),
-    room_number: (r.room_number as string | null) ?? null,
-    passenger: (r.passenger as string | null) ?? null,
-    fch_desde: String(r.fch_desde),
-    fch_hasta: String(r.fch_hasta),
-    amount: Number(r.amount) || 0,
-    total_price: Number(r.total_price) || 0,
-    actual_check_out: String(r.actual_check_out),
-    mixed_payment: Boolean(r.mixed_payment),
-  }));
+  return ((data ?? []) as Array<Record<string, unknown>>)
+    .filter((r) => r.facturable !== false)
+    .map((r) => ({
+      reservation_id: String(r.reservation_id),
+      movimiento_id: String(r.movimiento_id),
+      room_number: (r.room_number as string | null) ?? null,
+      passenger: (r.passenger as string | null) ?? null,
+      fch_desde: String(r.fch_desde),
+      fch_hasta: String(r.fch_hasta),
+      amount: Number(r.amount) || 0,
+      total_price: Number(r.total_price) || 0,
+      actual_check_out: String(r.actual_check_out),
+      mixed_payment: Boolean(r.mixed_payment),
+    }));
 }
 
 /**
