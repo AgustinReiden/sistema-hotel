@@ -8,10 +8,40 @@
 export type MetricInfo = { title: string; what: string; how: string };
 
 export const METRIC_INFO = {
-  // ── Tablero general ──
+  // ── Tablero general: la plata del período ──
+  closedSales: {
+    title: "Venta cerrada del período",
+    what: "Lo que facturaron las estadías que TERMINARON en el período (alojamiento + extras). Es la venta que ya está cerrada: no puede cambiar más.",
+    how: "Suma del precio total de las reservas con check-out real dentro del período. Es la única cifra que cierra exacto contra cobrado + vale blanco + fiado + saldo.",
+  },
+  closedCollectedMoney: {
+    title: "Cobrado en dinero",
+    what: "De esa venta cerrada, cuánto entró en plata de verdad (efectivo, tarjetas, transferencia, Mercado Pago).",
+    how: "Suma de los pagos de esas estadías, excluyendo vale blanco y los cargados como cuenta corriente (que son fiado, no cobranza).",
+  },
+  closedCredit: {
+    title: "Fiado a cuenta corriente",
+    what: "De esa venta cerrada, cuánto se fió a empresas o huéspedes con cuenta corriente. Es plata vendida que NO entró por caja y que hay que ir a cobrar después.",
+    how: "Suma de los cargos a cuenta corriente generados por esas estadías al hacer el check-out.",
+  },
+  settlement: {
+    title: "Cómo se cerró la venta",
+    what: "La cuenta completa del período: toda venta cerrada terminó en una de cuatro cajas — cobrada en dinero, consumida con vale blanco, fiada a cuenta corriente, o todavía impaga.",
+    how: "Venta cerrada = cobrado en dinero + vale blanco + fiado a cuenta corriente + saldo impago. Si no da exacto, el tablero avisa: hay datos inconsistentes.",
+  },
+  accountCollected: {
+    title: "Cobranzas de cuenta corriente",
+    what: "Plata que las empresas y huéspedes pagaron en el período para bajar su deuda de cuenta corriente. Corresponde a estadías viejas, por eso no está en la venta del período.",
+    how: "Suma de los pagos a cuenta registrados dentro del período. No pasan por la caja ni por el arqueo.",
+  },
+  totalToCollect: {
+    title: "Total a cobrar (hoy)",
+    what: "Todo lo que te deben hoy, junto: saldos de reservas activas más deuda de cuenta corriente. Es una foto de hoy, no del período elegido.",
+    how: "Saldo pendiente de reservas confirmadas o alojadas + saldo deudor de todas las cuentas corrientes.",
+  },
   lodgingRevenue: {
-    title: "Ingreso alojamiento",
-    what: "Lo que generaron las noches vendidas en el período, sin contar extras (minibar, daños, media estadía). Es devengado: cuenta la noche aunque el huésped todavía no la haya pagado.",
+    title: "Ingreso alojamiento (devengado)",
+    what: "Lo que generaron las noches dormidas dentro del período, sin contar extras (minibar, daños, media estadía). Es devengado: cuenta la noche aunque el huésped siga alojado y todavía no haya pagado. Por eso NO coincide con la venta cerrada ni con la caja: es la base de ADR y RevPAR.",
     how: "Por cada reserva: (precio base − descuento) ÷ noches totales × las noches que caen dentro del período. Se suman todas.",
   },
   occupancyRate: {
@@ -30,14 +60,14 @@ export const METRIC_INFO = {
     how: "Ingreso de alojamiento ÷ noches disponibles. Equivale a ADR × ocupación.",
   },
   totalPaymentsIncome: {
-    title: "Caja cobrada",
-    what: "Plata que realmente entró en el período (todos los medios de pago), sin importar a qué reserva corresponde ni cuándo fue la estadía.",
+    title: "Caja cobrada del período",
+    what: "Todos los pagos registrados en el período, sin importar a qué reserva corresponden ni cuándo fue la estadía (incluye señas de estadías futuras y vale blanco). Es el movimiento de caja, no la venta.",
     how: "Suma de todos los pagos registrados con fecha dentro del período, en la zona horaria del hotel.",
   },
   totalPaymentsIncomeNoVale: {
-    title: "Caja sin Vale Blanco",
-    what: "La caja cobrada descontando los pagos con vale blanco, que no son plata que entra. Es la venta real en dinero del período.",
-    how: "Suma de los pagos del período excluyendo los de método Vale Blanco.",
+    title: "Caja en dinero",
+    what: "La caja del período dejando solo plata de verdad: sin vale blanco (consumo interno) y sin los pagos marcados como cuenta corriente (que son fiado).",
+    how: "Suma de los pagos del período excluyendo los métodos Vale Blanco y Cuenta Corriente.",
   },
   guestNights: {
     title: "Pasajeros-noche",

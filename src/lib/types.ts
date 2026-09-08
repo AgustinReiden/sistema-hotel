@@ -613,6 +613,12 @@ export type ShiftSummary = {
   totalsByMethod: Record<PaymentMethod, number>;
   totalIncome: number;
   cashIncome: number;
+  /**
+   * Fiado a cuenta corriente en este turno: Σ cargos de las reservas cuyo check-out
+   * quedó ligado al turno. No es plata cobrada y no entra en totalIncome, pero es
+   * parte de lo que se cerró en el turno y el recepcionista lo tiene que ver.
+   */
+  creditCharged: number;
   payments: ShiftPaymentRow[];
   openedByEmail: string | null;
   closedByEmail: string | null;

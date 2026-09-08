@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
 import { getActiveOpenShift } from "@/lib/data";
 import { formatHotelTime } from "@/lib/time";
+import { localToISO } from "@/lib/format";
+import { addDaysToDateKey } from "@/lib/analytics";
 
 export const revalidate = 0; // Ensure fresh data on every load
 
@@ -48,11 +50,11 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
     const todayLocalStr = new Date().toLocaleDateString('en-CA', { timeZone: hotelTimezone });
     const selectedDateStr = params.date || todayLocalStr;
 
-    // Compute UTC start/end of the selected day in hotel's local timezone
-    const localMidnight = new Date(`${selectedDateStr}T00:00:00`);
-    const utcOffsetMs = localMidnight.getTime() - new Date(localMidnight.toLocaleString('en-US', { timeZone: hotelTimezone })).getTime();
-    const dayStartUTC = new Date(localMidnight.getTime() - utcOffsetMs);
-    const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
+    // Límites del día EN LA ZONA DEL HOTEL. El cálculo anterior partía de
+    // `new Date("YYYY-MM-DDT00:00:00")`, que se interpreta en la zona del servidor:
+    // desplegado en UTC mostraba los cobros de otro día.
+    const dayStartUTC = localToISO(selectedDateStr, "00:00", hotelTimezone);
+    const dayEndUTC = localToISO(addDaysToDateKey(selectedDateStr, 1), "00:00", hotelTimezone);
 
     const [paymentsResult, reservationsResult, extraIncomeResult, openShift] = await Promise.all([
         supabase
@@ -61,8 +63,8 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                 id, amount, payment_method, created_at, notes,
                 reservation:reservations(id, client_name, rooms(room_number))
             `)
-            .gte('created_at', dayStartUTC.toISOString())
-            .lt('created_at', dayEndUTC.toISOString())
+            .gte('created_at', dayStartUTC)
+            .lt('created_at', dayEndUTC)
             .order('created_at', { ascending: false }),
         supabase
             .from('reservations')
@@ -72,13 +74,32 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
             `)
             .in('status', ['confirmed', 'checked_in'])
             .order('check_out_target', { ascending: true }),
-        supabase.rpc('get_today_extra_income'),
+        // Cargos extra del día ELEGIDO. Antes usaba get_today_extra_income(), que
+        // está clavada en la fecha de hoy: al filtrar por otro día la tarjeta seguía
+        // mostrando la de hoy. Se excluyen los de reservas canceladas (nunca se
+        // vendieron).
+        supabase
+            .from('extra_charges')
+            .select('amount, reservations!inner(status)')
+            .eq('charge_type', 'half_day')
+            .neq('reservations.status', 'cancelled')
+            .gte('created_at', dayStartUTC)
+            .lt('created_at', dayEndUTC),
         getActiveOpenShift().catch(() => null),
     ]);
 
     const payments = paymentsResult.data || [];
     const todayIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const todayExtraIncome = Number(extraIncomeResult.data || 0);
+    const todayExtraIncome = (extraIncomeResult.data || []).reduce(
+        (sum, e) => sum + Number((e as { amount: number | string }).amount || 0),
+        0
+    );
+    // Lo cobrado no es todo plata: el vale blanco es consumo interno y un pago
+    // marcado "cuenta corriente" es fiado. Se muestran aparte para no inflar la caja.
+    const nonCashIncome = payments
+        .filter(p => p.payment_method === 'vale_blanco' || p.payment_method === 'cuenta_corriente')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+    const cashIncome = todayIncome - nonCashIncome;
     const debts = (reservationsResult.data || []).filter(r => Number(r.total_price) > Number(r.paid_amount));
     const totalDebtPending = debts.reduce((sum, r) => sum + (Number(r.total_price) - Number(r.paid_amount)), 0);
     const isToday = selectedDateStr === todayLocalStr;
@@ -147,7 +168,15 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                         <h2 className="text-4xl font-bold tracking-tight">${todayIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
                     </div>
                     <div className="relative z-10 mt-6 text-sm text-emerald-100 opacity-90">
-                        Total en caja cobrado hoy (Efectivo/T.C/etc).
+                        {nonCashIncome > 0 ? (
+                            <>
+                                ${cashIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en dinero
+                                {" + "}
+                                ${nonCashIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en vale blanco / cta. cte.
+                            </>
+                        ) : (
+                            "Total cobrado en el día (efectivo, tarjetas, transferencia, MP)."
+                        )}
                     </div>
                 </div>
 
@@ -158,12 +187,12 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                     <div className="relative z-10">
                         <div className="flex items-center gap-2 text-indigo-100 font-medium mb-1">
                             <TrendingUp size={16} />
-                            Ingresos Extra (Medio Día)
+                            Cargos Extra (Medio Día)
                         </div>
                         <h2 className="text-4xl font-bold tracking-tight">${todayExtraIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
                     </div>
                     <div className="relative z-10 mt-6 text-sm text-indigo-100 opacity-90">
-                        Cargos generados por extensiones de reservas o walk-ins extra.
+                        Cargos del día por extensiones o walk-ins. Ya están dentro del total de cada reserva: no se suman a la caja.
                     </div>
                 </div>
 

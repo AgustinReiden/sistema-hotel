@@ -22,8 +22,11 @@ import {
   weekdayOfKey,
   summarizeRoomBreakdown,
   computeWindowKpis,
+  buildSalesSettlement,
+  sumAccountMovements,
   type DailyOccupancy,
   type DailyTotal,
+  type ClosedStay,
   type NightlyReservation,
   type RoomInfo,
 } from "@/lib/analytics";
@@ -332,6 +335,24 @@ describe("computeWindowKpis", () => {
     expect(kpis.totalPaymentsIncomeNoVale).toBe(8000); // sin los 2000 de VB
   });
 
+  it("un pago marcado 'cuenta_corriente' no cuenta como plata cobrada", () => {
+    // Es fiado mal cargado (mig 89 lo prohíbe): contarlo como caja infla la venta.
+    const kpis = computeWindowKpis({
+      reservationsOverlap: [],
+      reservationsCreated: [],
+      payments: [
+        { amount: 5000, method: "cash", createdAt: "2026-07-03T12:00:00-03:00" },
+        { amount: 50000, method: "cuenta_corriente", createdAt: "2026-07-03T12:00:00-03:00" },
+      ],
+      rangeStartKey: "2026-07-01",
+      rangeEndKey: "2026-07-10",
+      activeRooms: 10,
+      tz: TZ,
+    });
+    expect(kpis.totalPaymentsIncome).toBe(55000); // el bruto sigue mostrando todo
+    expect(kpis.totalPaymentsIncomeNoVale).toBe(5000); // plata de verdad: solo el efectivo
+  });
+
   it("cuenta pasajeros-noche en base física y excluye canceladas", () => {
     const r1 = resv({
       // 3 noches físicas (02..04), 2 pasajeros → 6 pax-noche
@@ -554,5 +575,149 @@ describe("buildRoomBreakdown", () => {
     expect(totals.reservations).toBe(2);
     expect(totals.cancellations).toBe(1);
     expect(totals.cleanings).toBe(3);
+  });
+});
+
+// ─────────────────────── Cierre de ventas del período ───────────────────────
+
+function stay(partial: Partial<ClosedStay> = {}): ClosedStay {
+  return {
+    actualCheckOut: "2026-07-13T10:00:00-03:00",
+    totalPrice: 100000,
+    baseTotalPrice: 100000,
+    discountAmount: 0,
+    paidAmount: 100000,
+    paymentsMoney: 100000,
+    paymentsVale: 0,
+    creditCharged: 0,
+    ...partial,
+  };
+}
+
+describe("buildSalesSettlement", () => {
+  it("cierra exacto: venta = dinero + vale blanco + fiado + saldo", () => {
+    const s = buildSalesSettlement(
+      [
+        stay({ paymentsMoney: 100000 }),
+        // Fiado a cuenta corriente: la reserva queda saldada pero no entró plata.
+        stay({ totalPrice: 80000, baseTotalPrice: 80000, paidAmount: 80000, paymentsMoney: 0, creditCharged: 80000 }),
+        // Vale blanco: consumo interno, tampoco es plata.
+        stay({ totalPrice: 50000, baseTotalPrice: 50000, paidAmount: 50000, paymentsMoney: 0, paymentsVale: 50000 }),
+      ],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(s.stays).toBe(3);
+    expect(s.sales).toBe(230000);
+    expect(s.collectedMoney).toBe(100000);
+    expect(s.vale).toBe(50000);
+    expect(s.credit).toBe(80000);
+    expect(s.pending).toBe(0);
+    expect(s.unreconciled).toBe(0);
+  });
+
+  it("separa alojamiento de extras usando base − descuento", () => {
+    const s = buildSalesSettlement(
+      [stay({ baseTotalPrice: 100000, discountAmount: 20000, totalPrice: 110000, paidAmount: 110000, paymentsMoney: 110000 })],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(s.lodging).toBe(80000);
+    expect(s.extras).toBe(30000);
+    expect(s.sales).toBe(110000);
+    expect(s.unreconciled).toBe(0);
+  });
+
+  it("cuenta el saldo impago y sigue cerrando", () => {
+    const s = buildSalesSettlement(
+      [stay({ totalPrice: 100000, paidAmount: 60000, paymentsMoney: 60000 })],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(s.pending).toBe(40000);
+    expect(s.unreconciled).toBe(0);
+  });
+
+  it("delata el descuadre en vez de disimularlo", () => {
+    // paid_amount dice 100000 pero no hay pagos ni cargos que lo respalden.
+    const s = buildSalesSettlement(
+      [stay({ paidAmount: 100000, paymentsMoney: 0 })],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(s.unreconciled).toBe(100000);
+  });
+
+  it("bucketea el check-out en la zona del hotel, no en UTC", () => {
+    // 2026-07-31 23:00 en Tucumán es 2026-08-01T02:00Z: pertenece a julio.
+    const julio = buildSalesSettlement(
+      [stay({ actualCheckOut: "2026-08-01T02:00:00Z" })],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(julio.stays).toBe(1);
+    const agosto = buildSalesSettlement(
+      [stay({ actualCheckOut: "2026-08-01T02:00:00Z" })],
+      "2026-08-01",
+      "2026-08-31",
+      TZ
+    );
+    expect(agosto.stays).toBe(0);
+  });
+
+  it("ignora las estadías fuera del rango", () => {
+    const s = buildSalesSettlement(
+      [stay({ actualCheckOut: "2026-06-30T10:00:00-03:00" }), stay()],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(s.stays).toBe(1);
+    expect(s.sales).toBe(100000);
+  });
+
+  it("sin estadías devuelve todo en cero", () => {
+    const s = buildSalesSettlement([], "2026-07-01", "2026-07-31", TZ);
+    expect(s).toEqual({
+      stays: 0,
+      sales: 0,
+      lodging: 0,
+      extras: 0,
+      collectedMoney: 0,
+      vale: 0,
+      credit: 0,
+      pending: 0,
+      unreconciled: 0,
+    });
+  });
+});
+
+describe("sumAccountMovements", () => {
+  it("separa lo fiado de lo cobrado dentro del rango", () => {
+    const flow = sumAccountMovements(
+      [
+        { tipo: "cargo", amount: 50000, createdAt: "2026-07-05T12:00:00-03:00" },
+        { tipo: "cargo", amount: 30000, createdAt: "2026-07-20T12:00:00-03:00" },
+        { tipo: "pago", amount: 60000, createdAt: "2026-07-25T12:00:00-03:00" },
+        { tipo: "pago", amount: 999, createdAt: "2026-08-02T12:00:00-03:00" },
+      ],
+      "2026-07-01",
+      "2026-07-31",
+      TZ
+    );
+    expect(flow).toEqual({ charged: 80000, collected: 60000 });
+  });
+
+  it("bucketea en la zona del hotel", () => {
+    const movs: Parameters<typeof sumAccountMovements>[0] = [
+      { tipo: "pago", amount: 10000, createdAt: "2026-08-01T02:00:00Z" },
+    ];
+    expect(sumAccountMovements(movs, "2026-07-01", "2026-07-31", TZ).collected).toBe(10000);
+    expect(sumAccountMovements(movs, "2026-08-01", "2026-08-31", TZ).collected).toBe(0);
   });
 });
