@@ -61,7 +61,7 @@ export function stepAfterYes(prefillComplete: boolean): InvoiceStep {
 }
 
 /**
- * Largos máximos del detalle editable de la factura consolidada (mig 89). La
+ * Largos máximos del detalle editable de la factura consolidada (mig 93). La
  * comandera son 72 mm de ancho útil: más que esto envuelve y deja el ticket
  * ilegible. Los CHECK de `invoice_reservations.descripcion` y
  * `invoices.detalle_nota` usan los mismos números.
@@ -75,7 +75,7 @@ export const DETALLE_NOTA_MAX = 200;
  * ticket) y recorta. Devuelve null si no queda nada, para que el servidor caiga
  * al texto automático.
  *
- * ESPEJO DE `app_sanitize_detalle` (mig 89). Si cambia uno, cambia el otro.
+ * ESPEJO DE `app_sanitize_detalle` (mig 90). Si cambia uno, cambia el otro.
  * El enforcement real vive en la base; esto es para que la UI muestre lo mismo
  * que se va a guardar.
  */
@@ -92,7 +92,7 @@ export function sanitizeDetalleLine(text: string | null | undefined, max = DETAL
  * Texto por defecto de una línea del detalle. ASCII a propósito: es lo que se
  * imprime en la comandera térmica.
  *
- * ESPEJO DE `app_default_stay_description` (mig 89).
+ * ESPEJO DE `app_default_stay_description` (mig 90).
  */
 export function defaultStayDescription(stay: {
   room_number: string | null;

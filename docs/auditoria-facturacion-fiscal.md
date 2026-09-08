@@ -15,7 +15,7 @@ Dos cosas distintas:
 
 1. **Un bug que hacía imposible emitir una consolidada** (C-01). No era una hipótesis: el RPC
    fallaba en la primera llamada. Estaba ahí desde la migración 79 (2026-07-31) y se arrastró
-   por la 80 y la 81. **Corregido** en la migración 89 y verificado ejecutándolo.
+   por la 80 y la 81. **Corregido** en la migración 93 y verificado ejecutándolo.
 2. **El 87% de la cuenta corriente no se puede facturar por datos fiscales faltantes o mal
    cargados** (C-02). Eso no lo arregla el código: son decisiones de negocio y datos que hay
    que cargar.
@@ -62,7 +62,7 @@ antes con `P0025` y nadie llegó nunca a ejecutar el camino entero. Las verifica
 anteriores contaron funciones y firmas, que es exactamente lo que este bug no rompe: plpgsql
 no valida el cuerpo al crear la función.
 
-**Estado: CORREGIDO** en `89_detalle_editable_consolidada.sql` (`(array_agg(m.id ORDER BY
+**Estado: CORREGIDO** en `93_detalle_editable_consolidada.sql` (`(array_agg(m.id ORDER BY
 m.id))[1]`, mismo "elegí uno, siempre el mismo") y verificado emitiendo un draft real de 70
 estadías por $3.960.000, con neto/IVA cuadrando, que después se revirtió.
 

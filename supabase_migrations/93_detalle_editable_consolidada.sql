@@ -75,9 +75,12 @@ ALTER TABLE public.invoices
 --    ignorara en silencio, un detalle mal armado saldría impreso con el texto
 --    automático y nadie se enteraría.
 -- ─────────────────────────────────────────────────────────────────────────────
+-- El DROP saca la firma vieja de 7 argumentos (dos overloads conviviendo dejarian a
+-- PostgREST eligiendo cual llamar); el CREATE OR REPLACE deja la migracion
+-- re-ejecutable sobre una base que ya la tenga.
 DROP FUNCTION IF EXISTS public.rpc_create_consolidated_invoice_draft(TEXT, UUID, UUID[], TEXT, TEXT, TEXT, TEXT);
 
-CREATE FUNCTION public.rpc_create_consolidated_invoice_draft(
+CREATE OR REPLACE FUNCTION public.rpc_create_consolidated_invoice_draft(
   p_kind            TEXT,
   p_client_id       UUID,
   p_reservation_ids UUID[],
@@ -138,7 +141,7 @@ BEGIN
     RAISE EXCEPTION 'Selecciona al menos una estadia para facturar.' USING errcode = 'P0028';
   END IF;
 
-  -- Detalle: se valida ANTES de tocar nada. Todo lo que pase por acá va a salir
+  -- Detalle: se valida ANTES de tocar nada. Todo lo que pase por aca va a salir
   -- impreso en un comprobante fiscal.
   IF p_detalle IS NOT NULL THEN
     IF jsonb_typeof(p_detalle) <> 'array' THEN
@@ -166,14 +169,14 @@ BEGIN
   SELECT COALESCE(NULLIF(BTRIM(timezone), ''), 'America/Argentina/Tucuman')
   INTO v_tz FROM public.hotel_settings LIMIT 1;
 
-  -- Lock determinístico por id: evita deadlock entre dos admins consolidando a la vez.
+  -- Lock deterministico por id: evita deadlock entre dos admins consolidando a la vez.
   PERFORM 1 FROM public.reservations r
   WHERE r.id = ANY (v_ids)
   ORDER BY r.id
   FOR UPDATE;
 
-  -- Agrupado por reserva: si alguna tuviera más de un cargo, se suman en una sola
-  -- fila (si no, el conteo daría un P0029 falso y el INSERT de abajo violaría la PK).
+  -- Agrupado por reserva: si alguna tuviera mas de un cargo, se suman en una sola
+  -- fila (si no, el conteo daria un P0029 falso y el INSERT de abajo violaria la PK).
   FOR v_row IN
     SELECT r.id AS res_id, r.status AS res_status,
            SUM(m.amount) AS amount,
@@ -258,7 +261,7 @@ BEGIN
       RAISE EXCEPTION 'Huesped no encontrado.' USING errcode = 'P0002';
     END IF;
 
-    -- Con datos de facturación en la ficha (mig 81) se factura como corresponda;
+    -- Con datos de facturacion en la ficha (mig 81) se factura como corresponda;
     -- sin ellos, B con DNI, que es el default de siempre.
     v_cond_txt := lower(BTRIM(COALESCE(NULLIF(BTRIM(p_condicion_iva), ''), v_g.condicion_iva, '')));
 
@@ -302,7 +305,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- Redondeo SOBRE EL TOTAL. Sumar netos por estadía rompería invoices_amounts_add_up.
+  -- Redondeo SOBRE EL TOTAL. Sumar netos por estadia romperia invoices_amounts_add_up.
   v_total := round(v_total, 2);
   v_neto := round(v_total / (1 + v_s.iva_pct / 100), 2);
   v_iva := v_total - v_neto;
@@ -323,16 +326,16 @@ BEGIN
   )
   RETURNING id INTO v_invoice_id;
 
-  -- Filas ya lockeadas arriba, y agrupadas igual que el loop (una por estadía).
-  -- La descripción se congela acá: la que escribió el admin, o la automática.
+  -- Filas ya lockeadas arriba, y agrupadas igual que el loop (una por estadia).
+  -- La descripcion se congela aca: la que escribio el admin, o la automatica.
   --
-  -- BUG CORREGIDO (venía desde la mig 79 y se arrastró por la 80 y la 81): acá
-  -- decía `MIN(m.id)` sobre una columna UUID, y en Postgres no existe min(uuid).
+  -- BUG CORREGIDO (venia desde la mig 79 y se arrastro por la 80 y la 81): aca
+  -- decia `MIN(m.id)` sobre una columna UUID, y en Postgres no existe min(uuid).
   -- O sea que este INSERT reventaba con "function min(uuid) does not exist" en
   -- CUALQUIER llamada: la factura consolidada nunca pudo emitirse desde que se
-  -- escribió. No se notó porque la facturación electrónica está deshabilitada y
-  -- nunca se llegó a ejecutar el camino completo.
-  -- array_agg ordenado da el mismo "elegí uno, siempre el mismo" que se buscaba.
+  -- escribio. No se noto porque la facturacion electronica esta deshabilitada y
+  -- nunca se llego a ejecutar el camino completo.
+  -- array_agg ordenado da el mismo "elegi uno, siempre el mismo" que se buscaba.
   INSERT INTO public.invoice_reservations
     (invoice_id, reservation_id, cc_movimiento_id, amount, room_number, fch_desde, fch_hasta, descripcion)
   SELECT v_invoice_id, r.id, (array_agg(m.id ORDER BY m.id))[1], SUM(m.amount), ro.room_number,

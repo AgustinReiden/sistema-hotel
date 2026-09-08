@@ -201,7 +201,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
             </div>
             {stays.map((s) => (
               <div className="row small" key={s.reservation_id}>
-                {/* Texto congelado al emitir (mig 89). Las facturas anteriores no
+                {/* Texto congelado al emitir (mig 93). Las facturas anteriores no
                     lo tienen y caen al automático, que es lo que mostraban. */}
                 <span>{s.descripcion ?? defaultStayDescription(s)}</span>
                 <span>${money(s.amount)}</span>

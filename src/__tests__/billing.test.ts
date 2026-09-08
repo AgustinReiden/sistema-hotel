@@ -113,7 +113,7 @@ describe("stepAfterYes", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Detalle editable de la factura consolidada (mig 89).
+// Detalle editable de la factura consolidada (mig 93).
 // Espejo de app_sanitize_detalle / app_default_stay_description: lo que se
 // pruebe acá tiene que valer igual en la base.
 // ═══════════════════════════════════════════════════════════════════════════

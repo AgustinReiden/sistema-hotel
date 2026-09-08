@@ -732,7 +732,7 @@ export type InvoiceRecord = {
   qr_url: string | null;
   last_error: string | null;
   attempt_count: number;
-  /** Nota libre al pie del detalle, escrita por el admin al emitir (mig 89). */
+  /** Nota libre al pie del detalle, escrita por el admin al emitir (mig 93). */
   detalle_nota: string | null;
 };
 
@@ -802,7 +802,7 @@ export type InvoiceStayRow = {
   fch_desde: string; // date
   fch_hasta: string; // date
   /**
-   * Texto impreso de la línea, congelado al emitir (mig 89). NULL en las
+   * Texto impreso de la línea, congelado al emitir (mig 93). NULL en las
    * facturas anteriores a esa migración: el impreso cae al texto automático.
    */
   descripcion: string | null;
@@ -818,7 +818,7 @@ export type CcStayEstado =
   | "facturado_externo";
 
 /**
- * Una estadía de cuenta corriente de un cliente, facturada o no (mig 89). Antes
+ * Una estadía de cuenta corriente de un cliente, facturada o no (mig 90). Antes
  * la lista traía sólo lo pendiente; ahora trae todo, porque controlar una cuenta
  * corriente es ver también lo que ya salió y con qué comprobante.
  */
@@ -915,7 +915,7 @@ export type ConsolidatedInvoicePayload = {
   razonSocial?: string;
   domicilio?: string;
   /**
-   * Texto impreso de cada línea (mig 89). Los importes NO se mandan: salen del
+   * Texto impreso de cada línea (mig 93). Los importes NO se mandan: salen del
    * cargo de cuenta corriente, así que el detalle nunca puede contradecir el
    * total que después lleva CAE.
    */

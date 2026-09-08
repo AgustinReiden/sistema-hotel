@@ -80,7 +80,7 @@ export default function ConsolidadaClient({
   const [condicionIva, setCondicionIva] = useState<ReceptorCondicionCuit | "">("");
   const [domicilio, setDomicilio] = useState("");
 
-  // Detalle impreso: texto por estadía + nota al pie (mig 89). Los importes NO se
+  // Detalle impreso: texto por estadía + nota al pie (mig 93). Los importes NO se
   // editan, salen del cargo de cuenta corriente.
   // Se guardan sólo los textos que el admin cambió; el resto se deriva en el
   // render. Así "restaurar" es vaciar el mapa y no hay estado que sincronizar
@@ -367,7 +367,7 @@ export default function ConsolidadaClient({
         </section>
       )}
 
-      {/* 3) Detalle impreso (mig 89) */}
+      {/* 3) Detalle impreso (mig 93) */}
       {selectedKey && selectedRows.length > 0 && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">

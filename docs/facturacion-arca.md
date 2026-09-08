@@ -125,7 +125,7 @@ cliente → un comprobante. Detalles que importan:
   estadía: el redondeo por fila rompe `invoices_amounts_add_up` (hay tests).
 - El detalle de estadías va **sólo al impreso**. WSFEv1 no recibe renglones, sólo
   totales, así que para ARCA una consolidada es un total más grande.
-- **El detalle es editable antes de emitir (mig 89).** El admin puede reescribir el
+- **El detalle es editable antes de emitir (mig 93).** El admin puede reescribir el
   texto de cada línea y agregar una nota al pie (típico: la orden de compra de la
   empresa). Los **importes no se editan**: salen del cargo de cuenta corriente, así
   que el detalle impreso nunca puede contradecir el total que lleva CAE. El texto se

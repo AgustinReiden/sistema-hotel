@@ -22,7 +22,7 @@ function revalidateFiscalViews() {
 
 /**
  * Estadías de cuenta corriente del cliente: las pendientes de facturar y las que
- * ya salieron, con su comprobante (mig 89).
+ * ya salieron, con su comprobante (mig 90 y 93).
  */
 export async function loadCcAccountStaysAction(
   kind: CtaCteClientKind,
