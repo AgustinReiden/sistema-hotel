@@ -3726,7 +3726,15 @@ export async function getCtaCteBillingProfiles(): Promise<Record<string, Invoice
   return map;
 }
 
-/** Cargos de cuenta corriente de un cliente pendientes de facturar (admin). */
+/**
+ * Cargos de cuenta corriente de un cliente pendientes de facturar (admin).
+ *
+ * La RPC devuelve TODAS las estadías de cuenta corriente del cliente con su estado
+ * de facturación; el filtro por `facturable` vive acá. Ojo: se llamaba
+ * `rpc_list_cc_charges_to_invoice` y en PROD había sido reemplazada por
+ * `rpc_list_cc_account_stays` sin que quedara migración ni se actualizara este
+ * llamado, así que la pantalla venía fallando (ver migración 90).
+ */
 export async function listCcChargesToInvoice(
   kind: CtaCteClientKind,
   clientId: string,
@@ -3734,25 +3742,27 @@ export async function listCcChargesToInvoice(
   to?: string
 ): Promise<CcChargeToInvoiceRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_list_cc_charges_to_invoice", {
+  const { data, error } = await supabase.rpc("rpc_list_cc_account_stays", {
     p_kind: kind,
     p_client_id: clientId,
     p_from: from ?? null,
     p_to: to ?? null,
   });
   if (error) throw error;
-  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-    reservation_id: String(r.reservation_id),
-    movimiento_id: String(r.movimiento_id),
-    room_number: (r.room_number as string | null) ?? null,
-    passenger: (r.passenger as string | null) ?? null,
-    fch_desde: String(r.fch_desde),
-    fch_hasta: String(r.fch_hasta),
-    amount: Number(r.amount) || 0,
-    total_price: Number(r.total_price) || 0,
-    actual_check_out: String(r.actual_check_out),
-    mixed_payment: Boolean(r.mixed_payment),
-  }));
+  return ((data ?? []) as Array<Record<string, unknown>>)
+    .filter((r) => r.facturable !== false)
+    .map((r) => ({
+      reservation_id: String(r.reservation_id),
+      movimiento_id: String(r.movimiento_id),
+      room_number: (r.room_number as string | null) ?? null,
+      passenger: (r.passenger as string | null) ?? null,
+      fch_desde: String(r.fch_desde),
+      fch_hasta: String(r.fch_hasta),
+      amount: Number(r.amount) || 0,
+      total_price: Number(r.total_price) || 0,
+      actual_check_out: String(r.actual_check_out),
+      mixed_payment: Boolean(r.mixed_payment),
+    }));
 }
 
 /**

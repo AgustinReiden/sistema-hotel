@@ -175,4 +175,14 @@ ALTER TABLE public.payments ADD CONSTRAINT payments_payment_method_check
     'cash', 'credit_card', 'debit_card', 'bank_transfer', 'other', 'mercado_pago', 'vale_blanco'
   ));
 
+
+-- Anotar en el registro de migraciones (nace en la 91; si todavia no existe,
+-- la 91 la backfillea, asi que este bloque no falla en una base desde cero).
+DO $$
+BEGIN
+  IF to_regprocedure('public.record_migration(text, text)') IS NOT NULL THEN
+    PERFORM public.record_migration('89_pago_cta_cte_solo_por_checkout.sql');
+  END IF;
+END $$;
+
 COMMIT;
