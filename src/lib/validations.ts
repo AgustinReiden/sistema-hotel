@@ -243,10 +243,29 @@ export const associatedClientSchema = z.object({
     .string()
     .trim()
     .min(2, "El nombre del asociado debe tener al menos 2 caracteres."),
+  // Se valida de verdad: 7-8 digitos (DNI) u 11 con digito verificador (CUIT).
+  // Antes alcanzaba con 6 caracteres cualesquiera, y asi entraron CUIT que despues
+  // no dejan facturar (uno de 12 digitos, otro con el verificador mal).
   documentId: z
     .string()
     .trim()
-    .min(6, "El DNI o CUIT debe tener al menos 6 caracteres."),
+    .min(6, "El DNI o CUIT debe tener al menos 6 caracteres.")
+    .refine(
+      (value) => {
+        const digits = value.replace(/\D/g, "");
+        if (digits.length === 7 || digits.length === 8) return true;
+        return isValidCuit(digits);
+      },
+      "Ingresa un DNI de 7 u 8 digitos, o un CUIT de 11 digitos valido."
+    ),
+  razonSocial: z.preprocess(
+    (value) => {
+      if (typeof value !== "string") return value;
+      const trimmed = value.trim();
+      return trimmed === "" ? undefined : trimmed;
+    },
+    z.string().max(120, "La razon social no puede superar los 120 caracteres.").optional()
+  ),
   phone: optionalPhoneSchema,
   discountPercent: percentageSchema,
   condicionIva: z

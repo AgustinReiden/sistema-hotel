@@ -179,6 +179,7 @@ type AssociatedClientRow = {
   is_active: boolean;
   cuenta_corriente_habilitada?: boolean | null;
   condicion_iva?: string | null;
+  razon_social?: string | null;
   domicilio?: string | null;
   facturacion_modo?: string | null;
   created_at: string;
@@ -203,6 +204,7 @@ function toAssociatedClient(row: AssociatedClientRow): AssociatedClient {
     is_active: row.is_active,
     cuenta_corriente_habilitada: Boolean(row.cuenta_corriente_habilitada),
     condicion_iva: (row.condicion_iva as AssociatedClient["condicion_iva"] | undefined) ?? null,
+    razon_social: row.razon_social ?? null,
     domicilio: row.domicilio ?? null,
     facturacion_modo: (row.facturacion_modo as FacturacionModo | undefined) ?? "por_checkout",
     created_at: row.created_at,
@@ -619,6 +621,11 @@ const EMPTY_PREFILL: InvoiceReceptorPrefill = {
   complete: false,
 };
 
+function nonEmpty(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 /** Datos de facturación de una ficha, normalizados para el modal del check-out. */
 function toInvoicePrefill(
   client: BillingClientRow | undefined,
@@ -631,8 +638,14 @@ function toInvoicePrefill(
   const digits = (client.document_id ?? client.cuit ?? "").replace(/\D/g, "");
   const cuit = isValidCuit(digits) ? digits : "";
   const cond = client.condicion_iva;
+  // La razón social (nombre legal) manda sobre el nombre operativo: dos áreas de la
+  // misma empresa se llaman distinto en recepción pero facturan igual (mig 94).
   const razonSocial =
-    client.display_name ?? client.razon_social ?? client.full_name ?? fallbackName ?? "";
+    nonEmpty(client.razon_social) ??
+    nonEmpty(client.display_name) ??
+    nonEmpty(client.full_name) ??
+    fallbackName ??
+    "";
   const condicionIva =
     cond === "responsable_inscripto" || cond === "monotributo" || cond === "exento" ? cond : "";
   const domicilio = client.domicilio ?? client.domicilio_fiscal ?? "";
@@ -677,7 +690,7 @@ async function resolveBillingContextByReservation(
       ? supabase
           .from("associated_clients")
           .select(
-            "id, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, document_id, display_name, domicilio"
+            "id, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, document_id, display_name, razon_social, domicilio"
           )
           .in("id", companyIds)
       : Promise.resolve({ data: [], error: null }),
@@ -3718,7 +3731,7 @@ export async function getCtaCteBillingProfiles(): Promise<Record<string, Invoice
   const [companyRes, guestRes] = await Promise.all([
     supabase
       .from("associated_clients")
-      .select("id, cuenta_corriente_habilitada, condicion_iva, document_id, display_name, domicilio")
+      .select("id, cuenta_corriente_habilitada, condicion_iva, document_id, display_name, razon_social, domicilio")
       .eq("cuenta_corriente_habilitada", true),
     supabase
       .from("guests")

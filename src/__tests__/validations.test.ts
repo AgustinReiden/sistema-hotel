@@ -296,10 +296,14 @@ describe("checkInSchema", () => {
 });
 
 describe("associatedClientSchema", () => {
+  // CUIT real y valido (el del hotel). El de antes, 30-12345678-9, no pasa el
+  // modulo 11: desde la mig 94 el schema lo valida de verdad.
+  const CUIT_VALIDO = "30-70705453-7";
+
   it("accepts valid associated client input", () => {
     const result = associatedClientSchema.parse({
       displayName: "Empresa Uno",
-      documentId: "30-12345678-9",
+      documentId: CUIT_VALIDO,
       phone: "+54 381 4123456",
       discountPercent: "12.5",
       notes: "Tarifa corporativa",
@@ -313,10 +317,60 @@ describe("associatedClientSchema", () => {
     expect(() =>
       associatedClientSchema.parse({
         displayName: "Empresa Dos",
-        documentId: "30-12345678-9",
+        documentId: CUIT_VALIDO,
         discountPercent: 101,
       })
     ).toThrow();
+  });
+
+  // Los tres casos que en PROD dejaron cuentas sin poder facturar (mig 94).
+  it("rechaza un CUIT con el digito verificador mal", () => {
+    expect(() =>
+      associatedClientSchema.parse({
+        displayName: "JUFEC - DROGUERIA",
+        documentId: "30629421462", // el de PERFUMERIA con el ultimo digito cambiado
+        discountPercent: 0,
+      })
+    ).toThrow();
+  });
+
+  it("rechaza un CUIT de 12 o 13 digitos", () => {
+    expect(() =>
+      associatedClientSchema.parse({
+        displayName: "COMPANIA LA LEGUA SA",
+        documentId: "30-7070916787-8",
+        discountPercent: 0,
+      })
+    ).toThrow();
+  });
+
+  it("acepta un DNI de 7 u 8 digitos: no todo asociado es una empresa", () => {
+    for (const dni of ["1234567", "30123456"]) {
+      const result = associatedClientSchema.parse({
+        displayName: "Persona",
+        documentId: dni,
+        discountPercent: 0,
+      });
+      expect(result.documentId).toBe(dni);
+    }
+  });
+
+  it("la razon social es opcional y cae a undefined si esta vacia", () => {
+    const vacia = associatedClientSchema.parse({
+      displayName: "Empresa",
+      documentId: CUIT_VALIDO,
+      discountPercent: 0,
+      razonSocial: "   ",
+    });
+    expect(vacia.razonSocial).toBeUndefined();
+
+    const cargada = associatedClientSchema.parse({
+      displayName: "JUFEC - DROGUERIA",
+      documentId: CUIT_VALIDO,
+      discountPercent: 0,
+      razonSocial: "  JUFEC S.A.  ",
+    });
+    expect(cargada.razonSocial).toBe("JUFEC S.A.");
   });
 });
 
