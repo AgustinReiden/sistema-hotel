@@ -125,10 +125,23 @@ cliente → un comprobante. Detalles que importan:
   estadía: el redondeo por fila rompe `invoices_amounts_add_up` (hay tests).
 - El detalle de estadías va **sólo al impreso**. WSFEv1 no recibe renglones, sólo
   totales, así que para ARCA una consolidada es un total más grande.
+- **El detalle es editable antes de emitir (mig 89).** El admin puede reescribir el
+  texto de cada línea y agregar una nota al pie (típico: la orden de compra de la
+  empresa). Los **importes no se editan**: salen del cargo de cuenta corriente, así
+  que el detalle impreso nunca puede contradecir el total que lleva CAE. El texto se
+  **congela** en `invoice_reservations.descripcion` / `invoices.detalle_nota` al crear
+  el draft — incluso cuando no se editó, para que el comprobante se reimprima igual
+  dentro de tres años aunque cambie el formato del código. Después del CAE no hay
+  forma de cambiarlo: ninguna función escribe esas columnas fuera del draft y las
+  tablas no tienen policy de escritura. Corregir un detalle emitido es nota de crédito.
+- La lista muestra **todas** las estadías de la cuenta, no sólo las pendientes: las ya
+  cubiertas salen con su comprobante y el checkbox deshabilitado
+  (`rpc_list_cc_account_stays`, que reemplazó a `rpc_list_cc_charges_to_invoice`).
 - Una empresa sin `condicion_iva` cargada **no se puede consolidar** (`P0022`): se
   completa en el formulario y queda guardado en la ficha.
-- Un huésped particular se factura **B con DNI** de su ficha (no se agregaron
-  campos fiscales a `guests`).
+- Un huésped particular se factura **B con DNI** de su ficha, salvo que tenga datos
+  fiscales cargados (`condicion_iva`, `cuit`, `razon_social`, `domicilio_fiscal`), que
+  sí existen desde la **migración 81**; con ellos se factura como corresponda.
 - Si sale rechazada, las estadías siguen bloqueadas hasta que se **descarte** la
   factura; descartarla las libera. Si sale **autorizada con error**, corregirla
   exige nota de crédito, que la app todavía no emite.

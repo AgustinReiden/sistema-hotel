@@ -1,18 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, FileText, Loader2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, FileText, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import { isValidCuit } from "@/lib/arca/amounts";
+import { cbteLetra, formatCbteNumero, isValidCuit } from "@/lib/arca/amounts";
+import {
+  DETALLE_LINEA_MAX,
+  DETALLE_NOTA_MAX,
+  defaultStayDescription,
+  sanitizeDetalleLine,
+} from "@/lib/billing";
 import type {
-  CcChargeToInvoiceRow,
+  CcAccountStayRow,
   CtaCteAccount,
   CtaCteClientKind,
   InvoiceReceptorPrefill,
   ReceptorCondicionCuit,
 } from "@/lib/types";
-import { emitConsolidatedInvoiceAction, loadCcChargesAction } from "./actions";
+import { emitConsolidatedInvoiceAction, loadCcAccountStaysAction } from "./actions";
 
 type Props = {
   enabled: boolean;
@@ -37,6 +43,19 @@ function openInvoicePrint(invoiceId: string) {
   window.open(`/admin/factura/${invoiceId}?autoprint=1`, `factura-${invoiceId}`, "width=420,height=720");
 }
 
+/** Etiqueta del comprobante que ya cubre una estadía. */
+function coberturaLabel(r: CcAccountStayRow): string | null {
+  if (r.estado === "facturado_externo") {
+    return `Facturada afuera${r.external_ref ? `: ${r.external_ref}` : ""}`;
+  }
+  if (r.estado === "en_proceso") return "Factura en proceso";
+  if (r.cbte_tipo !== null && r.cbte_nro !== null && r.pto_vta !== null) {
+    const fecha = r.cbte_fch ? ` · ${shortDate(r.cbte_fch)}` : "";
+    return `Factura ${cbteLetra(r.cbte_tipo)} ${formatCbteNumero(r.pto_vta, r.cbte_nro)}${fecha}`;
+  }
+  return r.facturable ? null : "Ya facturada";
+}
+
 const inputClass =
   "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
 
@@ -50,7 +69,7 @@ export default function ConsolidadaClient({
   const [selectedKey, setSelectedKey] = useState<string>(
     preselectKind && preselectId ? `${preselectKind}:${preselectId}` : ""
   );
-  const [rows, setRows] = useState<CcChargeToInvoiceRow[]>([]);
+  const [rows, setRows] = useState<CcAccountStayRow[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [emitting, setEmitting] = useState(false);
@@ -60,6 +79,17 @@ export default function ConsolidadaClient({
   const [cuit, setCuit] = useState("");
   const [condicionIva, setCondicionIva] = useState<ReceptorCondicionCuit | "">("");
   const [domicilio, setDomicilio] = useState("");
+
+  // Detalle impreso: texto por estadía + nota al pie (mig 89). Los importes NO se
+  // editan, salen del cargo de cuenta corriente.
+  // Se guardan sólo los textos que el admin cambió; el resto se deriva en el
+  // render. Así "restaurar" es vaciar el mapa y no hay estado que sincronizar
+  // cada vez que cambia la selección.
+  const [detalleOverrides, setDetalleOverrides] = useState<Record<string, string>>({});
+  const [nota, setNota] = useState("");
+
+  const lineaDetalle = (r: CcAccountStayRow) =>
+    detalleOverrides[r.reservation_id] ?? defaultStayDescription(r);
 
   const [kind, id] = selectedKey ? (selectedKey.split(":") as [CtaCteClientKind, string]) : [null, null];
   const isCompany = kind === "company";
@@ -72,7 +102,7 @@ export default function ConsolidadaClient({
       return;
     }
     setLoading(true);
-    const result = await loadCcChargesAction(kind, id);
+    const result = await loadCcAccountStaysAction(kind, id);
     setLoading(false);
     if (!result.success) {
       toast.error(result.error);
@@ -80,9 +110,11 @@ export default function ConsolidadaClient({
       setPicked(new Set());
       return;
     }
-    setRows(result.data ?? []);
-    // Por defecto se selecciona todo: el caso normal es "facturame todo lo pendiente".
-    setPicked(new Set((result.data ?? []).map((r) => r.reservation_id)));
+    const data = result.data ?? [];
+    setRows(data);
+    // Por defecto se selecciona todo lo pendiente: el caso normal es
+    // "facturame todo lo que debe".
+    setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
   }, [kind, id]);
 
   useEffect(() => {
@@ -95,14 +127,37 @@ export default function ConsolidadaClient({
     setCuit(profile?.cuit ?? "");
     setCondicionIva(profile?.condicionIva ?? "");
     setDomicilio(profile?.domicilio ?? "");
+    setNota("");
   }, [profile]);
 
-  const selectedRows = rows.filter((r) => picked.has(r.reservation_id));
+  const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
+
+  // Las líneas se muestran en el mismo orden en que se van a imprimir (la factura
+  // ordena por fecha de entrada), no en el de la lista, que va del más reciente.
+  const selectedRows = useMemo(
+    () =>
+      rows
+        .filter((r) => picked.has(r.reservation_id))
+        .slice()
+        .sort((a, b) => a.fch_desde.localeCompare(b.fch_desde)),
+    [rows, picked]
+  );
+
   const total = selectedRows.reduce((sum, r) => sum + r.amount, 0);
   // La empresa siempre se factura con CUIT. Un huésped, sólo si su ficha tiene
   // condición IVA cargada (mig 81); si no, B con DNI, que es el default de siempre.
   const requiereCuit = isCompany || condicionIva !== "";
   const letra = !requiereCuit ? "B" : condicionIva === "exento" ? "B" : "A";
+
+  // El período va de la primera entrada a la última salida, igual que el servidor
+  // (LEAST/GREATEST), no del primer al último elemento de la lista.
+  const periodo =
+    selectedRows.length > 0
+      ? {
+          desde: selectedRows.reduce((min, r) => (r.fch_desde < min ? r.fch_desde : min), selectedRows[0].fch_desde),
+          hasta: selectedRows.reduce((max, r) => (r.fch_hasta > max ? r.fch_hasta : max), selectedRows[0].fch_hasta),
+        }
+      : null;
 
   const toggle = (reservationId: string) => {
     setPicked((current) => {
@@ -115,8 +170,16 @@ export default function ConsolidadaClient({
 
   const toggleAll = () => {
     setPicked((current) =>
-      current.size === rows.length ? new Set() : new Set(rows.map((r) => r.reservation_id))
+      current.size === facturables.length
+        ? new Set()
+        : new Set(facturables.map((r) => r.reservation_id))
     );
+  };
+
+  const restoreDetalle = () => {
+    setDetalleOverrides({});
+    setNota("");
+    toast.success("Detalle restaurado.");
   };
 
   const emit = async () => {
@@ -144,11 +207,19 @@ export default function ConsolidadaClient({
       }
     }
 
+    const notaLimpia = sanitizeDetalleLine(nota, DETALLE_NOTA_MAX);
+
     setEmitting(true);
     const result = await emitConsolidatedInvoiceAction({
       kind,
       clientId: id,
       reservationIds: selectedRows.map((r) => r.reservation_id),
+      detalle: selectedRows.map((r) => ({
+        reservationId: r.reservation_id,
+        // Si quedó vacío, el servidor pone el texto automático.
+        descripcion: sanitizeDetalleLine(lineaDetalle(r)) ?? "",
+      })),
+      ...(notaLimpia ? { nota: notaLimpia } : {}),
       ...(requiereCuit
         ? {
             cuit: cuit.replace(/\D/g, ""),
@@ -208,12 +279,12 @@ export default function ConsolidadaClient({
         </select>
       </section>
 
-      {/* 2) Estadías sin facturar */}
+      {/* 2) Estadías de la cuenta: pendientes y ya facturadas */}
       {selectedKey && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-slate-800">Estadías sin facturar</h3>
+              <h3 className="text-base font-bold text-slate-800">Estadías de la cuenta</h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Se factura el cargo a cuenta corriente de cada estadía, no el total de la reserva.
               </p>
@@ -234,43 +305,61 @@ export default function ConsolidadaClient({
               <p className="text-sm text-slate-400 text-center py-4">Cargando…</p>
             ) : rows.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-4">
-                Este cliente no tiene estadías pendientes de facturar 🎉
+                Este cliente no tiene estadías cargadas a cuenta corriente.
               </p>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={toggleAll}
-                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 mb-3"
-                >
-                  {picked.size === rows.length ? "Deseleccionar todo" : "Seleccionar todo"}
-                </button>
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <button
+                    type="button"
+                    onClick={toggleAll}
+                    disabled={facturables.length === 0}
+                    className="text-xs font-bold text-emerald-700 hover:text-emerald-800 disabled:text-slate-300"
+                  >
+                    {picked.size === facturables.length && facturables.length > 0
+                      ? "Deseleccionar todo"
+                      : "Seleccionar todo"}
+                  </button>
+                  <span className="text-xs text-slate-400">
+                    {facturables.length} sin facturar · {rows.length - facturables.length} ya cubiertas
+                  </span>
+                </div>
                 <ul className="divide-y divide-slate-100">
-                  {rows.map((r) => (
-                    <li key={r.reservation_id} className="py-2.5 flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={picked.has(r.reservation_id)}
-                        onChange={() => toggle(r.reservation_id)}
-                        className="w-4 h-4 accent-emerald-600 shrink-0"
-                        aria-label={`Incluir estadía de habitación ${r.room_number ?? "?"}`}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-slate-800 truncate">
-                          Hab. {r.room_number ?? "—"} · {shortDate(r.fch_desde)} → {shortDate(r.fch_hasta)}
-                          {r.passenger ? ` · ${r.passenger}` : ""}
-                        </p>
-                        {r.mixed_payment && (
-                          <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
-                            <AlertTriangle size={11} className="shrink-0" />
-                            Pago mixto: se factura sólo el cargo a cuenta (${money(r.amount)} de $
-                            {money(r.total_price)}).
+                  {rows.map((r) => {
+                    const cobertura = coberturaLabel(r);
+                    return (
+                      <li
+                        key={r.reservation_id}
+                        className={`py-2.5 flex items-center gap-3 ${r.facturable ? "" : "opacity-60"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={picked.has(r.reservation_id)}
+                          onChange={() => toggle(r.reservation_id)}
+                          disabled={!r.facturable}
+                          className="w-4 h-4 accent-emerald-600 shrink-0 disabled:cursor-not-allowed"
+                          aria-label={`Incluir estadía de habitación ${r.room_number ?? "?"}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-800 truncate">
+                            Hab. {r.room_number ?? "—"} · {shortDate(r.fch_desde)} → {shortDate(r.fch_hasta)}
+                            {r.passenger ? ` · ${r.passenger}` : ""}
                           </p>
-                        )}
-                      </div>
-                      <span className="text-sm font-bold text-slate-700 shrink-0">${money(r.amount)}</span>
-                    </li>
-                  ))}
+                          {r.facturable && r.mixed_payment && (
+                            <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
+                              <AlertTriangle size={11} className="shrink-0" />
+                              Pago mixto: se factura sólo el cargo a cuenta (${money(r.amount)} de $
+                              {money(r.total_price)}).
+                            </p>
+                          )}
+                          {cobertura && (
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{cobertura}</p>
+                          )}
+                        </div>
+                        <span className="text-sm font-bold text-slate-700 shrink-0">${money(r.amount)}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </>
             )}
@@ -278,8 +367,72 @@ export default function ConsolidadaClient({
         </section>
       )}
 
-      {/* 3) Receptor + emisión */}
-      {selectedKey && rows.length > 0 && (
+      {/* 3) Detalle impreso (mig 89) */}
+      {selectedKey && selectedRows.length > 0 && (
+        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Detalle del comprobante</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Es el texto que sale impreso. Los importes no se editan: salen del cargo a cuenta
+                corriente. Una vez emitida, el detalle no se puede cambiar.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={restoreDetalle}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              <RotateCcw size={13} /> Restaurar
+            </button>
+          </div>
+
+          <ul className="space-y-2">
+            {selectedRows.map((r) => (
+              <li key={r.reservation_id} className="flex items-center gap-3">
+                <input
+                  type="text"
+                  value={lineaDetalle(r)}
+                  maxLength={DETALLE_LINEA_MAX}
+                  onChange={(e) =>
+                    setDetalleOverrides((current) => ({
+                      ...current,
+                      [r.reservation_id]: e.target.value,
+                    }))
+                  }
+                  placeholder={defaultStayDescription(r)}
+                  className={`${inputClass} text-sm`}
+                  aria-label={`Descripción de la estadía de habitación ${r.room_number ?? "?"}`}
+                />
+                <span className="text-sm font-bold text-slate-700 shrink-0 w-28 text-right">
+                  ${money(r.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="cons-nota">
+              Nota al pie <span className="font-normal text-slate-400">(opcional)</span>
+            </label>
+            <input
+              id="cons-nota"
+              type="text"
+              value={nota}
+              maxLength={DETALLE_NOTA_MAX}
+              onChange={(e) => setNota(e.target.value)}
+              placeholder="Ej.: Orden de compra 4512"
+              className={inputClass}
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              {nota.length}/{DETALLE_NOTA_MAX} caracteres.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* 4) Receptor + emisión */}
+      {selectedKey && facturables.length > 0 && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
           <h3 className="text-base font-bold text-slate-800">Datos del receptor</h3>
 
@@ -383,12 +536,7 @@ export default function ConsolidadaClient({
               </p>
               <p className="text-xs text-slate-400">
                 Se emitirá una <strong>Factura {letra}</strong> con fecha de hoy, por el período{" "}
-                {selectedRows.length > 0
-                  ? `${shortDate(selectedRows[0].fch_desde)} → ${shortDate(
-                      selectedRows[selectedRows.length - 1].fch_hasta
-                    )}`
-                  : "—"}
-                .
+                {periodo ? `${shortDate(periodo.desde)} → ${shortDate(periodo.hasta)}` : "—"}.
               </p>
             </div>
             <button

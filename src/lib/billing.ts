@@ -59,3 +59,56 @@ export function initialInvoiceStep({
 export function stepAfterYes(prefillComplete: boolean): InvoiceStep {
   return prefillComplete ? "confirmDirecto" : "tipo";
 }
+
+/**
+ * Largos máximos del detalle editable de la factura consolidada (mig 89). La
+ * comandera son 72 mm de ancho útil: más que esto envuelve y deja el ticket
+ * ilegible. Los CHECK de `invoice_reservations.descripcion` y
+ * `invoices.detalle_nota` usan los mismos números.
+ */
+export const DETALLE_LINEA_MAX = 80;
+export const DETALLE_NOTA_MAX = 200;
+
+/**
+ * Limpia un texto que va a salir impreso en un comprobante fiscal: colapsa
+ * espacios, saca caracteres de control (un salto de línea rompe el layout del
+ * ticket) y recorta. Devuelve null si no queda nada, para que el servidor caiga
+ * al texto automático.
+ *
+ * ESPEJO DE `app_sanitize_detalle` (mig 89). Si cambia uno, cambia el otro.
+ * El enforcement real vive en la base; esto es para que la UI muestre lo mismo
+ * que se va a guardar.
+ */
+export function sanitizeDetalleLine(text: string | null | undefined, max = DETALLE_LINEA_MAX): string | null {
+  const collapsed = (text ?? "")
+    .replace(/[\u0000-\u001F\u007F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const cut = collapsed.slice(0, Math.max(max, 1)).trim();
+  return cut === "" ? null : cut;
+}
+
+/**
+ * Texto por defecto de una línea del detalle. ASCII a propósito: es lo que se
+ * imprime en la comandera térmica.
+ *
+ * ESPEJO DE `app_default_stay_description` (mig 89).
+ */
+export function defaultStayDescription(stay: {
+  room_number: string | null;
+  fch_desde: string; // yyyy-mm-dd
+  fch_hasta: string; // yyyy-mm-dd
+}): string {
+  const desde = formatDetalleDate(stay.fch_desde);
+  const hasta = formatDetalleDate(stay.fch_hasta);
+  const room = (stay.room_number ?? "").trim();
+  return room === ""
+    ? `Estadia ${desde} al ${hasta}`
+    : `Hab. ${room} - ${desde} al ${hasta}`;
+}
+
+/** "2026-08-12" (date de Postgres) → "12/08/2026". */
+function formatDetalleDate(value: string): string {
+  const [y, m, d] = (value ?? "").split("-");
+  return y && m && d ? `${d}/${m}/${y}` : value;
+}

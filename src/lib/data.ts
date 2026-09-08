@@ -53,7 +53,7 @@ import type {
   AuthorizedInvoiceRow,
   BillingControlRow,
   BillingPendingCounts,
-  CcChargeToInvoiceRow,
+  CcAccountStayRow,
   ConsolidatedInvoicePayload,
   FacturacionModo,
   InvoiceKind,
@@ -3471,6 +3471,7 @@ export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord |
     qr_url: (r.qr_url as string | null) ?? null,
     last_error: (r.last_error as string | null) ?? null,
     attempt_count: Number(r.attempt_count) || 0,
+    detalle_nota: (r.detalle_nota as string | null) ?? null,
   };
 }
 
@@ -3566,14 +3567,22 @@ export async function declineInvoice(reservationId: string): Promise<void> {
  * consolidadas, N. Es el detalle que se imprime (a ARCA no va: WSFEv1 sólo recibe
  * totales, no renglones).
  */
-export async function getInvoiceStays(invoiceId: string): Promise<InvoiceStayRow[]> {
+export async function getInvoiceStays(
+  invoiceId: string,
+  /**
+   * Incluir los vínculos ya desactivados. Lo necesita el impreso de una nota de
+   * crédito: al obtener CAE, la NC desvincula las estadías del comprobante que
+   * anula (mig 80), así que sin esto la NC de una consolidada saldría sin detalle.
+   */
+  includeUnlinked = false
+): Promise<InvoiceStayRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("invoice_reservations")
-    .select("reservation_id, room_number, amount, fch_desde, fch_hasta")
-    .eq("invoice_id", invoiceId)
-    .is("unlinked_at", null)
-    .order("fch_desde", { ascending: true });
+    .select("reservation_id, room_number, amount, fch_desde, fch_hasta, descripcion")
+    .eq("invoice_id", invoiceId);
+  if (!includeUnlinked) query = query.is("unlinked_at", null);
+  const { data, error } = await query.order("fch_desde", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     reservation_id: String(r.reservation_id),
@@ -3581,6 +3590,7 @@ export async function getInvoiceStays(invoiceId: string): Promise<InvoiceStayRow
     amount: Number(r.amount) || 0,
     fch_desde: String(r.fch_desde),
     fch_hasta: String(r.fch_hasta),
+    descripcion: (r.descripcion as string | null) ?? null,
   }));
 }
 
@@ -3612,15 +3622,19 @@ export async function getCtaCteBillingProfiles(): Promise<Record<string, Invoice
   return map;
 }
 
-/** Cargos de cuenta corriente de un cliente pendientes de facturar (admin). */
-export async function listCcChargesToInvoice(
+/**
+ * Estadías de cuenta corriente de un cliente, facturadas y sin facturar (mig 89).
+ * `facturable` repite el mismo predicado que usa el draft para rechazar con P0026,
+ * así la pantalla no ofrece tildar algo que el servidor después rebota.
+ */
+export async function listCcAccountStays(
   kind: CtaCteClientKind,
   clientId: string,
   from?: string,
   to?: string
-): Promise<CcChargeToInvoiceRow[]> {
+): Promise<CcAccountStayRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("rpc_list_cc_charges_to_invoice", {
+  const { data, error } = await supabase.rpc("rpc_list_cc_account_stays", {
     p_kind: kind,
     p_client_id: clientId,
     p_from: from ?? null,
@@ -3638,6 +3652,16 @@ export async function listCcChargesToInvoice(
     total_price: Number(r.total_price) || 0,
     actual_check_out: String(r.actual_check_out),
     mixed_payment: Boolean(r.mixed_payment),
+    facturable: Boolean(r.facturable),
+    estado: (r.estado as CcAccountStayRow["estado"]) ?? "pendiente",
+    invoice_id: (r.invoice_id as string | null) ?? null,
+    invoice_kind: (r.invoice_kind as CcAccountStayRow["invoice_kind"]) ?? null,
+    invoice_status: (r.invoice_status as string | null) ?? null,
+    cbte_tipo: r.cbte_tipo === null || r.cbte_tipo === undefined ? null : Number(r.cbte_tipo),
+    pto_vta: r.pto_vta === null || r.pto_vta === undefined ? null : Number(r.pto_vta),
+    cbte_nro: r.cbte_nro === null || r.cbte_nro === undefined ? null : Number(r.cbte_nro),
+    cbte_fch: (r.cbte_fch as string | null) ?? null,
+    external_ref: (r.external_ref as string | null) ?? null,
   }));
 }
 
@@ -3657,6 +3681,14 @@ export async function createConsolidatedInvoiceDraft(
     p_condicion_iva: payload.condicionIva ?? null,
     p_razon_social: payload.razonSocial ?? null,
     p_domicilio: payload.domicilio ?? null,
+    p_detalle:
+      payload.detalle && payload.detalle.length > 0
+        ? payload.detalle.map((d) => ({
+            reservation_id: d.reservationId,
+            descripcion: d.descripcion,
+          }))
+        : null,
+    p_nota: payload.nota ?? null,
   });
   if (error) throw error;
   const r = (data ?? {}) as Record<string, unknown>;
