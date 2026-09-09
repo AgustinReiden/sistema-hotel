@@ -4,33 +4,19 @@ import { revalidatePath } from "next/cache";
 
 import { getCtaCteMovements, registerAccountPayment } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import { createClient } from "@/lib/supabase/server";
+import { assertAdmin } from "@/lib/server-auth";
 import type { ActionResult, CtaCteClientKind, CtaCteMovimiento } from "@/lib/types";
 
-async function assertAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("No autorizado.");
-
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (error) throw error;
-  if (profile?.role !== "admin") {
-    throw new Error("Permisos insuficientes para gestionar cuentas corrientes.");
-  }
-}
+// El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
+const assertCuentasAdmin = () =>
+  assertAdmin("Permisos insuficientes para gestionar cuentas corrientes.");
 
 export async function loadCtaCteAccountAction(
   kind: CtaCteClientKind,
   clientId: string
 ): Promise<ActionResult<{ movements: CtaCteMovimiento[]; balance: number }>> {
   try {
-    await assertAdmin();
+    await assertCuentasAdmin();
     const data = await getCtaCteMovements(kind, clientId);
     return { success: true, data };
   } catch (error: unknown) {
@@ -47,7 +33,7 @@ export async function registerAccountPaymentAction(input: {
   notes?: string;
 }): Promise<ActionResult> {
   try {
-    await assertAdmin();
+    await assertCuentasAdmin();
     const amount = Number(input.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return { success: false, error: "El monto debe ser mayor a 0." };
