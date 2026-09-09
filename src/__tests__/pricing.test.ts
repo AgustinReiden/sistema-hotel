@@ -26,10 +26,28 @@ describe("calculateReservationPriceBreakdown", () => {
     expect(result.finalTotalPrice).toBe(18000);
   });
 
-  it("rounds up partial days to at least one night", () => {
+  it("cobra al menos una noche aunque la estadia entre y salga el mismo dia", () => {
+    // 11:00 -> 22:00 hora del hotel: mismo dia de calendario, 0 noches -> minimo 1.
     expect(
-      calculateReservationNights("2026-04-01T14:00:00.000Z", "2026-04-02T01:00:00.000Z")
+      calculateReservationNights("2026-04-01T14:00:00.000Z", "2026-04-02T01:00:00.000Z", TZ)
     ).toBe(1);
+  });
+
+  it("cuenta noches de calendario, no bloques de 24 horas (regresion mig 95)", () => {
+    // El caso de la habitacion 15: walk-in 09:20, salida 10:00 del dia siguiente. Son
+    // 24 h 40 min, que con la cuenta vieja (horas/24 para arriba) daban 2 noches.
+    expect(
+      calculateReservationNights("2026-09-09T12:20:09.000Z", "2026-09-10T13:00:00.000Z", TZ)
+    ).toBe(1);
+
+    const result = calculateReservationPriceBreakdown({
+      basePrice: 50000,
+      checkIn: "2026-09-09T12:20:09.000Z",
+      checkOut: "2026-09-10T13:00:00.000Z",
+      timezone: TZ,
+    });
+    expect(result.nights).toBe(1);
+    expect(result.finalTotalPrice).toBe(50000);
   });
 });
 

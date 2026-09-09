@@ -1,14 +1,22 @@
 import { countHotelNights } from "./time";
 
-const DAY_IN_MS = 1000 * 60 * 60 * 24;
-
 function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function calculateReservationNights(checkIn: string, checkOut: string) {
-  const durationMs = new Date(checkOut).getTime() - new Date(checkIn).getTime();
-  return Math.max(1, Math.ceil(durationMs / DAY_IN_MS));
+/**
+ * Noches de CALENDARIO en la zona del hotel. Del 9 al 10 es una noche, se entre a las
+ * 06:00 o a las 23:00: la hora de entrada define el servicio, no cuantas noches se
+ * cobran. Debe coincidir con app_calculate_reservation_pricing (mig 95), que es la
+ * autoridad; antes las dos contaban horas/24 para arriba y un walk-in de la manana
+ * cobraba una noche de mas.
+ */
+export function calculateReservationNights(
+  checkIn: string,
+  checkOut: string,
+  timezone?: string
+) {
+  return Math.max(1, countHotelNights(checkIn, checkOut, timezone));
 }
 
 /**
@@ -94,13 +102,15 @@ export function calculateReservationPriceBreakdown({
   checkIn,
   checkOut,
   discountPercent = 0,
+  timezone,
 }: {
   basePrice: number;
   checkIn: string;
   checkOut: string;
   discountPercent?: number;
+  timezone?: string;
 }) {
-  const nights = calculateReservationNights(checkIn, checkOut);
+  const nights = calculateReservationNights(checkIn, checkOut, timezone);
   const baseTotalPrice = roundCurrency(basePrice * nights);
   const normalizedDiscountPercent = roundCurrency(discountPercent);
   const discountAmount = roundCurrency((baseTotalPrice * normalizedDiscountPercent) / 100);
