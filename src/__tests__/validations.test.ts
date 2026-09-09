@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assignWalkInSchema,
@@ -456,6 +456,36 @@ describe("publicBookingSchema", () => {
     expect(() =>
       publicBookingSchema.parse({ ...validInput, checkIn: isoDay(-5), checkOut: isoDay(2) })
     ).toThrow();
+  });
+
+  describe("limite de fecha futura en la zona del hotel", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // 2026-07-04T01:30:00Z son las 22:30 del 3 de julio en Tucuman (UTC-3): el
+    // servidor en UTC ya cree que es el 4, pero para el hotel todavia es el 3. Antes
+    // esto rechazaba reservas para "hoy" cargadas de noche.
+    it("acepta el check-in de hoy (hotel) y rechaza el de ayer aunque el servidor ya piense que es mañana", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-04T01:30:00Z"));
+
+      expect(() =>
+        publicBookingSchema.parse({
+          ...validInput,
+          checkIn: "2026-07-03T14:00:00-03:00",
+          checkOut: "2026-07-05T10:00:00-03:00",
+        })
+      ).not.toThrow();
+
+      expect(() =>
+        publicBookingSchema.parse({
+          ...validInput,
+          checkIn: "2026-07-02T14:00:00-03:00",
+          checkOut: "2026-07-04T10:00:00-03:00",
+        })
+      ).toThrow();
+    });
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Language } from "./cancel-reasons";
+import { DEFAULT_TZ } from "./time";
 
 export type ConfirmationTemplateData = {
   client_name: string;
@@ -53,6 +54,7 @@ function formatDateForLang(iso: string, lang: Language): string {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: DEFAULT_TZ,
   });
 }
 

@@ -50,6 +50,17 @@ describe("buildConfirmationMessage", () => {
     );
   });
 
+  it("formats the arrival date in the hotel's timezone, not UTC", () => {
+    // 2026-07-04T01:00:00Z son las 22:00 del 3 de julio en el hotel (Tucuman, UTC-3).
+    const message = buildConfirmationMessage("es", {
+      ...reservationData,
+      check_in: "2026-07-04T01:00:00Z",
+    });
+
+    expect(message).toContain("Llegada: 03/07/2026");
+    expect(message).not.toContain("04/07/2026");
+  });
+
   it("builds a warmer Portuguese confirmation message", () => {
     const message = buildConfirmationMessage("pt", reservationData);
 

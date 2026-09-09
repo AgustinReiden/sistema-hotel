@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isValidCuit } from "./arca/amounts";
+import { hotelDateKey } from "./time";
 
 const optionalPhoneSchema = z.preprocess(
   (value) => {
@@ -386,11 +387,11 @@ export const publicBookingSchema = z.object({
     if (inMs - Date.now() > 365 * DAY_MS) {
       ctx.addIssue({ code: "custom", path: ["checkIn"], message: "La reserva no puede ser con mas de un año de anticipacion." });
     }
-    // Debe ser a futuro. Lenient (compara contra el inicio del dia de hoy) para no
-    // rechazar reservas del mismo dia que el backend igual acepta.
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    if (inMs < todayStart.getTime()) {
+    // Debe ser a futuro, comparado en la zona del HOTEL (no la del servidor, que en
+    // produccion es UTC): comparar por clave YYYY-MM-DD evita rechazar reservas de
+    // "hoy" cargadas entre las 21:00 y las 24:00 hora Argentina, cuando en UTC el
+    // servidor ya piensa que es mañana.
+    if (hotelDateKey(data.checkIn) < hotelDateKey(new Date())) {
       ctx.addIssue({ code: "custom", path: ["checkIn"], message: "La reserva debe ser para una fecha futura." });
     }
   });

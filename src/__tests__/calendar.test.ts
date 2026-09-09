@@ -72,4 +72,24 @@ describe("getCalendarCellState", () => {
     expect(sharedDay.checkoutReservation?.id).toBe("res-out");
     expect(sharedDay.stayReservation?.id).toBe("res-in");
   });
+
+  it("cuenta el check-in en su dia hotelero aunque entre a las 22:00 (ya seria otro dia en UTC)", () => {
+    // 22:00 del 7 de abril en Tucuman (UTC-3) == 01:00 UTC del 8. Con startOfDay/isSameDay
+    // (date-fns, reloj del proceso) esto se corria de dia en un servidor en UTC.
+    const reservation = makeReservation({
+      id: "res-night",
+      room_id: 2,
+      check_in_target: "2026-04-07T22:00:00-03:00",
+      check_out_target: "2026-04-09T10:00:00-03:00",
+    });
+
+    const entryDay = getCalendarCellState([reservation], 2, new Date("2026-04-07T12:00:00-03:00"));
+    const nextDay = getCalendarCellState([reservation], 2, new Date("2026-04-08T12:00:00-03:00"));
+    const dayBefore = getCalendarCellState([reservation], 2, new Date("2026-04-06T12:00:00-03:00"));
+
+    expect(entryDay.stayReservation?.id).toBe("res-night");
+    expect(nextDay.stayReservation?.id).toBe("res-night");
+    expect(nextDay.checkoutReservation).toBeNull();
+    expect(dayBefore.stayReservation).toBeNull();
+  });
 });
