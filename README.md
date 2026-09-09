@@ -84,42 +84,10 @@ Las mutaciones criticas se ejecutan dentro de funciones SQL transaccionales:
 
 ## Migraciones SQL
 
-Orden recomendado:
-
-1. `01_financial_rpc.sql` (historica, inicial)
-2. `02_security_roles_rls.sql`
-3. `03_integrity_constraints.sql`
-4. `04_indexes.sql`
-5. `05_reservation_rpcs.sql`
-9. `09_finance_module.sql`
-10. `10_payment_methods.sql`
-11. `11_security_lockdown.sql`
-12. `12_financial_fixes.sql`
-13. `13_schema_unification.sql`
-
-Importante: si ya tienes datos legacy, corre primero un chequeo de duplicados/solapamientos antes de aplicar constraints de la fase 03.
-
-Prechecks sugeridos:
-
-```sql
--- Solapamientos activos por habitacion.
-select r1.id as reservation_a, r2.id as reservation_b, r1.room_id
-from reservations r1
-join reservations r2
-  on r1.room_id = r2.room_id
- and r1.id < r2.id
- and r1.status in ('pending', 'confirmed', 'checked_in')
- and r2.status in ('pending', 'confirmed', 'checked_in')
- and tstzrange(r1.check_in_target, r1.check_out_target, '[)') &&
-     tstzrange(r2.check_in_target, r2.check_out_target, '[)');
-
--- Duplicados de half_day por reserva.
-select reservation_id, charge_type, count(*)
-from extra_charges
-where charge_type = 'half_day'
-group by reservation_id, charge_type
-having count(*) > 1;
-```
+No hay CLI ni pipeline de migraciones: se aplican a mano contra Supabase. Ver
+[`supabase_migrations/README.md`](supabase_migrations/README.md) para el detalle
+completo — cómo escribir una migración nueva, cómo aplicarla, qué está aplicado hoy
+(tabla `public.applied_migrations`) y cómo reconstruir la base desde cero.
 
 ## Setup local
 
@@ -132,9 +100,27 @@ npm install
 2. Configurar `.env.local`:
 
 ```env
+# Supabase — requeridas. Se hornean en el build y llegan al navegador (NEXT_PUBLIC_).
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+
+# Facturacion electronica ARCA — opcionales. Sin ellas, /admin/fiscal queda
+# deshabilitado (avisa por consola) pero el check-out sigue funcionando igual.
+# Detalle y tramite del certificado en docs/facturacion-arca.md.
+ARCA_CERT_B64=...
+ARCA_KEY_B64=...
+ARCA_INTERNAL_KEY=...
+
+# Notificacion de reserva por WhatsApp via n8n — opcional. Sin ella no se manda
+# el mensaje (avisa por consola), no rompe el flujo (src/lib/webhook.ts).
+N8N_WEBHOOK_URL=...
 ```
+
+`SUPABASE_SERVICE_ROLE_KEY` **no** va en el `.env.local` de la app: es sólo para
+`scripts/recuperacion/*.mjs` (aplicar migraciones SQL a mano, ver
+[`supabase_migrations/README.md`](supabase_migrations/README.md)). Vive únicamente en
+el `.env.local` de quien corre esos scripts y **nunca** se prefija `NEXT_PUBLIC_` ni se
+referencia desde `src/` — esas variables se hornean en el bundle que llega al navegador.
 
 3. Ejecutar desarrollo:
 
@@ -144,15 +130,28 @@ npm run dev
 
 ## Calidad y gates
 
-Comandos de verificacion:
+No hay CI: estos comandos se corren a mano antes de mergear.
 
 ```bash
-npm run lint
 npm run typecheck
+npm run lint
+npm test
 npm run build
 ```
 
-Objetivo: todos en verde antes de deploy.
+`build` hace falta sobre todo si se tocaron dependencias o configuracion — es lo que
+corre Coolify al deployar, así que si falla ahí falla el deploy. Objetivo: todos en
+verde antes de mergear a `main`.
+
+## Deploy
+
+Sin CI ni staging: Coolify hace build y deploya automaticamente **al pushear a
+`main`**. Por eso el trabajo se hace en una rama y PR — mergear a `main` es la acción
+que dispara producción, no un paso aparte.
+
+Las migraciones SQL no se aplican solas ni forman parte del deploy: se corren a mano
+contra Supabase, por separado, en el orden que indique el PR respecto al momento del
+merge (ver [`supabase_migrations/README.md`](supabase_migrations/README.md)).
 
 ## Flujo operativo resumido
 
