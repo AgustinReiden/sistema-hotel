@@ -4,7 +4,7 @@ import { createClient } from "./supabase/server";
 import { isValidCuit } from "./arca/amounts";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import { localToISO } from "./format";
-import { hotelDateKey } from "./time";
+import { addDaysToDateKey, DEFAULT_TZ, hotelDateKey } from "./time";
 import {
   buildDailyTotals,
   buildGuestNightsSeries,
@@ -1000,7 +1000,11 @@ export async function getReservationHistory(
   const search = sanitizeSearchTerm(options.search ?? "");
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
-  const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  // Inicio del dia (zona del hotel, no la del servidor) de hace `days` dias: si se
+  // calculara como "ahora menos N×24h", el corte se corre segun la hora del dia en
+  // que se abre la pantalla en vez de caer siempre en un limite de dia prolijo.
+  const sinceKey = addDaysToDateKey(hotelDateKey(new Date()), -days);
+  const sinceIso = localToISO(sinceKey, "00:00", DEFAULT_TZ);
 
   let query = supabase
     .from("reservations")

@@ -29,6 +29,8 @@ import {
     subMonths,
 } from "date-fns";
 
+import { addDaysToDateKey, hotelDateKey } from "@/lib/time";
+
 type PickerName = "checkin" | "checkout" | "guests";
 
 const WEEKDAYS = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"];
@@ -198,9 +200,11 @@ export default function PublicSearchForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const currentQuery = searchParams.toString();
-    const today = useMemo(() => new Date(), []);
-    const todayIso = useMemo(() => toIsoDate(today), [today]);
-    const tomorrowIso = useMemo(() => toIsoDate(addDays(today, 1)), [today]);
+    // "Hoy" en la zona del HOTEL, no la del navegador de quien reserva: si no, un
+    // huesped conectado desde otro huso (o el propio celular con la hora mal puesta)
+    // puede ver habilitado un dia que para el hotel ya paso, o al reves.
+    const todayIso = useMemo(() => hotelDateKey(new Date()), []);
+    const tomorrowIso = useMemo(() => addDaysToDateKey(todayIso, 1), [todayIso]);
 
     const defaultCheckIn = searchParams.get("checkin") || todayIso;
     const defaultCheckOut = searchParams.get("checkout") || tomorrowIso;
