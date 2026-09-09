@@ -4,6 +4,7 @@ import { useState } from "react";
 import { login } from "./actions";
 import { Shield, KeyRound } from "lucide-react";
 import { toast } from "sonner";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -18,12 +19,25 @@ export default function LoginPage() {
         formData.append("email", email);
         formData.append("password", password);
 
-        const result = await login(formData);
+        try {
+            const result = await login(formData);
 
-        // login hace redirect si sale exitoso.
-        // Si hay error retorna el mensaje.
-        if (result?.error) {
-            toast.error(result.error);
+            // login hace redirect si sale exitoso.
+            // Si hay error retorna el mensaje.
+            if (result?.error) {
+                toast.error(result.error);
+                setIsLoading(false);
+            }
+        } catch (error) {
+            // login() exitoso navega con redirect(), que Next implementa lanzando una
+            // excepcion especial (digest NEXT_REDIRECT...): hay que dejarla pasar para
+            // que la navegacion ocurra. Cualquier otro throw (red caida, etc.) es un
+            // error de verdad: avisamos y liberamos el boton en vez de dejarlo
+            // "Verificando..." para siempre.
+            if (isRedirectError(error)) {
+                throw error;
+            }
+            toast.error("No se pudo iniciar sesión. Revisá la conexión e intentá de nuevo.");
             setIsLoading(false);
         }
     };
