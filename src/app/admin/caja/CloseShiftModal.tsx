@@ -162,7 +162,11 @@ export default function CloseShiftModal({
 
   useEffect(() => {
     if (!isOpen || closed) return;
-    fetchBlockers();
+    // Se invoca desde una tarea async anidada (no directo en el efecto) para
+    // que el setState de fetchBlockers no dispare un render en cascada.
+    void (async () => {
+      await fetchBlockers();
+    })();
   }, [isOpen, closed, fetchBlockers]);
 
   // Al cerrar la caja se abre solo el comprobante de rendicion para imprimir
