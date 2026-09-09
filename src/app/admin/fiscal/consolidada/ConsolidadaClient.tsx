@@ -118,11 +118,14 @@ export default function ConsolidadaClient({
   }, [kind, id]);
 
   useEffect(() => {
-    // Se invoca desde una tarea async anidada (no directo en el efecto) para
-    // que el setState de loadRows no dispare un render en cascada.
-    void (async () => {
+    // La llamada va en una función anidada (no `loadRows` directo) porque
+    // `loadRows` setea estado y el linter (react-hooks/set-state-in-effect)
+    // marca cualquier setState alcanzable desde el efecto, aunque sea
+    // post-await; este es el patrón recomendado por React para fetch-in-effect.
+    async function run() {
       await loadRows();
-    })();
+    }
+    void run();
   }, [loadRows]);
 
   // Al elegir otra ficha, recargar los datos fiscales precargados (el valor

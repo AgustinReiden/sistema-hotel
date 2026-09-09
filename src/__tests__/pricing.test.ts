@@ -185,3 +185,89 @@ describe("calculateEarlyCheckoutBreakdown", () => {
     expect(r.newTotal).toBe(20000);
   });
 });
+
+// Fase 4: un solo criterio de noches en todo el sistema. Una noche es una noche de
+// CALENDARIO en la zona del hotel, con minimo 1 — la hora de entrada define el servicio,
+// no cuantas noches se cobran. Estos tests fijan ese criterio del lado del front y, sobre
+// todo, que las dos pantallas que muestran noches (alta / re-tarifa y salida anticipada)
+// no puedan volver a contar distinto. La autoridad en la base es app_hotel_nights
+// (mig 96), que aplica exactamente esta cuenta.
+describe("noches de calendario: un solo criterio", () => {
+  it("cuenta las noches que dormis, no los bloques de 24 horas", () => {
+    // Entrada y salida a la hora estandar del hotel: el caso normal.
+    expect(
+      calculateReservationNights("2026-07-03T14:00:00-03:00", "2026-07-04T10:00:00-03:00", TZ)
+    ).toBe(1);
+    expect(
+      calculateReservationNights("2026-07-03T14:00:00-03:00", "2026-07-05T10:00:00-03:00", TZ)
+    ).toBe(2);
+  });
+
+  it("una entrada temprana no agrega una noche (antes daba 3)", () => {
+    // 09:00 -> 10:00 dos dias despues son 49 h: horas/24 para arriba daba 3 noches y
+    // congelaba una noche de mas. Del 3 al 5 son dos noches, se entre a las 9 o a las 14.
+    expect(
+      calculateReservationNights("2026-07-03T09:00:00-03:00", "2026-07-05T10:00:00-03:00", TZ)
+    ).toBe(2);
+  });
+
+  it("cobra una noche cuando entra y sale el mismo dia", () => {
+    // 12:00 -> 17:00: cero noches de calendario, pero la habitacion se ocupo. El minimo
+    // de 1 es el que cubre esto (la siesta tarifada va por half_day_price, no por aca).
+    expect(
+      calculateReservationNights("2026-07-03T12:00:00-03:00", "2026-07-03T17:00:00-03:00", TZ)
+    ).toBe(1);
+  });
+
+  it("cuenta en la zona del hotel, no en UTC", () => {
+    // 22:00 del 03/07 en Tucuman ya es el 04/07 en UTC: contar por fecha UTC daria dos
+    // fechas distintas del lado de la entrada y la noche se contaria mal.
+    expect(
+      calculateReservationNights("2026-07-03T22:00:00-03:00", "2026-07-04T10:00:00-03:00", TZ)
+    ).toBe(1);
+  });
+
+  it("la hora de salida no puede agregar noches (caso 37 h)", () => {
+    // Entrada 09:00, salida 22:00 del dia siguiente. round(37/24) da 2, que es lo que
+    // leia rpc_extend_reservation antes de la mig 96 mientras el alta cobraba 1.
+    expect(
+      calculateReservationNights("2026-07-03T09:00:00-03:00", "2026-07-04T22:00:00-03:00", TZ)
+    ).toBe(1);
+  });
+
+  it("el alta y la salida anticipada cuentan las mismas noches", () => {
+    // La invariante que se rompio: si estas dos discrepan, el huesped paga N noches al
+    // entrar y el check-out divide por otro numero. Se prueba sobre horarios variados,
+    // porque solo coincidian cuando la hora de salida era menor que la de entrada.
+    const pares = [
+      ["2026-07-03T14:00:00-03:00", "2026-07-04T10:00:00-03:00"],
+      ["2026-07-03T14:00:00-03:00", "2026-07-06T10:00:00-03:00"],
+      ["2026-07-03T09:00:00-03:00", "2026-07-05T10:00:00-03:00"],
+      ["2026-07-03T09:00:00-03:00", "2026-07-04T22:00:00-03:00"],
+      ["2026-07-03T22:00:00-03:00", "2026-07-04T10:00:00-03:00"],
+      ["2026-07-03T12:00:00-03:00", "2026-07-03T17:00:00-03:00"],
+      ["2026-07-03T00:30:00-03:00", "2026-07-08T23:45:00-03:00"],
+    ] as const;
+
+    for (const [checkIn, checkOut] of pares) {
+      const alta = calculateReservationPriceBreakdown({
+        basePrice: 50000,
+        checkIn,
+        checkOut,
+        timezone: TZ,
+      });
+      const salida = calculateEarlyCheckoutBreakdown({
+        checkInTargetIso: checkIn,
+        checkOutTargetIso: checkOut,
+        departureIso: checkOut, // se va el dia que tenia reservado: no hay reduccion
+        baseTotalPrice: alta.baseTotalPrice,
+        totalPrice: alta.finalTotalPrice,
+        timezone: TZ,
+      });
+
+      expect(salida.originalNights, `${checkIn} -> ${checkOut}`).toBe(alta.nights);
+      expect(salida.chargedNights, `${checkIn} -> ${checkOut}`).toBe(alta.nights);
+      expect(salida.newTotal, `${checkIn} -> ${checkOut}`).toBe(alta.finalTotalPrice);
+    }
+  });
+});

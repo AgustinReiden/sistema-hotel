@@ -98,4 +98,38 @@ describe('parseActionError', () => {
         const result = parseActionError({ message: 'No autorizado.', code: '42501' }, 'Fallback');
         expect(result.error).toBe('No autorizado.');
     });
+
+    it('conserva el "Acceso denegado" de las RPC del sistema (42501)', () => {
+        const result = parseActionError({ message: 'Acceso denegado', code: '42501' }, 'Fallback');
+        expect(result.error).toBe('Acceso denegado');
+        expect(result.code).toBe('42501');
+    });
+
+    it('enmascara la denegacion cruda de RLS (42501 con "row-level security")', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const rlsError = {
+            message:
+                'new row violates row-level security policy for table "guests"',
+            code: '42501',
+        };
+        const result = parseActionError(rlsError, 'Fallback');
+        expect(result.error).toBe('No tenés permiso para hacer esta operación.');
+        expect(result.error).not.toContain('guests');
+        expect(result.code).toBe('42501');
+        expect(spy).toHaveBeenCalled();
+        spy.mockRestore();
+    });
+
+    it('enmascara tambien el UPDATE bloqueado por RLS de otra tabla', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const rlsError = {
+            message:
+                'permission denied: RLS policy violated (row-level security) for table "associated_clients"',
+            code: '42501',
+        };
+        const result = parseActionError(rlsError, 'Fallback');
+        expect(result.error).toBe('No tenés permiso para hacer esta operación.');
+        expect(result.error).not.toContain('associated_clients');
+        spy.mockRestore();
+    });
 });

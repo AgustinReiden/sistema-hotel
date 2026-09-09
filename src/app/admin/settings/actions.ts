@@ -3,25 +3,13 @@
 import { revalidatePath } from "next/cache";
 
 import { parseActionError } from "@/lib/error-utils";
-import { createClient } from "@/lib/supabase/server";
+import { assertAdmin } from "@/lib/server-auth";
 import type { ActionResult, ManageableProfile, UserRole } from "@/lib/types";
 import { hotelSettingsSchema } from "@/lib/validations";
 
 export async function updateHotelSettings(formData: FormData): Promise<ActionResult> {
   try {
-    const supabaseCheck = await createClient();
-    const {
-      data: { user },
-    } = await supabaseCheck.auth.getUser();
-    if (!user) return { success: false, error: "No autorizado." };
-    const { data: profileRow } = await supabaseCheck
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (profileRow?.role !== "admin") {
-      return { success: false, error: "Solo admin puede modificar los ajustes." };
-    }
+    const supabase = await assertAdmin("Solo admin puede modificar los ajustes.");
 
     const contactWhatsappPhone = String(formData.get("contact_whatsapp_phone") ?? "");
     const contactFixedPhone = String(formData.get("contact_fixed_phone") ?? "");
@@ -50,7 +38,6 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
     };
 
     const validated = hotelSettingsSchema.parse(rawData);
-    const supabase = await createClient();
 
     const { error } = await supabase
       .from("hotel_settings")
@@ -88,7 +75,7 @@ export async function updateHotelSettings(formData: FormData): Promise<ActionRes
 
 export async function listManageableUsersAction(): Promise<ActionResult<ManageableProfile[]>> {
   try {
-    const supabase = await createClient();
+    const supabase = await assertAdmin("Solo un administrador puede ver la lista de usuarios.");
     const { data, error } = await supabase.rpc("rpc_admin_list_profiles");
     if (error) throw error;
     const rows = (data ?? []) as {
@@ -111,12 +98,13 @@ export async function updateProfileAction(
   role: UserRole
 ): Promise<ActionResult> {
   try {
+    // Primero el rol: esta accion puede ascender a cualquiera a admin.
+    const supabase = await assertAdmin("Solo un administrador puede editar usuarios.");
     if (!userId) throw new Error("Usuario invalido.");
     if (!fullName || !fullName.trim()) throw new Error("El nombre es obligatorio.");
     if (role !== "admin" && role !== "receptionist" && role !== "client" && role !== "maintenance")
       throw new Error("Rol invalido.");
 
-    const supabase = await createClient();
     const { error } = await supabase.rpc("rpc_admin_update_profile", {
       p_user_id: userId,
       p_full_name: fullName.trim(),

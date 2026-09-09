@@ -4,13 +4,20 @@ import { revalidatePath } from "next/cache";
 
 import { authorizeOldTariff, rejectOldTariff, resolveAdminAlert } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
+import { assertAdmin } from "@/lib/server-auth";
 import type { ActionResult } from "@/lib/types";
+
+// Las tres RPC de alertas (rpc_resolve_admin_alert, rpc_authorize_old_tariff y
+// rpc_reject_old_tariff) arrancan con `IF NOT public.app_is_admin()`, asi que el rol ya
+// estaba validado en la base. El assert de aca corta antes y devuelve un mensaje claro
+// en vez del "Acceso denegado" crudo, y deja escrito en el codigo que son solo-admin.
 
 export async function resolveAdminAlertAction(
   alertId: number,
   notes?: string
 ): Promise<ActionResult> {
   try {
+    await assertAdmin("Solo un administrador puede resolver alertas.");
     if (!Number.isInteger(alertId) || alertId <= 0) {
       throw new Error("Alerta invalida.");
     }
@@ -26,6 +33,7 @@ export async function resolveAdminAlertAction(
 
 export async function authorizeOldTariffAction(alertId: number): Promise<ActionResult> {
   try {
+    await assertAdmin("Solo un administrador puede resolver alertas.");
     if (!Number.isInteger(alertId) || alertId <= 0) {
       throw new Error("Alerta invalida.");
     }
@@ -41,6 +49,7 @@ export async function authorizeOldTariffAction(alertId: number): Promise<ActionR
 
 export async function rejectOldTariffAction(alertId: number): Promise<ActionResult> {
   try {
+    await assertAdmin("Solo un administrador puede resolver alertas.");
     if (!Number.isInteger(alertId) || alertId <= 0) {
       throw new Error("Alerta invalida.");
     }

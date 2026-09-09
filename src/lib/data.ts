@@ -1134,14 +1134,22 @@ export async function setGuestPersonalDiscount(input: {
   const supabase = await createClient();
 
   if (input.id) {
-    const { error } = await supabase
+    // El .select() no es decorativo: un UPDATE bloqueado por RLS no devuelve error,
+    // afecta 0 filas y sin esto la pantalla diria "guardado" sin haber guardado nada.
+    const { data, error } = await supabase
       .from("guests")
       .update({
         discount_percent: input.discountPercent,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", input.id);
+      .eq("id", input.id)
+      .select("id");
     if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error(
+        "No se pudo guardar el descuento: no tenés permiso o el registro ya no existe."
+      );
+    }
     return;
   }
 
@@ -1159,11 +1167,19 @@ export async function setCompanyDiscount(
   discountPercent: number
 ): Promise<void> {
   const supabase = await createClient();
-  const { error } = await supabase
+  // Mismo motivo que en setGuestPersonalDiscount: 0 filas afectadas no es un error
+  // para Postgres, pero para el usuario significa que el descuento no se guardo.
+  const { data, error } = await supabase
     .from("associated_clients")
     .update({ discount_percent: discountPercent, updated_at: new Date().toISOString() })
-    .eq("id", companyId);
+    .eq("id", companyId)
+    .select("id");
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error(
+      "No se pudo guardar el descuento: no tenés permiso o el registro ya no existe."
+    );
+  }
 }
 
 /** Lista de clientes con descuento (huespedes + empresas) para la seccion Descuentos. */
