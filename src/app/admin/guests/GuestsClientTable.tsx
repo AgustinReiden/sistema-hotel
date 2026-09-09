@@ -84,7 +84,7 @@ export default function GuestsClientTable({
                       )}
                       {debt > 0 && canPay && (
                         <span className="text-[10px] uppercase font-bold text-amber-600 tracking-wider">
-                          Deuda: ${debt.toLocaleString("en-US")}
+                          Deuda: ${debt.toLocaleString("es-AR")}
                         </span>
                       )}
                     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CreditCard, FileText, LogIn, Pencil, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -165,6 +165,17 @@ export default function CalendarClient({
   const [cancelReason, setCancelReason] = useState("");
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    // No cierra mientras hay un cancel/check-in en curso (isPending): los botones de
+    // esa accion ya se deshabilitan igual con `disabled={isPending}`.
+    if (!selectedReservation || isPending) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedReservation(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedReservation, isPending]);
 
   const days = useMemo(
     () => Array.from({ length: daysCount }, (_, index) => addDaysToKey(startDateKey, index)),
@@ -463,6 +474,15 @@ export default function CalendarClient({
                             strokeLinejoin="round"
                             className="drop-shadow-sm transition-opacity group-hover:opacity-90 pointer-events-auto cursor-pointer"
                             onClick={() => openReservationDetails(placement.reservation)}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Ver detalle de la reserva de ${placement.reservation.client_name}`}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openReservationDetails(placement.reservation);
+                              }
+                            }}
                           />
                         </svg>
 
@@ -516,10 +536,15 @@ export default function CalendarClient({
 
       {selectedReservation && selectedRoom && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reservation-detail-title"
+          >
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Detalle de Reserva</h3>
+                <h3 id="reservation-detail-title" className="text-xl font-bold text-slate-900">Detalle de Reserva</h3>
                 <p className="text-sm text-slate-500">
                   Habitacion {selectedRoom.room_number} - {selectedRoom.room_type}
                 </p>
