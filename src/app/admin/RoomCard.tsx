@@ -24,7 +24,6 @@ import {
 import PaymentModal from "../components/PaymentModal";
 import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal";
 import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
-import { isValidCuit } from "@/lib/arca/amounts";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import { isBankPaymentMethod } from "@/lib/billing";
 import type {

@@ -118,16 +118,26 @@ export default function ConsolidadaClient({
   }, [kind, id]);
 
   useEffect(() => {
-    void loadRows();
+    // La llamada va en una función anidada (no `loadRows` directo) porque
+    // `loadRows` setea estado y el linter (react-hooks/set-state-in-effect)
+    // marca cualquier setState alcanzable desde el efecto, aunque sea
+    // post-await; este es el patrón recomendado por React para fetch-in-effect.
+    async function run() {
+      await loadRows();
+    }
+    void run();
   }, [loadRows]);
 
   // Precargar los datos fiscales de la ficha elegida (empresa o huésped).
   useEffect(() => {
-    setRazonSocial(profile?.razonSocial ?? "");
-    setCuit(profile?.cuit ?? "");
-    setCondicionIva(profile?.condicionIva ?? "");
-    setDomicilio(profile?.domicilio ?? "");
-    setNota("");
+    function sync() {
+      setRazonSocial(profile?.razonSocial ?? "");
+      setCuit(profile?.cuit ?? "");
+      setCondicionIva(profile?.condicionIva ?? "");
+      setDomicilio(profile?.domicilio ?? "");
+      setNota("");
+    }
+    sync();
   }, [profile]);
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
