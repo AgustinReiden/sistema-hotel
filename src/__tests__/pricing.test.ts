@@ -306,6 +306,29 @@ describe("el descuento no puede dejar el total en negativo", () => {
     expect(r.finalTotalPrice).toBe(0);
   });
 
+  it("acota el total de una salida anticipada a cero y conserva los extras", () => {
+    // Acá el porcentaje no se tipea: sale de una reserva ya guardada. Estas son las
+    // cifras de una que quedó congelada con 150 % de descuento (2 noches de 50.000,
+    // neto guardado en negativo) más 3.000 de minibar. El check-out devolvía
+    // -25.000 de "nuevo total"; ahora el piso es cero y el minibar que el huésped
+    // sí consumió se sigue cobrando.
+    const r = calculateEarlyCheckoutBreakdown({
+      checkInTargetIso: "2026-07-03T14:00:00-03:00",
+      checkOutTargetIso: "2026-07-05T10:00:00-03:00",
+      departureIso: "2026-07-04T09:00:00-03:00",
+      baseTotalPrice: 100000,
+      discountPercent: 150,
+      discountAmount: 150000,
+      totalPrice: -47000, // neto (-50.000) + 3.000 de minibar
+      timezone: TZ,
+    });
+
+    expect(r.chargedNights).toBe(1);
+    expect(r.extras).toBe(3000);
+    expect(r.newFinal).toBe(0); // antes: -25.000
+    expect(r.newTotal).toBe(3000); // solo el minibar
+  });
+
   it("con 100 % justo da cero, no un negativo por redondeo", () => {
     const r = calculateReservationPriceBreakdown({
       basePrice: 33333.33,
