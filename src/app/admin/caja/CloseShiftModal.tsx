@@ -162,7 +162,14 @@ export default function CloseShiftModal({
 
   useEffect(() => {
     if (!isOpen || closed) return;
-    fetchBlockers();
+    // La llamada va en una función anidada (no `fetchBlockers` directo) porque
+    // `fetchBlockers` setea estado y el linter (react-hooks/set-state-in-effect)
+    // marca cualquier setState alcanzable desde el efecto, aunque sea
+    // post-await; este es el patrón recomendado por React para fetch-in-effect.
+    async function run() {
+      await fetchBlockers();
+    }
+    void run();
   }, [isOpen, closed, fetchBlockers]);
 
   // Al cerrar la caja se abre solo el comprobante de rendicion para imprimir

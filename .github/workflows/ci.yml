@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Placeholders: src/lib/env.ts tira si faltan, next.config.mjs las lee
+          # para el host de imagenes/CSP. No son credenciales reales -- el build
+          # no habla con Supabase de verdad (todas las rutas menos /login y
+          # /_not-found ya son dinamicas, y esas dos no llaman a Supabase).
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+
+  test-utc:
+    runs-on: ubuntu-latest
+    # Diagnostico, no gate: el dueno del hotel opera en UTC-3
+    # (America/Argentina/Tucuman); en UTC salen a la luz bugs de zona horaria
+    # que en UTC-3 pueden pasar desapercibidos. Que falle no bloquea el merge,
+    # solo avisa -- por eso continue-on-error.
+    continue-on-error: true
+    env:
+      TZ: UTC
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tests en UTC
+        run: npm test
