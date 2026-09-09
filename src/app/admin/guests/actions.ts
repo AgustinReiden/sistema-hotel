@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { isValidCuit } from "@/lib/arca/amounts";
 import { parseActionError } from "@/lib/error-utils";
-import { createClient } from "@/lib/supabase/server";
+import { assertAdmin } from "@/lib/server-auth";
 import type { ActionResult, CondicionIva, GuestRecord } from "@/lib/types";
 
 export type GuestRecordPayload = {
@@ -26,24 +26,9 @@ export type GuestRecordPayload = {
   domicilioFiscal?: string | null;
 };
 
-async function assertAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("No autorizado.");
-
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (error) throw error;
-  if (profile?.role !== "admin") {
-    throw new Error("Permisos insuficientes para administrar huéspedes.");
-  }
-  return supabase;
-}
+// El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
+const assertGuestsAdmin = () =>
+  assertAdmin("Permisos insuficientes para administrar huéspedes.");
 
 const clean = (value: string | null | undefined): string | null => {
   if (typeof value !== "string") return null;
@@ -54,7 +39,7 @@ const clean = (value: string | null | undefined): string | null => {
 // Carga la ficha completa de un huésped del padrón para el modal de edición.
 export async function loadGuestRecordAction(id: string): Promise<ActionResult<GuestRecord>> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertGuestsAdmin();
     const { data, error } = await supabase
       .from("guests")
       .select(
@@ -84,7 +69,7 @@ export async function updateGuestAction(
   payload: GuestRecordPayload
 ): Promise<ActionResult> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertGuestsAdmin();
 
     const fullName = payload.fullName.trim();
     if (fullName.length < 2) {
@@ -138,7 +123,7 @@ export async function updateGuestAction(
 // Borra un huésped del padrón. Las reservas pasadas NO se tocan (FK guest_id ON DELETE SET NULL).
 export async function deleteGuestAction(id: string): Promise<ActionResult> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertGuestsAdmin();
     const { error } = await supabase.from("guests").delete().eq("id", id);
     if (error) throw error;
 

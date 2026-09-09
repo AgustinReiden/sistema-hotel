@@ -1,4 +1,5 @@
 import Sidebar from './Sidebar';
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { countBillingPending, getActiveOpenShift, getShiftSummary } from "@/lib/data";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
@@ -12,22 +13,23 @@ export default async function AdminLayout({
 }) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    const userEmail = user?.email || "";
+
+    // Defensa en profundidad: el middleware ya bloquea /admin sin sesion. Si alguna vez
+    // fallara, sin esto el panel se renderizaba igual con el rol "receptionist" por defecto.
+    if (!user) redirect("/login");
+
+    const userEmail = user.email || "";
 
     let role = "receptionist";
-    let openShift: Awaited<ReturnType<typeof getActiveOpenShift>> | null = null;
-
-    if (user) {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .single();
-        if (profile?.role) {
-            role = profile.role;
-        }
-        openShift = await getActiveOpenShift().catch(() => null);
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+    if (profile?.role) {
+        role = profile.role;
     }
+    const openShift = await getActiveOpenShift().catch(() => null);
 
     // Traspaso de caja: si un recepcionista entra y la caja abierta la dejó OTRO usuario,
     // debe rendirla (a ciegas) antes de operar. Se renderiza SOLO el bloqueo, sin sidebar
@@ -35,7 +37,6 @@ export default async function AdminLayout({
     const forceHandover =
         role === "receptionist" &&
         !!openShift &&
-        !!user &&
         openShift.opened_by !== user.id;
 
     if (forceHandover && openShift) {

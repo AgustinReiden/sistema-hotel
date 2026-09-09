@@ -33,6 +33,7 @@ import {
   type UpdateReservationInput,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
+import { assertAdmin } from "@/lib/server-auth";
 import { notifyReservationWebhook } from "@/lib/webhook";
 import {
   buildCancellationMessage,
@@ -236,6 +237,7 @@ export async function updateGuestDiscountAction(input: {
   discountPercent: number;
 }): Promise<ActionResult> {
   try {
+    await assertAdmin("Solo un administrador puede cambiar descuentos.");
     const percent = Number(input.discountPercent);
     if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
       return { success: false, error: "El descuento debe estar entre 0 y 100." };
@@ -264,6 +266,7 @@ export async function updateCompanyDiscountAction(input: {
   discountPercent: number;
 }): Promise<ActionResult> {
   try {
+    await assertAdmin("Solo un administrador puede cambiar descuentos.");
     const percent = Number(input.discountPercent);
     if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
       return { success: false, error: "El descuento debe estar entre 0 y 100." };

@@ -33,6 +33,10 @@ const TECHNICAL_SQLSTATES = new Set([
   "XX000", // internal_error
 ]);
 
+// Denegacion de RLS pura (no de una RPC): Postgres la manda en ingles y con el nombre
+// de la tabla adentro. Al recepcionista eso no le dice nada.
+const RLS_DENIED_MESSAGE = "No tenés permiso para hacer esta operación.";
+
 const GENERIC_MESSAGE =
   "Ocurrió un error inesperado al procesar la operación. Probá de nuevo; si persiste, avisá al administrador.";
 
@@ -49,6 +53,14 @@ export function parseActionError(
 
   if (isErrorWithMessage(error)) {
     const code = typeof error.code === "string" ? error.code : undefined;
+
+    // 42501 llega por dos caminos distintos y solo uno se enmascara: el de la RLS
+    // ("new row violates row-level security policy for table ..."). El otro es el
+    // `RAISE 'Acceso denegado'` de las RPC del sistema, que ya viene en castellano.
+    if (code === "42501" && /row-level security/i.test(String(error.message ?? ""))) {
+      console.error("[parseActionError] Escritura bloqueada por RLS:", error.message);
+      return { error: RLS_DENIED_MESSAGE, code };
+    }
 
     // Error técnico de Postgres: ocultar el detalle crudo, loguear el real.
     if (code && TECHNICAL_SQLSTATES.has(code)) {

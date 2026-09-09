@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { getAssociatedClientLedger } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import { createClient } from "@/lib/supabase/server";
+import { assertAdmin } from "@/lib/server-auth";
 import type { ActionResult, AssociatedClientLedger } from "@/lib/types";
 import { associatedClientSchema } from "@/lib/validations";
 
@@ -21,29 +21,9 @@ type AssociatedClientFormPayload = {
   facturacionModo?: "por_checkout" | "consolidada" | "no_factura";
 };
 
-async function assertAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    throw new Error("No autorizado.");
-  }
-
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (error) throw error;
-  if (profile?.role !== "admin") {
-    throw new Error("Permisos insuficientes para administrar asociados.");
-  }
-
-  return supabase;
-}
+// El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
+const assertAsociadosAdmin = () =>
+  assertAdmin("Permisos insuficientes para administrar asociados.");
 
 function revalidateAssociatedPaths() {
   revalidatePath("/admin");
@@ -55,7 +35,7 @@ export async function createAssociatedClientAction(
   payload: AssociatedClientFormPayload
 ): Promise<ActionResult> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertAsociadosAdmin();
     const validated = associatedClientSchema.parse(payload);
 
     const { error } = await supabase.from("associated_clients").insert({
@@ -86,7 +66,7 @@ export async function updateAssociatedClientAction(
   payload: AssociatedClientFormPayload
 ): Promise<ActionResult> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertAsociadosAdmin();
     const validated = associatedClientSchema.parse(payload);
 
     const { error } = await supabase
@@ -121,7 +101,7 @@ export async function toggleAssociatedClientStatusAction(
   nextIsActive: boolean
 ): Promise<ActionResult> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertAsociadosAdmin();
     const { error } = await supabase
       .from("associated_clients")
       .update({
@@ -145,7 +125,7 @@ export async function toggleAssociatedClientStatusAction(
 // que se pierde su cuenta corriente. Para conservar el historial, preferir archivar.
 export async function deleteAssociatedClientAction(id: string): Promise<ActionResult> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertAsociadosAdmin();
     const { error } = await supabase.from("associated_clients").delete().eq("id", id);
     if (error) throw error;
 
@@ -161,7 +141,7 @@ export async function loadAssociatedClientLedgerAction(
   clientId: string
 ): Promise<ActionResult<AssociatedClientLedger>> {
   try {
-    await assertAdmin();
+    await assertAsociadosAdmin();
     const ledger = await getAssociatedClientLedger(clientId);
     return { success: true, data: ledger };
   } catch (error: unknown) {
@@ -181,7 +161,7 @@ export async function findCompaniesByDocumentAction(
   excludeId?: string
 ): Promise<ActionResult<{ id: string; display_name: string }[]>> {
   try {
-    const supabase = await assertAdmin();
+    const supabase = await assertAsociadosAdmin();
     const digits = documentId.replace(/\D/g, "");
     if (digits.length < 7) return { success: true, data: [] };
 
