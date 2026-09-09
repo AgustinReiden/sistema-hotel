@@ -1,21 +1,12 @@
 // Aritmética y formatos puros del dominio ARCA. Sin red, sin `server-only`:
 // todo testeable con vitest.
 
-/**
- * Desglose de un precio final CON IVA incluido (hospedaje): neto redondeado a
- * 2 decimales y el IVA absorbe la diferencia, así neto + iva == total exacto
- * (ARCA valida la suma y la tabla invoices tiene el mismo CHECK).
- */
-export function computeAmounts(
-  total: number,
-  ivaPct: number
-): { neto: number; iva: number } {
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-  const totalR = round2(total);
-  const neto = round2(totalR / (1 + ivaPct / 100));
-  const iva = round2(totalR - neto);
-  return { neto, iva };
-}
+// El desglose de neto e IVA NO vive acá: lo calcula el SQL al crear la factura
+// (mig 79/80/81, "Redondeo SOBRE EL TOTAL"), y el CHECK invoices_amounts_add_up
+// garantiza neto + iva = total. Había una copia en TypeScript sin llamadores; se
+// borró para que no exista una segunda fórmula que pueda separarse de la real.
+// Si algún día hace falta un preview en el cliente, va con un test que lo compare
+// contra el round() de Postgres.
 
 /**
  * Fecha ARCA `yyyymmdd` de un instante ISO en la zona del hotel.

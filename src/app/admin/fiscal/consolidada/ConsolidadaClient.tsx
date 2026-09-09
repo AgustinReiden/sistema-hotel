@@ -74,11 +74,15 @@ export default function ConsolidadaClient({
   const [loading, setLoading] = useState(false);
   const [emitting, setEmitting] = useState(false);
 
+  const [kind, id] = selectedKey ? (selectedKey.split(":") as [CtaCteClientKind, string]) : [null, null];
+  const isCompany = kind === "company";
+  const profile = selectedKey ? billingProfiles[selectedKey] ?? null : null;
+
   // Receptor: se precarga de la ficha y el admin puede corregirlo antes de emitir.
-  const [razonSocial, setRazonSocial] = useState("");
-  const [cuit, setCuit] = useState("");
-  const [condicionIva, setCondicionIva] = useState<ReceptorCondicionCuit | "">("");
-  const [domicilio, setDomicilio] = useState("");
+  const [razonSocial, setRazonSocial] = useState(profile?.razonSocial ?? "");
+  const [cuit, setCuit] = useState(profile?.cuit ?? "");
+  const [condicionIva, setCondicionIva] = useState<ReceptorCondicionCuit | "">(profile?.condicionIva ?? "");
+  const [domicilio, setDomicilio] = useState(profile?.domicilio ?? "");
 
   // Detalle impreso: texto por estadía + nota al pie (mig 93). Los importes NO se
   // editan, salen del cargo de cuenta corriente.
@@ -90,10 +94,6 @@ export default function ConsolidadaClient({
 
   const lineaDetalle = (r: CcAccountStayRow) =>
     detalleOverrides[r.reservation_id] ?? defaultStayDescription(r);
-
-  const [kind, id] = selectedKey ? (selectedKey.split(":") as [CtaCteClientKind, string]) : [null, null];
-  const isCompany = kind === "company";
-  const profile = selectedKey ? billingProfiles[selectedKey] ?? null : null;
 
   const loadRows = useCallback(async () => {
     if (!kind || !id) {
@@ -128,17 +128,19 @@ export default function ConsolidadaClient({
     void run();
   }, [loadRows]);
 
-  // Precargar los datos fiscales de la ficha elegida (empresa o huésped).
-  useEffect(() => {
-    function sync() {
-      setRazonSocial(profile?.razonSocial ?? "");
-      setCuit(profile?.cuit ?? "");
-      setCondicionIva(profile?.condicionIva ?? "");
-      setDomicilio(profile?.domicilio ?? "");
-      setNota("");
-    }
-    sync();
-  }, [profile]);
+  // Al elegir otra ficha, recargar los datos fiscales precargados (el valor
+  // inicial ya sale de `profile` arriba). Se ajusta durante el render, no en
+  // un efecto, para no pintar primero los datos de la ficha anterior y recién
+  // después los nuevos.
+  const [prevProfile, setPrevProfile] = useState(profile);
+  if (profile !== prevProfile) {
+    setPrevProfile(profile);
+    setRazonSocial(profile?.razonSocial ?? "");
+    setCuit(profile?.cuit ?? "");
+    setCondicionIva(profile?.condicionIva ?? "");
+    setDomicilio(profile?.domicilio ?? "");
+    setNota("");
+  }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
 

@@ -1,7 +1,7 @@
 // Helpers para formatear tiempos en la timezone del hotel (por default Tucumán).
 // Evitan que `toLocaleString` use la zona del navegador o del servidor.
 
-const DEFAULT_TZ = "America/Argentina/Tucuman";
+export const DEFAULT_TZ = "America/Argentina/Tucuman";
 
 export function formatHotelTime(iso: string | null | undefined, timezone?: string): string {
   if (!iso) return "—";
@@ -99,6 +99,15 @@ export function countHotelNights(
   const fromUtc = Date.UTC(fy, fm - 1, fd);
   const toUtc = Date.UTC(ty, tm - 1, td);
   return Math.round((toUtc - fromUtc) / (1000 * 60 * 60 * 24));
+}
+
+// Suma (o resta) días a una clave "YYYY-MM-DD" y devuelve otra clave. Puro: no
+// depende de ninguna zona horaria, opera sobre la clave ya resuelta.
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
 }
 
 // Fecha corta tipo "25 jun 26" en la zona del hotel.

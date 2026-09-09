@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculateEarlyCheckoutBreakdown,
+  calculateHalfDayPriceBreakdown,
   calculateReservationNights,
   calculateReservationPriceBreakdown,
   calculateWalkInPriceBreakdown,
@@ -269,5 +270,61 @@ describe("noches de calendario: un solo criterio", () => {
       expect(salida.chargedNights, `${checkIn} -> ${checkOut}`).toBe(alta.nights);
       expect(salida.newTotal, `${checkIn} -> ${checkOut}`).toBe(alta.finalTotalPrice);
     }
+  });
+});
+
+describe("el descuento no puede dejar el total en negativo", () => {
+  // Un descuento cargado mal (150 %) daba un "a pagar" negativo en pantalla y ese
+  // número se congelaba en la reserva. El descuento puede llegar a regalar la
+  // estadía; nunca a que el hotel le deba plata al huésped.
+  it("acota el total de una reserva a cero", () => {
+    const r = calculateReservationPriceBreakdown({
+      basePrice: 50000,
+      checkIn: "2026-07-03T14:00:00-03:00",
+      checkOut: "2026-07-05T10:00:00-03:00",
+      discountPercent: 150,
+      timezone: TZ,
+    });
+    expect(r.baseTotalPrice).toBe(100000);
+    expect(r.finalTotalPrice).toBe(0);
+  });
+
+  it("acota el total de un walk-in a cero", () => {
+    const r = calculateWalkInPriceBreakdown({
+      basePrice: 50000,
+      nights: 2,
+      discountPercent: 150,
+    });
+    expect(r.finalTotalPrice).toBe(0);
+  });
+
+  it("acota el total de una media estadía a cero", () => {
+    const r = calculateHalfDayPriceBreakdown({
+      halfDayPrice: 30000,
+      discountPercent: 120,
+    });
+    expect(r.finalTotalPrice).toBe(0);
+  });
+
+  it("con 100 % justo da cero, no un negativo por redondeo", () => {
+    const r = calculateReservationPriceBreakdown({
+      basePrice: 33333.33,
+      checkIn: "2026-07-03T14:00:00-03:00",
+      checkOut: "2026-07-06T10:00:00-03:00",
+      discountPercent: 100,
+      timezone: TZ,
+    });
+    expect(r.finalTotalPrice).toBe(0);
+  });
+
+  it("un descuento normal sigue funcionando igual", () => {
+    const r = calculateReservationPriceBreakdown({
+      basePrice: 50000,
+      checkIn: "2026-07-03T14:00:00-03:00",
+      checkOut: "2026-07-05T10:00:00-03:00",
+      discountPercent: 10,
+      timezone: TZ,
+    });
+    expect(r.finalTotalPrice).toBe(90000);
   });
 });
