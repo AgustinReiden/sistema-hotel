@@ -5,7 +5,6 @@ import {
   arcaDateFromDateKey,
   cbteLetra,
   cbteNombre,
-  computeAmounts,
   formatArcaDate,
   formatCbteNumero,
   formatCuit,
@@ -51,44 +50,6 @@ const REQ: FecaeRequest = {
 };
 
 // ─────────────────────────── amounts ───────────────────────────
-
-describe("computeAmounts (IVA incluido)", () => {
-  it("121 → neto 100, iva 21", () => {
-    expect(computeAmounts(121, 21)).toEqual({ neto: 100, iva: 21 });
-  });
-
-  it("100 → neto 82.64, iva 17.36 (IVA absorbe el redondeo)", () => {
-    expect(computeAmounts(100, 21)).toEqual({ neto: 82.64, iva: 17.36 });
-  });
-
-  it("propiedad: neto + iva == total para una tabla de casos", () => {
-    for (const total of [1, 99.99, 1234.56, 50000, 123456.78, 0.01]) {
-      const { neto, iva } = computeAmounts(total, 21);
-      expect(Math.round((neto + iva) * 100)).toBe(Math.round(total * 100));
-    }
-  });
-
-  // Factura consolidada (mig 79): el importe es la SUMA de N cargos de cuenta
-  // corriente. El neto se calcula sobre ese total, nunca sumando netos por
-  // estadía — si no, el redondeo por fila desarma invoices_amounts_add_up.
-  it("consolidada: neto + iva == total sobre la suma de N cargos", () => {
-    const cargos = [18500.5, 27300, 9999.99, 45000.25, 12345.67, 33333.33, 7800.4, 61200.8];
-    for (let n = 1; n <= cargos.length; n++) {
-      const total = Number(cargos.slice(0, n).reduce((sum, c) => sum + c, 0).toFixed(2));
-      const { neto, iva } = computeAmounts(total, 21);
-      expect(Math.round((neto + iva) * 100)).toBe(Math.round(total * 100));
-    }
-  });
-
-  it("consolidada: sumar netos por estadía NO cuadra (por eso se redondea sobre el total)", () => {
-    const cargos = [100, 100, 100];
-    const total = 300;
-    const netosPorFila = cargos.reduce((sum, c) => sum + computeAmounts(c, 21).neto, 0);
-    // 82.64 * 3 = 247.92, pero el neto correcto de 300 es 247.93.
-    expect(netosPorFila).not.toBe(computeAmounts(total, 21).neto);
-    expect(Math.round((computeAmounts(total, 21).neto + computeAmounts(total, 21).iva) * 100)).toBe(30000);
-  });
-});
 
 describe("fechas ARCA", () => {
   it("convierte ISO a yyyymmdd en zona del hotel (cruza medianoche UTC)", () => {

@@ -84,7 +84,13 @@ export function sanitizeDetalleLine(text: string | null | undefined, max = DETAL
     .replace(/[\u0000-\u001F\u007F]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const cut = collapsed.slice(0, Math.max(max, 1)).trim();
+  // Se corta por caracteres, no por unidades UTF-16: `slice` partia al medio un
+  // emoji (que ocupa dos unidades), dejaba media pareja suelta -se imprime como
+  // "�"- y ademas lo contaba doble contra el limite. Asi coincide con el LEFT() de
+  // app_sanitize_detalle, que en Postgres tambien cuenta caracteres.
+  // (Un emoji compuesto con ZWJ son varios caracteres para las dos reglas por
+  // igual: se puede partir, pero el front y la base lo parten en el mismo lugar.)
+  const cut = Array.from(collapsed).slice(0, Math.max(max, 1)).join("").trim();
   return cut === "" ? null : cut;
 }
 

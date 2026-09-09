@@ -1,3 +1,14 @@
+// Monedas invalidas ya avisadas. El aviso sirve una vez: formatMoney se llama por
+// celda, y repetirlo en una tabla de 200 filas solo tapa la consola.
+const warnedInvalidCurrencies = new Set<string>();
+
+/**
+ * Importe con simbolo de moneda. Si `currency` no es un codigo ISO 4217, Intl tira
+ * RangeError y se cae a ARS: el hotel cobra en pesos, asi que mostrar de mas en
+ * pesos es lo unico que no confunde a nadie. Antes el respaldo era USD, o sea que
+ * un tipeo en la configuracion mostraba toda la caja en dolares SIN avisar. Ahora
+ * avisa por consola una vez por moneda, para que se corrija la configuracion.
+ */
 export function formatMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat("es-AR", {
@@ -6,9 +17,15 @@ export function formatMoney(amount: number, currency: string): string {
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
+    if (!warnedInvalidCurrencies.has(currency)) {
+      warnedInvalidCurrencies.add(currency);
+      console.warn(
+        `formatMoney: "${currency}" no es un codigo de moneda valido (ISO 4217). Los importes se muestran en ARS. Revisa la moneda en la configuracion del hotel.`
+      );
+    }
     return new Intl.NumberFormat("es-AR", {
       style: "currency",
-      currency: "USD",
+      currency: "ARS",
       maximumFractionDigits: 2,
     }).format(amount);
   }

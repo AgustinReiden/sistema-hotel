@@ -1339,23 +1339,6 @@ export async function markRoomAsAvailable(roomId: number): Promise<void> {
   if (error) throw error;
 }
 
-export async function checkRoomAvailability(
-  roomId: number,
-  checkInTarget: string,
-  checkOutTarget: string
-): Promise<boolean> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("reservations")
-    .select("id")
-    .eq("room_id", roomId)
-    .in("status", ACTIVE_RESERVATION_STATUSES)
-    .or(`and(check_in_target.lt.${checkOutTarget},check_out_target.gt.${checkInTarget})`);
-
-  if (error) throw error;
-  return (data ?? []).length === 0;
-}
-
 export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> {
   const supabase = await createClient();
   // Mismo fork que el alta: persona (huesped en guests) o empresa (pasajero en company_passengers).
@@ -2211,8 +2194,24 @@ export async function getManagementDashboardData(
   ]);
 
   // Un error acá no puede quedar en silencio: mostraría $0 como si fuera un dato
-  // real, que es exactamente lo que hacía desconfiar del tablero.
-  for (const res of [overlapRes, paymentsRes, closedRes, ccMovRes, extrasRes, receivableRes]) {
+  // real, que es exactamente lo que hacía desconfiar del tablero. Van TODAS las
+  // respuestas, no solo las de plata: si falla `roomsRes`, `activeRooms` queda en 0
+  // y la ocupación, el ADR y el RevPAR dan Infinity o NaN sin que nadie se entere.
+  // `ccAccounts` no está en la lista porque no es una respuesta de Supabase:
+  // getCtaCteAccounts() devuelve el array ya armado y tira sus propios errores.
+  for (const res of [
+    roomsRes,
+    overlapRes,
+    createdRes,
+    paymentsRes,
+    closedRes,
+    ccMovRes,
+    extrasRes,
+    shiftsRes,
+    cleaningRes,
+    receivableRes,
+    alertsRes,
+  ]) {
     if (res.error) throw res.error;
   }
 
@@ -2951,12 +2950,14 @@ export async function getRoomsNeedingCleaning(): Promise<
   const roomIds = list.map((r) => r.id);
   // Buscamos la última reserva checked_out por habitación (aunque hay que
   // tomar la más reciente por actual_check_out).
-  const { data: lastReservations } = await supabase
+  const { data: lastReservations, error: lastReservationsError } = await supabase
     .from("reservations")
     .select("room_id, client_name, actual_check_out")
     .in("room_id", roomIds)
     .eq("status", "checked_out")
     .order("actual_check_out", { ascending: false });
+
+  if (lastReservationsError) throw lastReservationsError;
 
   const lastByRoom = new Map<
     number,
