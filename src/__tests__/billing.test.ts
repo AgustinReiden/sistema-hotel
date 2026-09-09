@@ -150,6 +150,23 @@ describe("sanitizeDetalleLine", () => {
     expect(sanitizeDetalleLine(largo, DETALLE_NOTA_MAX)).toHaveLength(DETALLE_NOTA_MAX);
   });
 
+  it("no parte un emoji al medio cuando el corte cae justo en el límite", () => {
+    // 👍 ocupa DOS unidades UTF-16. Con `slice(0, 5)` el corte se quedaba con la
+    // mitad de la pareja y el ticket imprimía "abcd�". El emoji entra entero o no
+    // entra, igual que con el LEFT() de app_sanitize_detalle (mig 90), que en
+    // Postgres cuenta caracteres.
+    const cortado = sanitizeDetalleLine("abcd👍efg", 5);
+    expect(cortado).toBe("abcd👍");
+    // Un emoji cuenta UNO contra el límite, no dos.
+    expect(Array.from(cortado ?? "")).toHaveLength(5);
+    // Y no queda ningún surrogate suelto (lo que se veía como "�").
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(cortado ?? "")).toBe(false);
+  });
+
+  it("descarta el emoji entero si no entra en el límite", () => {
+    expect(sanitizeDetalleLine("abcd👍efg", 4)).toBe("abcd");
+  });
+
   it("no deja un espacio colgando cuando el recorte cae en el medio de una palabra", () => {
     const texto = `${"a".repeat(DETALLE_LINEA_MAX - 1)} bbb`;
     const out = sanitizeDetalleLine(texto);

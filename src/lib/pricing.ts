@@ -5,6 +5,16 @@ function roundCurrency(value: number) {
 }
 
 /**
+ * Total despues del descuento, con piso en cero. Un descuento mayor a 100 dejaba
+ * el total en negativo y la pantalla mostraba un "a pagar" negativo, que despues
+ * se congelaba en la reserva. El hotel no le debe plata al huesped por reservar:
+ * el descuento puede llegar a regalar la estadia, no a pagarla.
+ */
+function finalAfterDiscount(baseTotalPrice: number, discountAmount: number) {
+  return Math.max(0, roundCurrency(baseTotalPrice - discountAmount));
+}
+
+/**
  * Noches de CALENDARIO en la zona del hotel. Del 9 al 10 es una noche, se entre a las
  * 06:00 o a las 23:00: la hora de entrada define el servicio, no cuantas noches se
  * cobran. Debe coincidir con app_calculate_reservation_pricing (mig 95), que es la
@@ -114,7 +124,7 @@ export function calculateReservationPriceBreakdown({
   const baseTotalPrice = roundCurrency(basePrice * nights);
   const normalizedDiscountPercent = roundCurrency(discountPercent);
   const discountAmount = roundCurrency((baseTotalPrice * normalizedDiscountPercent) / 100);
-  const finalTotalPrice = roundCurrency(baseTotalPrice - discountAmount);
+  const finalTotalPrice = finalAfterDiscount(baseTotalPrice, discountAmount);
 
   return {
     nights,
@@ -138,7 +148,7 @@ export function calculateWalkInPriceBreakdown({
   const baseTotalPrice = roundCurrency(basePrice * normalizedNights);
   const normalizedDiscountPercent = roundCurrency(discountPercent);
   const discountAmount = roundCurrency((baseTotalPrice * normalizedDiscountPercent) / 100);
-  const finalTotalPrice = roundCurrency(baseTotalPrice - discountAmount);
+  const finalTotalPrice = finalAfterDiscount(baseTotalPrice, discountAmount);
 
   return {
     nights: normalizedNights,
@@ -163,7 +173,7 @@ export function calculateHalfDayPriceBreakdown({
   const baseTotalPrice = roundCurrency(halfDayPrice);
   const normalizedDiscountPercent = roundCurrency(discountPercent);
   const discountAmount = roundCurrency((baseTotalPrice * normalizedDiscountPercent) / 100);
-  const finalTotalPrice = roundCurrency(baseTotalPrice - discountAmount);
+  const finalTotalPrice = finalAfterDiscount(baseTotalPrice, discountAmount);
 
   return {
     baseTotalPrice,

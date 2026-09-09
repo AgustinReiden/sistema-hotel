@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   formatAmount,
@@ -29,10 +29,32 @@ describe("formatMoney", () => {
     expect(result).toContain("1.000.000");
   });
 
-  it("falls back to USD for invalid currency", () => {
-    const result = formatMoney(100, "INVALID_CURRENCY");
-    expect(result).toBeTruthy();
-    expect(result).toContain("100");
+  it("cae a ARS, no a USD, si la moneda no es un codigo ISO 4217", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // El respaldo era USD: un tipeo en la configuracion mostraba toda la caja
+      // del hotel en dolares sin avisar.
+      const enPesos = formatMoney(1500.5, "ARS");
+      const conMonedaRota = formatMoney(1500.5, "MONEDA_INEXISTENTE");
+      expect(conMonedaRota).toBe(enPesos);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("avisa una sola vez por moneda invalida, no una por importe", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // formatMoney se llama por celda; avisar en cada fila taparia la consola.
+      formatMoney(100, "PESOS_ARG");
+      formatMoney(250, "PESOS_ARG");
+      formatMoney(999, "PESOS_ARG");
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("PESOS_ARG");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
