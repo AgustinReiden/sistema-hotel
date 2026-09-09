@@ -6,7 +6,8 @@ import "server-only";
 // (o 'processing' si el outcome es desconocido) y se reintenta después.
 //
 // Secuencia (ver plan / mig 72):
-//  1. TA vigente (cache en DB; si vence en <5 min → WSAA → persistir ANTES de usar)
+//  1. TA vigente (cache en DB; si vence en <5 min → WSAA → persistir ANTES de usar;
+//     un solo login por ambiente aunque haya N emisiones a la vez)
 //  2. Recovery: si la invoice quedó 'processing' con número de un intento
 //     anterior, FECompConsultar — si ARCA la tiene, recuperar el CAE (no duplicar)
 //  3. FECompUltimoAutorizado → N
@@ -54,15 +55,20 @@ function isoFromArcaDate(yyyymmdd: string): string | null {
   return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
 }
 
-async function ensureTa(
+/**
+ * Renovación de TA en vuelo, por ambiente. Sin esto, dos emisiones simultáneas
+ * cerca del vencimiento piden dos tickets a WSAA y ARCA rechaza el segundo con
+ * "El CEE ya posee un TA valido" (ver Troubleshooting en docs/facturacion-arca.md),
+ * dejando esa factura pendiente hasta que venza el ticket bueno (hasta 12 h).
+ * La promesa se comparte entre los que llegan mientras dura, y se limpia al
+ * resolver O al rechazar: un login fallido no queda cacheado para el próximo.
+ */
+const taRenewals = new Map<FiscalEnvironment, Promise<{ token: string; sign: string }>>();
+
+async function renewTa(
   environment: FiscalEnvironment,
   internalKey: string
 ): Promise<{ token: string; sign: string }> {
-  const cached = await getArcaTa(environment, internalKey);
-  if (cached && new Date(cached.expiration_time).getTime() - Date.now() > TA_RENEW_MARGIN_MS) {
-    return { token: cached.token, sign: cached.sign };
-  }
-
   const certPem = getArcaCertPem();
   const keyPem = getArcaKeyPem();
   if (!certPem || !keyPem) {
@@ -83,6 +89,26 @@ async function ensureTa(
     internalKey,
   });
   return { token: ta.token, sign: ta.sign };
+}
+
+async function ensureTa(
+  environment: FiscalEnvironment,
+  internalKey: string
+): Promise<{ token: string; sign: string }> {
+  const cached = await getArcaTa(environment, internalKey);
+  if (cached && new Date(cached.expiration_time).getTime() - Date.now() > TA_RENEW_MARGIN_MS) {
+    return { token: cached.token, sign: cached.sign };
+  }
+
+  // Un solo loginWsaa por ambiente aunque entren N emisiones a la vez.
+  const inFlight = taRenewals.get(environment);
+  if (inFlight) return inFlight;
+
+  const renewal = renewTa(environment, internalKey).finally(() => {
+    taRenewals.delete(environment);
+  });
+  taRenewals.set(environment, renewal);
+  return renewal;
 }
 
 function requestFromPayload(p: BeginEmissionPayload): FecaeRequest {
