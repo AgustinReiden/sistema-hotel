@@ -166,9 +166,20 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           <span>{formatDateCol(invoice.cbte_fch)}</span>
         </div>
         <div className="row">
+          {/* RG 1415 exige declarar la condición de venta, y la consolidada NO es
+              contado: junta un mes de estadías fiadas. Sale de invoice.kind, que ya
+              está guardado; no hace falta un campo aparte (mig 98). */}
           <span>Cond. venta:</span>
-          <span>Contado</span>
+          <span>{isConsolidada ? "Cuenta corriente" : "Contado"}</span>
         </div>
+        {/* El vencimiento sólo dice algo cuando no es el mismo día de la emisión, o
+            sea en la consolidada a plazo. En el check-out sería ruido. */}
+        {invoice.fch_vto_pago && invoice.fch_vto_pago !== invoice.cbte_fch && (
+          <div className="row">
+            <span>Vencimiento:</span>
+            <span>{formatDateCol(invoice.fch_vto_pago)}</span>
+          </div>
+        )}
 
         <hr />
         {/* Receptor */}

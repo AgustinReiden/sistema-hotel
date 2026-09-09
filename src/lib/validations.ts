@@ -474,6 +474,20 @@ export const fiscalSettingsSchema = z
         .max(99998, "El punto de venta no puede superar 99998.")
         .optional()
     ),
+    // Plazo de la consolidada de cuenta corriente (mig 98). El tope de 365 es el
+    // mismo del CHECK de la base: un tipeo tipo "300" en vez de "30" manda a ARCA
+    // un vencimiento a un ano que despues solo se arregla con nota de credito.
+    dias_vto_cuenta_corriente: z.preprocess(
+      (v) => {
+        if (typeof v !== "string" || v.trim() === "") return 30;
+        return Number(v.trim());
+      },
+      z
+        .number()
+        .int("El plazo de la cuenta corriente debe ser un numero entero de dias.")
+        .min(0, "El plazo de la cuenta corriente no puede ser negativo.")
+        .max(365, "El plazo de la cuenta corriente no puede superar 365 dias.")
+    ),
   })
   .superRefine((data, ctx) => {
     if (!data.enabled) return;

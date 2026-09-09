@@ -696,6 +696,11 @@ export type FiscalSettings = {
   cbte_tipo: number;
   concepto: number;
   iva_pct: number;
+  /**
+   * Días entre emisión y vencimiento (FchVtoPago) de una consolidada de cuenta
+   * corriente (mig 98). Las de check-out y las notas de crédito vencen el mismo día.
+   */
+  dias_vto_cuenta_corriente: number;
 };
 
 /**
@@ -735,6 +740,8 @@ export type InvoiceRecord = {
   iva_id: number; // 5 = 21%
   fch_serv_desde: string; // date
   fch_serv_hasta: string; // date
+  /** Vencimiento de pago declarado a ARCA. En la consolidada va al plazo (mig 98). */
+  fch_vto_pago: string | null; // date
   qr_url: string | null;
   last_error: string | null;
   attempt_count: number;

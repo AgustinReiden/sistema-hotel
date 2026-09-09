@@ -268,6 +268,7 @@ export async function updateFiscalSettingsAction(
       iibb: String(formData.get("iibb") ?? "").trim(),
       inicio_actividades: String(formData.get("inicio_actividades") ?? "").trim(),
       punto_venta: String(formData.get("punto_venta") ?? "").trim(),
+      dias_vto_cuenta_corriente: String(formData.get("dias_vto_cuenta_corriente") ?? "").trim(),
     };
     const parsed = fiscalSettingsSchema.parse(raw);
 
@@ -280,6 +281,7 @@ export async function updateFiscalSettingsAction(
       iibb: parsed.iibb || null,
       inicio_actividades: parsed.inicio_actividades || null,
       punto_venta: parsed.punto_venta ?? null,
+      dias_vto_cuenta_corriente: parsed.dias_vto_cuenta_corriente,
     });
 
     // Sincronizar la clave interna del servidor (hash en fiscal_private) para

@@ -176,6 +176,24 @@ export default function FiscalSettingsPanel({ settings }: { settings: FiscalSett
             Exclusivo para la app. Se da de alta en el portal de ARCA con clave fiscal.
           </p>
         </div>
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">
+            Plazo de pago de cuenta corriente (días)
+          </label>
+          <input
+            type="number"
+            name="dias_vto_cuenta_corriente"
+            min={0}
+            max={365}
+            defaultValue={settings?.dias_vto_cuenta_corriente ?? 30}
+            placeholder="30"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none text-sm"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">
+            A cuántos días de la emisión vence una factura consolidada de cuenta corriente. Las
+            facturas de check-out y las notas de crédito vencen siempre el mismo día.
+          </p>
+        </div>
       </div>
 
       <div className="text-[11px] text-slate-400">
