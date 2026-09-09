@@ -273,6 +273,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
           </div>
 
           <CloseShiftModal
+            key={summary.shift.id}
             isOpen={closeModalOpen}
             onClose={() => setCloseModalOpen(false)}
             shiftId={summary.shift.id}
