@@ -3374,6 +3374,13 @@ export async function getFiscalSettings(): Promise<FiscalSettings | null> {
     cbte_tipo: Number(row.cbte_tipo) || 6,
     concepto: Number(row.concepto) || 2,
     iva_pct: Number(row.iva_pct) || 21,
+    // `|| 30` no sirve acá: un plazo de 0 días es válido (vence el mismo día) y
+    // `0 || 30` daría 30. El default sólo cubre la columna ausente — o sea, el
+    // ratito entre deployar el código y aplicar la migración 98.
+    dias_vto_cuenta_corriente:
+      row.dias_vto_cuenta_corriente == null || !Number.isFinite(Number(row.dias_vto_cuenta_corriente))
+        ? 30
+        : Number(row.dias_vto_cuenta_corriente),
   };
 }
 
@@ -3563,19 +3570,20 @@ export async function setArcaTa(input: {
  */
 export async function getStaleProcessingInvoiceIds(
   environment: FiscalSettings["environment"],
-  excludeInvoiceId: string,
+  excludeInvoiceId: string | null,
   staleBeforeIso: string
 ): Promise<string[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("invoices")
     .select("id")
     .eq("environment", environment)
     .eq("status", "processing")
     .not("cbte_nro", "is", null)
-    .lt("last_attempt_at", staleBeforeIso)
-    .neq("id", excludeInvoiceId)
-    .limit(10);
+    .lt("last_attempt_at", staleBeforeIso);
+  // `null` = barrido suelto, sin factura propia que excluir (sweepStaleInvoices).
+  if (excludeInvoiceId !== null) query = query.neq("id", excludeInvoiceId);
+  const { data, error } = await query.limit(10);
   if (error) throw error;
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => String(r.id));
 }
@@ -3616,6 +3624,7 @@ export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord |
     iva_id: Number(r.iva_id) || 5,
     fch_serv_desde: String(r.fch_serv_desde),
     fch_serv_hasta: String(r.fch_serv_hasta),
+    fch_vto_pago: (r.fch_vto_pago as string | null) ?? null,
     qr_url: (r.qr_url as string | null) ?? null,
     last_error: (r.last_error as string | null) ?? null,
     attempt_count: Number(r.attempt_count) || 0,

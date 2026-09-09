@@ -47,3 +47,19 @@ export async function assertStaff(forbiddenMessage = "No autorizado.") {
   if (role !== "admin" && role !== "receptionist") throw new Error(forbiddenMessage);
   return supabase;
 }
+
+/**
+ * "¿El que esta mirando es admin?", sin lanzar. Los assert* de arriba son para
+ * server actions, donde cortar con un error ES la respuesta correcta. Un server
+ * component que solo quiere decidir si hace algo de mas (por ejemplo, disparar el
+ * barrido de facturas trabadas en /admin/fiscal) no puede romper la pantalla por
+ * eso: si no se puede resolver el rol, la respuesta es false y la pagina sigue.
+ */
+export async function isCurrentUserAdmin(): Promise<boolean> {
+  try {
+    const { role } = await loadCurrentRole();
+    return role === "admin";
+  } catch {
+    return false;
+  }
+}

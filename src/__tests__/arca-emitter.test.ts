@@ -52,7 +52,7 @@ vi.mock("@/lib/arca/config", async (importOriginal) => {
   };
 });
 
-import { emitInvoice } from "@/lib/arca/emitter";
+import { emitInvoice, sweepStaleInvoices } from "@/lib/arca/emitter";
 
 const db = vi.mocked(dataMod);
 
@@ -95,6 +95,7 @@ const FISCAL_SETTINGS: FiscalSettings = {
   cbte_tipo: 6,
   concepto: 2,
   iva_pct: 21,
+  dias_vto_cuenta_corriente: 30,
 };
 
 function invoice(over: Partial<InvoiceRecord> = {}): InvoiceRecord {
@@ -124,6 +125,7 @@ function invoice(over: Partial<InvoiceRecord> = {}): InvoiceRecord {
     iva_id: 5,
     fch_serv_desde: "2026-09-07",
     fch_serv_hasta: "2026-09-09",
+    fch_vto_pago: "2026-09-09",
     qr_url: null,
     last_error: null,
     attempt_count: 0,
@@ -741,6 +743,104 @@ describe("emitInvoice — barrido de facturas trabadas", () => {
     expect(antiguedadMs).toBeLessThan(2 * 60 * 1000 + 10_000);
 
     expect(outcome.status).toBe("authorized");
+  });
+});
+
+// El barrido suelto: el que dispara /admin/fiscal cuando entra un admin. Existe
+// porque una consolidada se emite UNA VEZ POR MES: si ARCA daba timeout justo ahí, la
+// factura quedaba en 'processing' reteniendo su número hasta que alguien emitiera
+// cualquier otra cosa, y el recepcionista ni siquiera la ve en su lista.
+describe("sweepStaleInvoices — barrido sin factura de por medio", () => {
+  it("j. sin nada trabado no le pide ticket a ARCA", async () => {
+    staleIds = [];
+
+    await sweepStaleInvoices();
+
+    // Una sola consulta a la base y nada más: esto corre en CADA visita del admin a
+    // la pantalla, así que el caso normal tiene que ser barato.
+    expect(H.calls).toEqual(["getFiscalSettings", "getStaleProcessingInvoiceIds(excluye=null)"]);
+    expect(H.loginWsaa).not.toHaveBeenCalled();
+    expect(H.callWsfe).not.toHaveBeenCalled();
+    expect(db.getArcaTa).not.toHaveBeenCalled();
+  });
+
+  it("k. reconcilia la consolidada trabada que ARCA sí autorizó y le recupera el CAE", async () => {
+    staleIds = ["inv-consolidada-trabada"];
+    facturas.set(
+      "inv-consolidada-trabada",
+      invoice({
+        id: "inv-consolidada-trabada",
+        kind: "consolidada",
+        reservation_id: null,
+        status: "processing",
+        cbte_nro: 1200,
+        imp_total: 50000,
+        doc_nro: "12345678",
+      })
+    );
+    wsfeCola = {
+      FECompConsultar: [
+        xmlConsultaEncontrada({
+          cbteNro: 1200,
+          impTotal: 50000,
+          docNro: "12345678",
+          cae: "76280000000001",
+          caeVto: "20260915",
+        }),
+      ],
+    };
+
+    await sweepStaleInvoices();
+
+    expect(H.calls).toEqual([
+      "getFiscalSettings",
+      "getStaleProcessingInvoiceIds(excluye=null)",
+      "getArcaTa(homologacion)",
+      "getInvoiceById(inv-consolidada-trabada)",
+      "callWsfe:FECompConsultar",
+      "finalizeInvoice(inv-consolidada-trabada, authorized)",
+    ]);
+
+    // Recupera el CAE que ARCA ya había dado: NO re-emite ni duplica.
+    const [reconciliada] = finalizeCalls();
+    expect(reconciliada).toMatchObject({
+      invoiceId: "inv-consolidada-trabada",
+      outcome: "authorized",
+      cae: "76280000000001",
+    });
+    expect(reconciliada.arcaResult).toMatchObject({ recovered: true, sweep: true });
+
+    // Barre TODO lo trabado: no hay factura propia que excluir.
+    const [env, exclude, staleBefore] = db.getStaleProcessingInvoiceIds.mock.calls[0];
+    expect(env).toBe("homologacion");
+    expect(exclude).toBeNull();
+    // Mismo corte de 2 minutos que el barrido de emitInvoice.
+    const antiguedadMs = Date.now() - new Date(staleBefore).getTime();
+    expect(antiguedadMs).toBeGreaterThanOrEqual(2 * 60 * 1000);
+    expect(antiguedadMs).toBeLessThan(2 * 60 * 1000 + 10_000);
+  });
+
+  it("l. no hace nada si la facturación está deshabilitada", async () => {
+    db.getFiscalSettings.mockImplementation(async () => {
+      H.calls.push("getFiscalSettings");
+      return { ...FISCAL_SETTINGS, enabled: false };
+    });
+
+    await sweepStaleInvoices();
+
+    expect(H.calls).toEqual(["getFiscalSettings"]);
+    expect(db.getStaleProcessingInvoiceIds).not.toHaveBeenCalled();
+  });
+
+  it("m. nunca lanza: la pantalla de facturación tiene que abrir igual", async () => {
+    // Esto corre desde un server component. Si el barrido lanzara, se llevaría
+    // puesta /admin/fiscal justo cuando el admin va a mirar qué pasó.
+    db.getStaleProcessingInvoiceIds.mockImplementation(async () => {
+      throw new Error("la base se cayó");
+    });
+
+    await expect(sweepStaleInvoices()).resolves.toBeUndefined();
+    expect(H.callWsfe).not.toHaveBeenCalled();
   });
 });
 

@@ -1,16 +1,32 @@
+import { after } from "next/server";
 import { FileText } from "lucide-react";
 
+import { sweepStaleInvoices } from "@/lib/arca/emitter";
 import {
   getFiscalSettings,
   listInvoiceableCheckouts,
   listPendingInvoices,
   listTodayAuthorizedInvoices,
 } from "@/lib/data";
+import { isCurrentUserAdmin } from "@/lib/server-auth";
 import FiscalClient from "./FiscalClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function FiscalPage() {
+  // Barrido de facturas trabadas: una consolidada se emite una vez por mes, así que
+  // si ARCA da timeout justo ahí nadie vuelve a pasar por el barrido hasta la
+  // siguiente emisión, y el recepcionista ni siquiera la ve en su lista. Que el admin
+  // abra esta pantalla ALCANZA para reconciliarla, sin cron ni infraestructura nueva.
+  //
+  // Va en `after()`: corre DESPUÉS de mandar la respuesta, así que no le agrega ni un
+  // milisegundo a la carga de la pantalla aunque ARCA tarde. La contracara es que lo
+  // reconciliado se ve recién al refrescar; para algo que hoy puede quedar semanas
+  // trabado, esperar un refresh es barato. `sweepStaleInvoices` nunca lanza.
+  if (await isCurrentUserAdmin()) {
+    after(sweepStaleInvoices());
+  }
+
   const [settings, pending, invoiceable, authorized] = await Promise.all([
     getFiscalSettings().catch(() => null),
     listPendingInvoices().catch(() => []),

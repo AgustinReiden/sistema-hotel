@@ -49,6 +49,14 @@ import {
 
 const TA_RENEW_MARGIN_MS = 5 * 60 * 1000;
 
+/**
+ * Cuánto tiene que estar quieta una factura en 'processing' para considerarla
+ * trabada. Es el mismo umbral que usa `rpc_begin_invoice_emission` para decidir si
+ * un 'processing' es "fresco" (intento en vuelo) o re-emitible: si los dos números
+ * se separan, o barremos una emisión en curso o dejamos una trabada sin barrer.
+ */
+const STALE_PROCESSING_MS = 2 * 60 * 1000;
+
 /** "yyyymmdd" → "yyyy-mm-dd" (para columnas date de Postgres). */
 function isoFromArcaDate(yyyymmdd: string): string | null {
   if (!/^\d{8}$/.test(yyyymmdd)) return null;
@@ -205,15 +213,34 @@ async function sweepStaleProcessing(
   auth: WsfeAuth,
   cuit: string,
   internalKey: string,
-  excludeInvoiceId: string
+  excludeInvoiceId: string | null
 ): Promise<void> {
-  const staleBeforeIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   let ids: string[];
   try {
-    ids = await getStaleProcessingInvoiceIds(environment, excludeInvoiceId, staleBeforeIso);
+    ids = await getStaleProcessingInvoiceIds(environment, excludeInvoiceId, staleBefore());
   } catch {
     return; // sin DB no hay barrido; la emisión sigue igual
   }
+  await reconcileStaleIds(ids, wsfeUrl, auth, cuit, internalKey);
+}
+
+/** Corte de "estancada": un intento más viejo que esto ya no está en vuelo. */
+function staleBefore(): string {
+  return new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
+}
+
+/**
+ * Reconcilia una lista de facturas trabadas, una por una. Compartido por los dos
+ * barridos (el de `emitInvoice` y el suelto de `sweepStaleInvoices`) para que no
+ * puedan tratar distinto a la misma factura.
+ */
+async function reconcileStaleIds(
+  ids: string[],
+  wsfeUrl: string,
+  auth: WsfeAuth,
+  cuit: string,
+  internalKey: string
+): Promise<void> {
   for (const id of ids) {
     try {
       const inv = await getInvoiceById(id);
@@ -221,6 +248,54 @@ async function sweepStaleProcessing(
     } catch {
       // carrera con otro emitInvoice / red / etc.: ignorar, es limpieza best-effort
     }
+  }
+}
+
+/**
+ * Barrido suelto, sin una factura propia de por medio: reconcilia contra ARCA las
+ * 'processing' trabadas del ambiente configurado.
+ *
+ * POR QUÉ EXISTE: `sweepStaleProcessing` sólo corría como efecto lateral de emitir
+ * otra factura, y una consolidada se emite UNA VEZ POR MES. Si ARCA daba timeout
+ * justo ahí, la factura quedaba en 'processing' reteniendo su número hasta que
+ * alguien emitiera cualquier otra cosa — y encima el recepcionista no la ve
+ * (`rpc_list_pending_invoices` no le muestra las consolidadas, que tienen
+ * `cash_shift_id NULL`). Podía pasar semanas así. Ahora `/admin/fiscal` lo dispara
+ * al entrar un admin: la factura se reconcilia sola apenas alguien mira la pantalla,
+ * sin cron ni infraestructura nueva.
+ *
+ * Best-effort y silencioso: NUNCA lanza. Si falta configuración, clave o TA, no hace
+ * nada — la pantalla tiene que abrir igual, con o sin barrido.
+ */
+export async function sweepStaleInvoices(): Promise<void> {
+  try {
+    const internalKey = getArcaInternalKey();
+    if (!internalKey) return;
+
+    const { getFiscalSettings } = await import("@/lib/data");
+    const settings = await getFiscalSettings();
+    if (!settings?.enabled || !settings.cuit) return;
+
+    const environment = settings.environment;
+
+    // Se mira si hay candidatos ANTES de pedir el TA: el caso normal es que no haya
+    // ninguno, y no tiene sentido pegarle a WSAA en cada visita a la pantalla.
+    // `null` = no hay factura propia que excluir; acá se barre todo lo trabado.
+    const ids = await getStaleProcessingInvoiceIds(environment, null, staleBefore());
+    if (ids.length === 0) return;
+
+    const ta = await ensureTa(environment, internalKey);
+    const auth: WsfeAuth = { token: ta.token, sign: ta.sign, cuit: settings.cuit };
+    await reconcileStaleIds(
+      ids,
+      ARCA_ENDPOINTS[environment].wsfe,
+      auth,
+      settings.cuit,
+      internalKey
+    );
+  } catch {
+    // Limpieza oportunista: si falla, la pantalla se renderiza igual y el barrido
+    // vuelve a intentarse en la próxima visita (o al emitir la próxima factura).
   }
 }
 
