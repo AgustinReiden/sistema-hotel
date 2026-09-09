@@ -41,6 +41,9 @@ console.log("\nSQL arbitrario (deben dar 42501):");
 for (const [fn, args] of [
   ["run_sql", { query: "SELECT count(*) AS n FROM public.guests" }],
   ["exec_ddl", { p_sql: "SELECT 1" }],
+  // Anotar migraciones como aplicadas es escribir el registro de deriva (mig 99).
+  // Un nombre que no existe: si la funcion contestara, la fila quedaria igual.
+  ["record_migration", { p_filename: "00_prueba_anon_no_deberia_entrar.sql" }],
 ]) {
   const { data, error } = await supabase.rpc(fn, args);
   if (error?.code === "42501") ok(`${fn}: permission denied`);
