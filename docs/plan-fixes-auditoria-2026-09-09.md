@@ -427,15 +427,49 @@ Fase 12: detalles de baja prioridad, cada uno chico y verificable.
 
 | Fase | Estado | PR | Fecha |
 |---|---|---|---|
-| 1 | pendiente | | |
-| 2 | pendiente | | |
-| 3 | pendiente | | |
-| 4 | pendiente | | |
-| 5 | pendiente | | |
-| 6 | pendiente | | |
-| 7 | pendiente | | |
-| 8 | pendiente | | |
-| 9 | pendiente | | |
-| 10 | pendiente | | |
-| 11 | bloqueada por decisión de plazo | | |
-| 12 | pendiente | | |
+| 1 | verificada | #67, #70 | 2026-09-09 |
+| 2 | verificada | #68 | 2026-09-09 |
+| 3 | verificada, migración 97 aplicada en PROD | #71 | 2026-09-09 |
+| 4 | verificada, migraciones 95 y 96 aplicadas en PROD | #62, #69 | 2026-09-09 |
+| 5 | verificada | #72 | 2026-09-09 |
+| 6 | verificada | #75 | 2026-09-09 |
+| 7 | verificada | #66 | 2026-09-09 |
+| 8 | verificada | #73, #74 | 2026-09-09 |
+| 9 | verificada | #64 | 2026-09-09 |
+| 10 | verificada; falta activar la protección de `main` en GitHub | #65 | 2026-09-09 |
+| 11 | verificada, migración 98 aplicada en PROD (plazo: 30 días configurable) | #77 | 2026-09-09 |
+| 12 | verificada | #76 | 2026-09-09 |
+
+## Verificación del 2026-09-09 (noche)
+
+Las doce fases se ejecutaron el mismo día en sesiones separadas y se mergearon a `main` (commit 358f7b3). La verificación se hizo con cinco revisores independientes (Sonnet 5 para las fases de aplicación, Opus 5 para las de dinero y fiscal), cada criterio de aceptación contrastado contra el código final con archivo y línea, más consultas de solo lectura a PROD para confirmar que las migraciones están aplicadas y las guardas vivas.
+
+**Baseline en `main`**
+
+| Chequeo | Resultado |
+|---|---|
+| `tsc --noEmit` | limpio |
+| `eslint` | 0 errores, 0 warnings |
+| `vitest run` | 19 archivos, 302 tests, todos pasan; también con `TZ=UTC` |
+| `npm audit --omit=dev` | 0 vulnerabilidades |
+| `next build` | OK, proxy compilado |
+| CI en GitHub Actions | jobs `ci` y `test-utc` en verde en todos los runs |
+| PROD `applied_migrations` | 95, 96, 97 y 98 aplicadas |
+
+**Confirmado en PROD**
+
+- `payments`: `CHECK (amount > 0)` validado y FK a `reservations` con `ON DELETE RESTRICT`.
+- `invoices`, `arca_ta`, `fiscal_private`, `cuenta_corriente_movimientos`: sin INSERT, UPDATE ni DELETE para `anon` ni `authenticated`. `fiscal_settings` conserva solo UPDATE, como estaba previsto.
+- `app_hotel_nights` existe y la usan `app_calculate_reservation_pricing`, `rpc_extend_reservation` y `rpc_staff_early_checkout`. Ninguna función de PROD cuenta noches por horas.
+- `rpc_discard_invoice` tiene el guard P0024; `rpc_begin_invoice_emission` calcula el vencimiento de la consolidada; `fiscal_settings.dias_vto_cuenta_corriente` existe con default 30.
+- `exec_ddl` y `run_sql`: ejecutables solo por `service_role`.
+- La única reserva activa que difiere entre el criterio viejo y el nuevo es un walk-in cotizado correctamente a una noche. No hay reservas activas sobrecobradas.
+
+**Hallazgos nuevos que dejó la verificación**
+
+1. **`record_migration` ejecutable por anónimos en PROD (medio).** La migración 91 hace `REVOKE ALL ... FROM PUBLIC` y `GRANT ... TO service_role`, pero en PROD la función conserva el permiso a PUBLIC y a `authenticated`. Es deriva: ninguna migración posterior la toca. Cualquiera con la anon key puede insertar filas en `applied_migrations` y hacer creer que una migración está aplicada. No toca datos del hotel. Fix, a correr como `postgres` o `service_role` y a repetir en una migración 99 para que quede versionado:
+   `REVOKE ALL ON FUNCTION public.record_migration(text, text) FROM PUBLIC, anon, authenticated; GRANT EXECUTE ON FUNCTION public.record_migration(text, text) TO service_role;`
+2. **Tres reservas ya cerradas y cobradas con una noche de más** (190.000 en total, listadas con id en el PR #69). No se corrigen por migración: decisión de Agustín.
+3. **Protección de `main` en GitHub sin activar.** El CI corre pero nada impide mergear con el check en rojo. Paso manual: Settings, Branches, exigir el check `ci`.
+4. **CSP sigue en modo reporte en producción.** Es la decisión pendiente que describe la fase 10.
+5. **Bajos:** las tablas de dinero conservan TRUNCATE, REFERENCES y TRIGGER para `anon` y `authenticated` (default de Supabase, no alcanzable por PostgREST); la nota de crédito de una consolidada imprime "Cuenta corriente" pero declara vencimiento el mismo día; `getCtaCteAccounts` sigue silenciando los errores de sus consultas secundarias; `src/app/admin/finances/page.tsx` mantiene seis usos de locale `en-US`; los modales `NewReservationModal`, `EditReservationModal` y `CompanyCheckInModal` no recibieron la accesibilidad de la fase 12; `extra_charges.reservation_id` sigue en cascada.

@@ -128,6 +128,12 @@ cambia nada. **Hay que cargarla en las dos JUFEC antes de facturar.**
 
 ### 🟠 A-01 — La factura de cuenta corriente dice "Contado". Y a ARCA le dice lo mismo.
 
+> **Resuelto el 2026-09-09** en el PR #77 (migración 98): el impreso deriva la condición de
+> venta del `kind` y `rpc_begin_invoice_emission` fija `FchVtoPago` con el plazo configurable
+> `fiscal_settings.dias_vto_cuenta_corriente` (default 30 días) para las consolidadas. Queda
+> como detalle que la nota de crédito de una consolidada imprime "Cuenta corriente" pero declara
+> vencimiento el mismo día. El resto de esta sección describe el estado anterior.
+
 El impreso tiene `Cond. venta: Contado` fijo en el código
 (`src/app/admin/factura/[invoiceId]/page.tsx:169`), y `rpc_begin_invoice_emission` manda
 `FchVtoPago` = fecha de emisión, con el comentario *"contado: vence el mismo día"*.

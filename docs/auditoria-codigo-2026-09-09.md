@@ -2,6 +2,7 @@
 
 **Fecha:** 2026-09-09
 **Rama auditada:** `claude/code-audit-end-to-end-1c218e` (equivalente a `main` en c7837fb)
+**Estado al cierre del mismo día:** el crítico, los cinco altos y los veinte medios quedaron resueltos en los PRs #62 y #64 a #77, con las migraciones 95 a 98 aplicadas en PROD. La verificación fase por fase, el baseline final y los hallazgos nuevos que dejó la verificación (uno medio: `record_migration` ejecutable por anónimos en PROD) están en `docs/plan-fixes-auditoria-2026-09-09.md`, sección "Verificación del 2026-09-09 (noche)". Lo que sigue es el informe original, sin retocar.
 **Método:** baseline automático (typecheck, lint, tests, `npm audit`) + seis revisiones paralelas con Sonnet 5 por área (capa de datos y server actions, base de datos y migraciones, lógica de negocio, facturación ARCA, UI/cliente, configuración y dependencias). Cada hallazgo alto o crítico fue re-verificado a mano contra el código antes de entrar en este informe. Dos hallazgos "ALTO" reportados por subagentes se rebajaron al verificarlos: la autorización de tarifa vieja sin chequeo de rol (la RPC valida `app_is_admin()` en la base) y el descarte de facturas "En verificación" (la UI no muestra el botón para ese estado; queda solo la RPC como defensa en profundidad, ver M-7b). Ambos siguen en el informe con la severidad corregida.
 
 ## Baseline
