@@ -34,6 +34,10 @@ export function calculateReservationNights(
  * (desde el check-in hasta el día de salida), preservando la tarifa cotizada, el
  * % de descuento y los extras (minibar, daños, media estadía). Es el PREVIEW que
  * usa la UI; la autoridad es rpc_staff_early_checkout, que aplica la misma fórmula.
+ *
+ * Única diferencia con la RPC, y sólo con un descuento imposible de >100 %: acá el
+ * neto tiene piso en cero y allá no, pero allá el UPDATE rebota contra el CHECK
+ * reservations_total_price_non_negative. Ninguna de las dos guarda un negativo.
  */
 export function calculateEarlyCheckoutBreakdown({
   checkInTargetIso,
@@ -69,7 +73,7 @@ export function calculateEarlyCheckoutBreakdown({
   const extras = roundCurrency(totalPrice - (baseTotalPrice - discountAmount));
   const newBaseTotal = roundCurrency(perNight * chargedNights);
   const newDiscountAmount = roundCurrency((newBaseTotal * discountPercent) / 100);
-  const newFinal = roundCurrency(newBaseTotal - newDiscountAmount);
+  const newFinal = finalAfterDiscount(newBaseTotal, newDiscountAmount);
   const newTotal = roundCurrency(newFinal + extras);
   const newBalance = roundCurrency(Math.max(0, newTotal - paidAmount));
   const isOverpaid = newTotal < paidAmount;
