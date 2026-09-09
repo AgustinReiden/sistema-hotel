@@ -183,6 +183,19 @@ export default function CloseShiftModal({
     );
   }, [closed, shiftId]);
 
+  useEffect(() => {
+    // No cierra si el modal no se puede descartar (rendicion forzada), si ya se
+    // cerro la caja (esa vista no tiene un onClose directo: "Listo" hace logout o
+    // reabre turno segun `afterClose`, no alcanza con descartar) ni mientras hay
+    // un envio en curso (arqueo, ampliar/reportar salida vencida).
+    if (!isOpen || !dismissable || closed || loading || finishing || actionLoading) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, dismissable, closed, loading, finishing, actionLoading, onClose]);
+
   if (!isOpen) return null;
 
   const parsedActual = parseFloat(actualCash.replace(",", "."));
@@ -309,12 +322,17 @@ export default function CloseShiftModal({
     ].filter((r) => r.amount > 0);
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div
+          className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="close-shift-modal-title"
+        >
           <div className="p-6 text-center">
             <div className="inline-flex w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 items-center justify-center mb-3">
               <CheckCircle2 size={28} />
             </div>
-            <h2 className="text-xl font-bold text-slate-800 mb-1">Caja cerrada</h2>
+            <h2 id="close-shift-modal-title" className="text-xl font-bold text-slate-800 mb-1">Caja cerrada</h2>
             <p className="text-sm text-slate-500 mb-5">
               {d === 0
                 ? "La caja cuadra perfecto."
@@ -429,14 +447,19 @@ export default function CloseShiftModal({
   if (blockers === null || hasBlockers) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+        <div
+          className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="close-shift-modal-title"
+        >
           <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
                 <DoorOpen size={20} />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-slate-800">Salidas vencidas</h2>
+                <h2 id="close-shift-modal-title" className="text-xl font-bold text-slate-800">Salidas vencidas</h2>
                 <p className="text-slate-500 text-sm font-medium">
                   Resolvé cada habitación antes de rendir la caja.
                 </p>
@@ -633,14 +656,19 @@ export default function CloseShiftModal({
   // ── Paso 2: arqueo a ciegas ──
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="close-shift-modal-title"
+      >
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
               <Wallet size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">Rendir Caja</h2>
+              <h2 id="close-shift-modal-title" className="text-xl font-bold text-slate-800">Rendir Caja</h2>
               <p className="text-slate-500 text-sm font-medium">
                 Conta el efectivo real y cerramos el turno.
               </p>

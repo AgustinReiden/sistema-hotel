@@ -73,6 +73,18 @@ export default function BookingModal({
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    // No cierra mientras se envia el formulario, ni en la pantalla de exito: ahi el
+    // boton X tambien esta oculto a proposito, porque "Volver al Inicio" es lo unico
+    // que resetea el formulario para la proxima reserva.
+    if (!isOpen || loading || success) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, loading, success, onClose]);
+
   if (!isOpen) return null;
   if (typeof document === "undefined") return null;
 
@@ -138,7 +150,12 @@ export default function BookingModal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 bg-white">
-      <div className="relative w-full h-full bg-white overflow-hidden">
+      <div
+        className="relative w-full h-full bg-white overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="booking-modal-title"
+      >
         {!success && (
           <button
             onClick={onClose}
@@ -154,7 +171,7 @@ export default function BookingModal({
                 <div className="w-24 h-24 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-inner border border-emerald-100">
                   <CheckCircle2 size={48} />
                 </div>
-                <h3 className="text-4xl font-serif text-slate-900 mb-4">Reserva Registrada</h3>
+                <h3 id="booking-modal-title" className="text-4xl font-serif text-slate-900 mb-4">Reserva Registrada</h3>
                 <p className="text-slate-600 text-lg mb-3 max-w-2xl">
                   Tu reserva para la <strong>{room.room_type}</strong> quedo registrada y esta <span className="text-emerald-600 font-bold">pendiente de confirmacion</span>.
                 </p>
@@ -255,7 +272,7 @@ export default function BookingModal({
                 <div className="bg-white md:h-full overflow-y-auto">
                   <div className="max-w-xl mx-auto px-8 py-10 md:px-12 md:py-12">
                     <h3 className="text-xs font-bold text-brand-500 uppercase tracking-[0.22em] mb-4">Paso Final</h3>
-                    <h2 className="text-3xl md:text-5xl font-serif text-slate-900 mb-8 leading-[1.05]">
+                    <h2 id="booking-modal-title" className="text-3xl md:text-5xl font-serif text-slate-900 mb-8 leading-[1.05]">
                       Completa tus datos para reservar
                     </h2>
 

@@ -44,6 +44,15 @@ const nextConfig = {
         ];
     },
     allowedDevOrigins: ['127.0.0.1', 'localhost'],
+    // El repo se trabaja desde git worktrees (varios checkouts bajo .claude/worktrees/),
+    // cada uno con su propio lockfile, anidados bajo el lockfile del checkout principal.
+    // Turbopack ya no avisa "multiple lockfiles" en un worktree real (detecta el borde
+    // del worktree solo), pero fijar la raíz explícita evita depender de esa detección
+    // y protege un build desde un clone plano (ej. Coolify) que termine anidado bajo
+    // otro directorio con lockfile propio.
+    turbopack: {
+        root: import.meta.dirname,
+    },
     experimental: {
         serverActions: {
             allowedOrigins: ['hotelelrefugio.com.ar'],
