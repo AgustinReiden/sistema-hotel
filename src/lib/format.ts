@@ -36,6 +36,28 @@ export function formatShiftCode(shiftNumber: number, minDigits = 6): string {
 }
 
 /**
+ * Parsea un monto tipeado en formato argentino ("1.500,00") o con punto
+ * decimal simple ("1500.50", lo que devuelve un <input type="number">). La
+ * coma decide el formato: si hay coma, los puntos son separadores de miles y
+ * se descartan; si no hay coma, el punto es decimal y se deja como está.
+ * `parseFloat(x.replace(",", "."))` sobre "1.500,00" da 1.5 (mal) porque dos
+ * puntos hacen que parseFloat corte ahí. Devuelve null si no es un número
+ * válido o es negativo.
+ */
+export function parseArMoney(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.includes(",")
+    ? trimmed.replace(/\./g, "").replace(",", ".")
+    : trimmed;
+
+  const value = Number(normalized);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+/**
  * Converts a local date + time in a given IANA timezone to an ISO 8601 string
  * with the correct UTC offset (e.g. "2024-01-15T14:00:00-03:00").
  */

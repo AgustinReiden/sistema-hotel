@@ -6,6 +6,7 @@ import {
   formatShiftCode,
   formatSignedAmount,
   localToISO,
+  parseArMoney,
 } from "@/lib/format";
 
 describe("formatMoney", () => {
@@ -71,6 +72,37 @@ describe("formatShiftCode", () => {
 
   it("accepts a custom minimum length", () => {
     expect(formatShiftCode(27, 4)).toBe("0027");
+  });
+});
+
+describe("parseArMoney", () => {
+  it("parses formato argentino con miles y decimales", () => {
+    expect(parseArMoney("1.500,00")).toBe(1500);
+  });
+
+  it("parses punto decimal simple (sin coma)", () => {
+    expect(parseArMoney("1500.50")).toBe(1500.5);
+  });
+
+  it("parses coma decimal sin separador de miles", () => {
+    expect(parseArMoney("12,5")).toBe(12.5);
+  });
+
+  it("devuelve null para texto que no es un numero", () => {
+    expect(parseArMoney("abc")).toBeNull();
+  });
+
+  it("devuelve null para negativos", () => {
+    expect(parseArMoney("-5")).toBeNull();
+  });
+
+  it("devuelve null para vacio o solo espacios", () => {
+    expect(parseArMoney("")).toBeNull();
+    expect(parseArMoney("   ")).toBeNull();
+  });
+
+  it("acepta cero", () => {
+    expect(parseArMoney("0")).toBe(0);
   });
 });
 

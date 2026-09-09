@@ -5,6 +5,7 @@ import { Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { handleAddExtraCharge } from "./actions";
+import { parseArMoney } from "@/lib/format";
 
 type ChargeType = "minibar" | "damage" | "service" | "other";
 
@@ -38,14 +39,14 @@ export default function ExtraChargesModal({
 
   if (!isOpen) return null;
 
-  const parsedAmount = parseFloat(amount.replace(",", "."));
-  const newTotal = !isNaN(parsedAmount) && parsedAmount > 0 ? currentTotal + parsedAmount : null;
+  const parsedAmount = parseArMoney(amount);
+  const newTotal = parsedAmount !== null && parsedAmount > 0 ? currentTotal + parsedAmount : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (parsedAmount === null || parsedAmount <= 0) {
       setError("Ingresá un monto mayor a 0.");
       return;
     }
