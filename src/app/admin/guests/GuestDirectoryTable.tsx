@@ -150,7 +150,12 @@ export default function GuestDirectoryTable({
         </div>
       )}
 
-      <GuestModal guestId={editingId} onClose={() => setEditingId(null)} onSaved={() => router.refresh()} />
+      <GuestModal
+        key={editingId ?? "new"}
+        guestId={editingId}
+        onClose={() => setEditingId(null)}
+        onSaved={() => router.refresh()}
+      />
     </div>
   );
 }

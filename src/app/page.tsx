@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Star, MapPin, UtensilsCrossed, BedDouble, Fuel, Instagram, PhoneCall, Mail, MessageCircle } from "lucide-react";
@@ -20,6 +21,34 @@ function getTelHref(phone?: string | null): string | undefined {
 function getWhatsappHref(phone?: string | null): string | undefined {
   const digits = phone?.replace(/\D/g, "");
   return digits ? `https://wa.me/${digits}` : undefined;
+}
+
+// Mismo contenedor y los mismos 4 bloques (3 campos + boton) que <PublicSearchForm>,
+// con placeholders en vez de contenido real: el alto sale igual por construccion
+// (mismas clases de padding), asi el Suspense no hace saltar el layout.
+function PublicSearchFormFallback() {
+  const fields = ["Llegada", "Salida", "Huéspedes"];
+  return (
+    <div
+      aria-hidden="true"
+      className="max-w-4xl mx-auto bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl shadow-black/10 p-2 md:p-3 border border-white/80 flex flex-col md:flex-row gap-2"
+    >
+      {fields.map((label) => (
+        <div key={label} className="flex-1 flex items-center px-4 py-3 md:py-4 rounded-xl">
+          <div className="w-5 h-5 mr-3 shrink-0 rounded bg-slate-200 animate-pulse" />
+          <div className="w-full">
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] mb-0.5">
+              {label}
+            </div>
+            <div className="h-[18px] w-24 rounded bg-slate-200 animate-pulse" />
+          </div>
+        </div>
+      ))}
+      <div className="flex-1 flex items-center justify-center px-4 py-3 md:py-4 rounded-xl md:flex-none md:min-w-28">
+        <div className="w-5 h-5 rounded bg-slate-300 animate-pulse" />
+      </div>
+    </div>
+  );
 }
 
 export default async function Home({ searchParams }: PageProps) {
@@ -137,7 +166,9 @@ export default async function Home({ searchParams }: PageProps) {
             </h1>
 
             <div id="buscar-fechas" className="w-full max-w-5xl animate-fade-up" style={{ animationDelay: '0.3s' }}>
-              <PublicSearchForm key={`${checkin ?? ""}-${checkout ?? ""}-${guestsParam ?? ""}`} />
+              <Suspense fallback={<PublicSearchFormFallback />}>
+                <PublicSearchForm key={`${checkin ?? ""}-${checkout ?? ""}-${guestsParam ?? ""}`} />
+              </Suspense>
             </div>
           </div>
         </section>

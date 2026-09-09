@@ -32,6 +32,7 @@ import {
 import { handleExtendReservation } from "@/app/admin/actions";
 import { logout } from "@/app/login/actions";
 import ExportCsvButton from "./ExportCsvButton";
+import { parseArMoney } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { CloseShiftBlocker, PaymentMethod } from "@/lib/types";
 
@@ -185,7 +186,7 @@ export default function CloseShiftModal({
 
   if (!isOpen) return null;
 
-  const parsedActual = parseFloat(actualCash.replace(",", "."));
+  const parsedActual = parseArMoney(actualCash);
   const otherMethods = (Object.entries(totalsByMethod) as [PaymentMethod, number][])
     .filter(([method, amount]) => method !== "cash" && amount > 0);
 
@@ -193,7 +194,7 @@ export default function CloseShiftModal({
     e.preventDefault();
     setError(null);
 
-    if (isNaN(parsedActual) || parsedActual < 0) {
+    if (parsedActual === null) {
       setError("Ingresa el efectivo declarado (cero o mayor).");
       return;
     }

@@ -102,7 +102,7 @@ function DiscountRow({ row }: { row: DiscountedClient }) {
                 autoFocus
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSave();
+                  if (e.key === "Enter" && !saving) handleSave();
                   if (e.key === "Escape") setEditing(false);
                 }}
                 className={pctInput}

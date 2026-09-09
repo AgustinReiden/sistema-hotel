@@ -10,6 +10,7 @@ import {
 } from "./actions";
 import DateTimePickerField from "./DateTimePickerField";
 import type { ReservationEditableRow } from "@/lib/data";
+import { parseArMoney } from "@/lib/format";
 
 type Props = {
   isOpen: boolean;
@@ -102,8 +103,8 @@ export default function EditReservationModal({
 
     let override: number | null = null;
     if (isAdmin && overrideEnabled) {
-      const parsed = parseFloat(overrideValue.replace(",", "."));
-      if (isNaN(parsed) || parsed < 0) {
+      const parsed = parseArMoney(overrideValue);
+      if (parsed === null) {
         setError("El precio override debe ser un número mayor o igual a 0.");
         return;
       }
