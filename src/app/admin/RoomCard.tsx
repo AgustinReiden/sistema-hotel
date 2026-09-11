@@ -384,6 +384,17 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         return;
       }
       setIsExtendModalOpen(false);
+      // La noche agregada ya cubre la tarde del medio día, así que la mig 100 lo quita del
+      // total. Se avisa en pantalla para que el monto que baja no sea una sorpresa.
+      if (result.data?.halfDayRemoved) {
+        toast.success(
+          `Reserva ampliada. Se quitó el medio día ($${result.data.halfDayAmount.toLocaleString(
+            "es-AR"
+          )}): la noche agregada ya cubre esa tarde.`,
+          { duration: 8000 }
+        );
+        return;
+      }
       toast.success("Reserva ampliada exitosamente.");
     });
   };
