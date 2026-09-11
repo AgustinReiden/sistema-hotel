@@ -477,16 +477,19 @@ export async function handleResendWhatsapp(
   }
 }
 
-export async function handleExtendReservation(reservationId: string, nights: number): Promise<ActionResult> {
+export async function handleExtendReservation(
+  reservationId: string,
+  nights: number
+): Promise<ActionResult<{ halfDayRemoved: boolean; halfDayAmount: number }>> {
   try {
     if (nights <= 0) throw new Error("Debe agregar al menos 1 noche.");
-    await extendReservation(reservationId, nights);
+    const result = await extendReservation(reservationId, nights);
     revalidatePath("/admin");
     revalidateCalendarViews();
     revalidatePath("/admin/guests");
     revalidatePath("/admin/finances");
     revalidatePath("/admin/caja");
-    return { success: true };
+    return { success: true, data: result };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ampliar la reserva.");
     return { success: false, error: parsed.error, code: parsed.code };

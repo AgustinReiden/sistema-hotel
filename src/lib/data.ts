@@ -1879,19 +1879,31 @@ export async function getCancellationReason(
   return (data?.reason as string | null) ?? null;
 }
 
-export async function extendReservation(reservationId: string, extraNights: number): Promise<void> {
+export async function extendReservation(
+  reservationId: string,
+  extraNights: number
+): Promise<{ halfDayRemoved: boolean; halfDayAmount: number }> {
   const supabase = await createClient();
 
   // Escritura vía RPC SECURITY DEFINER (mig 76): reproduce la re-tarifa preservando la tarifa
   // congelada y los recargos, valida rol/estado y el solapamiento adentro. El UPDATE directo a
   // reservations se cerró en la mig 77 (auditoría H-01) para que un recepcionista no pueda
   // editar montos por PostgREST salteando estos guards.
-  const { error } = await supabase.rpc("rpc_extend_reservation", {
+  const { data, error } = await supabase.rpc("rpc_extend_reservation", {
     p_reservation_id: reservationId,
     p_extra_nights: extraNights,
   });
 
   if (error) throw error;
+
+  // La noche agregada incluye la tarde que cubría el medio día, así que la mig 100 quita ese
+  // cargo. Se devuelve para avisarlo en pantalla: es plata que sale del total y recepción
+  // tiene que poder explicarla si el huésped pregunta.
+  const r = (data ?? {}) as { half_day_removed?: boolean; half_day_amount?: number };
+  return {
+    halfDayRemoved: Boolean(r.half_day_removed),
+    halfDayAmount: Number(r.half_day_amount) || 0,
+  };
 }
 
 // ---- Solicitudes de Reserva ----
