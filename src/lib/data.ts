@@ -1748,6 +1748,8 @@ export async function updateReservation(input: UpdateReservationInput): Promise<
   dates_changed: boolean;
   price_overridden: boolean;
   guest_count?: number;
+  halfDayRemoved: boolean;
+  halfDayAmount: number;
 }> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_update_reservation", {
@@ -1769,6 +1771,8 @@ export async function updateReservation(input: UpdateReservationInput): Promise<
     discount_amount: number | string;
     dates_changed: boolean;
     price_overridden: boolean;
+    half_day_removed?: boolean;
+    half_day_amount?: number | string;
   };
   return {
     total_price: Number(result.total_price) || 0,
@@ -1777,6 +1781,10 @@ export async function updateReservation(input: UpdateReservationInput): Promise<
     discount_amount: Number(result.discount_amount) || 0,
     dates_changed: result.dates_changed,
     price_overridden: result.price_overridden,
+    // Correr la salida hacia adelante deja sin efecto el medio dia de late-checkout, asi que
+    // la mig 101 lo quita. Se avisa en pantalla: es plata que sale del total.
+    halfDayRemoved: Boolean(result.half_day_removed),
+    halfDayAmount: Number(result.half_day_amount) || 0,
   };
 }
 

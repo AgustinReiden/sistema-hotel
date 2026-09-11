@@ -556,6 +556,8 @@ export async function handleUpdateReservation(
     discount_amount: number;
     dates_changed: boolean;
     price_overridden: boolean;
+    halfDayRemoved: boolean;
+    halfDayAmount: number;
   }>
 > {
   try {

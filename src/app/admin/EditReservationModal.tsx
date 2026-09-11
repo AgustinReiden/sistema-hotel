@@ -145,6 +145,14 @@ export default function EditReservationModal({
     } else {
       toast.success("Reserva actualizada.");
     }
+    // Correr la salida hacia adelante deja sin efecto el medio día (mig 101). Va como aviso
+    // aparte para que no se pierda adentro del mensaje del total.
+    if (result.data?.halfDayRemoved) {
+      toast.info(
+        `Se quitó el medio día ($${result.data.halfDayAmount.toLocaleString("es-AR")}): la salida nueva ya cubre esa tarde.`,
+        { duration: 8000 }
+      );
+    }
     onClose();
   };
 
