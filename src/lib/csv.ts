@@ -54,13 +54,34 @@ export function formatAmountAr(n: number): string {
   return n.toFixed(2).replace(".", ",");
 }
 
-export type CsvColumnType = "texto" | "plano" | "monto" | "fecha";
+/**
+ * Un CUIT son once dígitos seguidos, y Excel lee once dígitos seguidos como un número:
+ * el 20123456789 se abre como "2,0123E+10" y el contador no puede leerlo. Puntuado
+ * NN-NNNNNNNN-N ya no es un número para Excel, así que entra como texto sin ningún
+ * truco, y de paso es el formato con el que ARCA lo escribe en todos lados.
+ *
+ * Sólo toca los once dígitos exactos. Un DNI (siete u ocho) entra como número pero se
+ * muestra entero, sin notación científica, así que no hay nada que arreglar; y lo que ya
+ * viene puntuado a mano se deja como está, porque puntuar dos veces lo rompería.
+ *
+ * El apóstrofo (la otra forma de marcar texto en Excel) acá NO sirve: al ABRIR un .csv
+ * Excel no lo interpreta como prefijo, lo deja como un carácter más y la celda termina
+ * mostrando "'20123456789". Verificado contra Excel 16.
+ */
+export function formatDocumentoAr(value: string): string {
+  return /^\d{11}$/.test(value)
+    ? `${value.slice(0, 2)}-${value.slice(2, 10)}-${value.slice(10)}`
+    : value;
+}
+
+export type CsvColumnType = "texto" | "plano" | "monto" | "fecha" | "documento";
 
 export type CsvColumn<T> = {
   header: string;
   /** "texto" = untrusted (pasa por csvTextField); "monto" NO pasa por csvTextField
    * (un importe negativo empieza con "-" y quedaría corrompido); "fecha" espera una
-   * clave "YYYY-MM-DD" y la formatea DD/MM/AAAA. */
+   * clave "YYYY-MM-DD" y la formatea DD/MM/AAAA; "documento" = DNI/CUIT, que es una
+   * ristra de dígitos pero NO un número (ver formatDocumentoAr). */
   type: CsvColumnType;
   value: (row: T) => string | number;
 };
@@ -75,6 +96,8 @@ function formatCsvValue(type: CsvColumnType, raw: string | number): string {
       const key = String(raw ?? "");
       return csvField(DATE_KEY.test(key) ? formatKey(key) : key);
     }
+    case "documento":
+      return csvTextField(formatDocumentoAr(String(raw ?? "")));
     case "plano":
     default:
       return csvField(String(raw ?? ""));

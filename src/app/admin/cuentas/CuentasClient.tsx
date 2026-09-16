@@ -22,7 +22,7 @@ function money(n: number) {
 const ACCOUNTS_CSV_COLUMNS: CsvColumn<CtaCteAccount>[] = [
   { header: "Cliente", type: "texto", value: (a) => a.name },
   { header: "Tipo", type: "plano", value: (a) => (a.kind === "company" ? "Empresa" : "Huésped") },
-  { header: "DNI/CUIT", type: "texto", value: (a) => a.document_id ?? "" },
+  { header: "DNI/CUIT", type: "documento", value: (a) => a.document_id ?? "" },
   { header: "Saldo", type: "monto", value: (a) => a.balance },
 ];
 
