@@ -267,9 +267,13 @@ export default function ConsolidadaClient({
    * andando y no hay riesgo de doble toggle (con dos handlers, un click sobre el
    * checkbox contaría dos veces y la fila quedaría como estaba).
    */
-  const handleRowClick = (index: number, shiftKey: boolean) => {
+  const handleRowClick = (index: number, event: React.MouseEvent) => {
     const row = rows[index];
     if (!row?.facturable) return;
+    const shiftKey = event.shiftKey;
+    // Sin esto, el shift+click deja al navegador pintando texto de punta a punta
+    // (mismo tratamiento que en el Control de facturación).
+    if (shiftKey) window.getSelection()?.removeAllRanges();
     const value = !picked.has(row.reservation_id);
     // Shift+click extiende desde el ancla: todas las FACTURABLES del tramo toman
     // el valor que acaba de tomar la fila clickeada. El ancla no se mueve, para
@@ -482,7 +486,7 @@ export default function ConsolidadaClient({
                     return (
                       <li
                         key={r.reservation_id}
-                        onClick={r.facturable ? (e) => handleRowClick(index, e.shiftKey) : undefined}
+                        onClick={r.facturable ? (e) => handleRowClick(index, e) : undefined}
                         className={`py-2.5 px-2 -mx-2 rounded-lg flex items-center gap-3 transition-colors ${
                           r.facturable
                             ? `cursor-pointer ${tildada ? "bg-emerald-50" : "hover:bg-slate-50"}`
