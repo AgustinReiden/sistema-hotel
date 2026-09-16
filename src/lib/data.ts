@@ -3684,22 +3684,33 @@ export async function listInvoiceableCheckouts(): Promise<InvoiceableCheckoutRow
   }));
 }
 
-/** Comprobantes autorizados recientes (para reimprimir/anular desde /admin/fiscal). */
-export async function listTodayAuthorizedInvoices(): Promise<AuthorizedInvoiceRow[]> {
+/**
+ * Comprobantes autorizados (para reimprimir/anular y para el libro de IVA ventas
+ * de /admin/fiscal). Filtra por `cbte_fch` (fecha del comprobante, no de creación
+ * del registro) cuando se pasa un rango; sin rango trae los últimos 200.
+ */
+export async function listAuthorizedInvoices(from?: string, to?: string): Promise<AuthorizedInvoiceRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("invoices")
-    .select("id, pto_vta, cbte_nro, cbte_tipo, receptor_nombre, imp_total, cbte_fch, kind, anulada_at")
-    .eq("status", "authorized")
-    .order("updated_at", { ascending: false })
-    .limit(30);
+    .select(
+      "id, pto_vta, cbte_nro, cbte_tipo, cbte_fch, receptor_nombre, doc_nro, imp_neto, imp_iva, imp_total, kind, anulada_at"
+    )
+    .eq("status", "authorized");
+  if (from) query = query.gte("cbte_fch", from);
+  if (to) query = query.lte("cbte_fch", to);
+  const { data, error } = await query.order("updated_at", { ascending: false }).limit(200);
   if (error) throw error;
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     invoice_id: String(r.id),
     pto_vta: Number(r.pto_vta),
     cbte_nro: Number(r.cbte_nro),
     cbte_tipo: Number(r.cbte_tipo),
+    cbte_fch: (r.cbte_fch as string | null) ?? null,
     receptor_nombre: (r.receptor_nombre as string | null) ?? null,
+    doc_nro: (r.doc_nro as string | null) ?? null,
+    imp_neto: Number(r.imp_neto) || 0,
+    imp_iva: Number(r.imp_iva) || 0,
     imp_total: Number(r.imp_total) || 0,
     kind: (r.kind as InvoiceKind | undefined) ?? "checkout",
     anulada_at: r.anulada_at == null ? null : String(r.anulada_at),

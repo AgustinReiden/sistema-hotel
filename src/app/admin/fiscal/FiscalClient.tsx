@@ -12,7 +12,11 @@ import {
   retryInvoiceAction,
 } from "./actions";
 import InvoicePromptModal, { type InvoicePromptData } from "../InvoicePromptModal";
+import DateRangeFilter from "../DateRangeFilter";
+import DownloadCsvButton from "../DownloadCsvButton";
 import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito, isValidCuit } from "@/lib/arca/amounts";
+import { buildCsv, type CsvColumn } from "@/lib/csv";
+import { buildBillingPresets } from "@/lib/date-range";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type {
   AuthorizedInvoiceRow,
@@ -26,11 +30,30 @@ type Props = {
   pending: PendingInvoiceRow[];
   invoiceable: InvoiceableCheckoutRow[];
   authorized: AuthorizedInvoiceRow[];
+  from: string;
+  to: string;
+  today: string;
 };
 
 function money(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+// Libro de IVA ventas del período: una fila por comprobante autorizado, tal como
+// se ve en "Emitidas recientes".
+const AUTHORIZED_CSV_COLUMNS: CsvColumn<AuthorizedInvoiceRow>[] = [
+  { header: "Fecha", type: "fecha", value: (r) => r.cbte_fch ?? "" },
+  { header: "Tipo", type: "plano", value: (r) => cbteNombre(r.cbte_tipo) },
+  { header: "Letra", type: "plano", value: (r) => cbteLetra(r.cbte_tipo) },
+  { header: "Punto de venta", type: "plano", value: (r) => r.pto_vta },
+  { header: "Número", type: "plano", value: (r) => r.cbte_nro },
+  { header: "Receptor", type: "texto", value: (r) => r.receptor_nombre ?? "" },
+  { header: "CUIT/DNI", type: "texto", value: (r) => r.doc_nro ?? "" },
+  { header: "Neto", type: "monto", value: (r) => r.imp_neto },
+  { header: "IVA", type: "monto", value: (r) => r.imp_iva },
+  { header: "Total", type: "monto", value: (r) => r.imp_total },
+  { header: "Anulada", type: "plano", value: (r) => (r.anulada_at !== null ? "Sí" : "No") },
+];
 
 function openInvoicePrint(invoiceId: string, autoprint = true) {
   window.open(
@@ -46,8 +69,14 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rechazada",
 };
 
-export default function FiscalClient({ enabled, pending, invoiceable, authorized }: Props) {
+export default function FiscalClient({ enabled, pending, invoiceable, authorized, from, to, today }: Props) {
   const router = useRouter();
+  const presets = buildBillingPresets(today);
+
+  const applyRange = (desde: string, hasta: string) => {
+    const params = new URLSearchParams({ desde, hasta });
+    router.push(`/admin/fiscal?${params.toString()}`);
+  };
   const [busyId, setBusyId] = useState<string | null>(null);
   // Mini-form de "Corregir DNI" abierto para una factura puntual.
   const [dniEditId, setDniEditId] = useState<string | null>(null);
@@ -311,12 +340,22 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
 
       {/* Emitidas recientes */}
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-base font-bold text-slate-800">Emitidas recientes</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Reimprimí la representación con QR. Si una factura salió mal, anulala con nota de crédito
-            y volvé a emitirla.
-          </p>
+        <div className="p-5 border-b border-slate-100 bg-slate-50/50 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Emitidas</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Reimprimí la representación con QR. Si una factura salió mal, anulala con nota de
+                crédito y volvé a emitirla. Es el libro de IVA ventas del período elegido.
+              </p>
+            </div>
+            <DownloadCsvButton
+              filename={`facturas_${from}_a_${to}.csv`}
+              build={() => buildCsv(AUTHORIZED_CSV_COLUMNS, authorized)}
+              label="Exportar CSV"
+            />
+          </div>
+          <DateRangeFilter from={from} to={to} presets={presets} onChange={applyRange} />
         </div>
         <div className="p-5">
           {authorized.length === 0 ? (

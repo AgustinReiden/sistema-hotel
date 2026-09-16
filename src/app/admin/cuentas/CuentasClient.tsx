@@ -7,11 +7,24 @@ import { Building2, DollarSign, FileText, Loader2, Printer, ScrollText, Search, 
 import { toast } from "sonner";
 
 import { loadCtaCteAccountAction, registerAccountPaymentAction } from "./actions";
+import DateRangeFilter from "../DateRangeFilter";
+import DownloadCsvButton from "../DownloadCsvButton";
+import { buildCsv, csvField, formatAmountAr, type CsvColumn } from "@/lib/csv";
+import { buildBillingPresets, formatKey } from "@/lib/date-range";
+import { hotelDateKey } from "@/lib/time";
 import type { CtaCteAccount, CtaCteMovimiento } from "@/lib/types";
 
 function money(n: number) {
   return `$${Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
 }
+
+// Listado de saldos (lo que está filtrado por el buscador): es el listado de deudores.
+const ACCOUNTS_CSV_COLUMNS: CsvColumn<CtaCteAccount>[] = [
+  { header: "Cliente", type: "texto", value: (a) => a.name },
+  { header: "Tipo", type: "plano", value: (a) => (a.kind === "company" ? "Empresa" : "Huésped") },
+  { header: "DNI/CUIT", type: "texto", value: (a) => a.document_id ?? "" },
+  { header: "Saldo", type: "monto", value: (a) => a.balance },
+];
 
 /** Comprobante de cta cte (el que firma el cliente), en la misma ventana que usa RoomCard. */
 function openAccountVoucher(movementId: string) {
@@ -49,8 +62,8 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
 
   return (
     <>
-      <div className="p-4 border-b border-slate-200 bg-slate-50">
-        <div className="relative max-w-xs">
+      <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+        <div className="relative max-w-xs flex-1 min-w-[220px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
@@ -59,6 +72,12 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
             className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
+        <DownloadCsvButton
+          filename={`cuentas_corrientes_${hotelDateKey(new Date())}.csv`}
+          build={() => buildCsv(ACCOUNTS_CSV_COLUMNS, filtered)}
+          label="Exportar CSV"
+          className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
+        />
       </div>
 
       <div className="overflow-x-auto">
@@ -141,7 +160,13 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
         />
       )}
 
-      {movTarget && <MovementsModal account={movTarget} onClose={() => setMovTarget(null)} />}
+      {movTarget && (
+        <MovementsModal
+          key={`${movTarget.kind}-${movTarget.id}`}
+          account={movTarget}
+          onClose={() => setMovTarget(null)}
+        />
+      )}
     </>
   );
 }
@@ -273,10 +298,53 @@ function RegisterPaymentModal({
   );
 }
 
+/** "" (sin límite) o una clave YYYY-MM-DD, para comparar contra hotelDateKey(m.created_at). */
+function inRange(dateKey: string, from: string, to: string): boolean {
+  return (!from || dateKey >= from) && (!to || dateKey <= to);
+}
+
+function periodLabel(from: string, to: string): string {
+  if (!from && !to) return "Todo el historial";
+  return `${from ? formatKey(from) : "…"} a ${to ? formatKey(to) : "…"}`;
+}
+
+/**
+ * CSV de movimientos del período filtrado (resumen que se le manda al cliente). La
+ * primera línea NO es una fila de la tabla: deja asentado el período Y el saldo real
+ * de la cuenta completa, para que nadie confunda la suma del período con la deuda
+ * total si el archivo queda cortado por el filtro.
+ */
+function buildMovementsCsv(
+  movements: CtaCteMovimiento[],
+  accountName: string,
+  balance: number,
+  from: string,
+  to: string
+): string {
+  const columns: CsvColumn<CtaCteMovimiento>[] = [
+    { header: "Fecha", type: "fecha", value: (m) => hotelDateKey(m.created_at) },
+    { header: "Tipo", type: "plano", value: (m) => (m.tipo === "cargo" ? "Cargo" : "Pago") },
+    { header: "Concepto", type: "texto", value: (m) => (m.tipo === "cargo" ? "Estadía" : m.payment_method ?? "") },
+    { header: "Monto", type: "monto", value: (m) => (m.tipo === "cargo" ? m.amount : -m.amount) },
+    { header: "Notas", type: "texto", value: (m) => m.notes ?? "" },
+  ];
+  const metaLine = csvField(
+    `Cuenta: ${accountName} · Período: ${periodLabel(from, to)} · Saldo total de la cuenta: $${formatAmountAr(balance)}`
+  );
+  const table = buildCsv(columns, movements).replace(/^﻿/, "");
+  return "﻿" + metaLine + "\r\n\r\n" + table;
+}
+
 function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [movements, setMovements] = useState<CtaCteMovimiento[]>([]);
   const [balance, setBalance] = useState(account.balance);
+  // Filtro DE VISTA sobre los movimientos ya cargados: nunca recalcula el saldo de
+  // arriba, que sigue siendo el de la cuenta completa (ver BalanceTag más abajo).
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const todayKey = useMemo(() => hotelDateKey(new Date()), []);
+  const presets = useMemo(() => buildBillingPresets(todayKey), [todayKey]);
 
   useEffect(() => {
     let active = true;
@@ -296,13 +364,31 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
     };
   }, [account.kind, account.id]);
 
+  const filteredMovements = useMemo(
+    () => movements.filter((m) => inRange(hotelDateKey(m.created_at), rangeFrom, rangeTo)),
+    [movements, rangeFrom, rangeTo]
+  );
+
+  const periodStats = useMemo(() => {
+    let cargos = 0;
+    let pagos = 0;
+    for (const m of filteredMovements) {
+      if (m.tipo === "cargo") cargos += m.amount;
+      else pagos += m.amount;
+    }
+    return { count: filteredMovements.length, cargos, pagos };
+  }, [filteredMovements]);
+
+  const hasExcluded =
+    (rangeFrom !== "" || rangeTo !== "") && filteredMovements.length < movements.length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
           <div>
             <h2 className="text-lg font-bold text-slate-800">{account.name}</h2>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-500" data-testid="mov-modal-balance">
               Saldo: <BalanceTag balance={balance} />
             </p>
           </div>
@@ -310,6 +396,39 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
             <X size={20} />
           </button>
         </div>
+        {!loading && movements.length > 0 && (
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <DateRangeFilter
+                from={rangeFrom}
+                to={rangeTo}
+                presets={presets}
+                allowAll
+                onChange={(f, t) => {
+                  setRangeFrom(f);
+                  setRangeTo(t);
+                }}
+              />
+              <DownloadCsvButton
+                filename={`movimientos_${account.name.replace(/\s+/g, "_")}_${rangeFrom || "inicio"}_a_${rangeTo || todayKey}.csv`}
+                build={() => buildMovementsCsv(filteredMovements, account.name, balance, rangeFrom, rangeTo)}
+                label="Exportar CSV"
+                className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2 shrink-0"
+              />
+            </div>
+            {/* Deliberadamente SIN la palabra "saldo": es la suma del período, no la
+                deuda real de la cuenta (esa sigue arriba, en BalanceTag). */}
+            <p className="text-xs font-semibold text-slate-500">
+              En el período: {periodStats.count} movimiento{periodStats.count === 1 ? "" : "s"} · cargos{" "}
+              {money(periodStats.cargos)} · pagos {money(periodStats.pagos)}
+            </p>
+            {hasExcluded && (
+              <p className="text-xs font-semibold text-amber-600">
+                Hay movimientos fuera del período elegido.
+              </p>
+            )}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
             <div className="flex items-center justify-center text-slate-500 py-8">
@@ -317,9 +436,11 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
             </div>
           ) : movements.length === 0 ? (
             <p className="text-center text-slate-500 py-8">Sin movimientos.</p>
+          ) : filteredMovements.length === 0 ? (
+            <p className="text-center text-slate-500 py-8">Sin movimientos en este período.</p>
           ) : (
             <div className="space-y-2">
-              {movements.map((m) => (
+              {filteredMovements.map((m) => (
                 <div
                   key={m.id}
                   className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-4 py-2.5"

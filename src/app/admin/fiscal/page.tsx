@@ -4,16 +4,21 @@ import { FileText } from "lucide-react";
 import { sweepStaleInvoices } from "@/lib/arca/emitter";
 import {
   getFiscalSettings,
+  getHotelSettings,
+  listAuthorizedInvoices,
   listInvoiceableCheckouts,
   listPendingInvoices,
-  listTodayAuthorizedInvoices,
 } from "@/lib/data";
+import { DATE_KEY } from "@/lib/date-range";
 import { isCurrentUserAdmin } from "@/lib/server-auth";
+import { hotelDateKey } from "@/lib/time";
 import FiscalClient from "./FiscalClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function FiscalPage() {
+type PageProps = { searchParams: Promise<{ desde?: string; hasta?: string }> };
+
+export default async function FiscalPage({ searchParams }: PageProps) {
   // Barrido de facturas trabadas: una consolidada se emite una vez por mes, así que
   // si ARCA da timeout justo ahí nadie vuelve a pasar por el barrido hasta la
   // siguiente emisión, y el recepcionista ni siquiera la ve en su lista. Que el admin
@@ -27,11 +32,20 @@ export default async function FiscalPage() {
     after(sweepStaleInvoices());
   }
 
+  // Default: mes en curso, en zona del hotel (no UTC: se corre de mes a la noche en Tucumán).
+  const hotelSettings = await getHotelSettings().catch(() => null);
+  const todayKey = hotelDateKey(new Date(), hotelSettings?.timezone);
+  const monthStartKey = `${todayKey.slice(0, 7)}-01`;
+  const { desde, hasta } = await searchParams;
+  let fromKey = desde && DATE_KEY.test(desde) ? desde : monthStartKey;
+  let toKey = hasta && DATE_KEY.test(hasta) ? hasta : todayKey;
+  if (fromKey > toKey) [fromKey, toKey] = [toKey, fromKey];
+
   const [settings, pending, invoiceable, authorized] = await Promise.all([
     getFiscalSettings().catch(() => null),
     listPendingInvoices().catch(() => []),
     listInvoiceableCheckouts().catch(() => []),
-    listTodayAuthorizedInvoices().catch(() => []),
+    listAuthorizedInvoices(fromKey, toKey).catch(() => []),
   ]);
 
   return (
@@ -61,6 +75,9 @@ export default async function FiscalPage() {
             pending={pending}
             invoiceable={invoiceable}
             authorized={authorized}
+            from={fromKey}
+            to={toKey}
+            today={todayKey}
           />
         </div>
       </div>
