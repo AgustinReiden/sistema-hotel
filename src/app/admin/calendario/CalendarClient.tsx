@@ -10,7 +10,13 @@ import EditReservationModal from "../EditReservationModal";
 import CompanyCheckInModal from "../CompanyCheckInModal";
 import { handleCancelReservation, handleCheckIn, handleCreateReservation } from "../actions";
 import { isPendingArrival } from "@/lib/arrivals";
-import { formatHotelDateTime, formatHotelShortDate } from "@/lib/time";
+import {
+  buildReservationPlacement,
+  classifyReservations,
+  finishedStayLabel,
+  type ReservationCategory,
+} from "@/lib/calendar";
+import { formatHotelDateTime, formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import type {
   AssociatedClient,
   CheckInPassengerInput,
@@ -31,20 +37,6 @@ function addDaysToKey(key: string, n: number): string {
   dt.setUTCDate(dt.getUTCDate() + n);
   const pad = (x: number) => String(x).padStart(2, "0");
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
-}
-function diffDaysKeys(aKey: string, bKey: string): number {
-  const [ay, am, ad] = aKey.split("-").map(Number);
-  const [by, bm, bd] = bKey.split("-").map(Number);
-  return Math.round((Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86400000);
-}
-/** Clave "YYYY-MM-DD" de un instante ISO, en la zona indicada. */
-function hotelDateKeyOf(iso: string, timezone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(iso));
 }
 // Etiquetas formateadas desde la clave (mediodía UTC + tz UTC → sin corrimientos).
 const WEEKDAY_FMT = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "short" });
@@ -81,14 +73,6 @@ type CreateDraft = {
   checkOut: string;
 };
 
-type ReservationPlacement = {
-  reservation: Reservation;
-  visibleStartIndex: number;
-  cellSpan: number;
-  startsBeforeRange: boolean;
-  endsAfterRange: boolean;
-};
-
 // Compacto: para que entren ~16 habitaciones a lo alto y 15 dias a lo ancho sin scroll
 // en una pantalla de escritorio (estilo sistema viejo del hotel).
 const CELL_WIDTH = 64;
@@ -97,10 +81,12 @@ const ROW_HEIGHT = 34;
 const BAR_TOP = 3;
 const BAR_HEIGHT = 26;
 
-type ReservationCategory = "active" | "next" | "future" | "pending" | "overdue";
-
 function getReservationPalette(category: ReservationCategory) {
   switch (category) {
+    case "finished":
+      // Gris claro: el pasado tiene que leerse como fondo, no competir con lo que hay que
+      // atender hoy. Más claro que "pending" (slate-400) para que no se confundan.
+      return { from: "#e2e8f0", to: "#cbd5e1" }; // slate-200 → slate-300
     case "pending":
       return { from: "#94a3b8", to: "#64748b" }; // slate (grey)
     case "active":
@@ -113,38 +99,6 @@ function getReservationPalette(category: ReservationCategory) {
       return { from: "#fb7185", to: "#e11d48" }; // rose (red): falta el check-in
   }
 }
-
-function buildReservationPlacement(
-  reservation: Reservation,
-  startKey: string,
-  daysCount: number,
-  timezone: string
-): ReservationPlacement | null {
-  const checkInIndex = diffDaysKeys(hotelDateKeyOf(reservation.check_in_target, timezone), startKey);
-  const checkoutIndex = diffDaysKeys(hotelDateKeyOf(reservation.check_out_target, timezone), startKey);
-
-  if (checkoutIndex < 0 || checkInIndex >= daysCount) return null;
-
-  const visibleStartIndex = Math.max(0, checkInIndex);
-  const visibleEndIndex = Math.min(daysCount - 1, checkoutIndex);
-
-  if (visibleStartIndex > visibleEndIndex) return null;
-
-  const startsBeforeRange = checkInIndex < 0;
-  const endsAfterRange = checkoutIndex >= daysCount;
-
-  const cellSpan = visibleEndIndex - visibleStartIndex + 1;
-
-  return {
-    reservation,
-    visibleStartIndex,
-    cellSpan,
-    startsBeforeRange,
-    endsAfterRange,
-  };
-}
-
-
 
 export default function CalendarClient({
   rooms,
@@ -184,8 +138,18 @@ export default function CalendarClient({
   const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
   const canCancel = role === "admin" || role === "receptionist";
   const isAdmin = role === "admin";
+  // Hoy según el servidor (nowIso), no el reloj de la PC de recepción.
+  const todayKey = hotelDateKey(nowIso, timezone);
 
   const openCreateModal = (roomId: number, dayKey: string) => {
+    // Ahora que el calendario navega el pasado, cada celda vieja vacía es un botón que
+    // cargaría una reserva retroactiva sin querer. Se corta acá, en el clic accidental:
+    // la carga a mano desde "Nueva Reserva" sigue abierta para el caso legítimo.
+    if (dayKey < todayKey) {
+      toast.info("Esa fecha ya pasó. Para cargar una reserva vieja usá 'Nueva Reserva'.");
+      return;
+    }
+
     const checkOutKey = addDaysToKey(dayKey, 1);
 
     setCreateDraft({
@@ -262,8 +226,7 @@ export default function CalendarClient({
   const selectedArrivalIsOverdue =
     selectedReservation != null &&
     selectedIsPendingArrival &&
-    hotelDateKeyOf(selectedReservation.check_in_target, timezone) <
-      hotelDateKeyOf(nowIso, timezone);
+    hotelDateKey(selectedReservation.check_in_target, timezone) < todayKey;
   // La habitación tiene que estar libre: si está ocupada, en limpieza o fuera de
   // servicio, primero hay que resolver eso (el RPC lo rechaza igual).
   const selectedRoomBlockReason =
@@ -277,12 +240,18 @@ export default function CalendarClient({
   const canCheckInSelected =
     canCancel && selectedIsPendingArrival && selectedRoomBlockReason === null;
   // Editar desde el calendario: recepción o admin ANTES del check-in (pendiente/confirmada);
-  // tras el check-in solo el admin (override). Las finalizadas/canceladas no llegan al calendario.
+  // tras el check-in solo el admin (override). Las finalizadas ahora SÍ llegan al calendario
+  // (son el histórico), y quedan afuera de los dos casos: se miran, no se tocan.
   const canEditSelected =
     selectedReservation != null &&
     ((canCancel &&
       (selectedReservation.status === "pending" || selectedReservation.status === "confirmed")) ||
       (isAdmin && selectedReservation.status === "checked_in"));
+  // Una estadía terminada no se "cancela": ya se cobró y puede estar facturada. Antes no
+  // hacía falta mirar el estado porque las checked_out ni llegaban a esta pantalla.
+  const canCancelSelected =
+    canCancel && selectedReservation != null && selectedReservation.status !== "checked_out";
+  const selectedIsFinished = selectedReservation?.status === "checked_out";
 
   return (
     <>
@@ -330,6 +299,10 @@ export default function CalendarClient({
             <span className="w-3 h-3 rounded-full bg-rose-500" />
             Falta check-in
           </span>
+          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
+            <span className="w-3 h-3 rounded-full bg-slate-300" />
+            Pasada
+          </span>
         </div>
         <p className="text-sm text-slate-500">
           Click en una fecha vacia para reservar. Click sobre una barra o checkout para ver la reserva.
@@ -371,31 +344,9 @@ export default function CalendarClient({
               .map((reservation) =>
                 buildReservationPlacement(reservation, startDateKey, daysCount, timezone)
               )
-              .filter((placement): placement is ReservationPlacement => placement !== null);
+              .filter((placement) => placement !== null);
 
-            let foundNext = false;
-            const categoryMap = new Map<string, ReservationCategory>();
-            roomReservations.forEach((r) => {
-              if (r.status === "pending") {
-                categoryMap.set(r.id, "pending");
-              } else if (r.status === "checked_in") {
-                categoryMap.set(r.id, "active");
-              } else if (isPendingArrival(r, nowIso, timezone) && !foundNext) {
-                // El día de entrada ya pasó y sigue sin check-in: se marca en rojo
-                // para que recepción la vea de lejos y la registre.
-                const isOverdue =
-                  hotelDateKeyOf(r.check_in_target, timezone) < hotelDateKeyOf(nowIso, timezone);
-                categoryMap.set(r.id, isOverdue ? "overdue" : "next");
-                foundNext = true;
-              } else {
-                if (!foundNext) {
-                  categoryMap.set(r.id, "next");
-                  foundNext = true;
-                } else {
-                  categoryMap.set(r.id, "future");
-                }
-              }
-            });
+            const categoryMap = classifyReservations(roomReservations, nowIso, timezone);
 
             // Zebra de filas: banda primaria blanco / gris para distinguir habitaciones.
             const rowBg = roomIndex % 2 === 1 ? "bg-slate-100" : "bg-white";
@@ -415,18 +366,27 @@ export default function CalendarClient({
                   style={{ width: `${daysCount * CELL_WIDTH}px`, height: `${ROW_HEIGHT}px` }}
                 >
                   <div className="absolute inset-0 flex">
-                    {days.map((dayKey, dayIndex) => (
-                      <button
-                        type="button"
-                        key={`${room.id}-${dayKey}`}
-                        onClick={() => openCreateModal(room.id, dayKey)}
-                        className={`h-full shrink-0 border-r border-slate-100 transition-colors hover:bg-brand-50 ${
-                          dayIndex % 2 === 1 ? "bg-slate-500/5" : ""
-                        }`}
-                        style={{ width: `${CELL_WIDTH}px` }}
-                        aria-label={`Crear reserva para habitación ${room.room_number} el ${ddmmyyyy(dayKey)}`}
-                      />
-                    ))}
+                    {days.map((dayKey, dayIndex) => {
+                      // En los días pasados la celda no invita al clic: sin resaltado al
+                      // pasar el mouse y sin cursor de mano. El clic igual avisa por qué.
+                      const isPast = dayKey < todayKey;
+                      return (
+                        <button
+                          type="button"
+                          key={`${room.id}-${dayKey}`}
+                          onClick={() => openCreateModal(room.id, dayKey)}
+                          className={`h-full shrink-0 border-r border-slate-100 transition-colors ${
+                            isPast ? "cursor-default" : "hover:bg-brand-50"
+                          } ${dayIndex % 2 === 1 ? "bg-slate-500/5" : ""}`}
+                          style={{ width: `${CELL_WIDTH}px` }}
+                          aria-label={
+                            isPast
+                              ? `${ddmmyyyy(dayKey)}: fecha pasada, no se reserva desde la grilla`
+                              : `Crear reserva para habitación ${room.room_number} el ${ddmmyyyy(dayKey)}`
+                          }
+                        />
+                      );
+                    })}
                   </div>
 
                   {placements.map((placement) => {
@@ -447,11 +407,16 @@ export default function CalendarClient({
                     const left = placement.visibleStartIndex * CELL_WIDTH;
                     const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
                     const showText = horizontalWidth >= 56;
+                    // El pasado se queda quieto: con una ventana vieja llena, veinte barras
+                    // flotando es ruido. Además el gris claro necesita texto oscuro.
+                    const isFinished = category === "finished";
 
                     return (
                       <div
                         key={`stay-${placement.reservation.id}`}
-                        className="absolute z-10 animate-float-ribbon group pointer-events-none"
+                        className={`absolute z-10 group pointer-events-none ${
+                          isFinished ? "" : "animate-float-ribbon"
+                        }`}
                         style={{
                           left: `${left}px`,
                           top: `${BAR_TOP}px`,
@@ -488,22 +453,38 @@ export default function CalendarClient({
 
                         {showText && (
                           <div className="relative z-10 flex h-full flex-col justify-center items-center pointer-events-none px-1 overflow-hidden">
-                            <p className="text-[10px] font-black tracking-tight text-white drop-shadow-md whitespace-nowrap leading-none">
+                            <p
+                              className={`text-[10px] font-black tracking-tight whitespace-nowrap leading-none ${
+                                isFinished ? "text-slate-600" : "text-white drop-shadow-md"
+                              }`}
+                            >
                               {placement.reservation.client_name}
                             </p>
-                            <p className="text-[7px] uppercase font-black tracking-widest text-white/90 drop-shadow-md whitespace-nowrap leading-none mt-0.5">
-                              {category === "overdue"
-                                ? "Falta check-in"
-                                : placement.reservation.status === "checked_in"
-                                  ? "En estadia"
-                                  : placement.reservation.status === "pending"
-                                    ? "Pendiente"
-                                    : "Confirmada"}
+                            <p
+                              className={`text-[7px] uppercase font-black tracking-widest whitespace-nowrap leading-none mt-0.5 ${
+                                isFinished ? "text-slate-500" : "text-white/90 drop-shadow-md"
+                              }`}
+                            >
+                              {isFinished
+                                ? finishedStayLabel(placement.reservation)
+                                : category === "overdue"
+                                  ? "Falta check-in"
+                                  : placement.reservation.status === "checked_in"
+                                    ? "En estadia"
+                                    : placement.reservation.status === "pending"
+                                      ? "Pendiente"
+                                      : "Confirmada"}
                             </p>
                           </div>
                         )}
                         {!endsAfterRange && (
-                          <span className="absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
+                          <span
+                            className={`absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest pointer-events-none ${
+                              isFinished
+                                ? "text-slate-500"
+                                : "text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+                            }`}
+                          >
                             Salida
                           </span>
                         )}
@@ -573,6 +554,21 @@ export default function CalendarClient({
             </div>
 
             <div className="p-6 space-y-6">
+              {selectedIsFinished && (
+                // Sin esto, recepción abre una estadía vieja y se queda mirando un modal
+                // sin un solo botón, sin saber si está roto o si le falta permiso.
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-bold text-slate-700">Estadía finalizada</p>
+                  <p className="text-sm mt-1 text-slate-600">
+                    El check-out se hizo el{" "}
+                    {formatHotelDateTime(
+                      selectedReservation.actual_check_out ?? selectedReservation.check_out_target,
+                      timezone
+                    )}
+                    . Queda como registro histórico: se consulta, no se modifica.
+                  </p>
+                </div>
+              )}
               {selectedIsPendingArrival && (
                 <div
                   className={`rounded-xl border p-4 ${selectedArrivalIsOverdue
@@ -701,7 +697,7 @@ export default function CalendarClient({
                 </div>
               </div>
 
-              {canCancel && (
+              {canCancelSelected && (
                 <div className="rounded-xl border border-red-100 bg-red-50 p-4">
                   <label className="block text-sm font-semibold text-red-800 mb-2" htmlFor="calendar-cancel-reason">
                     Motivo de cancelacion
