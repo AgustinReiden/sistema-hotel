@@ -72,6 +72,7 @@ describe("CloseShiftModal", () => {
         shiftNumber={1}
         totalsByMethod={totalsByMethod}
         creditCharged={0}
+        creditCharges={[]}
         checkoutsCount={0}
       />
     );
@@ -96,6 +97,7 @@ describe("CloseShiftModal", () => {
         shiftNumber={1}
         totalsByMethod={totalsByMethod}
         creditCharged={0}
+        creditCharges={[]}
         checkoutsCount={0}
       />
     );

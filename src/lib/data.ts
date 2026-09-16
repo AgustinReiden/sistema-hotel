@@ -85,6 +85,7 @@ import type {
   RoomCategoryUsage,
   CleaningLogResult,
   Room,
+  ShiftCreditChargeRow,
   ShiftPaymentRow,
   TodayCleaning,
   ShiftSummary,
@@ -2640,6 +2641,35 @@ function normalizeShiftPayment(row: PaymentWithReservationRow): ShiftPaymentRow 
   };
 }
 
+type CreditChargeWithReservationRow = {
+  id: string;
+  amount: number | string;
+  created_at: string;
+  reservation_id: string | null;
+  reservations:
+    | { client_name: string; rooms: { room_number: string }[] | { room_number: string } | null }
+    | { client_name: string; rooms: { room_number: string }[] | { room_number: string } | null }[]
+    | null;
+};
+
+function normalizeShiftCreditCharge(
+  row: CreditChargeWithReservationRow
+): ShiftCreditChargeRow {
+  const reservation = Array.isArray(row.reservations)
+    ? row.reservations[0]
+    : row.reservations;
+  const rooms = reservation?.rooms;
+  const room = Array.isArray(rooms) ? rooms[0] : rooms;
+  return {
+    id: row.id,
+    amount: Number(row.amount) || 0,
+    created_at: row.created_at,
+    reservation_id: row.reservation_id,
+    client_name: reservation?.client_name ?? "Desconocido",
+    room_number: room?.room_number ?? null,
+  };
+}
+
 async function getAuthUserEmail(userId: string): Promise<string | null> {
   // Para mostrar quien abrio/cerro el turno. profiles tiene full_name pero no email,
   // y auth.users no es accesible por defecto. Usamos la RPC via SQL si existe, si no, null.
@@ -2690,19 +2720,27 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
 
   // Fiado del turno: cargos a cuenta corriente de los check-outs rendidos acá. No
   // pasa por `payments` (por eso no toca el arqueo), pero sin mostrarlo la rendición
-  // esconde plata vendida.
+  // esconde plata vendida. Se trae el detalle (quién y qué habitación) y no solo el
+  // total: en el cierre, un número sin nombre no se puede contrastar contra nada.
   const { data: creditData, error: creditError } = await supabase
     .from("cuenta_corriente_movimientos")
-    .select("amount, reservations!inner(checkout_cash_shift_id)")
+    .select(
+      `
+      id, amount, created_at, reservation_id,
+      reservations!inner ( checkout_cash_shift_id, client_name, rooms ( room_number ) )
+      `
+    )
     .eq("tipo", "cargo")
-    .eq("reservations.checkout_cash_shift_id", shiftId);
+    .eq("reservations.checkout_cash_shift_id", shiftId)
+    .order("created_at", { ascending: false });
 
   if (creditError) throw creditError;
 
-  const creditCharged = ((creditData ?? []) as { amount: number | string }[]).reduce(
-    (sum, m) => sum + (Number(m.amount) || 0),
-    0
+  const creditCharges = ((creditData ?? []) as CreditChargeWithReservationRow[]).map(
+    normalizeShiftCreditCharge
   );
+
+  const creditCharged = creditCharges.reduce((sum, m) => sum + m.amount, 0);
 
   const totalsByMethod: Record<PaymentMethod, number> = {
     cash: 0,
@@ -2736,6 +2774,7 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
     totalIncome,
     cashIncome,
     creditCharged: Math.round((creditCharged + Number.EPSILON) * 100) / 100,
+    creditCharges,
     payments,
     openedByEmail,
     closedByEmail,

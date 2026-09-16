@@ -182,7 +182,7 @@ export default function CalendarClient({
     [daysCount, startDateKey]
   );
   const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
-  const canCancel = role === "admin" || role === "receptionist";
+  const isStaff = role === "admin" || role === "receptionist";
   const isAdmin = role === "admin";
 
   const openCreateModal = (roomId: number, dayKey: string) => {
@@ -275,12 +275,18 @@ export default function CalendarClient({
           ? "La habitación está fuera de servicio por mantenimiento."
           : null;
   const canCheckInSelected =
-    canCancel && selectedIsPendingArrival && selectedRoomBlockReason === null;
+    isStaff && selectedIsPendingArrival && selectedRoomBlockReason === null;
+  // Cancelar una reserva ya tomada es solo del admin (mig 102): borra plata y libera la
+  // habitación sin vuelta atrás. A recepción le queda el rechazo de una solicitud todavía
+  // pendiente, que es lo mismo que hace en /admin/solicitudes.
+  const canCancelSelected =
+    selectedReservation != null &&
+    (isAdmin || (isStaff && selectedReservation.status === "pending"));
   // Editar desde el calendario: recepción o admin ANTES del check-in (pendiente/confirmada);
   // tras el check-in solo el admin (override). Las finalizadas/canceladas no llegan al calendario.
   const canEditSelected =
     selectedReservation != null &&
-    ((canCancel &&
+    ((isStaff &&
       (selectedReservation.status === "pending" || selectedReservation.status === "confirmed")) ||
       (isAdmin && selectedReservation.status === "checked_in"));
 
@@ -701,7 +707,7 @@ export default function CalendarClient({
                 </div>
               </div>
 
-              {canCancel && (
+              {canCancelSelected && (
                 <div className="rounded-xl border border-red-100 bg-red-50 p-4">
                   <label className="block text-sm font-semibold text-red-800 mb-2" htmlFor="calendar-cancel-reason">
                     Motivo de cancelacion

@@ -34,7 +34,7 @@ import { logout } from "@/app/login/actions";
 import ExportCsvButton from "./ExportCsvButton";
 import { parseArMoney } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
-import type { CloseShiftBlocker, PaymentMethod } from "@/lib/types";
+import type { CloseShiftBlocker, PaymentMethod, ShiftCreditChargeRow } from "@/lib/types";
 
 type Props = {
   isOpen: boolean;
@@ -44,6 +44,8 @@ type Props = {
   totalsByMethod: Record<PaymentMethod, number>;
   /** Fiado a cuenta corriente en el turno (no es plata cobrada). */
   creditCharged: number;
+  /** Las estadías detrás de ese total, para que el cierre diga de quién es cada peso. */
+  creditCharges: ShiftCreditChargeRow[];
   /** Piezas rendidas = check-outs hechos en el turno. */
   checkoutsCount: number;
   /**
@@ -107,6 +109,7 @@ export default function CloseShiftModal({
   shiftNumber,
   totalsByMethod,
   creditCharged,
+  creditCharges,
   checkoutsCount,
   afterClose = "refresh",
   dismissable = true,
@@ -367,14 +370,32 @@ export default function CloseShiftModal({
                 </div>
               ))}
               {creditCharged > 0 && (
-                <div className="flex items-center justify-between px-3 py-2 text-sm bg-amber-50">
-                  <span className="text-amber-800 font-medium">
-                    Fiado a cta. cte.
-                    <span className="block text-xs font-normal text-amber-700">
-                      No cobrado: queda en la cuenta del cliente
+                <div className="bg-amber-50">
+                  <div className="flex items-center justify-between px-3 py-2 text-sm">
+                    <span className="text-amber-800 font-medium">
+                      Cuenta corriente (fiado)
+                      <span className="block text-xs font-normal text-amber-700">
+                        No cobrado: queda en la cuenta del cliente
+                      </span>
                     </span>
-                  </span>
-                  <span className="font-bold text-amber-900">${formatMoney(creditCharged)}</span>
+                    <span className="font-bold text-amber-900">${formatMoney(creditCharged)}</span>
+                  </div>
+                  {/* Quién quedó debiendo. El total solo no se puede contrastar contra nada;
+                      con los nombres, el que rinde puede revisar pieza por pieza. */}
+                  <ul className="px-3 pb-2 space-y-0.5">
+                    {creditCharges.map((c) => (
+                      <li
+                        key={c.id}
+                        className="flex items-center justify-between gap-3 text-xs text-amber-800"
+                      >
+                        <span className="truncate">
+                          {c.client_name}
+                          {c.room_number ? ` (Hab. ${c.room_number})` : ""}
+                        </span>
+                        <span className="font-bold shrink-0">${formatMoney(c.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
