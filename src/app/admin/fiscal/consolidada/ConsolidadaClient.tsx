@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, FileText, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
+import DateRangeFilter from "@/app/admin/DateRangeFilter";
+import StickyActionBar from "@/app/admin/StickyActionBar";
 import { cbteLetra, formatCbteNumero, isValidCuit } from "@/lib/arca/amounts";
+import { buildBillingPresets } from "@/lib/date-range";
 import {
   DETALLE_LINEA_MAX,
   DETALLE_NOTA_MAX,
@@ -27,6 +30,8 @@ type Props = {
   billingProfiles: Record<string, InvoiceReceptorPrefill>;
   preselectKind: CtaCteClientKind | null;
   preselectId: string | null;
+  /** "Hoy" en zona del hotel, calculado en el servidor: base de los presets. */
+  todayKey: string;
 };
 
 function money(n: number) {
@@ -59,12 +64,22 @@ function coberturaLabel(r: CcAccountStayRow): string | null {
 const inputClass =
   "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
 
+/** Un dato del receptor que falta: `campo` va en la barra, `mensaje` en el toast. */
+type FaltanteReceptor = { campo: string; mensaje: string };
+
+/** ["CUIT", "domicilio"] → "CUIT y domicilio". */
+function listarFaltantes(campos: string[]): string {
+  if (campos.length <= 1) return campos[0] ?? "";
+  return `${campos.slice(0, -1).join(", ")} y ${campos[campos.length - 1]}`;
+}
+
 export default function ConsolidadaClient({
   enabled,
   accounts,
   billingProfiles,
   preselectKind,
   preselectId,
+  todayKey,
 }: Props) {
   const [selectedKey, setSelectedKey] = useState<string>(
     preselectKind && preselectId ? `${preselectKind}:${preselectId}` : ""
@@ -73,6 +88,20 @@ export default function ConsolidadaClient({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [emitting, setEmitting] = useState(false);
+
+  // Rango del listado. Vacío = "Todo", que es el default a propósito: el caso
+  // normal sigue siendo "facturame todo lo que debe", y un rango puesto de
+  // arranque escondería deuda sin que nadie lo haya pedido.
+  const [range, setRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  // Estadías que tiene la cuenta entera, para poder decir "N de M". Se guarda de
+  // la última carga sin rango; el servidor sólo devuelve lo filtrado.
+  const [totalStays, setTotalStays] = useState<number | null>(null);
+  // Ancla del shift+click. Es un índice sobre `rows`, así que se invalida cada
+  // vez que la lista cambia (otro cliente, otro rango, recarga).
+  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+
+  const rangoActivo = range.from !== "" || range.to !== "";
+  const presets = useMemo(() => buildBillingPresets(todayKey), [todayKey]);
 
   const [kind, id] = selectedKey ? (selectedKey.split(":") as [CtaCteClientKind, string]) : [null, null];
   const isCompany = kind === "company";
@@ -96,13 +125,22 @@ export default function ConsolidadaClient({
     detalleOverrides[r.reservation_id] ?? defaultStayDescription(r);
 
   const loadRows = useCallback(async () => {
+    setLastClickedIndex(null);
     if (!kind || !id) {
       setRows([]);
       setPicked(new Set());
+      setTotalStays(null);
       return;
     }
     setLoading(true);
-    const result = await loadCcAccountStaysAction(kind, id);
+    // Los vacíos van como undefined, no como "": el filtro por período es
+    // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
+    const result = await loadCcAccountStaysAction(
+      kind,
+      id,
+      range.from || undefined,
+      range.to || undefined
+    );
     setLoading(false);
     if (!result.success) {
       toast.error(result.error);
@@ -112,10 +150,13 @@ export default function ConsolidadaClient({
     }
     const data = result.data ?? [];
     setRows(data);
+    // Sin rango, lo que vino ES la cuenta entera: es la única carga que puede
+    // fijar el "de M" del contador.
+    if (!range.from && !range.to) setTotalStays(data.length);
     // Por defecto se selecciona todo lo pendiente: el caso normal es
     // "facturame todo lo que debe".
     setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
-  }, [kind, id]);
+  }, [kind, id, range.from, range.to]);
 
   useEffect(() => {
     // La llamada va en una función anidada (no `loadRows` directo) porque
@@ -128,22 +169,42 @@ export default function ConsolidadaClient({
     void run();
   }, [loadRows]);
 
-  // Al elegir otra ficha, recargar los datos fiscales precargados (el valor
-  // inicial ya sale de `profile` arriba). Se ajusta durante el render, no en
-  // un efecto, para no pintar primero los datos de la ficha anterior y recién
-  // después los nuevos.
-  const [prevProfile, setPrevProfile] = useState(profile);
-  if (profile !== prevProfile) {
-    setPrevProfile(profile);
+  // Al elegir otro cliente se reinicia todo lo que era "de este cliente": los
+  // datos fiscales vuelven a los de la ficha nueva (el valor inicial ya sale de
+  // `profile` arriba) y el rango vuelve a "Todo".
+  //
+  // Se compara por `selectedKey` y NO por la identidad de `profile`: dos clientes
+  // sin ficha de facturación resuelven los dos a null, así que mirando `profile`
+  // el cambio pasaba desapercibido y los datos tipeados para el anterior quedaban
+  // pegados en el formulario. En una pantalla que emite comprobantes reales eso
+  // significa poder facturarle a uno con el CUIT del otro.
+  //
+  // El rango vuelve a "Todo" porque un período que tenía sentido para un cliente
+  // mostraría al siguiente sin deuda; además es la única carga que puede fijar el
+  // "de M" del contador.
+  //
+  // Se ajusta durante el render, no en un efecto, para no pintar primero los
+  // datos del cliente anterior y recién después los nuevos.
+  const [prevSelectedKey, setPrevSelectedKey] = useState(selectedKey);
+  if (selectedKey !== prevSelectedKey) {
+    setPrevSelectedKey(selectedKey);
     setRazonSocial(profile?.razonSocial ?? "");
     setCuit(profile?.cuit ?? "");
     setCondicionIva(profile?.condicionIva ?? "");
     setDomicilio(profile?.domicilio ?? "");
     setNota("");
+    setRange({ from: "", to: "" });
+    setTotalStays(null);
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
 
+  // INVARIANTE que hace seguro al filtro por período: lo seleccionado se DERIVA
+  // de `rows`, nunca se acumula aparte. Al angostar el rango, las estadías que
+  // salen de la lista dejan de contar solas: no se puede emitir un comprobante
+  // con algo que no está a la vista. Si esto pasara a ser un estado propio
+  // (p. ej. "guardar la selección entre filtros"), se podría facturar a ciegas.
+  //
   // Las líneas se muestran en el mismo orden en que se van a imprimir (la factura
   // ordena por fecha de entrada), no en el de la lista, que va del más reciente.
   const selectedRows = useMemo(
@@ -171,13 +232,67 @@ export default function ConsolidadaClient({
         }
       : null;
 
-  const toggle = (reservationId: string) => {
+  // Única fuente de verdad de "¿está completo el receptor?": la usan la barra
+  // flotante (para deshabilitar el botón y decir qué falta ANTES de apretarlo) y
+  // emit() (para no mandarle a ARCA un comprobante incompleto). Si estuviera
+  // duplicada, la barra podría habilitar algo que emit() después rebota.
+  const faltantesReceptor = useMemo<FaltanteReceptor[]>(() => {
+    if (!requiereCuit) return [];
+    const faltan: FaltanteReceptor[] = [];
+    if (!condicionIva) {
+      faltan.push({ campo: "condición IVA", mensaje: "Elegí la condición frente al IVA." });
+    }
+    if (!isValidCuit(cuit.replace(/\D/g, ""))) {
+      // Vacío y mal cargado no son lo mismo: como el botón ahora queda
+      // deshabilitado, el toast con el motivo no llega a dispararse nunca, así
+      // que la distinción tiene que estar en la barra.
+      faltan.push({
+        campo: cuit.trim() === "" ? "CUIT" : "CUIT válido",
+        mensaje: "El CUIT no es válido (11 dígitos con dígito verificador).",
+      });
+    }
+    if (!razonSocial.trim()) {
+      faltan.push({ campo: "razón social", mensaje: "Ingresá la razón social." });
+    }
+    if (!domicilio.trim()) {
+      faltan.push({ campo: "domicilio", mensaje: "Ingresá el domicilio del receptor." });
+    }
+    return faltan;
+  }, [requiereCuit, condicionIva, cuit, razonSocial, domicilio]);
+
+  /**
+   * Un solo camino para marcar/desmarcar: el onClick vive en el <li> y el
+   * checkbox va controlado con un onChange no-op. Apretar Espacio con el checkbox
+   * enfocado dispara un click que burbujea hasta el <li>, así que el teclado sigue
+   * andando y no hay riesgo de doble toggle (con dos handlers, un click sobre el
+   * checkbox contaría dos veces y la fila quedaría como estaba).
+   */
+  const handleRowClick = (index: number, event: React.MouseEvent) => {
+    const row = rows[index];
+    if (!row?.facturable) return;
+    const shiftKey = event.shiftKey;
+    // Sin esto, el shift+click deja al navegador pintando texto de punta a punta
+    // (mismo tratamiento que en el Control de facturación).
+    if (shiftKey) window.getSelection()?.removeAllRanges();
+    const value = !picked.has(row.reservation_id);
+    // Shift+click extiende desde el ancla: todas las FACTURABLES del tramo toman
+    // el valor que acaba de tomar la fila clickeada. El ancla no se mueve, para
+    // poder ir agrandando y achicando el mismo tramo.
+    const extiende = shiftKey && lastClickedIndex !== null;
+    const desde = extiende ? Math.min(lastClickedIndex, index) : index;
+    const hasta = extiende ? Math.max(lastClickedIndex, index) : index;
+
     setPicked((current) => {
       const next = new Set(current);
-      if (next.has(reservationId)) next.delete(reservationId);
-      else next.add(reservationId);
+      for (let i = desde; i <= hasta; i++) {
+        const r = rows[i];
+        if (!r?.facturable) continue;
+        if (value) next.add(r.reservation_id);
+        else next.delete(r.reservation_id);
+      }
       return next;
     });
+    if (!extiende) setLastClickedIndex(index);
   };
 
   const toggleAll = () => {
@@ -187,6 +302,19 @@ export default function ConsolidadaClient({
         : new Set(facturables.map((r) => r.reservation_id))
     );
   };
+
+  // `indeterminate` no es un atributo de HTML, sólo una propiedad del nodo: hay
+  // que escribirla a mano. Es el estado "hay algo tildado, pero no todo".
+  const todasRef = useRef<HTMLInputElement>(null);
+  const todasTildadas = facturables.length > 0 && picked.size === facturables.length;
+  useEffect(() => {
+    if (todasRef.current) {
+      todasRef.current.indeterminate = picked.size > 0 && picked.size < facturables.length;
+    }
+  }, [picked, facturables.length]);
+
+  // La sección del receptor, para que "Completar" pueda traerla a la vista.
+  const receptorRef = useRef<HTMLElement>(null);
 
   const restoreDetalle = () => {
     setDetalleOverrides({});
@@ -200,23 +328,12 @@ export default function ConsolidadaClient({
       toast.error("Seleccioná al menos una estadía.");
       return;
     }
-    if (requiereCuit) {
-      if (!condicionIva) {
-        toast.error("Elegí la condición frente al IVA.");
-        return;
-      }
-      if (!isValidCuit(cuit.replace(/\D/g, ""))) {
-        toast.error("El CUIT no es válido (11 dígitos con dígito verificador).");
-        return;
-      }
-      if (!razonSocial.trim()) {
-        toast.error("Ingresá la razón social.");
-        return;
-      }
-      if (!domicilio.trim()) {
-        toast.error("Ingresá el domicilio del receptor.");
-        return;
-      }
+    // Mismos faltantes que muestra la barra, en el mismo orden: con el botón
+    // deshabilitado esto no debería dispararse nunca, pero se revalida igual
+    // porque el estado pudo cambiar entre el render y el click.
+    if (faltantesReceptor.length > 0) {
+      toast.error(faltantesReceptor[0].mensaje);
+      return;
     }
 
     const notaLimpia = sanitizeDetalleLine(nota, DETALLE_NOTA_MAX);
@@ -312,42 +429,77 @@ export default function ConsolidadaClient({
             </button>
           </div>
 
-          <div className="p-5">
+          <div className="p-5 space-y-4">
+            {/* El filtro va afuera del if de carga: si se esconde cuando no hay
+                resultados, no queda nada que explique por qué la lista está
+                vacía ni cómo volver a "Todo". */}
+            <div>
+              <DateRangeFilter
+                from={range.from}
+                to={range.to}
+                presets={presets}
+                onChange={(from, to) => setRange({ from, to })}
+                allowAll
+              />
+              <p
+                className={`text-xs mt-2 ${rangoActivo ? "font-semibold text-amber-700" : "text-slate-400"}`}
+              >
+                Mostrando {rows.length} de {totalStays ?? rows.length} estadías de la cuenta
+                {rangoActivo ? " (hay un período puesto)." : "."}
+              </p>
+            </div>
+
             {loading ? (
               <p className="text-sm text-slate-400 text-center py-4">Cargando…</p>
             ) : rows.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-4">
-                Este cliente no tiene estadías cargadas a cuenta corriente.
+                {rangoActivo
+                  ? "No hay estadías en este período. Probá con «Todo» para ver la cuenta entera."
+                  : "Este cliente no tiene estadías cargadas a cuenta corriente."}
               </p>
             ) : (
               <>
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <button
-                    type="button"
-                    onClick={toggleAll}
-                    disabled={facturables.length === 0}
-                    className="text-xs font-bold text-emerald-700 hover:text-emerald-800 disabled:text-slate-300"
-                  >
-                    {picked.size === facturables.length && facturables.length > 0
-                      ? "Deseleccionar todo"
-                      : "Seleccionar todo"}
-                  </button>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                    <input
+                      ref={todasRef}
+                      type="checkbox"
+                      // Nombre fijo: el texto visible alterna entre "Seleccionar"
+                      // y "Deseleccionar", y un lector de pantalla ya anuncia el
+                      // estado por `checked`/`indeterminate`.
+                      aria-label="Seleccionar todas las estadías"
+                      checked={todasTildadas}
+                      onChange={toggleAll}
+                      disabled={facturables.length === 0}
+                      className="w-4 h-4 accent-emerald-600 disabled:cursor-not-allowed"
+                    />
+                    {todasTildadas ? "Deseleccionar todo" : "Seleccionar todo"}
+                  </label>
                   <span className="text-xs text-slate-400">
                     {facturables.length} sin facturar · {rows.length - facturables.length} ya cubiertas
                   </span>
                 </div>
                 <ul className="divide-y divide-slate-100">
-                  {rows.map((r) => {
+                  {rows.map((r, index) => {
                     const cobertura = coberturaLabel(r);
+                    const tildada = picked.has(r.reservation_id);
                     return (
                       <li
                         key={r.reservation_id}
-                        className={`py-2.5 flex items-center gap-3 ${r.facturable ? "" : "opacity-60"}`}
+                        onClick={r.facturable ? (e) => handleRowClick(index, e) : undefined}
+                        className={`py-2.5 px-2 -mx-2 rounded-lg flex items-center gap-3 transition-colors ${
+                          r.facturable
+                            ? `cursor-pointer ${tildada ? "bg-emerald-50" : "hover:bg-slate-50"}`
+                            : "opacity-60 cursor-not-allowed"
+                        }`}
                       >
                         <input
                           type="checkbox"
-                          checked={picked.has(r.reservation_id)}
-                          onChange={() => toggle(r.reservation_id)}
+                          checked={tildada}
+                          // No-op a propósito: el toggle lo hace el onClick del
+                          // <li>, al que este click (o el Espacio del teclado)
+                          // burbujea. Ver handleRowClick.
+                          onChange={() => {}}
                           disabled={!r.facturable}
                           className="w-4 h-4 accent-emerald-600 shrink-0 disabled:cursor-not-allowed"
                           aria-label={`Incluir estadía de habitación ${r.room_number ?? "?"}`}
@@ -445,7 +597,10 @@ export default function ConsolidadaClient({
 
       {/* 4) Receptor + emisión */}
       {selectedKey && facturables.length > 0 && (
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
+        <section
+          ref={receptorRef}
+          className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4"
+        >
           <h3 className="text-base font-bold text-slate-800">Datos del receptor</h3>
 
           {!isCompany && (
@@ -539,30 +694,59 @@ export default function ConsolidadaClient({
               mal, corregilo en Huéspedes antes de emitir.
             </p>
           )}
+        </section>
+      )}
 
-          <div className="border-t border-slate-100 pt-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-bold text-slate-800">
-                {selectedRows.length} estadía{selectedRows.length === 1 ? "" : "s"} · Total $
-                {money(total)}
+      {/* 5) Barra flotante: con 20 estadías, el total y el botón quedaban al
+          fondo de todo. Se muestra según la SELECCIÓN, no según `facturables`,
+          porque lo que importa es qué se está por emitir. */}
+      <StickyActionBar visible={selectedRows.length > 0}>
+        <div
+          role="region"
+          aria-label="Resumen de la factura consolidada"
+          className="flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-800">
+              {selectedRows.length} estadía{selectedRows.length === 1 ? "" : "s"} · Total ${money(total)}
+            </p>
+            <p className="text-xs text-slate-400">
+              Factura {letra} · período{" "}
+              {periodo ? `${shortDate(periodo.desde)} → ${shortDate(periodo.hasta)}` : "—"}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {/* El botón ahora está siempre a la vista, así que la barra tiene que
+                decir por qué no se puede emitir ANTES de apretarlo, no después
+                con un toast. */}
+            {faltantesReceptor.length > 0 && (
+              <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
+                <AlertTriangle size={13} className="shrink-0" />
+                Falta: {listarFaltantes(faltantesReceptor.map((f) => f.campo))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    receptorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+                  }
+                  className="underline font-bold hover:text-amber-900"
+                >
+                  Completar
+                </button>
               </p>
-              <p className="text-xs text-slate-400">
-                Se emitirá una <strong>Factura {letra}</strong> con fecha de hoy, por el período{" "}
-                {periodo ? `${shortDate(periodo.desde)} → ${shortDate(periodo.hasta)}` : "—"}.
-              </p>
-            </div>
+            )}
             <button
               type="button"
               onClick={() => void emit()}
-              disabled={emitting || selectedRows.length === 0}
-              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-2"
+              disabled={emitting || selectedRows.length === 0 || faltantesReceptor.length > 0}
+              className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-2"
             >
               {emitting ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />}
               Emitir factura consolidada
             </button>
           </div>
-        </section>
-      )}
+        </div>
+      </StickyActionBar>
     </div>
   );
 }
