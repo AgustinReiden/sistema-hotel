@@ -3649,6 +3649,7 @@ export async function getInvoiceById(invoiceId: string): Promise<InvoiceRecord |
     last_error: (r.last_error as string | null) ?? null,
     attempt_count: Number(r.attempt_count) || 0,
     detalle_nota: (r.detalle_nota as string | null) ?? null,
+    detalle_concepto_unico: (r.detalle_concepto_unico as string | null) ?? null,
   };
 }
 
@@ -3881,6 +3882,9 @@ export async function createConsolidatedInvoiceDraft(
           }))
         : null,
     p_nota: payload.nota ?? null,
+    // Null = detallado, que es el default y lo que hacían todas las llamadas hasta
+    // la mig 102. Con texto, el impreso colapsa a una sola línea.
+    p_concepto_unico: payload.conceptoUnico ?? null,
   });
   if (error) throw error;
   const r = (data ?? {}) as Record<string, unknown>;

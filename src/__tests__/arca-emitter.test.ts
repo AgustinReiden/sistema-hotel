@@ -130,6 +130,7 @@ function invoice(over: Partial<InvoiceRecord> = {}): InvoiceRecord {
     last_error: null,
     attempt_count: 0,
     detalle_nota: null,
+    detalle_concepto_unico: null,
     ...over,
   };
 }

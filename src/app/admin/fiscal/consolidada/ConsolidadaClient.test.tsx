@@ -9,9 +9,10 @@ vi.mock("sonner", () => ({
 }));
 
 const loadCcAccountStaysAction = vi.fn();
+const emitConsolidatedInvoiceAction = vi.fn();
 vi.mock("./actions", () => ({
   loadCcAccountStaysAction: (...args: unknown[]) => loadCcAccountStaysAction(...args),
-  emitConsolidatedInvoiceAction: vi.fn(),
+  emitConsolidatedInvoiceAction: (...args: unknown[]) => emitConsolidatedInvoiceAction(...args),
 }));
 
 function makeRow(
@@ -97,12 +98,24 @@ const plata = (n: number) =>
 
 const BARRA = "Resumen de la factura consolidada";
 
+/** El payload con el que se llamó a la acción de emitir. */
+type EmitPayload = {
+  detalle?: { reservationId: string; descripcion: string }[];
+  conceptoUnico?: string;
+};
+const payloadEmitido = () => emitConsolidatedInvoiceAction.mock.calls[0][0] as EmitPayload;
+
 describe("ConsolidadaClient", () => {
   beforeEach(() => {
     loadCcAccountStaysAction.mockReset();
     loadCcAccountStaysAction.mockImplementation((kind: string, id: string) =>
       Promise.resolve({ success: true, data: [makeRow(`${kind}-${id}-1`, "5")] })
     );
+    emitConsolidatedInvoiceAction.mockReset();
+    emitConsolidatedInvoiceAction.mockResolvedValue({
+      success: true,
+      data: { status: "authorized", invoiceId: "inv-1", numero: "0003-00000001", count: 1 },
+    });
   });
 
   it("con cliente preseleccionado, precarga los datos fiscales de esa ficha sin esperar a elegirla de nuevo", async () => {
@@ -295,5 +308,102 @@ describe("ConsolidadaClient", () => {
     // vacío: con el botón deshabilitado, el toast del motivo ya no se dispara.
     fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "20111111113" } });
     expect(within(barra).getByText(/Falta: CUIT válido y domicilio/)).toBeInTheDocument();
+  });
+
+  describe("forma del detalle impreso (mig 102)", () => {
+    beforeEach(() => {
+      // emit() abre la ventana del impreso; en jsdom no está implementada.
+      vi.spyOn(window, "open").mockImplementation(() => null);
+    });
+
+    const emitir = () =>
+      fireEvent.click(screen.getByRole("button", { name: /Emitir factura consolidada/ }));
+
+    it("con «un solo concepto», manda el texto y NO las líneas por estadía", async () => {
+      renderClient();
+      await screen.findByRole("region", { name: BARRA });
+
+      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+
+      // Arranca en "Alojamiento" y es editable.
+      const campo = screen.getByLabelText("Texto del concepto único");
+      expect(campo).toHaveValue("Alojamiento");
+      fireEvent.change(campo, { target: { value: "Servicios de alojamiento" } });
+
+      // Las líneas por estadía desaparecen: en este modo no se imprimen.
+      expect(
+        screen.queryByLabelText("Descripción de la estadía de habitación 5")
+      ).not.toBeInTheDocument();
+
+      emitir();
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
+      expect(payloadEmitido().conceptoUnico).toBe("Servicios de alojamiento");
+      // Lo importante: no van las dos formas juntas. Con `detalle` también en el
+      // payload, el comprobante guardaría un detalle que nadie eligió ni va a ver.
+      expect(payloadEmitido().detalle).toBeUndefined();
+    });
+
+    it("en «detallado» (el default) sigue mandando el array por estadía, como antes", async () => {
+      renderClient();
+      await screen.findByRole("region", { name: BARRA });
+
+      // No se toca el interruptor: el modo de siempre es el default.
+      emitir();
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
+      expect(payloadEmitido().conceptoUnico).toBeUndefined();
+      expect(payloadEmitido().detalle).toEqual([
+        { reservationId: "company-acme-1", descripcion: "Hab. 5 - 01/09/2026 al 03/09/2026" },
+      ]);
+    });
+
+    it("ir a «un solo concepto» y volver no pierde los textos editados por estadía", async () => {
+      renderClient();
+      await screen.findByRole("region", { name: BARRA });
+
+      const linea = () => screen.getByLabelText("Descripción de la estadía de habitación 5");
+      fireEvent.change(linea(), { target: { value: "Convención anual" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+      fireEvent.click(screen.getByRole("button", { name: "Detallado" }));
+
+      expect(linea()).toHaveValue("Convención anual");
+
+      emitir();
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
+      expect(payloadEmitido().detalle?.[0].descripcion).toBe("Convención anual");
+    });
+
+    it("si se borra el texto del concepto, se emite el default que muestra el placeholder", async () => {
+      renderClient();
+      await screen.findByRole("region", { name: BARRA });
+
+      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+      fireEvent.change(screen.getByLabelText("Texto del concepto único"), {
+        target: { value: "   " },
+      });
+
+      emitir();
+
+      // Mandar vacío sería peor: en el servidor NULL significa "detallado", así que
+      // el impreso saldría distinto de lo que la pantalla venía mostrando.
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
+      expect(payloadEmitido().conceptoUnico).toBe("Alojamiento");
+      expect(payloadEmitido().detalle).toBeUndefined();
+    });
+
+    it("«Restaurar» también devuelve el texto del concepto a «Alojamiento»", async () => {
+      renderClient();
+      await screen.findByRole("region", { name: BARRA });
+
+      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+      fireEvent.change(screen.getByLabelText("Texto del concepto único"), {
+        target: { value: "Otra cosa" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Restaurar/ }));
+
+      expect(screen.getByLabelText("Texto del concepto único")).toHaveValue("Alojamiento");
+    });
   });
 });
