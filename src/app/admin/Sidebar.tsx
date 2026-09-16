@@ -5,8 +5,11 @@ import LogoutButton from './LogoutButton';
 export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount = 0 }: { role: string; userEmail: string; hasOpenShift?: boolean; unbilledCount?: number }) {
     const isAdmin = role === 'admin';
 
+    // h-dvh (no min-h-screen) para que el sidebar mida exactamente lo mismo que el shell:
+    // con el min-height mandando, el pie con el usuario y "Cerrar sesión" queda fuera de la
+    // ventana y el <nav flex-1 overflow-y-auto> nunca llega a scrollear solo.
     return (
-        <aside className="w-full md:w-64 bg-slate-900 text-slate-300 md:min-h-screen flex flex-col border-r border-slate-800 shrink-0 shadow-2xl z-10 transition-all duration-300">
+        <aside className="w-full md:w-64 bg-slate-900 text-slate-300 md:h-dvh flex flex-col border-r border-slate-800 shrink-0 shadow-2xl z-10 transition-all duration-300">
             <div className="h-16 flex items-center px-6 bg-slate-950/50 border-b border-slate-800">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center mr-3 shadow-lg shadow-emerald-500/20">
                     <BedDouble size={18} className="text-white" />
