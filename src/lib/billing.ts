@@ -1,4 +1,9 @@
-import type { PaymentMethod } from "./types";
+import { formatCbteNumero } from "./arca/amounts";
+import type {
+  BillingControlCierre,
+  BillingControlEstado,
+  PaymentMethod,
+} from "./types";
 
 /**
  * Medios de pago con rastro bancario. Cobrar por acá y no facturar es una
@@ -117,4 +122,77 @@ export function defaultStayDescription(stay: {
 function formatDetalleDate(value: string): string {
   const [y, m, d] = (value ?? "").split("-");
   return y && m && d ? `${d}/${m}/${y}` : value;
+}
+
+// ─── Control de facturación: etiquetas y lógica de lote ────────────────────────
+// Viven acá y no en ControlClient.tsx porque el CSV que se le manda al contador
+// tiene que decir exactamente lo mismo que la pantalla. Una sola fuente de verdad:
+// si mañana cambia una etiqueta, cambia en los dos lados o en ninguno.
+
+/** Texto de cada estado. El color queda en la pantalla; el texto se comparte con el CSV. */
+export const BILLING_ESTADO_LABEL: Record<BillingControlEstado, string> = {
+  facturado: "Facturado",
+  facturado_consolidado: "Consolidado",
+  facturado_externo: "Facturado afuera",
+  en_proceso: "En proceso",
+  pendiente_consolidada: "Espera consolidada",
+  no_corresponde: "No corresponde",
+  falta: "FALTA FACTURAR",
+};
+
+/** Cómo cerró la estadía. Mismo criterio: compartido entre pantalla y CSV. */
+export const BILLING_CIERRE_LABEL: Record<BillingControlCierre, string> = {
+  caja: "Caja",
+  cuenta_corriente: "Cta. cte.",
+  vale_blanco: "Vale blanco",
+};
+
+/**
+ * Qué comprobante mostrar para una estadía: el externo declarado a mano gana,
+ * porque si está es porque alguien afirmó que se facturó afuera. Devuelve null
+ * cuando no hay ninguno, y cada consumidor decide cómo se ve la ausencia (la
+ * pantalla pone "—", el CSV deja la celda vacía).
+ */
+export function billingComprobante(row: {
+  external_ref: string | null;
+  cbte_tipo: number | null;
+  pto_vta: number | null;
+  cbte_nro: number | null;
+}): string | null {
+  if (row.external_ref) return row.external_ref;
+  if (row.cbte_nro && row.pto_vta) {
+    return `${row.cbte_tipo === 1 ? "A" : "B"} ${formatCbteNumero(row.pto_vta, row.cbte_nro)}`;
+  }
+  return null;
+}
+
+/**
+ * Qué acción en lote admite una selección.
+ *
+ * - "marcar": todas están sin facturar, así que se pueden dar por facturadas afuera.
+ * - "deshacer": todas están marcadas como facturadas afuera.
+ * - "mezclado": hay estados distintos y la acción sería ambigua.
+ * - "sin_accion": todas en el mismo estado, pero uno que no admite lote (ya
+ *   facturadas por el sistema, en proceso, no corresponde).
+ * - "vacio": no hay nada seleccionado.
+ *
+ * Por qué se bloquea en vez de aplicar "lo que se pueda": marcar de más es
+ * irreversible en la práctica (esa estadía deja de reclamarse), así que el
+ * empleado tiene que ver exactamente sobre qué está actuando.
+ */
+export type BulkBillingAction = "marcar" | "deshacer" | "mezclado" | "sin_accion" | "vacio";
+
+/** Estados desde los que todavía falta facturar: son los que se pueden marcar. */
+const MARCABLES: readonly BillingControlEstado[] = ["falta", "pendiente_consolidada"];
+
+export function bulkBillingAction(
+  rows: readonly { estado: BillingControlEstado }[]
+): BulkBillingAction {
+  if (rows.length === 0) return "vacio";
+  if (rows.every((r) => MARCABLES.includes(r.estado))) return "marcar";
+  if (rows.every((r) => r.estado === "facturado_externo")) return "deshacer";
+  // Todas iguales pero fuera de lote (p. ej. ya facturadas por el sistema): no es
+  // una mezcla, y decirle "elegí filas del mismo estado" sería mentirle al empleado.
+  const primero = rows[0].estado;
+  return rows.every((r) => r.estado === primero) ? "sin_accion" : "mezclado";
 }
