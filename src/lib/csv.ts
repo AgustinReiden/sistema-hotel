@@ -6,7 +6,12 @@
 import { formatShiftCode } from "./format";
 import { formatHotelDate, formatHotelTime } from "./time";
 import { DATE_KEY, formatKey } from "./date-range";
-import type { CheckoutExportRow } from "./types";
+import {
+  BILLING_CIERRE_LABEL,
+  BILLING_ESTADO_LABEL,
+  billingComprobante,
+} from "./billing";
+import type { BillingControlRow, CheckoutExportRow } from "./types";
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "Efectivo",
@@ -111,4 +116,41 @@ export function buildCheckoutCsv(
     { header: "Turno", type: "plano", value: (r) => formatShiftCode(r.shift_number) },
   ];
   return buildCsv(columns, rows);
+}
+
+/**
+ * CSV del control de facturación: es el archivo que se le manda al contador para
+ * cruzar qué falta facturar. Se arma en el cliente sobre las filas que están en
+ * pantalla (ya filtradas), sin segunda consulta, justamente para que el archivo
+ * nunca pueda decir algo distinto de lo que vio el empleado.
+ *
+ * Cliente y comprobante son texto untrusted (el nombre puede venir de una reserva
+ * pública y el comprobante lo tipea a mano un admin), así que van por "texto".
+ */
+export function buildBillingControlCsv(rows: BillingControlRow[]): string {
+  const columns: CsvColumn<BillingControlRow>[] = [
+    { header: "Salida", type: "fecha", value: (r) => r.fch_hasta },
+    { header: "Habitacion", type: "plano", value: (r) => r.room_number },
+    { header: "Cliente", type: "texto", value: (r) => r.cliente },
+    { header: "Cierre", type: "plano", value: (r) => BILLING_CIERRE_LABEL[r.cierre] },
+    { header: "Total", type: "monto", value: (r) => r.total_price },
+    {
+      // "plano" en vez de "monto" SÓLO por el null: la estadía que cerró por caja
+      // no tiene cargo a cuenta corriente, y un "0,00" le diría al contador algo
+      // falso (que se cargó cero). Vacío es lo que la pantalla muestra como "—".
+      // Para los importes reales el resultado es idéntico al de "monto": misma
+      // función de formato y el mismo escapado (no hay caracteres que citar).
+      header: "Cargo cta. cte.",
+      type: "plano",
+      value: (r) => (r.cargo_cc === null ? "" : formatAmountAr(r.cargo_cc)),
+    },
+    { header: "Estado", type: "plano", value: (r) => BILLING_ESTADO_LABEL[r.estado] },
+    { header: "Comprobante", type: "texto", value: (r) => billingComprobante(r) ?? "" },
+  ];
+  return buildCsv(columns, rows);
+}
+
+/** `control-facturacion-2026-08-01_2026-08-31.csv`: con el rango, para que no se pisen en Descargas. */
+export function billingControlCsvFilename(from: string, to: string): string {
+  return `control-facturacion-${from}_${to}.csv`;
 }
