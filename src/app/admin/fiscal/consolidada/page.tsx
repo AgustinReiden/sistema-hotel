@@ -6,7 +6,9 @@ import {
   getCtaCteBillingProfiles,
   getCurrentUserRole,
   getFiscalSettings,
+  getHotelSettings,
 } from "@/lib/data";
+import { hotelDateKey } from "@/lib/time";
 import type { CtaCteClientKind } from "@/lib/types";
 import ConsolidadaClient from "./ConsolidadaClient";
 
@@ -23,11 +25,19 @@ export default async function ConsolidadaPage({
   }
 
   const { kind, id } = await searchParams;
-  const [accounts, billingProfiles, settings] = await Promise.all([
+  const [accounts, billingProfiles, settings, hotel] = await Promise.all([
     getCtaCteAccounts(),
     getCtaCteBillingProfiles(),
     getFiscalSettings().catch(() => null),
+    // Sólo se usa para la zona horaria de los presets: si falla, la pantalla
+    // tiene que seguir funcionando igual, no morirse por unos botones.
+    getHotelSettings().catch(() => null),
   ]);
+
+  // El "hoy" de los presets se calcula en el servidor y en la zona del hotel: si
+  // saliera del reloj del navegador, "Este mes" podría arrancar un día antes o
+  // después según la máquina de la recepción.
+  const todayKey = hotelDateKey(new Date(), hotel?.timezone || undefined);
 
   const preselectKind: CtaCteClientKind | null =
     kind === "company" || kind === "guest" ? kind : null;
@@ -64,6 +74,7 @@ export default async function ConsolidadaPage({
             billingProfiles={billingProfiles}
             preselectKind={preselectKind}
             preselectId={preselectId}
+            todayKey={todayKey}
           />
         </div>
       </div>
