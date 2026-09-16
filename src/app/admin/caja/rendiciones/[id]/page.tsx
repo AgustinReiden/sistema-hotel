@@ -45,6 +45,14 @@ type ShiftCopyProps = {
   totalIncome: number;
   /** Fiado a cuenta corriente en el turno. No es cobrado: va aparte del TOTAL. */
   creditCharged: number;
+  /** Las estadías detrás de ese total, para que el papel diga de quién es cada peso. */
+  creditList: Array<{
+    id: string;
+    time: string;
+    amount: number;
+    clientName: string;
+    roomNumber: string | null;
+  }>;
   paymentsList: Array<{
     id: string;
     time: string;
@@ -75,6 +83,7 @@ function ShiftCopy(props: ShiftCopyProps) {
     cobradoRows,
     totalIncome,
     creditCharged,
+    creditList,
     paymentsList,
     notes,
     printedAt,
@@ -124,8 +133,22 @@ function ShiftCopy(props: ShiftCopyProps) {
       </p>
       {creditCharged > 0 && (
         <>
-          <p className="row">
-            <span>Fiado cta cte:</span>
+          <hr />
+          <p className="section">CUENTA CORRIENTE ({creditList.length})</p>
+          {creditList.map((charge) => (
+            <div key={charge.id} className="payment-line">
+              <p className="row small">
+                <span>{charge.time} - Fiado</span>
+                <span>{money(charge.amount)}</span>
+              </p>
+              <p className="row small muted indent">
+                {charge.clientName}
+                {charge.roomNumber ? ` (Hab. ${charge.roomNumber})` : ""}
+              </p>
+            </div>
+          ))}
+          <p className="row big">
+            <span>TOTAL CTA CTE:</span>
             <span>{money(creditCharged)}</span>
           </p>
           <p className="row small indent">no cobrado, va a la cuenta</p>
@@ -230,6 +253,7 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     totalsByMethod,
     totalIncome,
     creditCharged,
+    creditCharges,
     checkoutsCount,
     payments,
     openedByEmail,
@@ -265,6 +289,13 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     cobradoRows,
     totalIncome,
     creditCharged,
+    creditList: creditCharges.map((charge) => ({
+      id: charge.id,
+      time: formatHotelTime(charge.created_at, tz),
+      amount: charge.amount,
+      clientName: charge.client_name,
+      roomNumber: charge.room_number,
+    })),
     paymentsList: payments.map((payment) => ({
       id: payment.id,
       time: formatHotelTime(payment.created_at, tz),

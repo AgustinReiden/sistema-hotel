@@ -618,6 +618,20 @@ export type ShiftPaymentRow = {
   room_number: string | null;
 };
 
+/**
+ * Una estadía que en el check-out se cerró contra la cuenta corriente del cliente.
+ * No es plata cobrada, pero es una pieza que se rindió en el turno y el cierre la
+ * tiene que nombrar: sin el detalle, en la rendición solo hay un total sin dueño.
+ */
+export type ShiftCreditChargeRow = {
+  id: string;
+  amount: number;
+  created_at: string;
+  reservation_id: string | null;
+  client_name: string;
+  room_number: string | null;
+};
+
 export type ShiftSummary = {
   shift: CashShift;
   paymentsCount: number;
@@ -632,6 +646,8 @@ export type ShiftSummary = {
    * parte de lo que se cerró en el turno y el recepcionista lo tiene que ver.
    */
   creditCharged: number;
+  /** Las estadías detrás de `creditCharged`, una por línea. */
+  creditCharges: ShiftCreditChargeRow[];
   payments: ShiftPaymentRow[];
   openedByEmail: string | null;
   closedByEmail: string | null;

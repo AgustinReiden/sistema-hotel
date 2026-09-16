@@ -217,10 +217,45 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
                     </li>
                   );
                 })}
-                {summary.totalIncome === 0 && (
+                {summary.totalIncome === 0 && summary.creditCharged === 0 && (
                   <li className="text-sm text-slate-500 italic">Sin cobros todavia.</li>
                 )}
               </ul>
+
+              {/* Lo cerrado a cuenta corriente no pasa por `payments`, así que no aparece
+                  arriba ni suma al total cobrado. Se muestra igual: es plata vendida en el
+                  turno y el que rinde tiene que poder explicarla. */}
+              {summary.creditCharged > 0 && (
+                <div className="mt-5 pt-4 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="flex items-center gap-2 text-amber-700 font-bold">
+                      <Wallet size={16} className="text-amber-500" />
+                      Cuenta corriente (fiado)
+                    </span>
+                    <span className="font-bold text-amber-800">
+                      ${formatMoney(summary.creditCharged)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mb-3">
+                    No es plata cobrada: queda en la cuenta del cliente.
+                  </p>
+                  <ul className="space-y-2">
+                    {summary.creditCharges.map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="text-slate-600 truncate">
+                          {c.client_name}
+                          {c.room_number && (
+                            <span className="text-slate-400"> (Hab. {c.room_number})</span>
+                          )}
+                        </span>
+                        <span className="font-bold text-amber-800 shrink-0">
+                          ${formatMoney(c.amount)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -280,6 +315,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
             shiftNumber={summary.shift.shift_number}
             totalsByMethod={summary.totalsByMethod}
             creditCharged={summary.creditCharged}
+            creditCharges={summary.creditCharges}
             checkoutsCount={summary.checkoutsCount}
             afterClose={isAdmin ? "refresh" : "logout"}
             hotelTimezone={hotelTimezone}

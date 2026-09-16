@@ -1,7 +1,7 @@
 "use client";
 
 import CloseShiftModal from "./CloseShiftModal";
-import type { PaymentMethod } from "@/lib/types";
+import type { PaymentMethod, ShiftCreditChargeRow } from "@/lib/types";
 
 type Props = {
   shiftId: string;
@@ -10,6 +10,8 @@ type Props = {
   totalsByMethod: Record<PaymentMethod, number>;
   /** Fiado a cuenta corriente del turno que se está rindiendo. */
   creditCharged: number;
+  /** Las estadías detrás de ese total. */
+  creditCharges: ShiftCreditChargeRow[];
   checkoutsCount: number;
 };
 
@@ -24,6 +26,7 @@ export default function ForcedShiftHandover({
   openedByName,
   totalsByMethod,
   creditCharged,
+  creditCharges,
   checkoutsCount,
 }: Props) {
   const quien = openedByName ?? "otro usuario";
@@ -36,6 +39,7 @@ export default function ForcedShiftHandover({
         shiftNumber={shiftNumber}
         totalsByMethod={totalsByMethod}
         creditCharged={creditCharged}
+        creditCharges={creditCharges}
         checkoutsCount={checkoutsCount}
         afterClose="reopen"
         dismissable={false}
