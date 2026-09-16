@@ -74,7 +74,13 @@ export default async function AdminLayout({
             : 0;
 
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+        // Shell de alto fijo: sin una altura definida en este ancestro, los h-full y los
+        // flex-1 overflow-auto que traen las páginas no acotan nada y termina scrolleando la
+        // ventana entera, con el menú yéndose hacia arriba y position:sticky inútil en todo
+        // el panel. h-dvh y no h-screen porque 100vh mide el viewport con la barra de URL
+        // retraída y taparía el pie del sidebar; md:min-h-0 es obligatorio porque si sobrevive
+        // el min-h-screen, cuando 100vh > 100dvh gana el min-height y vuelve el problema.
+        <div data-admin-shell className="min-h-screen md:min-h-0 md:h-dvh bg-slate-50 flex flex-col md:flex-row md:overflow-hidden">
             {role === "receptionist" && <IdleLogout />}
             <Sidebar
                 role={role}
@@ -82,9 +88,19 @@ export default async function AdminLayout({
                 hasOpenShift={!!openShift}
                 unbilledCount={unbilledCount}
             />
-            <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
                 <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
-                {children}
+                {/* El que scrollea es este wrapper y no <main> para dejar el aviso de turno
+                    viejo FUERA del área scrolleable: adentro, cualquier página con h-full
+                    mediría h-full + el alto del banner y aparecería una segunda scrollbar
+                    inútil cada vez que hay un turno abierto hace rato. Es flex-col porque
+                    varias páginas devuelven un fragmento (<header shrink-0> + <div flex-1
+                    overflow-auto>) y dependen de que el padre sea columna flex. Todo con
+                    prefijo md: a propósito: abajo de 768px el panel queda como siempre,
+                    sidebar apilado y scroll de ventana. */}
+                <div data-admin-scroll className="flex-1 min-h-0 flex flex-col md:overflow-y-auto">
+                    {children}
+                </div>
             </main>
         </div>
     );

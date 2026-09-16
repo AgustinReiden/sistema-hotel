@@ -89,6 +89,20 @@ html {
     min-height: 0 !important;
     height: auto !important;
   }
+  /* El panel admin es un shell de 100dvh con el contenido dentro de un contenedor con
+     overflow, y Chrome imprime recortado al alto de esa caja: el ticket sale cortado abajo.
+     Se neutraliza SOLO el shell (no .overflow-y-auto en general, del que dependen los ~30
+     modales max-h-[90vh], el desplegable de ClientSearch y las listas max-h de Finanzas y
+     Caja) para que la hoja vuelva a medir el contenido. */
+  [data-admin-shell],
+  [data-admin-shell] > main,
+  [data-admin-scroll] {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
   main,
   .print\:p-0 {
     padding: 0 !important;

@@ -38,13 +38,18 @@ export default function IdleLogout() {
       "scroll",
       "click",
     ];
-    events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
+    // capture: true porque desde que el panel scrollea en un div interno y no en la ventana,
+    // el evento "scroll" no burbujea; sin esto, leer una lista con la rueda deja de contar
+    // como actividad y la sesión se cierra sola a los 30 minutos. Tiene que ser el MISMO
+    // objeto de opciones en el removeEventListener o el listener no se desregistra.
+    const listenerOpts: AddEventListenerOptions = { passive: true, capture: true };
+    events.forEach((e) => window.addEventListener(e, onActivity, listenerOpts));
     document.addEventListener("visibilitychange", onVisibility);
     arm();
 
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
-      events.forEach((e) => window.removeEventListener(e, onActivity));
+      events.forEach((e) => window.removeEventListener(e, onActivity, listenerOpts));
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);

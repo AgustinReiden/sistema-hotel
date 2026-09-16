@@ -46,7 +46,7 @@ export default function OpenShiftAgeAlert({ openedAt }: { openedAt: string | nul
   }
 
   return (
-    <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-amber-900">
+    <div className="print:hidden bg-amber-50 border-b border-amber-200 px-4 py-3 text-amber-900">
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 w-9 h-9 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0">
