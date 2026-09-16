@@ -789,14 +789,18 @@ export type InvoiceableCheckoutRow = {
   actual_check_out: string;
 };
 
-/** Comprobante con CAE, para reimprimir o anular con nota de crédito. */
+/** Comprobante con CAE, para reimprimir/anular y para el export del libro de IVA ventas. */
 export type AuthorizedInvoiceRow = {
   invoice_id: string;
   pto_vta: number;
   cbte_nro: number;
   /** 1 = Factura A · 6 = Factura B · 3 = NC A · 8 = NC B. */
   cbte_tipo: number;
+  cbte_fch: string | null; // date
   receptor_nombre: string | null;
+  doc_nro: string | null;
+  imp_neto: number;
+  imp_iva: number;
   imp_total: number;
   kind: InvoiceKind;
   /** Con valor si ya fue anulado por una nota de crédito. */
