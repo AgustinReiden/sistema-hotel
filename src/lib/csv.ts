@@ -1,8 +1,11 @@
-// Armado del CSV fiscal de check-outs por turno. Formato AR (Excel-friendly):
-// separador ';', decimales con coma, UTF-8 con BOM, fecha DD/MM/AAAA, hora HH:MM.
+// Armado de CSVs con formato AR (Excel-friendly): separador ';', decimales con
+// coma, UTF-8 con BOM, fecha DD/MM/AAAA. buildCsv es el motor genérico: cada
+// columna declara su tipo para que nadie vuelva a decidir a mano cuándo escapar.
+// buildCheckoutCsv (el export fiscal de check-outs por turno) está montado encima.
 
 import { formatShiftCode } from "./format";
 import { formatHotelDate, formatHotelTime } from "./time";
+import { DATE_KEY, formatKey } from "./date-range";
 import type { CheckoutExportRow } from "./types";
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -17,21 +20,8 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   sin_cobro: "Sin cobro",
 };
 
-// "Turno" va AL FINAL para no correr las columnas que un importador ya mapee
-// por posición. Es el nº de cierre correlativo con el que el sistema de gestión
-// valida que se importó el turno correcto.
-const CSV_HEADERS = [
-  "Fecha",
-  "Hora",
-  "Cliente",
-  "Cod. Cliente",
-  "Monto",
-  "Forma de pago",
-  "Turno",
-];
-
 /** Escapa un campo para CSV con separador ';': envuelve en comillas y duplica comillas internas. */
-function csvField(value: string): string {
+export function csvField(value: string): string {
   const needsQuote = /[";\n\r]/.test(value);
   const escaped = value.replace(/"/g, '""');
   return needsQuote ? `"${escaped}"` : escaped;
@@ -49,48 +39,76 @@ function csvField(value: string): string {
  * con '-' y quedaría corrompido para el importador fiscal. Los nombres/DNI
  * legítimos nunca arrancan con esos caracteres, así que las filas reales no cambian.
  */
-function csvTextField(value: string): string {
+export function csvTextField(value: string): string {
   const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return csvField(neutralized);
 }
 
 /** Monto con coma decimal, sin separador de miles (más seguro para importadores fiscales). */
-function formatAmountAr(n: number): string {
+export function formatAmountAr(n: number): string {
   return n.toFixed(2).replace(".", ",");
 }
 
+export type CsvColumnType = "texto" | "plano" | "monto" | "fecha";
+
+export type CsvColumn<T> = {
+  header: string;
+  /** "texto" = untrusted (pasa por csvTextField); "monto" NO pasa por csvTextField
+   * (un importe negativo empieza con "-" y quedaría corrompido); "fecha" espera una
+   * clave "YYYY-MM-DD" y la formatea DD/MM/AAAA. */
+  type: CsvColumnType;
+  value: (row: T) => string | number;
+};
+
+function formatCsvValue(type: CsvColumnType, raw: string | number): string {
+  switch (type) {
+    case "texto":
+      return csvTextField(String(raw ?? ""));
+    case "monto":
+      return csvField(formatAmountAr(Number(raw)));
+    case "fecha": {
+      const key = String(raw ?? "");
+      return csvField(DATE_KEY.test(key) ? formatKey(key) : key);
+    }
+    case "plano":
+    default:
+      return csvField(String(raw ?? ""));
+  }
+}
+
 /**
- * Construye el texto CSV a partir de las filas de check-out.
- * Prefija BOM para que Excel en español respete los acentos.
+ * Motor genérico de CSV: cada columna declara su tipo, así nadie vuelve a decidir
+ * a mano cuándo escapar. Prefija BOM para que Excel en español respete los acentos.
  */
+export function buildCsv<T>(columns: CsvColumn<T>[], rows: T[]): string {
+  const lines: string[] = [columns.map((c) => csvField(c.header)).join(";")];
+  for (const row of rows) {
+    lines.push(columns.map((c) => formatCsvValue(c.type, c.value(row))).join(";"));
+  }
+  // ﻿ = BOM UTF-8; \r\n = fin de línea que Excel prefiere.
+  return "﻿" + lines.join("\r\n");
+}
+
+/** Construye el texto CSV a partir de las filas de check-out (export fiscal). */
 export function buildCheckoutCsv(
   rows: CheckoutExportRow[],
   timezone: string
 ): string {
-  const lines: string[] = [CSV_HEADERS.map(csvField).join(";")];
-
-  for (const row of rows) {
-    const fecha = formatHotelDate(row.actual_check_out, timezone);
-    const hora = formatHotelTime(row.actual_check_out, timezone);
-    const cliente = row.client_name ?? "";
-    const codCliente = row.client_dni ?? "";
-    const monto = formatAmountAr(row.total_price);
-    const formaPago =
-      PAYMENT_METHOD_LABELS[row.payment_method] ?? row.payment_method;
-
-    lines.push(
-      [
-        csvField(fecha),
-        csvField(hora),
-        csvTextField(cliente),
-        csvTextField(codCliente),
-        csvField(monto),
-        csvField(formaPago),
-        csvField(formatShiftCode(row.shift_number)),
-      ].join(";")
-    );
-  }
-
-  // ﻿ = BOM UTF-8; \r\n = fin de línea que Excel prefiere.
-  return "﻿" + lines.join("\r\n");
+  // "Turno" va AL FINAL para no correr las columnas que un importador ya mapee
+  // por posición. Es el nº de cierre correlativo con el que el sistema de gestión
+  // valida que se importó el turno correcto.
+  const columns: CsvColumn<CheckoutExportRow>[] = [
+    { header: "Fecha", type: "plano", value: (r) => formatHotelDate(r.actual_check_out, timezone) },
+    { header: "Hora", type: "plano", value: (r) => formatHotelTime(r.actual_check_out, timezone) },
+    { header: "Cliente", type: "texto", value: (r) => r.client_name ?? "" },
+    { header: "Cod. Cliente", type: "texto", value: (r) => r.client_dni ?? "" },
+    { header: "Monto", type: "monto", value: (r) => r.total_price },
+    {
+      header: "Forma de pago",
+      type: "plano",
+      value: (r) => PAYMENT_METHOD_LABELS[r.payment_method] ?? r.payment_method,
+    },
+    { header: "Turno", type: "plano", value: (r) => formatShiftCode(r.shift_number) },
+  ];
+  return buildCsv(columns, rows);
 }
