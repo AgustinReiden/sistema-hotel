@@ -747,6 +747,12 @@ export type InvoiceRecord = {
   attempt_count: number;
   /** Nota libre al pie del detalle, escrita por el admin al emitir (mig 93). */
   detalle_nota: string | null;
+  /**
+   * Elegido al emitir y congelado con el comprobante (mig 102): null = detalle
+   * estadía por estadía (lo de siempre); con texto = una sola línea con ese texto
+   * por el total. Una sola columna para no poder contradecirse.
+   */
+  detalle_concepto_unico: string | null;
 };
 
 /**
@@ -935,6 +941,12 @@ export type ConsolidatedInvoicePayload = {
   detalle?: { reservationId: string; descripcion: string }[];
   /** Nota libre al pie del detalle. */
   nota?: string;
+  /**
+   * Con texto, el impreso sale con UNA sola línea con ese texto por el total, en
+   * vez de una por estadía (mig 102). Ausente = detallado, que es el default.
+   * Una sola cosa lleva la bandera y el texto, igual que la columna.
+   */
+  conceptoUnico?: string;
 };
 
 /** Resultado de emitInvoice para la UI (toast + acción). */

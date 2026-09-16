@@ -81,6 +81,11 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
   // La NC hereda la nota del comprobante que anula: los dos papeles tienen que
   // decir lo mismo.
   const detalleNota = invoice.detalle_nota ?? (isNC ? anulado?.detalle_nota ?? null : null);
+  // Y por la misma razón hereda la forma del detalle (mig 102): si la factura
+  // anulada salió con un solo concepto, la NC que la anula tiene que salir igual,
+  // o el cliente recibe dos papeles que no se parecen. null = detallado.
+  const conceptoUnico =
+    invoice.detalle_concepto_unico ?? (isNC ? anulado?.detalle_concepto_unico ?? null : null);
 
   const qrDataUrl = invoice.qr_url ? await qrPngDataUrl(invoice.qr_url) : null;
   const numero = formatCbteNumero(invoice.pto_vta, invoice.cbte_nro);
@@ -206,18 +211,34 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
         {/* Detalle (el WSFE factura totales; el detalle es de la representación) */}
         {isConsolidada ? (
           <>
-            <div className="row">
-              <span>DETALLE DE ESTADÍAS</span>
-              <span>{stays.length}</span>
-            </div>
-            {stays.map((s) => (
-              <div className="row small" key={s.reservation_id}>
-                {/* Texto congelado al emitir (mig 93). Las facturas anteriores no
-                    lo tienen y caen al automático, que es lo que mostraban. */}
-                <span>{s.descripcion ?? defaultStayDescription(s)}</span>
-                <span>${money(s.amount)}</span>
+            {conceptoUnico ? (
+              // Un solo concepto (mig 102): ni habitaciones ni fechas estadía por
+              // estadía, que es justamente lo que pidieron algunas empresas.
+              // El importe es imp_total, el mismo que suman las líneas del modo
+              // detallado, TAMBIÉN en una Factura A: con imp_neto cambiaría cómo se
+              // lee una A respecto de las consolidadas ya emitidas.
+              <div className="row">
+                <span>{conceptoUnico}</span>
+                <span>${money(invoice.imp_total)}</span>
               </div>
-            ))}
+            ) : (
+              <>
+                <div className="row">
+                  <span>DETALLE DE ESTADÍAS</span>
+                  <span>{stays.length}</span>
+                </div>
+                {stays.map((s) => (
+                  <div className="row small" key={s.reservation_id}>
+                    {/* Texto congelado al emitir (mig 93). Las facturas anteriores no
+                        lo tienen y caen al automático, que es lo que mostraban. */}
+                    <span>{s.descripcion ?? defaultStayDescription(s)}</span>
+                    <span>${money(s.amount)}</span>
+                  </div>
+                ))}
+              </>
+            )}
+            {/* El período y la nota al pie se quedan en los dos modos: el período
+                es el dato del servicio que pide la RG 1415. */}
             <div className="row small">
               <span>Período:</span>
               <span>

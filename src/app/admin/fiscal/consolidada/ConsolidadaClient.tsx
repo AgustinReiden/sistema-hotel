@@ -64,6 +64,21 @@ function coberturaLabel(r: CcAccountStayRow): string | null {
 const inputClass =
   "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
 
+/**
+ * Texto por defecto del concepto único (mig 102). Es lo que piden las empresas que
+ * no quieren ver habitaciones ni fechas en la factura: una sola línea por el total.
+ */
+const CONCEPTO_UNICO_DEFAULT = "Alojamiento";
+
+/** Pastilla del interruptor de forma del detalle, mismo estilo que los presets. */
+function pillClass(activa: boolean) {
+  return `rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+    activa
+      ? "border-brand-600 bg-brand-600 text-white"
+      : "border-slate-200 bg-white text-slate-600 hover:border-brand-400 hover:text-brand-700"
+  }`;
+}
+
 /** Un dato del receptor que falta: `campo` va en la barra, `mensaje` en el toast. */
 type FaltanteReceptor = { campo: string; mensaje: string };
 
@@ -120,6 +135,17 @@ export default function ConsolidadaClient({
   // cada vez que cambia la selección.
   const [detalleOverrides, setDetalleOverrides] = useState<Record<string, string>>({});
   const [nota, setNota] = useState("");
+
+  // Forma del detalle impreso (mig 102): detallado (default, lo de siempre) o una
+  // sola línea por el total. El modo y su texto son dos estados de PANTALLA, pero al
+  // servidor va una sola cosa: el texto, o nada. Así no se puede mandar "prendido y
+  // vacío", que es el estado imposible que la columna única evita en la base.
+  //
+  // Se elige a mano en cada factura y NO se guarda en la ficha del cliente: una
+  // preferencia vieja prendida sin que nadie la mire manda una factura colapsada sin
+  // querer, y una factura emitida no se corrige, se anula con nota de crédito.
+  const [conceptoUnicoModo, setConceptoUnicoModo] = useState(false);
+  const [conceptoUnicoTexto, setConceptoUnicoTexto] = useState(CONCEPTO_UNICO_DEFAULT);
 
   const lineaDetalle = (r: CcAccountStayRow) =>
     detalleOverrides[r.reservation_id] ?? defaultStayDescription(r);
@@ -195,6 +221,10 @@ export default function ConsolidadaClient({
     setNota("");
     setRange({ from: "", to: "" });
     setTotalStays(null);
+    // La forma del detalle también vuelve al default: es una decisión por factura,
+    // no una preferencia del cliente (mig 102).
+    setConceptoUnicoModo(false);
+    setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
@@ -319,6 +349,7 @@ export default function ConsolidadaClient({
   const restoreDetalle = () => {
     setDetalleOverrides({});
     setNota("");
+    setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
     toast.success("Detalle restaurado.");
   };
 
@@ -337,17 +368,31 @@ export default function ConsolidadaClient({
     }
 
     const notaLimpia = sanitizeDetalleLine(nota, DETALLE_NOTA_MAX);
+    // Si el admin borró el texto, vale el default que muestra el placeholder: lo
+    // mismo que ya hacen las líneas por estadía cuando quedan vacías. Mandar vacío
+    // sería peor, porque en el servidor NULL significa "detallado" y el impreso
+    // saldría distinto de lo que la pantalla venía mostrando.
+    const conceptoUnicoLimpio = conceptoUnicoModo
+      ? sanitizeDetalleLine(conceptoUnicoTexto) ?? CONCEPTO_UNICO_DEFAULT
+      : null;
 
     setEmitting(true);
     const result = await emitConsolidatedInvoiceAction({
       kind,
       clientId: id,
       reservationIds: selectedRows.map((r) => r.reservation_id),
-      detalle: selectedRows.map((r) => ({
-        reservationId: r.reservation_id,
-        // Si quedó vacío, el servidor pone el texto automático.
-        descripcion: sanitizeDetalleLine(lineaDetalle(r)) ?? "",
-      })),
+      // Una forma o la otra, nunca las dos: con un solo concepto, las líneas por
+      // estadía no se imprimen, así que mandar sus textos sería guardar en el
+      // comprobante algo que nadie eligió ni va a ver.
+      ...(conceptoUnicoLimpio
+        ? { conceptoUnico: conceptoUnicoLimpio }
+        : {
+            detalle: selectedRows.map((r) => ({
+              reservationId: r.reservation_id,
+              // Si quedó vacío, el servidor pone el texto automático.
+              descripcion: sanitizeDetalleLine(lineaDetalle(r)) ?? "",
+            })),
+          }),
       ...(notaLimpia ? { nota: notaLimpia } : {}),
       ...(requiereCuit
         ? {
@@ -531,7 +576,7 @@ export default function ConsolidadaClient({
         </section>
       )}
 
-      {/* 3) Detalle impreso (mig 93) */}
+      {/* 3) Detalle impreso (mig 93; la forma, mig 102) */}
       {selectedKey && selectedRows.length > 0 && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
@@ -551,29 +596,76 @@ export default function ConsolidadaClient({
             </button>
           </div>
 
-          <ul className="space-y-2">
-            {selectedRows.map((r) => (
-              <li key={r.reservation_id} className="flex items-center gap-3">
-                <input
-                  type="text"
-                  value={lineaDetalle(r)}
-                  maxLength={DETALLE_LINEA_MAX}
-                  onChange={(e) =>
-                    setDetalleOverrides((current) => ({
-                      ...current,
-                      [r.reservation_id]: e.target.value,
-                    }))
-                  }
-                  placeholder={defaultStayDescription(r)}
-                  className={`${inputClass} text-sm`}
-                  aria-label={`Descripción de la estadía de habitación ${r.room_number ?? "?"}`}
-                />
-                <span className="text-sm font-bold text-slate-700 shrink-0 w-28 text-right">
-                  ${money(r.amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {/* Interruptor de forma (mig 102). El default es "Detallado": el modo de
+              siempre. Cambiar de modo no borra nada, sólo cambia qué se muestra y
+              qué se va a imprimir. */}
+          <div>
+            <div role="group" aria-label="Forma del detalle impreso" className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-pressed={!conceptoUnicoModo}
+                onClick={() => setConceptoUnicoModo(false)}
+                className={pillClass(!conceptoUnicoModo)}
+              >
+                Detallado
+              </button>
+              <button
+                type="button"
+                aria-pressed={conceptoUnicoModo}
+                onClick={() => setConceptoUnicoModo(true)}
+                className={pillClass(conceptoUnicoModo)}
+              >
+                Un solo concepto
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              {conceptoUnicoModo
+                ? "Sale UNA línea por el total: no figuran las habitaciones ni las fechas de cada estadía. El período sí, al pie."
+                : "Sale una línea por estadía, con su habitación y sus fechas."}
+            </p>
+          </div>
+
+          {conceptoUnicoModo ? (
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                value={conceptoUnicoTexto}
+                maxLength={DETALLE_LINEA_MAX}
+                onChange={(e) => setConceptoUnicoTexto(e.target.value)}
+                // Si se borra, se imprime esto: mismo trato que las líneas por estadía.
+                placeholder={CONCEPTO_UNICO_DEFAULT}
+                className={`${inputClass} text-sm`}
+                aria-label="Texto del concepto único"
+              />
+              <span className="text-sm font-bold text-slate-700 shrink-0 w-28 text-right">
+                ${money(total)}
+              </span>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {selectedRows.map((r) => (
+                <li key={r.reservation_id} className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={lineaDetalle(r)}
+                    maxLength={DETALLE_LINEA_MAX}
+                    onChange={(e) =>
+                      setDetalleOverrides((current) => ({
+                        ...current,
+                        [r.reservation_id]: e.target.value,
+                      }))
+                    }
+                    placeholder={defaultStayDescription(r)}
+                    className={`${inputClass} text-sm`}
+                    aria-label={`Descripción de la estadía de habitación ${r.room_number ?? "?"}`}
+                  />
+                  <span className="text-sm font-bold text-slate-700 shrink-0 w-28 text-right">
+                    ${money(r.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="cons-nota">
@@ -713,6 +805,9 @@ export default function ConsolidadaClient({
             <p className="text-xs text-slate-400">
               Factura {letra} · período{" "}
               {periodo ? `${shortDate(periodo.desde)} → ${shortDate(periodo.hasta)}` : "—"}
+              {/* El botón de emitir está acá, así que la forma del impreso tiene que
+                  verse acá: es lo último que se mira antes de apretar. */}
+              {conceptoUnicoModo ? " · un solo concepto" : ""}
             </p>
           </div>
 
