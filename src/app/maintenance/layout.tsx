@@ -36,7 +36,7 @@ export default async function MaintenanceLayout({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm">
+      <header className="min-h-16 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 px-4 py-3 md:px-6 md:py-0 shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-sky-500 flex items-center justify-center shadow-md shadow-sky-500/20">
             <Sparkles size={18} className="text-white" />

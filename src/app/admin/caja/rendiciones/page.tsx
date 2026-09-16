@@ -37,7 +37,7 @@ export default async function CajaRendicionesPage({
       : "/admin/caja/rendiciones";
 
   return (
-    <div className="p-8 pb-20 overflow-y-auto w-full">
+    <div className="p-4 pb-24 md:p-8 md:pb-20 overflow-y-auto w-full">
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <Link

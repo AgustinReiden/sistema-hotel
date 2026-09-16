@@ -599,8 +599,8 @@ export default function ControlClient({
       {/* Confirmación de facturación externa. No emite nada: registra un hecho que
           el sistema no puede verificar contra ARCA, así que pide constancia. */}
       {externalTargets && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end justify-center sm:items-center sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                 <ExternalLink size={17} className="text-indigo-600" />

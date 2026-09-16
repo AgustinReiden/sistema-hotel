@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { DM_Sans, Montserrat } from 'next/font/google';
 import './globals.css';
 import { Toaster } from 'sonner';
@@ -9,6 +9,12 @@ const montserrat = Montserrat({ subsets: ['latin'], weight: ['400', '500', '600'
 export const metadata: Metadata = {
   title: 'El Refugio | Hotel & Servicios de Ruta',
   description: 'Hotel, comedor regional, repuestera y combustibles en Taco Pozo, Chaco. Tu parada segura en la ruta.',
+};
+
+// Next ya inyecta width=device-width por su cuenta; esto agrega el color de la barra del
+// navegador en el celular, que queda igual al menú del panel.
+export const viewport: Viewport = {
+  themeColor: '#0f172a',
 };
 
 export default function RootLayout({

@@ -81,6 +81,31 @@ const ROW_HEIGHT = 34;
 const BAR_TOP = 3;
 const BAR_HEIGHT = 26;
 
+const CALENDAR_HELP_TEXT =
+  "Click en una fecha vacia para reservar. Click sobre una barra o checkout para ver la reserva.";
+
+/** Las referencias de color. Se arman una vez y se usan en las dos vistas (plegada y fija). */
+const legendChips = (
+  [
+    { dot: "bg-emerald-400", label: "Activa" },
+    { dot: "bg-amber-400", label: "Próxima" },
+    { dot: "bg-blue-400", label: "Futuras" },
+    { dot: "bg-slate-400", label: "Pendiente" },
+    { dot: "bg-rose-500", label: "Falta check-in", emphasis: true },
+    { dot: "bg-slate-300", label: "Pasada" },
+  ] as const
+).map((chip) => (
+  <span
+    key={chip.label}
+    className={`inline-flex items-center gap-2 rounded-full bg-white border px-3 py-1.5 ${
+      "emphasis" in chip ? "border-rose-200 font-semibold text-rose-700" : "border-slate-200"
+    }`}
+  >
+    <span className={`w-3 h-3 rounded-full ${chip.dot}`} />
+    {chip.label}
+  </span>
+));
+
 function getReservationPalette(category: ReservationCategory) {
   switch (category) {
     case "finished":
@@ -277,39 +302,29 @@ export default function CalendarClient({
           filter: drop-shadow(0 10px 15px rgba(0,0,0,0.15));
         }
       `}</style>
-      <div className="flex flex-wrap items-center justify-between mb-5 gap-4">
-        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-emerald-400" />
-            Activa
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-amber-400" />
-            Próxima
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-blue-400" />
-            Futuras
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-slate-400" />
-            Pendiente
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-rose-200 px-3 py-1.5 font-semibold text-rose-700">
-            <span className="w-3 h-3 rounded-full bg-rose-500" />
-            Falta check-in
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white border border-slate-200 px-3 py-1.5">
-            <span className="w-3 h-3 rounded-full bg-slate-300" />
-            Pasada
-          </span>
+      {/* Las referencias ocupaban tres filas de píldoras y el texto de ayuda otras dos: en
+          un teléfono eso empujaba la grilla —que es a lo que se viene— abajo del pliegue.
+          En pantalla chica van plegadas; de 768px para arriba se ven como siempre. */}
+      <details className="md:hidden mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-600">
+          Referencias
+        </summary>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          {legendChips}
         </div>
-        <p className="text-sm text-slate-500">
-          Click en una fecha vacia para reservar. Click sobre una barra o checkout para ver la reserva.
-        </p>
+        <p className="mt-3 text-sm text-slate-500">{CALENDAR_HELP_TEXT}</p>
+      </details>
+
+      <div className="hidden md:flex flex-wrap items-center justify-between mb-5 gap-4">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">{legendChips}</div>
+        <p className="text-sm text-slate-500">{CALENDAR_HELP_TEXT}</p>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-auto shadow-sm max-h-[calc(100vh-13rem)]">
+      {/* dvh y no vh: en el celular 100vh mide el viewport con la barra de URL retraída y
+          la grilla se pasaba de largo. En pantalla chica ocupa menos alto a propósito: un
+          contenedor con scroll propio de casi toda la pantalla, dentro de una página que
+          también scrollea, es un pozo del que no se sale. */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-auto shadow-sm max-h-[65dvh] md:max-h-[calc(100dvh-13rem)]">
         <div className="min-w-max">
           <div className="flex border-b border-slate-200 sticky top-0 z-30 bg-slate-50">
             <div
@@ -477,14 +492,12 @@ export default function CalendarClient({
                             </p>
                           </div>
                         )}
-                        {!endsAfterRange && (
-                          <span
-                            className={`absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest pointer-events-none ${
-                              isFinished
-                                ? "text-slate-500"
-                                : "text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
-                            }`}
-                          >
+                        {/* "Salida" sólo en lo que todavía está por pasar: en una ventana
+                            del pasado, repetirlo en cada barra terminada choca con el
+                            nombre de la reserva de al lado y no le dice nada a nadie (la
+                            diagonal ya muestra dónde terminó). */}
+                        {!endsAfterRange && !isFinished && (
+                          <span className="absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
                             Salida
                           </span>
                         )}
@@ -516,9 +529,9 @@ export default function CalendarClient({
       />
 
       {selectedReservation && selectedRoom && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm">
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden"
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-2xl overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]"
             role="dialog"
             aria-modal="true"
             aria-labelledby="reservation-detail-title"

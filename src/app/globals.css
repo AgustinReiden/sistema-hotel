@@ -27,6 +27,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Safari en iOS hace zoom cuando enfocás un campo con fuente menor a 16px, y la pantalla
+   queda corrida y con scroll horizontal. En el celular todos los campos van a 16px; de
+   escritorio para arriba sigue mandando la clase de Tailwind (text-sm, text-xs), que es
+   la que da la densidad del panel. Se hace acá y no campo por campo porque son ~190. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Glassmorphism utilities */
 .glass {
   background: rgba(255, 255, 255, 0.7);

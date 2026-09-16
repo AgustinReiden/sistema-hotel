@@ -167,8 +167,8 @@ export default function CreateRoomModal({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden relative max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden relative max-h-[92dvh] sm:max-h-[88dvh] flex flex-col">
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0">
                     <h2 className="text-2xl font-bold text-slate-800">Crear Nueva Habitacion</h2>
                     <button

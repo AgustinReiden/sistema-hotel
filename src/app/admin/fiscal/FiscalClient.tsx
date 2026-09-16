@@ -411,8 +411,8 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
 
       {/* Confirmación de nota de crédito: es irreversible y genera un 3er papel. */}
       {ncTarget && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-end justify-center sm:items-center sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full p-6 overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]">
             <div className="flex items-center gap-2 mb-3">
               <FileMinus size={20} className="text-rose-600" />
               <h3 className="text-lg font-black text-slate-800">Anular con nota de crédito</h3>

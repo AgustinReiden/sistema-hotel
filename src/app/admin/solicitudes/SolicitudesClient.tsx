@@ -136,8 +136,8 @@ export default function SolicitudesClient({ solicitudes }: Props) {
   return (
     <div className="space-y-8">
       {confirmDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-8 animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-slate-950/50 backdrop-blur-sm">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full mx-4 p-8 animate-in zoom-in-95 duration-200 overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]">
             <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-5 ${confirmDialog.type === "confirm" ? "bg-green-50 text-green-500" : "bg-red-50 text-red-500"}`}>
               {confirmDialog.type === "confirm" ? <CheckCircle2 size={28} /> : <XCircle size={28} />}
             </div>

@@ -13,7 +13,7 @@ export default async function SettingsPage() {
     return (
         <div className="flex flex-col h-full">
             {/* Header Módulo */}
-            <header className="h-16 bg-white border-b border-slate-200 flex items-center px-8 shrink-0">
+            <header className="min-h-16 bg-white border-b border-slate-200 flex flex-wrap items-center gap-2 px-4 py-3 md:px-8 md:py-0 shrink-0">
                 <div className="flex items-center space-x-3">
                     <div className="p-2 bg-slate-100 rounded-lg">
                         <Settings size={20} className="text-slate-600" />
@@ -23,7 +23,7 @@ export default async function SettingsPage() {
             </header>
 
             {/* Contenido */}
-            <div className="flex-1 overflow-auto p-8 bg-slate-50">
+            <div className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50">
                 <div className="max-w-4xl mx-auto">
                     <div className="mb-6">
                         <h2 className="text-2xl font-bold text-slate-800">Configuración Global</h2>

@@ -68,7 +68,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
   }, [openModalOpen, closeModalOpen, router]);
 
   return (
-    <div className="p-8 pb-20 overflow-y-auto w-full">
+    <div className="p-4 pb-24 md:p-8 md:pb-20 overflow-y-auto w-full">
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Caja</h1>

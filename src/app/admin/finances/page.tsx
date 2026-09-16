@@ -105,7 +105,7 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
     const isToday = selectedDateStr === todayLocalStr;
 
     return (
-        <div className="p-8 pb-20 overflow-y-auto w-full">
+        <div className="p-4 pb-24 md:p-8 md:pb-20 overflow-y-auto w-full">
             {!openShift && isToday && (
                 <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-4 shadow-sm">
                     <div className="flex items-center gap-3">

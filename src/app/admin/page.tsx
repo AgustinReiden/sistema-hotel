@@ -16,6 +16,7 @@ const EMPTY_INVOICE_PREFILL: InvoiceReceptorPrefill = {
 };
 import NewReservationButton from "./NewReservationButton";
 import RoomCard from "./RoomCard";
+import { PageHeader } from "./PageShell";
 import {
   getActiveAssociatedClients,
   getCurrentUserRole,
@@ -203,27 +204,27 @@ export default async function Dashboard() {
 
   return (
     <>
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-50 shadow-sm shrink-0">
-        <h1 className="text-xl font-bold text-slate-800">
-          Vista Global: {formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}
-        </h1>
-        <div className="flex items-center space-x-4">
-          {lateCheckoutsCount > 0 && (
-            <div className="px-4 py-1.5 rounded-full bg-amber-100 text-amber-800 text-sm font-medium border border-amber-200 shadow-sm flex items-center">
-              <AlertTriangle size={14} className="mr-2" />
+      <PageHeader
+        title={`Vista Global: ${formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}`}
+        badge={
+          lateCheckoutsCount > 0 ? (
+            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium border border-amber-200 flex items-center">
+              <AlertTriangle size={14} className="mr-1.5 shrink-0" />
               {lateCheckoutsCount} Check-out Retrasado
-            </div>
-          )}
-          <NewReservationButton
-            rooms={rooms}
-            associatedClients={associatedClients}
-            standardCheckInTime={hotelSettings.standard_check_in_time}
-            standardCheckOutTime={hotelSettings.standard_check_out_time}
-          />
-        </div>
-      </header>
+            </span>
+          ) : null
+        }
+        className="z-40 shadow-sm"
+      >
+        <NewReservationButton
+          rooms={rooms}
+          associatedClients={associatedClients}
+          standardCheckInTime={hotelSettings.standard_check_in_time}
+          standardCheckOutTime={hotelSettings.standard_check_out_time}
+        />
+      </PageHeader>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 md:p-8">
         {isAdmin && unresolvedAlertsCount > 0 && (
           <div className="mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-3">
@@ -272,20 +273,22 @@ export default async function Dashboard() {
             </Link>
           </div>
         )}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <p className="text-sm font-medium text-slate-500 mb-1">Total Habitaciones</p>
-            <p className="text-3xl font-bold text-slate-800">{rooms.length}</p>
+        {/* Tres en fila también en el celular: apilados se comían 300px de pantalla antes
+            de que se viera la primera habitación, que es a lo que se entra. */}
+        <div className="grid grid-cols-3 gap-2 md:gap-5 mb-6">
+          <div className="bg-white rounded-xl border border-slate-200 p-3 md:p-4 shadow-sm">
+            <p className="text-xs md:text-sm font-medium text-slate-500 mb-1">Total Habitaciones</p>
+            <p className="text-2xl md:text-3xl font-bold text-slate-800">{rooms.length}</p>
           </div>
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <p className="text-sm font-medium text-slate-500 mb-1">Ocupadas</p>
-            <p className="text-3xl font-bold text-slate-800">
+          <div className="bg-white rounded-xl border border-slate-200 p-3 md:p-4 shadow-sm">
+            <p className="text-xs md:text-sm font-medium text-slate-500 mb-1">Ocupadas</p>
+            <p className="text-2xl md:text-3xl font-bold text-slate-800">
               {mappedRooms.filter((room) => room.status === "occupied").length}
             </p>
           </div>
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <p className="text-sm font-medium text-slate-500 mb-1">Por Limpiar</p>
-            <p className="text-3xl font-bold text-slate-800">
+          <div className="bg-white rounded-xl border border-slate-200 p-3 md:p-4 shadow-sm">
+            <p className="text-xs md:text-sm font-medium text-slate-500 mb-1">Por Limpiar</p>
+            <p className="text-2xl md:text-3xl font-bold text-slate-800">
               {mappedRooms.filter((room) => room.status === "cleaning").length}
             </p>
           </div>

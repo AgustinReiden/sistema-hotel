@@ -68,8 +68,8 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
   if (!client) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-3xl max-h-[92dvh] sm:max-h-[88dvh] flex flex-col overflow-hidden">
         <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-start justify-between gap-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-11 h-11 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center shrink-0">
