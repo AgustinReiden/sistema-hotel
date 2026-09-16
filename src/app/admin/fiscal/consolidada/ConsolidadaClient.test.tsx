@@ -47,6 +47,9 @@ function makeRow(
 const accounts: CtaCteAccount[] = [
   { kind: "company", id: "acme", name: "Acme SA", document_id: "20111111112", balance: 10000 },
   { kind: "guest", id: "g1", name: "Juan Perez", document_id: "30222222", balance: 5000 },
+  // A propósito fuera de `billingProfiles`: los dos resuelven a `profile` null.
+  { kind: "company", id: "sf1", name: "Sin Ficha Uno", document_id: null, balance: 1000 },
+  { kind: "company", id: "sf2", name: "Sin Ficha Dos", document_id: null, balance: 2000 },
 ];
 
 const billingProfiles: Record<string, InvoiceReceptorPrefill> = {
@@ -68,14 +71,14 @@ const billingProfiles: Record<string, InvoiceReceptorPrefill> = {
   },
 };
 
-function renderClient() {
+function renderClient(preselectId = "acme") {
   return render(
     <ConsolidadaClient
       enabled
       accounts={accounts}
       billingProfiles={billingProfiles}
       preselectKind="company"
-      preselectId="acme"
+      preselectId={preselectId}
       todayKey="2026-09-16"
     />
   );
@@ -125,6 +128,26 @@ describe("ConsolidadaClient", () => {
     await waitFor(() => expect(screen.getByLabelText("Razón social")).toHaveValue("Juan Perez"));
     expect(screen.getByLabelText("Domicilio")).toHaveValue("Otra Calle 456");
     expect(screen.getByLabelText("CUIT")).toHaveValue("");
+  });
+
+  it("entre dos clientes SIN ficha de facturación, tampoco arrastra los datos fiscales del anterior", async () => {
+    renderClient("sf1");
+    await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue(""));
+
+    // Sin ficha cargada, el admin completa el receptor a mano.
+    fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "20111111112" } });
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Sin Ficha Uno" } });
+    fireEvent.change(screen.getByLabelText("Domicilio"), { target: { value: "Calle Uno 1" } });
+
+    fireEvent.change(screen.getByLabelText("Cliente de cuenta corriente"), {
+      target: { value: "company:sf2" },
+    });
+
+    // Los dos dan `profile` null: comparando por identidad el cambio pasaba
+    // desapercibido y se le podía emitir al segundo con el CUIT del primero.
+    await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue(""));
+    expect(screen.getByLabelText("Razón social")).toHaveValue("");
+    expect(screen.getByLabelText("Domicilio")).toHaveValue("");
   });
 
   it("clickear cualquier parte de la fila marca/desmarca UNA sola vez", async () => {

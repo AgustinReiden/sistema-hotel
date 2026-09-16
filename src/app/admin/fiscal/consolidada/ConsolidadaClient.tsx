@@ -169,26 +169,30 @@ export default function ConsolidadaClient({
     void run();
   }, [loadRows]);
 
-  // Al elegir otra ficha, recargar los datos fiscales precargados (el valor
-  // inicial ya sale de `profile` arriba). Se ajusta durante el render, no en
-  // un efecto, para no pintar primero los datos de la ficha anterior y recién
-  // después los nuevos.
-  const [prevProfile, setPrevProfile] = useState(profile);
-  if (profile !== prevProfile) {
-    setPrevProfile(profile);
+  // Al elegir otro cliente se reinicia todo lo que era "de este cliente": los
+  // datos fiscales vuelven a los de la ficha nueva (el valor inicial ya sale de
+  // `profile` arriba) y el rango vuelve a "Todo".
+  //
+  // Se compara por `selectedKey` y NO por la identidad de `profile`: dos clientes
+  // sin ficha de facturación resuelven los dos a null, así que mirando `profile`
+  // el cambio pasaba desapercibido y los datos tipeados para el anterior quedaban
+  // pegados en el formulario. En una pantalla que emite comprobantes reales eso
+  // significa poder facturarle a uno con el CUIT del otro.
+  //
+  // El rango vuelve a "Todo" porque un período que tenía sentido para un cliente
+  // mostraría al siguiente sin deuda; además es la única carga que puede fijar el
+  // "de M" del contador.
+  //
+  // Se ajusta durante el render, no en un efecto, para no pintar primero los
+  // datos del cliente anterior y recién después los nuevos.
+  const [prevSelectedKey, setPrevSelectedKey] = useState(selectedKey);
+  if (selectedKey !== prevSelectedKey) {
+    setPrevSelectedKey(selectedKey);
     setRazonSocial(profile?.razonSocial ?? "");
     setCuit(profile?.cuit ?? "");
     setCondicionIva(profile?.condicionIva ?? "");
     setDomicilio(profile?.domicilio ?? "");
     setNota("");
-  }
-
-  // Al cambiar de cliente el rango vuelve a "Todo". Si no, un período que tenía
-  // sentido para un cliente se arrastraría al siguiente y lo mostraría sin deuda;
-  // además es la única carga que puede fijar el "de M" del contador.
-  const [prevSelectedKey, setPrevSelectedKey] = useState(selectedKey);
-  if (selectedKey !== prevSelectedKey) {
-    setPrevSelectedKey(selectedKey);
     setRange({ from: "", to: "" });
     setTotalStays(null);
   }
