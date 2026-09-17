@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { billingComprobante, bulkBillingAction } from "@/lib/billing";
+import {
+  billingComprobante,
+  bulkBillingAction,
+  isPendingWithTrail,
+  matchesCobro,
+} from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
 import type { BillingControlEstado, BillingControlRow } from "@/lib/types";
 
@@ -106,12 +111,23 @@ describe("billingComprobante", () => {
 });
 
 describe("buildBillingControlCsv — el archivo que se le manda al contador", () => {
-  it("lleva las 8 columnas acordadas, en orden", () => {
+  it("lleva las 9 columnas acordadas, en orden", () => {
     const csv = buildBillingControlCsv([]);
     const header = csv.replace(/^﻿/, "").split("\r\n")[0];
     expect(header).toBe(
-      "Salida;Habitacion;Cliente;Cierre;Total;Cargo cta. cte.;Estado;Comprobante"
+      "Salida;Habitacion;Cliente;Cierre;Bancaria;Total;Cargo cta. cte.;Estado;Comprobante"
     );
+  });
+
+  it("dice si dejó rastro bancario, que 'Cierre' por sí solo no distingue", () => {
+    // Una estadía con tarjeta cierra por caja igual que una en efectivo: sin esta
+    // columna el contador no puede separarlas en el Excel.
+    const conTarjeta = dataRows(buildBillingControlCsv([row({ bancario: true })]))[0];
+    const enEfectivo = dataRows(buildBillingControlCsv([row({ bancario: false })]))[0];
+    expect(conTarjeta[3]).toBe("Caja");
+    expect(enEfectivo[3]).toBe("Caja");
+    expect(conTarjeta[4]).toBe("SI");
+    expect(enEfectivo[4]).toBe("NO");
   });
 
   it("abre con BOM UTF-8 para que Excel no rompa los acentos", () => {
@@ -124,7 +140,7 @@ describe("buildBillingControlCsv — el archivo que se le manda al contador", ()
     const csv = buildBillingControlCsv([
       row({ total_price: 1234.5, cargo_cc: 800, cierre: "cuenta_corriente", estado: "falta" }),
     ]);
-    const [salida, hab, cliente, cierre, total, cargo, estado] = dataRows(csv)[0];
+    const [salida, hab, cliente, cierre, , total, cargo, estado] = dataRows(csv)[0];
     expect(salida).toBe("12/08/2026");
     expect(hab).toBe("5");
     expect(cliente).toBe("Juan Pérez");
@@ -136,7 +152,7 @@ describe("buildBillingControlCsv — el archivo que se le manda al contador", ()
 
   it("deja el cargo a cta. cte. VACÍO cuando no hay, en vez de un 0,00 que sería falso", () => {
     const csv = buildBillingControlCsv([row({ cargo_cc: null })]);
-    expect(dataRows(csv)[0][5]).toBe("");
+    expect(dataRows(csv)[0][6]).toBe("");
   });
 
   it("neutraliza la inyección de fórmulas de Excel en cliente y comprobante", () => {
@@ -147,14 +163,14 @@ describe("buildBillingControlCsv — el archivo que se le manda al contador", ()
     ]);
     const fields = dataRows(csv)[0];
     expect(fields[2].replace(/^"/, "").startsWith("'")).toBe(true);
-    expect(fields[7].replace(/^"/, "").startsWith("'")).toBe(true);
+    expect(fields[8].replace(/^"/, "").startsWith("'")).toBe(true);
   });
 
   it("no deja que un ';' en el nombre corra las columnas", () => {
     const csv = buildBillingControlCsv([row({ cliente: "Pérez; Juan" })]);
     const linea = csv.replace(/^﻿/, "").split("\r\n")[1];
     expect(linea).toContain('"Pérez; Juan"');
-    // Entrecomillado, la fila sigue teniendo 8 campos reales.
+    // Entrecomillado, la fila sigue teniendo 9 campos reales.
     expect(linea.match(/"/g)?.length).toBe(2);
   });
 
@@ -180,5 +196,65 @@ describe("billingControlCsvFilename", () => {
     expect(billingControlCsvFilename("2026-08-01", "2026-08-31")).toBe(
       "control-facturacion-2026-08-01_2026-08-31.csv"
     );
+  });
+});
+
+describe("matchesCobro — el filtro por medio de cobro", () => {
+  it("sin filtro deja pasar todo", () => {
+    expect(matchesCobro(row({ cierre: "vale_blanco" }), "")).toBe(true);
+  });
+
+  it("NO confunde 'caja' con efectivo: una tarjeta también cierra por caja", () => {
+    // Es la trampa del modelo: `cierre` dice a dónde fue la deuda, no con qué se pagó.
+    const tarjeta = row({ cierre: "caja", bancario: true });
+    expect(matchesCobro(tarjeta, "bancaria")).toBe(true);
+    expect(matchesCobro(tarjeta, "efectivo")).toBe(false);
+
+    const efectivo = row({ cierre: "caja", bancario: false });
+    expect(matchesCobro(efectivo, "efectivo")).toBe(true);
+    expect(matchesCobro(efectivo, "bancaria")).toBe(false);
+  });
+
+  it("una estadía puede caer en dos filtros a la vez y eso es la verdad", () => {
+    // Pagó una parte con tarjeta y el resto quedó a cuenta corriente.
+    const mixta = row({ cierre: "cuenta_corriente", bancario: true });
+    expect(matchesCobro(mixta, "cuenta_corriente")).toBe(true);
+    expect(matchesCobro(mixta, "bancaria")).toBe(true);
+    expect(matchesCobro(mixta, "efectivo")).toBe(false);
+  });
+
+  it("separa el vale blanco de todo lo demás", () => {
+    const vale = row({ cierre: "vale_blanco" });
+    expect(matchesCobro(vale, "vale_blanco")).toBe(true);
+    expect(matchesCobro(vale, "efectivo")).toBe(false);
+    expect(matchesCobro(vale, "cuenta_corriente")).toBe(false);
+  });
+
+  it("ante un filtro inventado en la URL muestra todo, no esconde filas", () => {
+    expect(matchesCobro(row(), "cualquier-cosa")).toBe(true);
+  });
+});
+
+describe("isPendingWithTrail — el atajo de la planilla del gerente", () => {
+  it("toma lo que falta facturar y dejó rastro", () => {
+    expect(isPendingWithTrail(row({ estado: "falta", bancario: true }))).toBe(true);
+    expect(
+      isPendingWithTrail(row({ estado: "falta", cierre: "cuenta_corriente" }))
+    ).toBe(true);
+    expect(
+      isPendingWithTrail(row({ estado: "pendiente_consolidada", cierre: "cuenta_corriente" }))
+    ).toBe(true);
+  });
+
+  it("deja afuera el efectivo: sin rastro, el SÍ/NO del check-out es legítimo", () => {
+    expect(isPendingWithTrail(row({ estado: "falta", cierre: "caja", bancario: false }))).toBe(
+      false
+    );
+  });
+
+  it("deja afuera lo que ya está resuelto, aunque haya dejado rastro", () => {
+    expect(isPendingWithTrail(row({ estado: "facturado", bancario: true }))).toBe(false);
+    expect(isPendingWithTrail(row({ estado: "facturado_externo", bancario: true }))).toBe(false);
+    expect(isPendingWithTrail(row({ estado: "no_corresponde", bancario: true }))).toBe(false);
   });
 });

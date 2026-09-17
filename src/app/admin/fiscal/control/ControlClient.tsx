@@ -3,7 +3,17 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, FileText, Layers, Loader2, Printer, Undo2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  FileText,
+  Landmark,
+  Layers,
+  Loader2,
+  Printer,
+  Undo2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import InvoicePromptModal, { type InvoicePromptData } from "../../InvoicePromptModal";
@@ -17,12 +27,17 @@ import {
 } from "./actions";
 import {
   BILLING_CIERRE_LABEL,
+  BILLING_COBRO_FILTERS,
+  BILLING_COBRO_LABEL,
   BILLING_ESTADO_LABEL,
   billingComprobante,
   bulkBillingAction,
+  isPendingBilling,
+  isPendingWithTrail,
+  matchesCobro,
 } from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
-import { buildBillingPresets } from "@/lib/date-range";
+import { BILLING_EPOCH, buildBillingPresets } from "@/lib/date-range";
 import type { BillingControlEstado, BillingControlRow, CtaCteAccount } from "@/lib/types";
 
 type Props = {
@@ -32,6 +47,12 @@ type Props = {
   to: string;
   cliente: string;
   estado: string;
+  /** Filtro por medio de cobro; "" es sin filtro. Ver `matchesCobro`. */
+  cobro: string;
+  /** Atajo de un clic a "falta facturar Y deja rastro" (ver `isPendingWithTrail`). */
+  rastro: boolean;
+  /** Sin facturar en TODO el historial, para avisar de lo que cae fuera del rango. */
+  totalHistorico: number;
   /** "Hoy" en la zona del hotel, resuelto en el server (ver page.tsx). */
   todayKey: string;
 };
@@ -81,6 +102,9 @@ export default function ControlClient({
   to,
   cliente,
   estado,
+  cobro,
+  rastro,
+  totalHistorico,
   todayKey,
 }: Props) {
   const router = useRouter();
@@ -100,16 +124,46 @@ export default function ControlClient({
 
   const busy = busyId !== null || bulkBusy;
 
+  // Los contadores respetan cobro y rastro pero NO estado: estado es justamente lo
+  // que estos botones eligen. Si contaran sobre `rows` a secas, "FALTA FACTURAR: 50"
+  // llevaría a una tabla de 3 filas cuando hay un filtro de cobro puesto.
   const counts = useMemo(() => {
     const map = {} as Record<BillingControlEstado, number>;
     for (const e of ORDER) map[e] = 0;
-    for (const r of rows) map[r.estado] = (map[r.estado] ?? 0) + 1;
+    for (const r of rows) {
+      if (!matchesCobro(r, cobro)) continue;
+      if (rastro && !isPendingWithTrail(r)) continue;
+      map[r.estado] = (map[r.estado] ?? 0) + 1;
+    }
     return map;
-  }, [rows]);
+  }, [rows, cobro, rastro]);
 
+  /**
+   * Pendientes DENTRO del rango que se está viendo. Se cuenta sobre `rows` crudas
+   * —sin cobro ni rastro— porque el número contra el que se compara
+   * (`totalHistorico`, de rpc_count_billing_pending) tampoco los aplica. Comparar
+   * un total filtrado contra uno sin filtrar haría aparecer el aviso cuando no
+   * corresponde, o peor, lo escondería justo cuando hay algo viejo sin facturar.
+   */
+  const pendientesEnRango = useMemo(
+    () => rows.filter((r) => isPendingBilling(r.estado)).length,
+    [rows]
+  );
+
+  /** Cuántas filas del rango actual califican para el atajo de la planilla. */
+  const rastroDisponible = useMemo(() => rows.filter(isPendingWithTrail).length, [rows]);
+
+  // Los tres filtros se aplican en AND y todos en el cliente: el server ya trajo
+  // el rango de fechas y el cliente, que son los únicos que achican la consulta.
   const visible = useMemo(
-    () => (estado ? rows.filter((r) => r.estado === estado) : rows),
-    [rows, estado]
+    () =>
+      rows.filter(
+        (r) =>
+          (!estado || r.estado === estado) &&
+          matchesCobro(r, cobro) &&
+          (!rastro || isPendingWithTrail(r))
+      ),
+    [rows, estado, cobro, rastro]
   );
 
   /**
@@ -251,7 +305,15 @@ export default function ControlClient({
   };
 
   const applyFilters = (patch: Record<string, string>) => {
-    const params = new URLSearchParams({ desde: from, hasta: to, cliente, estado, ...patch });
+    const params = new URLSearchParams({
+      desde: from,
+      hasta: to,
+      cliente,
+      estado,
+      cobro,
+      rastro: rastro ? "1" : "",
+      ...patch,
+    });
     for (const [k, v] of [...params.entries()]) if (!v) params.delete(k);
     router.push(`/admin/fiscal/control?${params.toString()}`);
   };
@@ -319,6 +381,25 @@ export default function ControlClient({
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="control-cobro">
+              Cobro
+            </label>
+            <select
+              id="control-cobro"
+              value={cobro}
+              onChange={(e) => applyFilters({ cobro: e.target.value })}
+              className={inputClass}
+            >
+              <option value="">Todos</option>
+              {BILLING_COBRO_FILTERS.map((c) => (
+                <option key={c} value={c}>
+                  {BILLING_COBRO_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Baja EXACTAMENTE lo que está en pantalla, armado en memoria sobre las
               mismas filas: el archivo no puede decir algo distinto del listado. */}
           <DownloadCsvButton
@@ -336,6 +417,50 @@ export default function ControlClient({
           </Link>
         </div>
       </section>
+
+      {/* Atajo de la planilla del gerente: "los tickets cobrados en cta cte y con
+          tarjetas/billetera que faltan facturar". Es un botón propio y no "combiná
+          Estado con Cobro" porque es exactamente la lista que se viene a buscar. */}
+      {(rastro || rastroDisponible > 0) && (
+        <button
+          type="button"
+          onClick={() => applyFilters({ rastro: rastro ? "" : "1", estado: "", cobro: "" })}
+          className={`w-full sm:w-auto flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+            rastro
+              ? "bg-violet-600 text-white hover:bg-violet-700"
+              : "bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100"
+          }`}
+        >
+          <Landmark size={16} />
+          {rastro ? (
+            <>
+              Mostrando sólo lo que falta facturar y deja rastro ({visible.length}) · Quitar
+            </>
+          ) : (
+            <>Falta facturar y deja rastro (cta. cte. o bancaria): {rastroDisponible}</>
+          )}
+        </button>
+      )}
+
+      {/* Lo que queda FUERA del rango elegido. Sin este aviso, una estadía vieja sin
+          facturar no aparece en ninguna pantalla: acá se abre en el mes en curso y
+          el badge del menú mira 60 días. El número viejo tiene que encontrarte a vos. */}
+      {totalHistorico > pendientesEnRango && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span className="text-amber-900">
+            Hay <strong>{totalHistorico}</strong> estadías sin facturar en todo el historial y en
+            este rango se ven <strong>{pendientesEnRango}</strong>.
+          </span>
+          <button
+            type="button"
+            onClick={() => applyFilters({ desde: BILLING_EPOCH, hasta: todayKey })}
+            className="font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+          >
+            Ver todas
+          </button>
+        </div>
+      )}
 
       {/* Contadores */}
       <div className="flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">

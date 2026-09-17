@@ -185,6 +185,15 @@ export type BulkBillingAction = "marcar" | "deshacer" | "mezclado" | "sin_accion
 /** Estados desde los que todavía falta facturar: son los que se pueden marcar. */
 const MARCABLES: readonly BillingControlEstado[] = ["falta", "pendiente_consolidada"];
 
+/**
+ * ¿Esta estadía sigue reclamando una factura? Mismo criterio que
+ * `rpc_count_billing_pending` suma en la base, para que el contador "en todo el
+ * historial" y lo que se ve en pantalla se puedan comparar sin mentir.
+ */
+export function isPendingBilling(estado: BillingControlEstado): boolean {
+  return MARCABLES.includes(estado);
+}
+
 export function bulkBillingAction(
   rows: readonly { estado: BillingControlEstado }[]
 ): BulkBillingAction {
@@ -195,4 +204,72 @@ export function bulkBillingAction(
   // una mezcla, y decirle "elegí filas del mismo estado" sería mentirle al empleado.
   const primero = rows[0].estado;
   return rows.every((r) => r.estado === primero) ? "sin_accion" : "mezclado";
+}
+
+/**
+ * Cómo se cobró la estadía, para el filtro del control de facturación.
+ *
+ * OJO CON `cierre`: `'caja'` NO significa efectivo. Significa "no fue a cuenta
+ * corriente ni a vale blanco". Una estadía pagada con tarjeta tiene
+ * `cierre = 'caja'` Y `bancario = true`. Por eso el filtro no clasifica cada fila
+ * en una sola categoría: son predicados que se pisan a propósito. Una estadía que
+ * pagó una parte con tarjeta y el resto a cuenta corriente aparece en los dos
+ * filtros, que es la verdad.
+ */
+export type BillingCobroFilter = "cuenta_corriente" | "bancaria" | "efectivo" | "vale_blanco";
+
+export const BILLING_COBRO_LABEL: Record<BillingCobroFilter, string> = {
+  cuenta_corriente: "Cta. cte.",
+  bancaria: "Bancaria (tarjeta, transf., MP)",
+  efectivo: "Efectivo o sin cobro",
+  vale_blanco: "Vale blanco",
+};
+
+export const BILLING_COBRO_FILTERS: readonly BillingCobroFilter[] = [
+  "cuenta_corriente",
+  "bancaria",
+  "efectivo",
+  "vale_blanco",
+] as const;
+
+export function isBillingCobroFilter(value: string): value is BillingCobroFilter {
+  return (BILLING_COBRO_FILTERS as readonly string[]).includes(value);
+}
+
+type CobroRow = { cierre: BillingControlCierre; bancario: boolean };
+
+/** Predicado del filtro de cobro. Cadena vacía = sin filtro (pasa todo). */
+export function matchesCobro(row: CobroRow, filter: string): boolean {
+  if (filter === "") return true;
+  switch (filter) {
+    case "cuenta_corriente":
+      return row.cierre === "cuenta_corriente";
+    case "bancaria":
+      return row.bancario;
+    // Único definido por exclusión: es "lo que quedó" una vez descartado el resto.
+    case "efectivo":
+      return row.cierre === "caja" && !row.bancario;
+    case "vale_blanco":
+      return row.cierre === "vale_blanco";
+    default:
+      // Filtro desconocido (alguien tocó la URL): mostrar todo antes que nada.
+      return true;
+  }
+}
+
+/**
+ * Lo que pide la planilla del gerente en una sola condición: estadías que faltan
+ * facturar Y que dejaron rastro (cuenta corriente o cobro bancario). Son las que
+ * no se pueden dejar pasar, porque el movimiento ya existe en otro lado.
+ *
+ * Es un atajo de un clic y no "combiná estos dos filtros" justamente porque el
+ * que la usa (el admin que factura) entra a buscar exactamente esta lista.
+ */
+export function isPendingWithTrail(
+  row: CobroRow & { estado: BillingControlEstado }
+): boolean {
+  return (
+    isPendingBilling(row.estado) &&
+    (row.bancario || row.cierre === "cuenta_corriente")
+  );
 }
