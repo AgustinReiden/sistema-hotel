@@ -1,10 +1,14 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { getHotelSettings } from "@/lib/data";
+import { getFiscalSettings, getHotelSettings } from "@/lib/data";
+import { nombreComprobante, prefijoArchivo } from "@/lib/comprobante-nombre";
 import { formatAmount, formatShiftCode } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
 import ReceiptAutoPrint from "./ReceiptAutoPrint";
+import ThermalStyles from "@/app/admin/components/ThermalStyles";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +81,7 @@ function ReceiptCopy(props: ReceiptCopyProps) {
         <span>{createdAtFormatted}</span>
       </p>
       <hr />
+      <p className="seccion">Cliente</p>
       <p className="row">
         <span>Huesped:</span>
         <span>{clientName}</span>
@@ -100,26 +105,26 @@ function ReceiptCopy(props: ReceiptCopyProps) {
         </p>
       )}
       <hr />
+      <p className="seccion">Pago</p>
       <p className="row">
         <span>Metodo:</span>
         <span>{paymentMethod}</span>
       </p>
       <p className="total">
         <span>TOTAL PAGADO</span>
-        <span>{money(amount)}</span>
+        <span className="money">{money(amount)}</span>
       </p>
-      <hr />
       <p className="row small">
         <span>Total estadia:</span>
-        <span>{money(totalPrice)}</span>
+        <span className="money">{money(totalPrice)}</span>
       </p>
       <p className="row small">
         <span>Pagado acumulado:</span>
-        <span>{money(paidAmount)}</span>
+        <span className="money">{money(paidAmount)}</span>
       </p>
       <p className="row small">
         <span>Saldo restante:</span>
-        <span>{money(saldo)}</span>
+        <span className="money">{money(saldo)}</span>
       </p>
       {notes && (
         <>
@@ -138,6 +143,41 @@ type PageProps = {
   params: Promise<{ paymentId: string }>;
   searchParams: Promise<{ autoprint?: string; copy?: string }>;
 };
+
+/** Sólo el número, para el título. Cacheado por request: no duplica la consulta. */
+const reciboNumeroCached = cache(async (paymentId: string): Promise<number | null> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("payments")
+    .select("recibo_numero")
+    .eq("id", paymentId)
+    .maybeSingle();
+  const numero = (data as { recibo_numero: number | null } | null)?.recibo_numero;
+  return numero ?? null;
+});
+
+const fiscalCached = cache(getFiscalSettings);
+
+/**
+ * El <title> es lo que el navegador propone como nombre de archivo al "Guardar como
+ * PDF": "COMB - Rec - 000042". Antes los cuatro papeles del sistema se guardaban
+ * todos como "El Refugio | Hotel & Servicios de Ruta.pdf".
+ */
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { paymentId } = await params;
+  const [numero, fiscal] = await Promise.all([
+    reciboNumeroCached(paymentId).catch(() => null),
+    fiscalCached().catch(() => null),
+  ]);
+
+  return {
+    title: nombreComprobante({
+      prefijo: prefijoArchivo(fiscal?.prefijo_archivos, fiscal?.razon_social),
+      tipo: "Rec",
+      numero: numero !== null ? formatShiftCode(numero) : "",
+    }),
+  };
+}
 
 export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const { paymentId } = await params;
@@ -254,50 +294,17 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
       <style>{`
         /* Comandera termica: ancho 80mm y alto automatico (= largo del contenido), sin
            margenes, para que no queden hojas en blanco y el corte caiga al final. */
-        @page { size: 80mm auto; margin: 0; }
-        @media print {
-          body {
-            background: white !important;
-            color: #000 !important;
-            margin: 0 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .no-print { display: none !important; }
-        }
-        .thermal {
-          font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-          background: white;
-          color: #000;
-          width: 72mm;
-          max-width: 72mm;
-          margin: 0 auto;
-          line-height: 1.2;
-          word-break: break-word;
-        }
-        /* Copias en flujo continuo (sin salto de pagina, que generaba el espacio en blanco
-           gigante entre original y duplicado); se separan con linea de corte punteada. */
-        .thermal-page { padding: 0 3mm; }
+        /* Copias en flujo continuo (sin salto de pagina, que generaba el espacio en
+           blanco gigante entre original y duplicado); se separan con linea de corte
+           punteada. */
         .thermal-page.copy-next {
           margin-top: 4mm;
           padding-top: 4mm;
           border-top: 1px dashed #000;
         }
         .thermal-feed { height: 2mm; }
-        .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
-        .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
-        .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 2px; text-align: center; letter-spacing: 0.6px; }
-        .thermal .sub { font-size: 10pt; font-weight: 800; text-align: center; margin: 0 0 6px; letter-spacing: 1.5px; }
-        .thermal hr { border: none; border-top: 1.5px solid #000; margin: 5px 0; }
-        .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 1.5px 0; }
-        .thermal .row span:first-child { font-weight: 800; margin-right: 6px; }
-        .thermal .row span:last-child { text-align: right; }
-        .thermal .row.small { font-size: 9.5pt; font-weight: 700; }
-        .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 13pt; font-weight: 900; margin: 6px 0 4px; }
-        .thermal .note { font-size: 9.5pt; font-weight: 700; margin: 4px 0; }
-        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 6px 0 0; }
-        .thermal .footer.muted { color: #000; margin-top: 2px; }
       `}</style>
+      <ThermalStyles />
     </div>
   );
 }

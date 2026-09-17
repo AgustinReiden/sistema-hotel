@@ -95,6 +95,7 @@ const FISCAL_SETTINGS: FiscalSettings = {
   cbte_tipo: 6,
   concepto: 2,
   iva_pct: 21,
+  prefijo_archivos: null,
   dias_vto_cuenta_corriente: 30,
 };
 

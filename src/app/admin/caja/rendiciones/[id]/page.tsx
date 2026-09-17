@@ -1,8 +1,16 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 
-import { getCurrentUserRole, getHotelSettings, getShiftSummary } from "@/lib/data";
+import {
+  getCurrentUserRole,
+  getFiscalSettings,
+  getHotelSettings,
+  getShiftSummary,
+} from "@/lib/data";
+import { nombreComprobante, prefijoArchivo } from "@/lib/comprobante-nombre";
 import { formatAmount, formatShiftCode, formatSignedAmount } from "@/lib/format";
 import { formatHotelDateTime, formatHotelTime } from "@/lib/time";
 import ThermalAutoPrint from "@/app/admin/components/ThermalAutoPrint";
@@ -210,6 +218,31 @@ type PageProps = {
   searchParams: Promise<{ autoprint?: string; copy?: string }>;
 };
 
+const summaryCached = cache(getShiftSummary);
+const fiscalCached = cache(getFiscalSettings);
+
+/**
+ * El <title> es lo que el navegador propone como nombre de archivo al "Guardar como
+ * PDF": "COMB - Rend - 000027". Antes los cuatro papeles del sistema se guardaban
+ * todos como "El Refugio | Hotel & Servicios de Ruta.pdf".
+ */
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { id } = await params;
+  const [summary, fiscal] = await Promise.all([
+    summaryCached(id).catch(() => null),
+    fiscalCached().catch(() => null),
+  ]);
+
+  return {
+    title: nombreComprobante({
+      prefijo: prefijoArchivo(fiscal?.prefijo_archivos, fiscal?.razon_social),
+      tipo: "Rend",
+      // El mismo código que ya se imprime en el papel.
+      numero: summary ? formatShiftCode(summary.shift.shift_number) : "",
+    }),
+  };
+}
+
 export default async function ShiftReportPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const sp = await searchParams;
@@ -221,7 +254,7 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
   // request perdia la sesion (al cerrar caja) -> el comprobante "se cerraba" antes de imprimir.
   const copyMode = autoPrint ? "both" : requestedCopy ?? "both";
   const [summary, hotelSettings, role] = await Promise.all([
-    getShiftSummary(id),
+    summaryCached(id),
     getHotelSettings().catch(() => null),
     getCurrentUserRole(),
   ]);

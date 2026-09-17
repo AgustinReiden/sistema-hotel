@@ -3515,6 +3515,7 @@ export async function getFiscalSettings(): Promise<FiscalSettings | null> {
     cbte_tipo: Number(row.cbte_tipo) || 6,
     concepto: Number(row.concepto) || 2,
     iva_pct: Number(row.iva_pct) || 21,
+    prefijo_archivos: (row.prefijo_archivos as string | null) ?? null,
     // `|| 30` no sirve acá: un plazo de 0 días es válido (vence el mismo día) y
     // `0 || 30` daría 30. El default sólo cubre la columna ausente — o sea, el
     // ratito entre deployar el código y aplicar la migración 98.

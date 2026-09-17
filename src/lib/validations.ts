@@ -466,6 +466,17 @@ export const fiscalSettingsSchema = z
     razon_social: z.string().trim().max(200, "Maximo 200 caracteres."),
     domicilio_fiscal: z.string().trim().max(300, "Maximo 300 caracteres."),
     iibb: z.string().trim().max(60, "Maximo 60 caracteres."),
+    // Sigla para el nombre de archivo de los comprobantes. Los caracteres que
+    // Windows y macOS rechazan en un nombre se bloquean acá y en el CHECK de la
+    // base (mig 107): si pasaran, el navegador los reemplazaria y el archivo
+    // terminaria llamandose distinto de lo que se ve en esta pantalla.
+    prefijo_archivos: z
+      .string()
+      .trim()
+      .max(8, "Maximo 8 caracteres.")
+      .refine((v) => !/[/\:*?"<>|]/.test(v), {
+        message: 'El prefijo no puede tener / \ : * ? " < > |',
+      }),
     inicio_actividades: z
       .string()
       .trim()

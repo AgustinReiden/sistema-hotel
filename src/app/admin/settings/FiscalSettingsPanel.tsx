@@ -142,6 +142,23 @@ export default function FiscalSettingsPanel({ settings }: { settings: FiscalSett
           </p>
         </div>
         <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">
+            Prefijo para los archivos
+          </label>
+          <input
+            name="prefijo_archivos"
+            defaultValue={settings?.prefijo_archivos ?? ""}
+            placeholder="COMB"
+            maxLength={8}
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none text-sm"
+          />
+          <p className="text-[11px] text-slate-400 mt-1">
+            Con qué empieza el nombre del archivo al guardar un comprobante en PDF:
+            &ldquo;COMB - Fact - 00008-00000001&rdquo;. Vacío usa las primeras letras de la razón
+            social.
+          </p>
+        </div>
+        <div>
           <label className="block text-sm font-bold text-slate-700 mb-1">Ingresos Brutos</label>
           <input
             name="iibb"
