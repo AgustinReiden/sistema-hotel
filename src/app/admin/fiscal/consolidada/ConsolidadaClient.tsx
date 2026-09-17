@@ -5,12 +5,15 @@ import { AlertTriangle, FileText, Loader2, RefreshCw, RotateCcw } from "lucide-r
 import { toast } from "sonner";
 
 import DateRangeFilter from "@/app/admin/DateRangeFilter";
+import PaginationFooter from "@/app/admin/PaginationFooter";
 import StickyActionBar from "@/app/admin/StickyActionBar";
+import { usePagination } from "@/app/admin/usePagination";
 import { cbteLetra, formatCbteNumero, isValidCuit } from "@/lib/arca/amounts";
 import { buildBillingPresets } from "@/lib/date-range";
 import {
   DETALLE_LINEA_MAX,
   DETALLE_NOTA_MAX,
+  countSelectedOffPage,
   defaultStayDescription,
   sanitizeDetalleLine,
 } from "@/lib/billing";
@@ -111,8 +114,14 @@ export default function ConsolidadaClient({
   // Estadías que tiene la cuenta entera, para poder decir "N de M". Se guarda de
   // la última carga sin rango; el servidor sólo devuelve lo filtrado.
   const [totalStays, setTotalStays] = useState<number | null>(null);
-  // Ancla del shift+click. Es un índice sobre `rows`, así que se invalida cada
-  // vez que la lista cambia (otro cliente, otro rango, recarga).
+  // Qué se pinta en la lista: sólo lo que falta facturar (default, para no abrir
+  // en un pozo de historial) o la cuenta entera. Es un filtro de PANTALLA, no va
+  // al servidor: `rows` ya trae todo lo del rango elegido.
+  const [estadoFiltro, setEstadoFiltro] = useState<"pendientes" | "todas">("pendientes");
+  // Ancla del shift+click. Es un índice sobre la lista filtrada por estado
+  // (`visible`), así que se invalida cada vez que esa lista cambia (otro cliente,
+  // otro rango, otro filtro, recarga) o cuando la página se movió y el índice
+  // guardado ya no cae en la página que se está viendo (ver handleRowClick).
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
   const rangoActivo = range.from !== "" || range.to !== "";
@@ -221,6 +230,9 @@ export default function ConsolidadaClient({
     setNota("");
     setRange({ from: "", to: "" });
     setTotalStays(null);
+    // Vuelve a "Pendientes": es el default con el que se abre cualquier cuenta,
+    // no una preferencia que se arrastra de un cliente al siguiente.
+    setEstadoFiltro("pendientes");
     // La forma del detalle también vuelve al default: es una decisión por factura,
     // no una preferencia del cliente (mig 102).
     setConceptoUnicoModo(false);
@@ -228,6 +240,36 @@ export default function ConsolidadaClient({
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
+
+  // Lo que se pinta según el filtro de estado. "Pendientes" es exactamente
+  // `facturables`: por eso "Seleccionar todo" y el indeterminate, que siguen
+  // basándose en `facturables` más abajo, ya reflejan la lista filtrada sin
+  // necesidad de otra cuenta aparte (ninguna fila no-facturable es tildable en
+  // ningún filtro, así que el universo de lo seleccionable no cambia con esto).
+  const visible = useMemo(
+    () => (estadoFiltro === "pendientes" ? facturables : rows),
+    [estadoFiltro, facturables, rows]
+  );
+
+  // Paginación en memoria sobre `visible`: `rows`/`facturables` siguen enteros
+  // para el contador y la selección, esto sólo decide qué filas se pintan. La
+  // huella junta cliente, rango y filtro de estado: cualquiera de los tres que
+  // cambie vuelve a la página 1.
+  const {
+    rows: pagina,
+    setPage,
+    ...paginacion
+  } = usePagination(visible, `${selectedKey}|${range.from}|${range.to}|${estadoFiltro}`);
+
+  // Cambiar el filtro de estado reordena `visible` (otra lista, no sólo otra
+  // página de la misma). El índice del ancla quedaría apuntando a una fila
+  // distinta sin que nadie haya paginado, así que se invalida acá. Cliente y
+  // rango ya lo hacen en `loadRows`, que corre antes de pintar la lista nueva.
+  const [prevEstadoFiltro, setPrevEstadoFiltro] = useState(estadoFiltro);
+  if (estadoFiltro !== prevEstadoFiltro) {
+    setPrevEstadoFiltro(estadoFiltro);
+    setLastClickedIndex(null);
+  }
 
   // INVARIANTE que hace seguro al filtro por período: lo seleccionado se DERIVA
   // de `rows`, nunca se acumula aparte. Al angostar el rango, las estadías que
@@ -297,8 +339,12 @@ export default function ConsolidadaClient({
    * andando y no hay riesgo de doble toggle (con dos handlers, un click sobre el
    * checkbox contaría dos veces y la fila quedaría como estaba).
    */
-  const handleRowClick = (index: number, event: React.MouseEvent) => {
-    const row = rows[index];
+  const handleRowClick = (localIndex: number, event: React.MouseEvent) => {
+    // `localIndex` es la posición dentro de `pagina`; el ancla y el rango de
+    // extensión se manejan en índices de `visible` (la lista filtrada entera),
+    // así que se traduce con el offset de la página actual.
+    const index = paginacion.firstIndex - 1 + localIndex;
+    const row = visible[index];
     if (!row?.facturable) return;
     const shiftKey = event.shiftKey;
     // Sin esto, el shift+click deja al navegador pintando texto de punta a punta
@@ -307,15 +353,22 @@ export default function ConsolidadaClient({
     const value = !picked.has(row.reservation_id);
     // Shift+click extiende desde el ancla: todas las FACTURABLES del tramo toman
     // el valor que acaba de tomar la fila clickeada. El ancla no se mueve, para
-    // poder ir agrandando y achicando el mismo tramo.
-    const extiende = shiftKey && lastClickedIndex !== null;
-    const desde = extiende ? Math.min(lastClickedIndex, index) : index;
-    const hasta = extiende ? Math.max(lastClickedIndex, index) : index;
+    // poder ir agrandando y achicando el mismo tramo. Pero sólo si el ancla sigue
+    // cayendo en la página que se está viendo: si se paginó desde el último
+    // click, el índice guardado ya no señala una fila visible y extender
+    // tildaría estadías que nadie llegó a ver.
+    const anchorEnPagina =
+      lastClickedIndex !== null &&
+      lastClickedIndex >= paginacion.firstIndex - 1 &&
+      lastClickedIndex <= paginacion.lastIndex - 1;
+    const extiende = shiftKey && anchorEnPagina;
+    const desde = extiende ? Math.min(lastClickedIndex as number, index) : index;
+    const hasta = extiende ? Math.max(lastClickedIndex as number, index) : index;
 
     setPicked((current) => {
       const next = new Set(current);
       for (let i = desde; i <= hasta; i++) {
-        const r = rows[i];
+        const r = visible[i];
         if (!r?.facturable) continue;
         if (value) next.add(r.reservation_id);
         else next.delete(r.reservation_id);
@@ -342,6 +395,26 @@ export default function ConsolidadaClient({
       todasRef.current.indeterminate = picked.size > 0 && picked.size < facturables.length;
     }
   }, [picked, facturables.length]);
+
+  /**
+   * Estadías tildadas que NO están en la página que se está viendo. A diferencia
+   * del Control de facturación, acá no se excluyen de la emisión —`selectedRows`
+   * ya sale de `rows` entero, no de la página— así que esto es puro aviso: sin él,
+   * alguien puede apretar "Emitir" pensando que sólo van las 5 filas a la vista
+   * cuando en realidad van 12, y una factura ya emitida no se corrige, se anula
+   * con nota de crédito.
+   */
+  const fueraDePagina = useMemo(
+    () => countSelectedOffPage(visible, pagina, picked),
+    [visible, pagina, picked]
+  );
+  const avisoFueraDePagina =
+    fueraDePagina > 0 ? (
+      <span className="text-amber-700">
+        Tenés {fueraDePagina} {fueraDePagina === 1 ? "estadía tildada" : "estadías tildadas"} en
+        otras páginas: se incluyen igual en el total y en la factura.
+      </span>
+    ) : null;
 
   // La sección del receptor, para que "Completar" pueda traerla a la vista.
   const receptorRef = useRef<HTMLElement>(null);
@@ -494,13 +567,54 @@ export default function ConsolidadaClient({
               </p>
             </div>
 
+            {/* Filtro de estado: abre en "Pendientes" para no aterrizar en dos
+                años de historial. Va afuera del if de carga por lo mismo que el
+                de período: si se esconde con la lista vacía, no queda nada que
+                explique el vacío ni cómo salir de él. */}
+            {rows.length > 0 && (
+              <div role="group" aria-label="Filtro por estado de facturación" className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={estadoFiltro === "pendientes"}
+                  onClick={() => setEstadoFiltro("pendientes")}
+                  className={pillClass(estadoFiltro === "pendientes")}
+                >
+                  Pendientes de facturar
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={estadoFiltro === "todas"}
+                  onClick={() => setEstadoFiltro("todas")}
+                  className={pillClass(estadoFiltro === "todas")}
+                >
+                  Todas
+                </button>
+              </div>
+            )}
+
             {loading ? (
               <p className="text-sm text-slate-400 text-center py-4">Cargando…</p>
-            ) : rows.length === 0 ? (
+            ) : visible.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-4">
-                {rangoActivo
-                  ? "No hay estadías en este período. Probá con «Todo» para ver la cuenta entera."
-                  : "Este cliente no tiene estadías cargadas a cuenta corriente."}
+                {rows.length === 0 ? (
+                  rangoActivo ? (
+                    "No hay estadías en este período. Probá con «Todo» para ver la cuenta entera."
+                  ) : (
+                    "Este cliente no tiene estadías cargadas a cuenta corriente."
+                  )
+                ) : (
+                  <>
+                    No hay estadías pendientes de facturar: las {rows.length} de esta cuenta ya
+                    están cubiertas.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setEstadoFiltro("todas")}
+                      className="underline font-bold text-slate-600 hover:text-slate-800"
+                    >
+                      Ver todas
+                    </button>
+                  </>
+                )}
               </p>
             ) : (
               <>
@@ -525,7 +639,7 @@ export default function ConsolidadaClient({
                   </span>
                 </div>
                 <ul className="divide-y divide-slate-100">
-                  {rows.map((r, index) => {
+                  {pagina.map((r, index) => {
                     const cobertura = coberturaLabel(r);
                     const tildada = picked.has(r.reservation_id);
                     return (
@@ -570,6 +684,12 @@ export default function ConsolidadaClient({
                     );
                   })}
                 </ul>
+                <PaginationFooter
+                  {...paginacion}
+                  noun="estadías"
+                  onPageChange={setPage}
+                  note={avisoFueraDePagina}
+                />
               </>
             )}
           </div>
