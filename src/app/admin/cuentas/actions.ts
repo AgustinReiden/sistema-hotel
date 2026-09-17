@@ -86,7 +86,7 @@ export async function registerAccountPaymentAction(input: {
 }
 
 /**
- * Suelta una imputación de un pago (mig 110). El motivo es obligatorio acá y en la
+ * Suelta una imputación de un pago (mig 111). El motivo es obligatorio acá y en la
  * RPC: la fila queda como historia, y una historia sin el porqué no sirve de nada
  * cuando dentro de un año haya que explicar por qué se movió esa plata.
  */
@@ -116,7 +116,7 @@ export async function revertPaymentImputacionAction(input: {
 }
 
 /**
- * Aplica un pago ya registrado a una o más facturas (mig 110): lo que se hace con la
+ * Aplica un pago ya registrado a una o más facturas (mig 111): lo que se hace con la
  * plata que quedó libre después de desimputar, o con un adelanto que se cobró antes
  * de que existiera la factura.
  */

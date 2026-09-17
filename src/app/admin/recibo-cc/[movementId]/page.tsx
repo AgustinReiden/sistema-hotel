@@ -177,7 +177,7 @@ function ReceiptCopy({
           <hr />
           <p className="seccion">Imputado a</p>
           {/*
-            La clave es imputacion_id y no invoice_id: desde la mig 110 una misma
+            La clave es imputacion_id y no invoice_id: desde la mig 111 una misma
             factura puede figurar dos veces en el mismo pago (una línea desimputada y
             la que la reemplazó), y con invoice_id React vería claves repetidas.
           */}

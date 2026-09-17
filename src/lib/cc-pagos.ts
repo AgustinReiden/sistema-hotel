@@ -33,7 +33,7 @@ export type Retenciones = {
 
 /**
  * Lo mínimo que necesita una imputación para hacer cuentas: su importe, y si sigue
- * viva. Una imputación desimputada (mig 110) queda en la lista como historia pero no
+ * viva. Una imputación desimputada (mig 111) queda en la lista como historia pero no
  * cancela nada, así que todas las sumas de acá abajo la saltean. `revertida` es
  * opcional para que un arreglo recién armado en la pantalla —donde nada se desimputó
  * todavía— se siga pudiendo pasar tal cual.

@@ -530,7 +530,7 @@ export async function registerAccountPayment(
 
 /**
  * Suelta una imputación: esa plata deja de cancelar esa factura y vuelve a quedar
- * disponible en el pago (mig 110). La fila no se borra, se marca con quién y por qué.
+ * disponible en el pago (mig 111). La fila no se borra, se marca con quién y por qué.
  *
  * El caso que motivó esto: una nota de crédito anula la factura y el trigger de la
  * mig 80 ya la suelta solo. Ésta es la puerta manual, para los errores de carga
@@ -559,7 +559,7 @@ export async function revertPaymentImputacion(input: {
 }
 
 /**
- * Aplica un pago YA registrado a facturas (mig 110). Es la contraparte de desimputar:
+ * Aplica un pago YA registrado a facturas (mig 111). Es la contraparte de desimputar:
  * sin esto la plata liberada queda suelta, porque `registerAccountPayment` crea el
  * movimiento y sus imputaciones juntos y no hay forma de agregarle una después.
  *

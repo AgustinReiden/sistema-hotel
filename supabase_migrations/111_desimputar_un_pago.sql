@@ -1,4 +1,4 @@
--- Migration 110: la plata imputada tiene marcha atras
+-- Migration 111: la plata imputada tiene marcha atras
 --
 -- COMO QUEDO LA 109. Un pago de cuenta corriente se imputa a facturas y eso se
 -- escribe en cc_pago_imputaciones, pero la fila no tiene salida: no hay RPC para
@@ -56,7 +56,7 @@
 -- lugares preguntando "¿ya esta facturada?", corregidos de a uno cuando llego la nota
 -- de credito). El candado se toma adentro y sigue tomado hasta el commit del llamador.
 --
--- Aplicar a PROD por secciones via select public.exec_ddl($mig110$ ... $mig110$) SIN
+-- Aplicar a PROD por secciones via select public.exec_ddl($mig111$ ... $mig111$) SIN
 -- ; final y SIN BEGIN/COMMIT. ESTA MIGRACION VA DESPUES DE LA 109, que al 2026-09-17
 -- todavia no esta aplicada (applied_migrations corta en la 99 y cc_pago_imputaciones
 -- no existe en PROD). Si se corre antes, falla con 42P01 en la seccion 1, que es lo
@@ -944,7 +944,7 @@ BEGIN
     SET unlinked_at = NOW()
     WHERE invoice_id = NEW.nota_credito_de AND unlinked_at IS NULL;
 
-    -- Y la PLATA, que es lo que agrega la mig 110. Liberar la estadía sin liberar el
+    -- Y la PLATA, que es lo que agrega la mig 111. Liberar la estadía sin liberar el
     -- pago dejaba el monto consumido contra un comprobante muerto y hacía que la
     -- factura de reemplazo no se pudiera cobrar con ese mismo pago.
     UPDATE public.cc_pago_imputaciones
@@ -987,7 +987,7 @@ $fn$;
 DO $do$
 BEGIN
   IF to_regprocedure('public.record_migration(text, text)') IS NOT NULL THEN
-    PERFORM public.record_migration('110_desimputar_un_pago.sql');
+    PERFORM public.record_migration('111_desimputar_un_pago.sql');
   END IF;
 END
 $do$;

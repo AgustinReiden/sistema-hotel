@@ -152,8 +152,8 @@ describe("no se puede imputar de más", () => {
   });
 });
 
-describe("una imputación desimputada deja de contar (mig 110)", () => {
-  // La regla que sostiene toda la mig 110: si lo desimputado siguiera sumando,
+describe("una imputación desimputada deja de contar (mig 111)", () => {
+  // La regla que sostiene toda la mig 111: si lo desimputado siguiera sumando,
   // revertir no liberaría un peso y el pago no se podría aplicar a la factura de
   // reemplazo — que es justo el bug que la migración cierra.
   it("no suma al total imputado", () => {
