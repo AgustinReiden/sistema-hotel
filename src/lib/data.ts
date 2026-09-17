@@ -3,6 +3,7 @@ import "server-only";
 import { createClient } from "./supabase/server";
 import { isValidCuit } from "./arca/amounts";
 import { AUTHORIZED_INVOICES_LIMIT } from "./billing";
+import { netoRecibido } from "./cc-pagos";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import { localToISO } from "./format";
 import { addDaysToDateKey, DEFAULT_TZ, hotelDateKey } from "./time";
@@ -61,6 +62,9 @@ import type {
   BillingControlRow,
   BillingPendingCounts,
   CcAccountStayRow,
+  CcClientPaymentRow,
+  CcPagoImputacion,
+  CcPaymentReceipt,
   ClientInvoiceRow,
   ConsolidatedInvoicePayload,
   FacturacionModo,
@@ -465,21 +469,39 @@ export async function getCtaCteMovements(
 
   const { data, error } = await supabase
     .from("cuenta_corriente_movimientos")
-    .select("id, tipo, amount, reservation_id, payment_method, notes, created_at")
+    .select(
+      "id, tipo, amount, reservation_id, payment_method, notes, created_at, retencion_ganancias, retencion_iibb, retencion_certificado, remito_numero, recibo_cc_numero"
+    )
     .eq(column, clientId)
     .order("created_at", { ascending: false });
   if (error) throw error;
 
-  const movements = ((data ?? []) as (CtaCteMovimiento & { amount: number | string })[]).map((m) => ({
+  type RawMovement = Omit<CtaCteMovimiento, "amount" | "retencion_ganancias" | "retencion_iibb"> & {
+    amount: number | string;
+    retencion_ganancias: number | string | null;
+    retencion_iibb: number | string | null;
+  };
+  const movements: CtaCteMovimiento[] = ((data ?? []) as RawMovement[]).map((m) => ({
     ...m,
     amount: Number(m.amount) || 0,
+    retencion_ganancias: Number(m.retencion_ganancias) || 0,
+    retencion_iibb: Number(m.retencion_iibb) || 0,
   }));
+  // El saldo se sigue calculando sobre `amount`, que es lo que el movimiento CANCELA
+  // de deuda. Las retenciones ya están adentro: no mueven el saldo (mig 109).
   const balance = movements.reduce((sum, m) => sum + signedMovement(m.tipo, m.amount), 0);
   return { movements, balance: Math.round((balance + Number.EPSILON) * 100) / 100 };
 }
 
-/** Registra un pago a cuenta (vía RPC admin-only). No toca la caja. */
-export async function registerAccountPayment(input: RegisterAccountPaymentPayload): Promise<string> {
+/**
+ * Registra un pago a cuenta (vía RPC admin-only). No toca la caja.
+ *
+ * `amount` es lo que CANCELA de deuda: efectivo más retenciones. Las imputaciones se
+ * miden contra ese total, no contra el neto recibido (mig 109).
+ */
+export async function registerAccountPayment(
+  input: RegisterAccountPaymentPayload
+): Promise<{ movementId: string; reciboCcNumero: number | null }> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_register_account_payment", {
     p_associated_client_id: input.kind === "company" ? input.clientId : null,
@@ -487,10 +509,220 @@ export async function registerAccountPayment(input: RegisterAccountPaymentPayloa
     p_amount: input.amount,
     p_method: input.method ?? null,
     p_notes: input.notes ?? null,
+    p_retencion_ganancias: input.retencionGanancias ?? 0,
+    p_retencion_iibb: input.retencionIibb ?? 0,
+    p_retencion_certificado: input.retencionCertificado ?? null,
+    p_imputaciones:
+      input.imputaciones && input.imputaciones.length > 0
+        ? input.imputaciones.map((i) => ({ invoice_id: i.invoiceId, amount: i.amount }))
+        : null,
   });
   if (error) throw error;
-  const result = data as { movement_id?: string } | null;
-  return String(result?.movement_id ?? "");
+  const result = (data ?? {}) as { movement_id?: string; recibo_cc_numero?: number | null };
+  return {
+    movementId: String(result.movement_id ?? ""),
+    reciboCcNumero:
+      result.recibo_cc_numero === null || result.recibo_cc_numero === undefined
+        ? null
+        : Number(result.recibo_cc_numero),
+  };
+}
+
+/** Normaliza el jsonb de imputaciones que devuelven los RPC de cuenta corriente. */
+function mapCcImputaciones(raw: unknown): CcPagoImputacion[] {
+  return ((raw ?? []) as Array<Record<string, unknown>>).map((i) => ({
+    invoice_id: String(i.invoice_id),
+    cbte_tipo: Number(i.cbte_tipo) || 0,
+    pto_vta: Number(i.pto_vta) || 0,
+    cbte_nro: i.cbte_nro === null || i.cbte_nro === undefined ? null : Number(i.cbte_nro),
+    cbte_fch: (i.cbte_fch as string | null) ?? null,
+    kind: (i.kind as InvoiceKind | undefined) ?? "checkout",
+    anulada: Boolean(i.anulada),
+    imp_total: Number(i.imp_total) || 0,
+    imputado: Number(i.imputado) || 0,
+  }));
+}
+
+/**
+ * Pagos a cuenta de un cliente, con retenciones, neto recibido y las facturas a las
+ * que se imputó cada uno (mig 109).
+ */
+export async function listClientPayments(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<CcClientPaymentRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_client_payments", {
+    p_associated_client_id: kind === "company" ? clientId : null,
+    p_guest_id: kind === "guest" ? clientId : null,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    movimiento_id: String(r.movimiento_id),
+    created_at: String(r.created_at),
+    amount: Number(r.amount) || 0,
+    payment_method: (r.payment_method as string | null) ?? null,
+    retencion_ganancias: Number(r.retencion_ganancias) || 0,
+    retencion_iibb: Number(r.retencion_iibb) || 0,
+    retencion_certificado: (r.retencion_certificado as string | null) ?? null,
+    neto_recibido: Number(r.neto_recibido) || 0,
+    sin_imputar: Number(r.sin_imputar) || 0,
+    recibo_cc_numero:
+      r.recibo_cc_numero === null || r.recibo_cc_numero === undefined
+        ? null
+        : Number(r.recibo_cc_numero),
+    notes: (r.notes as string | null) ?? null,
+    imputaciones: mapCcImputaciones(r.imputaciones),
+  }));
+}
+
+/**
+ * Todo lo que imprime el recibo de un pago a cuenta (mig 109).
+ *
+ * Va a las tablas directo (la RLS de staff lo permite), igual que el comprobante de
+ * cargo: son tres lecturas de una fila y sus alrededores, no una consulta de negocio
+ * que merezca su propio RPC.
+ *
+ * El saldo que devuelve es el de la cuenta DESPUÉS de este pago, reconstruido a la
+ * fecha del movimiento — no el saldo de hoy. Un recibo tiene que reimprimirse igual
+ * dentro de tres años, y el de hoy cambiaría con cada estadía nueva.
+ */
+export async function getCcPaymentReceipt(movementId: string): Promise<CcPaymentReceipt | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("cuenta_corriente_movimientos")
+    .select(
+      `
+      id, tipo, amount, payment_method, notes, created_at, recibo_cc_numero,
+      retencion_ganancias, retencion_iibb, retencion_certificado,
+      associated_client_id, guest_id,
+      associated_client:associated_clients ( display_name, razon_social, document_id ),
+      guest:guests ( full_name, document_id )
+      `
+    )
+    .eq("id", movementId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  type RelationOne<T> = T | T[] | null;
+  const one = <T,>(rel: RelationOne<T>): T | null => (Array.isArray(rel) ? rel[0] ?? null : rel);
+
+  const raw = data as {
+    id: string;
+    tipo: "cargo" | "pago";
+    amount: number | string;
+    payment_method: string | null;
+    notes: string | null;
+    created_at: string;
+    recibo_cc_numero: number | null;
+    retencion_ganancias: number | string | null;
+    retencion_iibb: number | string | null;
+    retencion_certificado: string | null;
+    associated_client_id: string | null;
+    guest_id: string | null;
+    associated_client: RelationOne<{
+      display_name: string;
+      razon_social: string | null;
+      document_id: string | null;
+    }>;
+    guest: RelationOne<{ full_name: string; document_id: string | null }>;
+  };
+
+  // Esta página es el recibo de un COBRO. Un cargo tiene su propio comprobante en
+  // /admin/comprobante-cc y dice otra cosa: no se imprime uno como el otro.
+  if (raw.tipo !== "pago") return null;
+
+  const company = one(raw.associated_client);
+  const guest = one(raw.guest);
+  const amount = Number(raw.amount) || 0;
+  const retencionGanancias = Number(raw.retencion_ganancias) || 0;
+  const retencionIibb = Number(raw.retencion_iibb) || 0;
+
+  const [impRes, movRes] = await Promise.all([
+    supabase
+      .from("cc_pago_imputaciones")
+      .select(
+        "amount, invoice:invoices ( id, cbte_tipo, pto_vta, cbte_nro, cbte_fch, kind, anulada_at, imp_total )"
+      )
+      .eq("movimiento_id", movementId),
+    // Los movimientos de la cuenta hasta este pago inclusive, para el saldo posterior.
+    supabase
+      .from("cuenta_corriente_movimientos")
+      .select("tipo, amount, created_at, id")
+      .eq(raw.associated_client_id ? "associated_client_id" : "guest_id",
+        raw.associated_client_id ?? raw.guest_id ?? "")
+      .lte("created_at", raw.created_at),
+  ]);
+  if (impRes.error) throw impRes.error;
+  if (movRes.error) throw movRes.error;
+
+  type RawImputacion = {
+    amount: number | string;
+    invoice: RelationOne<{
+      id: string;
+      cbte_tipo: number;
+      pto_vta: number;
+      cbte_nro: number | null;
+      cbte_fch: string | null;
+      kind: InvoiceKind;
+      anulada_at: string | null;
+      imp_total: number | string;
+    }>;
+  };
+  const imputaciones: CcPagoImputacion[] = ((impRes.data ?? []) as RawImputacion[])
+    .map((row) => {
+      const inv = one(row.invoice);
+      if (!inv) return null;
+      return {
+        invoice_id: String(inv.id),
+        cbte_tipo: Number(inv.cbte_tipo) || 0,
+        pto_vta: Number(inv.pto_vta) || 0,
+        cbte_nro: inv.cbte_nro === null ? null : Number(inv.cbte_nro),
+        cbte_fch: inv.cbte_fch ?? null,
+        kind: inv.kind ?? "checkout",
+        anulada: inv.anulada_at !== null,
+        imp_total: Number(inv.imp_total) || 0,
+        imputado: Number(row.amount) || 0,
+      };
+    })
+    .filter((i): i is CcPagoImputacion => i !== null)
+    .sort((a, b) => (a.cbte_fch ?? "").localeCompare(b.cbte_fch ?? "") || (a.cbte_nro ?? 0) - (b.cbte_nro ?? 0));
+
+  // `lte` sobre created_at puede traer otro movimiento del mismo instante: se
+  // desempata por id, el mismo criterio con el que la migración numeró el backfill.
+  // Se compara el instante parseado y no el string, porque dos timestamps del mismo
+  // momento pueden llegar escritos distinto (con y sin fracción de segundo) y ahí una
+  // comparación lexicográfica dejaría un movimiento anterior afuera del saldo.
+  const refTime = Date.parse(raw.created_at);
+  const hastaEstePago = (
+    (movRes.data ?? []) as (CcMovRow & { created_at: string; id: string })[]
+  ).filter((m) => {
+    const t = Date.parse(m.created_at);
+    return t < refTime || (t === refTime && m.id <= raw.id);
+  });
+  const saldo = hastaEstePago.reduce(
+    (sum, m) => sum + signedMovement(m.tipo, Number(m.amount) || 0),
+    0
+  );
+
+  return {
+    movimiento_id: raw.id,
+    recibo_cc_numero: raw.recibo_cc_numero,
+    created_at: raw.created_at,
+    client_name: company?.razon_social || company?.display_name || guest?.full_name || "—",
+    client_document: company?.document_id ?? guest?.document_id ?? null,
+    amount,
+    payment_method: raw.payment_method,
+    retencion_ganancias: retencionGanancias,
+    retencion_iibb: retencionIibb,
+    retencion_certificado: raw.retencion_certificado,
+    neto_recibido: netoRecibido({ amount, retencionGanancias, retencionIibb }),
+    notes: raw.notes,
+    imputaciones,
+    saldo_despues: Math.round((saldo + Number.EPSILON) * 100) / 100,
+  };
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -3984,6 +4216,11 @@ export async function listCcAccountStays(
     cbte_nro: r.cbte_nro === null || r.cbte_nro === undefined ? null : Number(r.cbte_nro),
     cbte_fch: (r.cbte_fch as string | null) ?? null,
     external_ref: (r.external_ref as string | null) ?? null,
+    // Estado de COBRO (mig 109). Viene de la misma RPC a propósito: la parte difícil
+    // es resolver qué factura viva cubre la estadía, y ese predicado ya vive ahí.
+    imp_total: r.imp_total === null || r.imp_total === undefined ? null : Number(r.imp_total),
+    imputado: r.imputado === null || r.imputado === undefined ? null : Number(r.imputado),
+    cobro_estado: (r.cobro_estado as CcAccountStayRow["cobro_estado"]) ?? "sin_facturar",
   }));
 }
 
