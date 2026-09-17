@@ -3,6 +3,7 @@ import { defaultStayDescription } from "@/lib/billing";
 import { qrPngDataUrl } from "@/lib/arca/qr";
 import { getFiscalSettings, getHotelSettings, getInvoiceById, getInvoiceStays } from "@/lib/data";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
+import InvoicePrintActions from "./InvoicePrintActions";
 
 export const dynamic = "force-dynamic";
 
@@ -114,7 +115,11 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
     "Pequeños Contribuyentes de la Ley N° 27.618.";
 
   return (
-    <div className="thermal">
+    <>
+      {/* Reimprimir y guardar PDF. Sólo cuando se entra a mirar el comprobante:
+          con ?autoprint=1 la ventana imprime sola y se cierra. */}
+      {!autoPrint && <InvoicePrintActions />}
+      <div className="thermal">
       <div className="thermal-page">
         {isHomo && <div className="homo-band">COMPROBANTE DE PRUEBA — SIN VALOR FISCAL</div>}
 
@@ -188,6 +193,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
 
         <hr />
         {/* Receptor */}
+        <p className="seccion">Cliente</p>
         <div className="row">
           <span>Cliente:</span>
           <span>{invoice.receptor_nombre ?? "—"}</span>
@@ -211,28 +217,31 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
         {/* Detalle (el WSFE factura totales; el detalle es de la representación) */}
         {isConsolidada ? (
           <>
+            {/* Un rótulo en vez de una fila "DETALLE DE ESTADÍAS | N": dice lo mismo
+                con menos tinta y sin competir con las líneas que siguen. */}
+            <p className="seccion">
+              Detalle{conceptoUnico ? "" : ` · ${stays.length} estadías`}
+            </p>
             {conceptoUnico ? (
               // Un solo concepto (mig 102): ni habitaciones ni fechas estadía por
               // estadía, que es justamente lo que pidieron algunas empresas.
               // El importe es imp_total, el mismo que suman las líneas del modo
               // detallado, TAMBIÉN en una Factura A: con imp_neto cambiaría cómo se
               // lee una A respecto de las consolidadas ya emitidas.
-              <div className="row">
+              // `item` y no `row`: acá el texto es lo que envuelve y el importe lo
+              // que tiene que quedar entero (ver los estilos).
+              <div className="item">
                 <span>{conceptoUnico}</span>
-                <span>${money(invoice.imp_total)}</span>
+                <span className="money">${money(invoice.imp_total)}</span>
               </div>
             ) : (
               <>
-                <div className="row">
-                  <span>DETALLE DE ESTADÍAS</span>
-                  <span>{stays.length}</span>
-                </div>
                 {stays.map((s) => (
-                  <div className="row small" key={s.reservation_id}>
+                  <div className="item small" key={s.reservation_id}>
                     {/* Texto congelado al emitir (mig 93). Las facturas anteriores no
                         lo tienen y caen al automático, que es lo que mostraban. */}
                     <span>{s.descripcion ?? defaultStayDescription(s)}</span>
-                    <span>${money(s.amount)}</span>
+                    <span className="money">${money(s.amount)}</span>
                   </div>
                 ))}
               </>
@@ -249,9 +258,10 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           </>
         ) : (
           <>
-            <div className="row">
+            <p className="seccion">Detalle</p>
+            <div className="item">
               <span>HOSPEDAJE</span>
-              <span>${money(isA ? invoice.imp_neto : invoice.imp_total)}</span>
+              <span className="money">${money(isA ? invoice.imp_neto : invoice.imp_total)}</span>
             </div>
             <div className="row small">
               <span>Período:</span>
@@ -267,22 +277,22 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
             {/* Factura A: IVA discriminado (Neto + IVA + Total) */}
             <div className="row">
               <span>Neto Gravado:</span>
-              <span>${money(invoice.imp_neto)}</span>
+              <span className="money">${money(invoice.imp_neto)}</span>
             </div>
             <div className="row">
               <span>IVA {ivaPctLabel}:</span>
-              <span>${money(invoice.imp_iva)}</span>
+              <span className="money">${money(invoice.imp_iva)}</span>
             </div>
             <div className="total">
               <span>TOTAL:</span>
-              <span>${money(invoice.imp_total)}</span>
+              <span className="money">${money(invoice.imp_total)}</span>
             </div>
           </>
         ) : (
           <>
             <div className="total">
               <span>TOTAL:</span>
-              <span>${money(invoice.imp_total)}</span>
+              <span className="money">${money(invoice.imp_total)}</span>
             </div>
 
             {/* RG 5614 / Ley 27.743 — Transparencia Fiscal: solo a consumidor final. */}
@@ -293,11 +303,13 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
                 </p>
                 <div className="row small">
                   <span>IVA Contenido:</span>
-                  <span>${money(invoice.imp_iva)}</span>
+                  <span className="money">${money(invoice.imp_iva)}</span>
                 </div>
-                <div className="row small">
+                {/* Etiqueta larguísima: acá el que envuelve tiene que ser el texto,
+                    no el importe, así que va como `item`. */}
+                <div className="item small">
                   <span>Otros Impuestos Nacionales Indirectos:</span>
-                  <span>$0,00</span>
+                  <span className="money">$0,00</span>
                 </div>
               </div>
             )}
@@ -347,6 +359,13 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           }
           .no-print { display: none !important; }
         }
+        /* El papel útil son 66mm (72 menos los márgenes): un renglón entra en unos
+           38 caracteres a 9pt. Los cuerpos de antes (10.5pt, todo en negrita)
+           desbordaban ese ancho y el navegador partía lo primero que encontraba,
+           que terminaba siendo la etiqueta ("Domicili / o:") o el importe
+           ("$1.480. / 000,00"). Por eso NO hay un word-break global acá: cada tipo
+           de fila declara abajo qué parte puede envolver y cuál tiene que salir
+           entera. */
         .thermal {
           font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
           background: white;
@@ -354,32 +373,48 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
           width: 72mm;
           max-width: 72mm;
           margin: 0 auto;
-          line-height: 1.2;
-          word-break: break-word;
+          line-height: 1.25;
         }
         .thermal-page { padding: 0 3mm; }
         .thermal-feed { height: 10mm; }
-        .thermal h1 { font-size: 14pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
-        .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
-        .thermal h2 { font-size: 13pt; font-weight: 900; margin: 4px 0 2px; text-align: center; letter-spacing: 1px; }
-        .thermal hr { border: none; border-top: 1.5px solid #000; margin: 5px 0; }
-        .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 1.5px 0; }
-        .thermal .row span:first-child { font-weight: 800; margin-right: 6px; }
-        .thermal .row span:last-child { text-align: right; }
-        .thermal .row.small { font-size: 9pt; font-weight: 700; }
-        .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 14pt; font-weight: 900; margin: 6px 0 4px; }
-        .tipo-box { display: flex; flex-direction: column; align-items: center; margin: 4px 0 0; }
-        .tipo-letra { font-size: 22pt; font-weight: 900; border: 2px solid #000; padding: 0 14px; line-height: 1.3; }
-        .tipo-cod { font-size: 8pt; font-weight: 700; }
+        .thermal h1 { font-size: 12pt; font-weight: 900; margin: 0 0 1px; text-align: center; line-height: 1.15; }
+        .thermal .addr { font-size: 8pt; font-weight: 600; text-align: center; margin: 0 0 4px; }
+        .thermal h2 { font-size: 11pt; font-weight: 900; margin: 3px 0; text-align: center; letter-spacing: 0.3px; }
+        .thermal hr { border: none; border-top: 1px solid #000; margin: 4px 0; }
+        /* Rótulo de sección: separa emisor / cliente / detalle de un vistazo. */
+        .thermal .seccion { font-size: 7pt; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin: 4px 0 1px; }
+
+        /* Etiqueta + valor. La etiqueta sale SIEMPRE entera; el que envuelve, si
+           hace falta, es el valor (un domicilio largo, una razón social). */
+        .thermal .row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 9pt; margin: 1.5px 0; }
+        .thermal .row > span:first-child { flex: 0 0 auto; white-space: nowrap; font-weight: 700; }
+        .thermal .row > span:last-child { flex: 1 1 auto; min-width: 0; text-align: right; font-weight: 600; overflow-wrap: break-word; }
+        .thermal .row.small { font-size: 8pt; }
+
+        /* Concepto + importe: exactamente al revés. El texto envuelve y el importe
+           queda entero, que es lo que se lee primero en un comprobante. */
+        .thermal .item { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 9pt; margin: 1.5px 0; }
+        .thermal .item > span:first-child { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: break-word; }
+        .thermal .item > span:last-child { flex: 0 0 auto; white-space: nowrap; font-weight: 700; }
+        .thermal .item.small { font-size: 8pt; }
+
+        /* Ningún importe se parte en dos renglones, esté donde esté. */
+        .thermal .money { white-space: nowrap; }
+
+        .thermal .total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12pt; font-weight: 900; margin: 5px 0 3px; border-top: 1px solid #000; padding-top: 4px; }
+        .tipo-box { display: flex; flex-direction: column; align-items: center; margin: 3px 0 0; }
+        .tipo-letra { font-size: 16pt; font-weight: 900; border: 1.5px solid #000; padding: 0 10px; line-height: 1.25; }
+        .tipo-cod { font-size: 7pt; font-weight: 700; }
         .transparencia { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; }
-        .transparencia-title { font-size: 8pt; font-weight: 800; text-align: center; margin: 0 0 2px; }
-        .thermal .nota { font-size: 9pt; font-weight: 700; margin: 3px 0 1px; word-break: break-word; }
-        .leyenda { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; font-size: 7.5pt; font-weight: 700; text-align: justify; }
+        .transparencia-title { font-size: 7.5pt; font-weight: 800; text-align: center; margin: 0 0 2px; }
+        .thermal .nota { font-size: 8pt; font-weight: 600; margin: 3px 0 1px; overflow-wrap: break-word; }
+        .leyenda { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; font-size: 7pt; font-weight: 600; text-align: justify; }
         .leyenda p { margin: 0; }
-        .qr-wrap { display: flex; justify-content: center; margin: 6px 0 2px; }
-        .qr { width: 30mm; height: 30mm; }
-        .homo-band { font-size: 9pt; font-weight: 900; text-align: center; border: 2px dashed #000; padding: 2px 4px; margin: 4px 0; }
+        .qr-wrap { display: flex; justify-content: center; margin: 5px 0 2px; }
+        .qr { width: 26mm; height: 26mm; }
+        .homo-band { font-size: 8pt; font-weight: 900; text-align: center; border: 2px dashed #000; padding: 2px 4px; margin: 4px 0; }
       `}</style>
-    </div>
+      </div>
+    </>
   );
 }

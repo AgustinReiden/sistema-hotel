@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, FileText, Layers, Loader2, Printer, Undo2, X } from "lucide-react";
+import { ExternalLink, Eye, FileText, Layers, Loader2, Printer, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import InvoicePromptModal, { type InvoicePromptData } from "../../InvoicePromptModal";
+import ClientFilter from "./ClientFilter";
 import DateRangeFilter from "../../DateRangeFilter";
 import DownloadCsvButton from "../../DownloadCsvButton";
 import StickyActionBar from "../../StickyActionBar";
@@ -17,13 +18,16 @@ import {
 } from "./actions";
 import {
   BILLING_CIERRE_LABEL,
-  BILLING_ESTADO_LABEL,
+  BILLING_ESTADO_MATIZ,
+  BILLING_GRUPO_LABEL,
   billingComprobante,
+  billingGrupo,
   bulkBillingAction,
 } from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
 import type { BillingControlEstado, BillingControlRow, CtaCteAccount } from "@/lib/types";
+import type { BillingGrupo } from "@/lib/billing";
 
 type Props = {
   rows: BillingControlRow[];
@@ -61,15 +65,27 @@ const ESTADO_CLASS: Record<BillingControlEstado, string> = {
   falta: "bg-rose-100 text-rose-700",
 };
 
-const ORDER: BillingControlEstado[] = [
-  "falta",
-  "pendiente_consolidada",
-  "en_proceso",
-  "facturado",
-  "facturado_consolidado",
-  "facturado_externo",
-  "no_corresponde",
-];
+const GRUPOS: BillingGrupo[] = ["pendiente", "facturado"];
+
+/**
+ * Texto del chip de estado. El grupo es lo que se lee de un vistazo; el estado
+ * fino baja a la etiqueta de al lado (ver BILLING_ESTADO_MATIZ). La excepción es
+ * `no_corresponde`: cae del lado "facturado" para el filtro, pero decirle
+ * "Facturado" sería falso, así que lleva su propio texto.
+ */
+function chipEstado(estado: BillingControlEstado): string {
+  if (estado === "no_corresponde") return "No corresponde";
+  return billingGrupo(estado) === "pendiente" ? "Pendiente" : "Facturado";
+}
+
+/**
+ * Reimpresión: abre el comprobante en una ventana chica que se imprime sola y se
+ * cierra (?autoprint=1). Mismo camino que usa /admin/fiscal, así el papel sale
+ * igual desde las dos pantallas.
+ */
+function openInvoicePrint(invoiceId: string) {
+  window.open(`/admin/factura/${invoiceId}?autoprint=1`, `factura-${invoiceId}`, "width=420,height=720");
+}
 
 const inputClass =
   "px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm";
@@ -101,15 +117,20 @@ export default function ControlClient({
   const busy = busyId !== null || bulkBusy;
 
   const counts = useMemo(() => {
-    const map = {} as Record<BillingControlEstado, number>;
-    for (const e of ORDER) map[e] = 0;
-    for (const r of rows) map[r.estado] = (map[r.estado] ?? 0) + 1;
+    const map: Record<BillingGrupo, number> = { pendiente: 0, facturado: 0 };
+    for (const r of rows) map[billingGrupo(r.estado)] += 1;
     return map;
   }, [rows]);
 
+  // `estado` en la URL ya no es un estado fino sino un grupo ("pendiente" |
+  // "facturado"). Un valor viejo o inventado no filtra nada: se muestra todo, que
+  // es el default seguro — nunca esconder filas por un parámetro que no se entiende.
+  const grupoFiltrado: BillingGrupo | null =
+    estado === "pendiente" || estado === "facturado" ? estado : null;
+
   const visible = useMemo(
-    () => (estado ? rows.filter((r) => r.estado === estado) : rows),
-    [rows, estado]
+    () => (grupoFiltrado ? rows.filter((r) => billingGrupo(r.estado) === grupoFiltrado) : rows),
+    [rows, grupoFiltrado]
   );
 
   /**
@@ -282,23 +303,12 @@ export default function ControlClient({
         />
 
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[220px]">
-            <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="control-cliente">
-              Cliente
-            </label>
-            <select
-              id="control-cliente"
+          <div className="w-full sm:w-[260px]">
+            <ClientFilter
+              accounts={accounts}
               value={cliente}
-              onChange={(e) => applyFilters({ cliente: e.target.value })}
-              className={`${inputClass} w-full`}
-            >
-              <option value="">Todos</option>
-              {accounts.map((a) => (
-                <option key={`${a.kind}:${a.id}`} value={`${a.kind}:${a.id}`}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => applyFilters({ cliente: v })}
+            />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="control-estado">
@@ -306,14 +316,14 @@ export default function ControlClient({
             </label>
             <select
               id="control-estado"
-              value={estado}
+              value={grupoFiltrado ?? ""}
               onChange={(e) => applyFilters({ estado: e.target.value })}
               className={inputClass}
             >
               <option value="">Todos</option>
-              {ORDER.map((e) => (
-                <option key={e} value={e}>
-                  {BILLING_ESTADO_LABEL[e]}
+              {GRUPOS.map((g) => (
+                <option key={g} value={g}>
+                  {BILLING_GRUPO_LABEL[g]}
                 </option>
               ))}
             </select>
@@ -337,18 +347,18 @@ export default function ControlClient({
         </div>
       </section>
 
-      {/* Contadores */}
+      {/* Contadores: los mismos dos grupos del filtro, y clickeables. */}
       <div className="flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
-        {ORDER.filter((e) => counts[e] > 0).map((e) => (
+        {GRUPOS.map((g) => (
           <button
-            key={e}
+            key={g}
             type="button"
-            onClick={() => applyFilters({ estado: estado === e ? "" : e })}
-            className={`px-3 py-1 rounded-full transition-opacity ${ESTADO_CLASS[e]} ${
-              estado && estado !== e ? "opacity-40" : ""
-            }`}
+            onClick={() => applyFilters({ estado: grupoFiltrado === g ? "" : g })}
+            className={`px-3 py-1 rounded-full transition-opacity ${
+              g === "pendiente" ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+            } ${grupoFiltrado && grupoFiltrado !== g ? "opacity-40" : ""}`}
           >
-            {BILLING_ESTADO_LABEL[e]}: {counts[e]}
+            {BILLING_GRUPO_LABEL[g]}: {counts[g]}
           </button>
         ))}
         <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-600">
@@ -363,7 +373,7 @@ export default function ControlClient({
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th
-                  className="px-4 py-3 w-10"
+                  className="px-3 py-2.5 w-10"
                   onClick={() => {
                     if (visible.length > 0) toggleAll();
                   }}
@@ -382,21 +392,23 @@ export default function ControlClient({
                     className="h-4 w-4 cursor-pointer accent-indigo-600 disabled:cursor-not-allowed"
                   />
                 </th>
-                <th className="px-4 py-3">Salida</th>
-                <th className="px-4 py-3">Hab.</th>
-                <th className="px-4 py-3">Cliente</th>
-                <th className="px-4 py-3">Cierre</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-right">Cargo cta. cte.</th>
-                <th className="px-4 py-3">Estado</th>
-                <th className="px-4 py-3">Comprobante</th>
-                <th className="px-4 py-3 text-right">Acción</th>
+                <th className="px-3 py-2.5">Salida</th>
+                <th className="px-2 py-2.5">Hab.</th>
+                <th className="px-3 py-2.5">Cliente</th>
+                {/* La forma de cierre es contexto, no decisión: es lo primero que
+                    se guarda cuando la pantalla no da para las diez columnas. */}
+                <th className="px-3 py-2.5 hidden xl:table-cell">Cierre</th>
+                <th className="px-3 py-2.5 text-right">Total</th>
+                <th className="px-3 py-2.5 text-right">Cargo cta. cte.</th>
+                <th className="px-3 py-2.5">Estado</th>
+                <th className="px-3 py-2.5 hidden xl:table-cell">Comprobante</th>
+                <th className="px-3 py-2.5 text-right">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-400">
                     No hay check-outs en este rango con los filtros elegidos.
                   </td>
                 </tr>
@@ -412,7 +424,7 @@ export default function ControlClient({
                         selected ? "bg-indigo-50 hover:bg-indigo-100" : "hover:bg-slate-50/60"
                       }`}
                     >
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2.5">
                         <input
                           type="checkbox"
                           aria-label={`Seleccionar ${describeRow(r)}`}
@@ -423,30 +435,48 @@ export default function ControlClient({
                           className="h-4 w-4 cursor-pointer accent-indigo-600"
                         />
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-sm text-slate-600 whitespace-nowrap">
                         {shortDate(r.fch_hasta)}
                       </td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-800">{r.room_number}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700 max-w-[220px] truncate">
+                      <td className="px-2 py-2.5 text-sm font-bold text-slate-800">{r.room_number}</td>
+                      <td className="px-3 py-2.5 text-sm text-slate-700 max-w-[200px] truncate" title={r.cliente}>
                         {r.cliente}
+                        {/* Con la columna Cierre escondida, el dato sigue a la vista acá. */}
+                        <span className="block xl:hidden text-[11px] font-bold text-slate-400">
+                          {BILLING_CIERRE_LABEL[r.cierre]}
+                        </span>
                       </td>
-                      <td className="px-4 py-3 text-xs font-bold text-slate-500">
+                      <td className="px-3 py-2.5 text-xs font-bold text-slate-500 whitespace-nowrap hidden xl:table-cell">
                         {BILLING_CIERRE_LABEL[r.cierre]}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700 text-right whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-sm text-slate-700 text-right whitespace-nowrap">
                         ${money(r.total_price)}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700 text-right whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-sm text-slate-700 text-right whitespace-nowrap">
                         {r.cargo_cc === null ? "—" : `$${money(r.cargo_cc)}`}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2.5">
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
                             ESTADO_CLASS[r.estado]
                           }`}
                         >
-                          {BILLING_ESTADO_LABEL[r.estado]}
+                          {chipEstado(r.estado)}
                         </span>
+                        {/* El estado fino no desaparece: baja a esta etiqueta, que
+                            es la que dice "por fuera", "consolidada" o "en ARCA". */}
+                        {BILLING_ESTADO_MATIZ[r.estado] && (
+                          <span className="ml-1.5 inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">
+                            {BILLING_ESTADO_MATIZ[r.estado]}
+                          </span>
+                        )}
+                        {/* Mismo criterio que con el cierre: la columna se esconde
+                            en pantallas chicas, pero el número no se pierde. */}
+                        {comprobante && (
+                          <span className="block xl:hidden text-[11px] font-mono text-slate-400">
+                            {comprobante}
+                          </span>
+                        )}
                         {/* Cobrada por medio bancario: facturarla no es opcional. */}
                         {r.bancario && (
                           <span
@@ -457,10 +487,10 @@ export default function ControlClient({
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs font-mono text-slate-500 whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-xs font-mono text-slate-500 whitespace-nowrap hidden xl:table-cell">
                         {comprobante ?? "—"}
                       </td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
                         {/* Los botones de fila NO seleccionan: facturar y seleccionar
                             son gestos distintos y no se pueden confundir. */}
                         <div
@@ -514,14 +544,27 @@ export default function ControlClient({
                           )}
                           {(r.estado === "facturado" || r.estado === "facturado_consolidado") &&
                             r.invoice_id && (
-                              <a
-                                href={`/admin/factura/${r.invoice_id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors"
-                              >
-                                <Printer size={14} /> Ver
-                              </a>
+                              <>
+                                <a
+                                  href={`/admin/factura/${r.invoice_id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title="Ver el comprobante (desde ahí se imprime o se guarda en PDF)"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors"
+                                >
+                                  <Eye size={14} /> Ver
+                                </a>
+                                {/* Atajo: manda a la comandera sin pasar por la
+                                    pantalla del comprobante. */}
+                                <button
+                                  type="button"
+                                  onClick={() => openInvoicePrint(r.invoice_id as string)}
+                                  title="Reimprimir en la comandera"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors"
+                                >
+                                  <Printer size={14} /> Reimprimir
+                                </button>
+                              </>
                             )}
                         </div>
                       </td>

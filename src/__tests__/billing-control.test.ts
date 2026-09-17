@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { billingComprobante, bulkBillingAction } from "@/lib/billing";
+import {
+  BILLING_ESTADO_MATIZ,
+  billingComprobante,
+  billingGrupo,
+  bulkBillingAction,
+} from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
 import type { BillingControlEstado, BillingControlRow } from "@/lib/types";
 
@@ -82,6 +87,33 @@ describe("bulkBillingAction — qué acción en lote admite una selección", () 
   it("una sola fila marcable habilita el marcado", () => {
     expect(bulkBillingAction(conEstado("falta"))).toBe("marcar");
     expect(bulkBillingAction(conEstado("facturado_externo"))).toBe("deshacer");
+  });
+});
+
+describe("billingGrupo — los dos grupos del filtro de estado", () => {
+  it("manda a 'pendiente' todo lo que todavía pide una acción", () => {
+    expect(billingGrupo("falta")).toBe("pendiente");
+    expect(billingGrupo("pendiente_consolidada")).toBe("pendiente");
+    // Emitida pero sin CAE todavía: hasta que ARCA conteste puede terminar
+    // rechazada, así que no se le dice al admin que ya está facturada.
+    expect(billingGrupo("en_proceso")).toBe("pendiente");
+  });
+
+  it("manda a 'facturado' lo que ya no pide ninguna acción", () => {
+    expect(billingGrupo("facturado")).toBe("facturado");
+    expect(billingGrupo("facturado_consolidado")).toBe("facturado");
+    expect(billingGrupo("facturado_externo")).toBe("facturado");
+    // No lleva comprobante y nadie tiene que hacer nada: cae de este lado del
+    // filtro aunque su chip en pantalla diga "No corresponde".
+    expect(billingGrupo("no_corresponde")).toBe("facturado");
+  });
+
+  it("conserva el matiz de los estados que no se explican solos", () => {
+    expect(BILLING_ESTADO_MATIZ.facturado_externo).toBe("por fuera");
+    expect(BILLING_ESTADO_MATIZ.facturado_consolidado).toBe("consolidada");
+    expect(BILLING_ESTADO_MATIZ.pendiente_consolidada).toBe("espera consolidada");
+    expect(BILLING_ESTADO_MATIZ.falta).toBeNull();
+    expect(BILLING_ESTADO_MATIZ.facturado).toBeNull();
   });
 });
 
