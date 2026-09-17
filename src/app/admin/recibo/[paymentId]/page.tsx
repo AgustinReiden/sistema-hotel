@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { getHotelSettings } from "@/lib/data";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatShiftCode } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
 import ReceiptAutoPrint from "./ReceiptAutoPrint";
 
@@ -158,7 +158,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     .from("payments")
     .select(
       `
-      id, amount, payment_method, notes, created_at,
+      id, amount, payment_method, notes, created_at, recibo_numero,
       reservation:reservations ( client_name, client_dni, total_price, paid_amount, rooms ( room_number ), associated_client:associated_clients ( display_name ) )
       `
     )
@@ -173,6 +173,7 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
     payment_method: string;
     notes: string | null;
     created_at: string;
+    recibo_numero: number | null;
     reservation: unknown;
   };
   const raw = data as Raw;
@@ -211,7 +212,10 @@ export default async function ReceiptPage({ params, searchParams }: PageProps) {
   const receiptData = {
     hotelName: hotelSettings?.name || "Hotel El Refugio",
     hotelAddress: hotelSettings?.address ?? "",
-    paymentIdShort: raw.id.slice(0, 8),
+    // Numero correlativo del recibo (mig 106). Los pagos anteriores a esa migracion
+    // quedaron numerados por el backfill; el fallback al pedazo de UUID existe por si
+    // alguna vez se lee una fila sin numero, no como camino normal.
+    paymentIdShort: raw.recibo_numero !== null ? formatShiftCode(raw.recibo_numero) : raw.id.slice(0, 8),
     paymentMethod: METHOD_LABEL[raw.payment_method] ?? raw.payment_method,
     createdAtFormatted: formatHotelDateTime(raw.created_at, tz),
     clientName: reservation?.client_name ?? "---",
