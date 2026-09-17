@@ -348,6 +348,8 @@ export type RegisterAccountPaymentPayload = {
 
 /** Una factura a la que se imputó un pago, tal como la devuelve el jsonb del RPC. */
 export type CcPagoImputacion = {
+  /** Id de la fila de imputación: es lo que recibe `revertPaymentImputacion` (mig 110). */
+  imputacion_id: string;
   invoice_id: string;
   cbte_tipo: number;
   pto_vta: number;
@@ -362,6 +364,15 @@ export type CcPagoImputacion = {
   imp_total: number;
   /** Lo que este pago le imputó a esta factura. */
   imputado: number;
+  /**
+   * La imputación se soltó (mig 110): esta plata volvió a quedar disponible en el
+   * pago y ya no cancela esta factura. Se muestra marcada, no se esconde — mismo
+   * criterio que `anulada`: un recibo reimpreso tiene que decir lo mismo que el día
+   * que salió. Lo que NO tiene que hacer es seguir sumando.
+   */
+  revertida: boolean;
+  revertida_at: string | null;
+  revertida_motivo: string | null;
 };
 
 /** Un pago a cuenta de un cliente, con su desglose y su imputación (mig 109). */
@@ -376,7 +387,10 @@ export type CcClientPaymentRow = {
   retencion_certificado: string | null;
   /** `amount` menos las retenciones: la plata que entró de verdad. */
   neto_recibido: number;
-  /** Lo del pago que todavía no se aplicó a ninguna factura. */
+  /**
+   * Lo del pago que todavía no se aplicó a ninguna factura. Cuenta sólo las
+   * imputaciones vivas, así que desimputar una línea lo sube (mig 110).
+   */
   sin_imputar: number;
   recibo_cc_numero: number | null;
   notes: string | null;

@@ -151,3 +151,41 @@ describe("no se puede imputar de más", () => {
     expect(facturaExcedente({ impTotal: 100000, imputado: 100000 }, 1)).toBe(1);
   });
 });
+
+describe("una imputación desimputada deja de contar (mig 110)", () => {
+  // La regla que sostiene toda la mig 110: si lo desimputado siguiera sumando,
+  // revertir no liberaría un peso y el pago no se podría aplicar a la factura de
+  // reemplazo — que es justo el bug que la migración cierra.
+  it("no suma al total imputado", () => {
+    const imputaciones = [{ amount: 60000 }, { amount: 40000, revertida: true }];
+    expect(imputadoTotal(imputaciones)).toBe(60000);
+  });
+
+  it("devuelve monto disponible al pago", () => {
+    const pago = { amount: 100000 };
+    // Con las dos vivas el pago estaba consumido entero.
+    expect(sinImputar(pago, [{ amount: 60000 }, { amount: 40000 }])).toBe(0);
+    // Al soltar una, esos $40.000 vuelven a quedar para imputar.
+    expect(sinImputar(pago, [{ amount: 60000 }, { amount: 40000, revertida: true }])).toBe(40000);
+  });
+
+  it("libera el techo del pago, así se puede volver a imputar", () => {
+    const pago = { amount: 100000 };
+    // Sin soltar la primera, agregar $40.000 se pasaba.
+    expect(imputacionExcedente(pago, [{ amount: 100000 }, { amount: 40000 }])).toBe(40000);
+    // Soltándola, entra.
+    expect(
+      imputacionExcedente(pago, [{ amount: 100000, revertida: true }, { amount: 40000 }])
+    ).toBe(0);
+  });
+
+  it("una factura desimputada por completo vuelve a quedar impaga", () => {
+    const imputaciones = [{ amount: 100000, revertida: true }];
+    expect(estaPagada({ impTotal: 100000, imputado: imputadoTotal(imputaciones) })).toBe(false);
+  });
+
+  it("revertida ausente o false significa viva", () => {
+    // La pantalla arma las líneas nuevas sin el campo: no puede cambiar el resultado.
+    expect(imputadoTotal([{ amount: 500 }, { amount: 500, revertida: false }])).toBe(1000);
+  });
+});
