@@ -33,8 +33,25 @@ export type Retenciones = {
   retencionIibb?: number | null;
 };
 
-/** Lo mínimo que necesita una imputación para hacer cuentas: su importe. */
-export type ImputacionMonto = { amount: number };
+/**
+ * Lo mínimo que necesita una imputación para hacer cuentas: su importe, y si sigue
+ * viva. Una imputación desimputada (mig 111) queda en la lista como historia pero no
+ * cancela nada, así que todas las sumas de acá abajo la saltean. `revertida` es
+ * opcional para que un arreglo recién armado en la pantalla —donde nada se desimputó
+ * todavía— se siga pudiendo pasar tal cual.
+ */
+export type ImputacionMonto = { amount: number; revertida?: boolean | null };
+
+/**
+ * Las que todavía cancelan factura. Es el único lugar que decide qué cuenta: si
+ * mañana aparece otra forma de anular una imputación, se agrega acá y las cinco
+ * funciones de abajo quedan bien solas.
+ */
+export function imputacionesVivas<T extends ImputacionMonto>(
+  imputaciones: readonly T[]
+): T[] {
+  return imputaciones.filter((i) => !i.revertida);
+}
 
 function num(value: number | null | undefined): number {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -62,15 +79,19 @@ export function retencionExcedente(pago: { amount: number } & Retenciones): numb
   return Math.max(0, round2(retencionesTotal(pago) - num(pago.amount)));
 }
 
-/** Σ de lo imputado a facturas. */
+/** Σ de lo imputado a facturas. Sólo lo vivo: lo desimputado ya no cancela nada. */
 export function imputadoTotal(imputaciones: readonly ImputacionMonto[]): number {
-  return round2(imputaciones.reduce((sum, i) => sum + num(i.amount), 0));
+  return round2(imputacionesVivas(imputaciones).reduce((sum, i) => sum + num(i.amount), 0));
 }
 
 /**
  * Lo del pago que todavía no se imputó a ninguna factura. Un pago puede quedar
  * parcialmente imputado (o sin imputar) a propósito: el cliente adelanta plata y la
  * factura sale después.
+ *
+ * Como `imputadoTotal` saltea las desimputadas, desimputar una línea sube este número:
+ * ésa es justamente la plata que queda libre para aplicar a la factura de reemplazo.
+ * Espejo del `sin_imputar` de `rpc_list_client_payments`.
  */
 export function sinImputar(pago: { amount: number }, imputaciones: readonly ImputacionMonto[]): number {
   return round2(num(pago.amount) - imputadoTotal(imputaciones));

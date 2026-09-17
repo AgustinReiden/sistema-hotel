@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import {
+  addPaymentImputaciones,
   getCtaCteMovements,
   listCcAccountStays,
   listClientInvoices,
   listClientOpenInvoices,
   listClientPayments,
   registerAccountPayment,
+  revertPaymentImputacion,
 } from "@/lib/data";
 import { imputacionExcedente, retencionExcedente } from "@/lib/cc-pagos";
 import { parseActionError } from "@/lib/error-utils";
@@ -216,6 +218,80 @@ export async function registerAccountPaymentAction(input: {
     return { success: true, data };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo registrar el pago.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Suelta una imputación de un pago (mig 111). El motivo es obligatorio acá y en la
+ * RPC: la fila queda como historia, y una historia sin el porqué no sirve de nada
+ * cuando dentro de un año haya que explicar por qué se movió esa plata.
+ */
+export async function revertPaymentImputacionAction(input: {
+  imputacionId: string;
+  motivo: string;
+}): Promise<ActionResult<{ liberado: number; sinImputar: number }>> {
+  try {
+    await assertCuentasAdmin();
+    if (!input.imputacionId) {
+      return { success: false, error: "Falta la imputación a desimputar." };
+    }
+    const motivo = (input.motivo ?? "").trim();
+    if (!motivo) {
+      return { success: false, error: "Escribí por qué se desimputa." };
+    }
+    const { liberado, sinImputar } = await revertPaymentImputacion({
+      imputacionId: input.imputacionId,
+      motivo,
+    });
+    revalidatePath("/admin/cuentas");
+    return { success: true, data: { liberado, sinImputar } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo desimputar el pago.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Aplica un pago ya registrado a una o más facturas (mig 111): lo que se hace con la
+ * plata que quedó libre después de desimputar, o con un adelanto que se cobró antes
+ * de que existiera la factura.
+ */
+export async function addPaymentImputacionesAction(input: {
+  movementId: string;
+  imputaciones: Array<{ invoiceId: string; amount: number }>;
+}): Promise<ActionResult<{ imputado: number; sinImputar: number }>> {
+  try {
+    await assertCuentasAdmin();
+    if (!input.movementId) {
+      return { success: false, error: "Falta el pago a imputar." };
+    }
+    const imputaciones = input.imputaciones ?? [];
+    if (imputaciones.length === 0) {
+      return { success: false, error: "Elegí al menos una factura." };
+    }
+    // Se valida acá además de en la RPC porque un importe NaN o negativo llegaría al
+    // jsonb como null y el error de la base no diría cuál de las líneas está mal.
+    for (const linea of imputaciones) {
+      if (!linea.invoiceId) {
+        return { success: false, error: "Falta la factura en una de las líneas." };
+      }
+      const amount = Number(linea.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return { success: false, error: "Cada importe imputado debe ser mayor a 0." };
+      }
+    }
+    const data = await addPaymentImputaciones({
+      movementId: input.movementId,
+      imputaciones: imputaciones.map((i) => ({
+        invoiceId: i.invoiceId,
+        amount: Number(i.amount),
+      })),
+    });
+    revalidatePath("/admin/cuentas");
+    return { success: true, data };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo imputar el pago.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

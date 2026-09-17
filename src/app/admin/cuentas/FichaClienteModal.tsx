@@ -756,20 +756,39 @@ function FilaPago({ pago }: { pago: CcClientPaymentRow }) {
           <ul className="mt-1 space-y-1">
             {pago.imputaciones.map((imp) => (
               <li
-                key={imp.invoice_id}
+                key={imp.imputacion_id}
                 className="flex flex-wrap justify-between gap-2 text-xs text-slate-600"
               >
                 <span>
-                  Factura {cbteLetra(imp.cbte_tipo)}{" "}
-                  {imp.cbte_nro !== null ? formatCbteNumero(imp.pto_vta, imp.cbte_nro) : "s/nro"}
-                  {imp.cbte_fch ? ` · ${formatKey(imp.cbte_fch)}` : ""}
+                  {/* Una imputación revertida (mig 111) se muestra tachada y no se
+                      esconde —un recibo reimpreso dice lo mismo que el día que
+                      salió—, pero su importe ya NO cancela esta factura: esa plata
+                      volvió a quedar disponible en el pago. */}
+                  <span className={imp.revertida ? "line-through text-slate-400" : ""}>
+                    Factura {cbteLetra(imp.cbte_tipo)}{" "}
+                    {imp.cbte_nro !== null ? formatCbteNumero(imp.pto_vta, imp.cbte_nro) : "s/nro"}
+                    {imp.cbte_fch ? ` · ${formatKey(imp.cbte_fch)}` : ""}
+                  </span>
                   {/* La factura se anuló DESPUÉS del cobro: se informa, no se
                       esconde. El recibo impreso sigue diciendo lo mismo. */}
                   {imp.anulada && (
                     <span className="ml-1.5 text-[11px] font-bold text-red-600">(anulada)</span>
                   )}
+                  {imp.revertida && (
+                    <span className="ml-1.5 text-[11px] font-bold text-slate-500">
+                      desimputada{imp.revertida_motivo ? `: ${imp.revertida_motivo}` : ""}
+                    </span>
+                  )}
                 </span>
-                <span className="font-semibold text-slate-800">{formatAmount(imp.imputado)}</span>
+                <span
+                  className={
+                    imp.revertida
+                      ? "font-semibold text-slate-400 line-through"
+                      : "font-semibold text-slate-800"
+                  }
+                >
+                  {formatAmount(imp.imputado)}
+                </span>
               </li>
             ))}
           </ul>

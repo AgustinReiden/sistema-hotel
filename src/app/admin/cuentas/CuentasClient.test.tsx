@@ -203,6 +203,7 @@ const pagos: CcClientPaymentRow[] = [
     notes: null,
     imputaciones: [
       {
+        imputacion_id: "i1",
         invoice_id: "f1",
         cbte_tipo: 1,
         pto_vta: 8,
@@ -212,6 +213,26 @@ const pagos: CcClientPaymentRow[] = [
         anulada: false,
         imp_total: 1480000,
         imputado: 60000,
+        revertida: false,
+        revertida_at: null,
+        revertida_motivo: null,
+      },
+      {
+        // Desimputada (mig 111): se sigue mostrando, tachada, y su plata ya no
+        // cancela nada — por eso los $40.000 figuran a cuenta.
+        imputacion_id: "i2",
+        invoice_id: "f2",
+        cbte_tipo: 6,
+        pto_vta: 8,
+        cbte_nro: 42,
+        cbte_fch: "2026-08-01",
+        kind: "checkout",
+        anulada: false,
+        imp_total: 50000,
+        imputado: 40000,
+        revertida: true,
+        revertida_at: "2026-09-16T10:00:00.000Z",
+        revertida_motivo: "Se imputó a la factura equivocada",
       },
     ],
   },
@@ -287,6 +308,9 @@ describe("CuentasClient — solapa Pagos", () => {
     expect(fila.getByText(/Factura A 00008-00000001/)).toBeTruthy();
     expect(fila.getByText("$60.000,00")).toBeTruthy();
     expect(fila.getByText(/\$40\.000,00 quedaron a cuenta/)).toBeTruthy();
+    // La imputación soltada se muestra marcada, no se esconde: un recibo reimpreso
+    // dice lo mismo que el día que salió. Lo que no hace es seguir sumando.
+    expect(fila.getByText(/desimputada: Se imputó a la factura equivocada/)).toBeTruthy();
   });
 
   it("reimprime el recibo en la misma ventana que el resto de los impresos", async () => {
