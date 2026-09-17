@@ -7,7 +7,9 @@ import {
   getReservationHistory,
   getUpcomingGuests,
 } from "@/lib/data";
-import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
+import { PAGE_SIZE, paginate, parsePageParam } from "@/lib/pagination";
+import { hotelDateKey } from "@/lib/time";
+import HistoryRangeFilter from "./HistoryRangeFilter";
 import PaginationFooter from "../PaginationFooter";
 import GuestsClientTable from "./GuestsClientTable";
 import GuestDirectoryTable from "./GuestDirectoryTable";
@@ -23,6 +25,8 @@ type GuestsPageProps = {
     view?: string;
     page?: string;
     cancelled?: string;
+    desde?: string;
+    hasta?: string;
   }>;
 };
 
@@ -52,11 +56,27 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
   const hotelSettings = await getHotelSettings().catch(() => null);
   const timezone = hotelSettings?.timezone || "America/Argentina/Tucuman";
 
+  // Rango explícito de la pestaña Historial. Sin él se ven los últimos 60 días.
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const desde = params.desde && DATE_RE.test(params.desde) ? params.desde : "";
+  const hasta = params.hasta && DATE_RE.test(params.hasta) ? params.hasta : "";
+  const todayKey = hotelDateKey(new Date());
+
   const directory = view === "directorio" ? await getGuestDirectory(search) : [];
-  const upcoming = view === "por_llegar" ? await getUpcomingGuests(search) : [];
+  // "Por llegar" se corta acá y no en la consulta: son 36 filas y el orden por
+  // fecha de entrada tiene que salir de la base, no de un slice a medias.
+  const upcomingAll = view === "por_llegar" ? await getUpcomingGuests(search) : [];
+  const upcoming = paginate(upcomingAll, page);
   const history =
     view === "historial"
-      ? await getReservationHistory({ page, pageSize: PAGE_SIZE, search, includeCancelled })
+      ? await getReservationHistory({
+          page,
+          pageSize: PAGE_SIZE,
+          search,
+          includeCancelled,
+          from: desde || undefined,
+          to: hasta || undefined,
+        })
       : null;
 
   const buildHref = (
@@ -69,6 +89,9 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
     const nextCancelled =
       overrides.cancelled !== undefined ? overrides.cancelled : includeCancelled ? "1" : "";
     if (nextCancelled) parts.push(`cancelled=${nextCancelled}`);
+    // El período elegido sobrevive al cambio de página y al de pestaña.
+    if (desde) parts.push(`desde=${desde}`);
+    if (hasta) parts.push(`hasta=${hasta}`);
     if (overrides.page && overrides.page > 1) parts.push(`page=${overrides.page}`);
     return parts.length > 0 ? `/admin/guests?${parts.join("&")}` : "/admin/guests";
   };
@@ -143,7 +166,10 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
         <p className="text-xs text-slate-500 mt-2">
           {view === "directorio" &&
             "Padrón de huéspedes (sin repetir, agrupados por DNI). El descuento se aplica al elegirlos en una reserva."}
-          {view === "historial" && `Reservas de los últimos 60 días, ${PAGE_SIZE} por página.`}
+          {view === "historial" &&
+            (desde || hasta
+              ? `Reservas del período elegido, ${PAGE_SIZE} por página.`
+              : `Reservas que ya ocurrieron, últimos 60 días, ${PAGE_SIZE} por página.`)}
           {view === "por_llegar" && "Todas las reservas próximas, sin límite de tiempo."}
         </p>
       </header>
@@ -154,27 +180,49 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
         )}
 
         {view === "por_llegar" && (
-          <UpcomingGuestsTable guests={upcoming} searchQuery={search} timezone={timezone} />
+          <UpcomingGuestsTable
+            guests={upcoming.rows}
+            searchQuery={search}
+            timezone={timezone}
+            footer={
+              <PaginationFooter
+                page={upcoming.page}
+                totalPages={upcoming.totalPages}
+                total={upcoming.total}
+                firstIndex={upcoming.firstIndex}
+                lastIndex={upcoming.lastIndex}
+                noun="reservas"
+                hrefFor={(p) => buildHref({ page: p })}
+              />
+            }
+          />
         )}
 
         {view === "historial" && history && (
           <>
+            <HistoryRangeFilter
+              from={desde}
+              to={hasta}
+              todayKey={todayKey}
+              search={search}
+              includeCancelled={includeCancelled}
+            />
             <GuestsClientTable
               initialGuests={history.rows}
               searchQuery={search}
               timezone={timezone}
+              footer={
+                <PaginationFooter
+                  page={history.page}
+                  totalPages={history.totalPages}
+                  total={history.total}
+                  firstIndex={history.total === 0 ? 0 : (history.page - 1) * history.pageSize + 1}
+                  lastIndex={Math.min(history.page * history.pageSize, history.total)}
+                  noun="reservas"
+                  hrefFor={(p) => buildHref({ page: p })}
+                />
+              }
             />
-            <div className="mt-4 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-              <PaginationFooter
-                page={history.page}
-                totalPages={history.totalPages}
-                total={history.total}
-                firstIndex={history.total === 0 ? 0 : (history.page - 1) * history.pageSize + 1}
-                lastIndex={Math.min(history.page * history.pageSize, history.total)}
-                noun="reservas"
-                hrefFor={(p) => buildHref({ page: p })}
-              />
-            </div>
           </>
         )}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Guest } from "@/lib/types";
 import { DollarSign, Loader2, X, XCircle } from "lucide-react";
@@ -14,10 +14,13 @@ export default function GuestsClientTable({
   initialGuests,
   searchQuery,
   timezone,
+  footer,
 }: {
   initialGuests: Guest[];
   searchQuery: string;
   timezone: string;
+  /** El pie de paginación, que la página arma y esto acomoda dentro de la tarjeta. */
+  footer?: ReactNode;
 }) {
   const router = useRouter();
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
@@ -178,6 +181,8 @@ export default function GuestsClientTable({
             : "No hay huéspedes registrados en el historial de reservas."}
         </div>
       )}
+
+      {footer}
 
       {selectedGuest && (
         <PaymentModal

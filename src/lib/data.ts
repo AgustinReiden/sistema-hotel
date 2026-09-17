@@ -993,18 +993,35 @@ export async function getGuestDirectory(searchTerm = ""): Promise<GuestDirectory
     }
   }
 
-  // Orden: primero los que se hospedaron (por ultima visita desc), despues el registro por nombre.
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.last_check_in && b.last_check_in) return b.last_check_in.localeCompare(a.last_check_in);
-    if (a.last_check_in) return -1;
-    if (b.last_check_in) return 1;
-    return a.client_name.localeCompare(b.client_name, "es-AR", { sensitivity: "base" });
-  });
+  // Orden ALFABETICO, a secas. Esto es un padron -la lista de quienes son clientes
+  // del hotel-, no un historial: se entra a buscar a una persona por su nombre. El
+  // orden anterior mezclaba dos criterios (primero los que se hospedaron por ultima
+  // visita, despues el resto por nombre) y el resultado no era ninguno de los dos:
+  // como la mayoria del padron importado no matchea ninguna reserva, la pantalla se
+  // veia alfabetica con un bloque cronologico corto arriba que nadie entendia.
+  // Lo cronologico vive en la pestana Historial.
+  return Array.from(map.values()).sort((a, b) =>
+    a.client_name.localeCompare(b.client_name, "es-AR", { sensitivity: "base" })
+  );
 }
 
 /**
- * Historial de reservas paginado (15 por página por defecto), acotado a los últimos
- * `days` días (60 por defecto). Devuelve también el total para la paginación.
+ * Historial de reservas: lo que YA PASÓ, de lo más reciente a lo más viejo.
+ *
+ * Dos cosas que no eran obvias y estaban mal:
+ *
+ * 1) No excluía el futuro. Como ordena por fecha de entrada descendente, arriba de
+ *    todo aparecían las reservas de dentro de tres meses — un "historial" que
+ *    empezaba por lo que todavía no ocurrió. Esas reservas ya viven en la pestaña
+ *    "Por llegar", que las ordena de la más próxima a la más lejana.
+ *
+ * 2) No desempataba. Con varias entradas el mismo día, Postgres las devuelve en el
+ *    orden que se le da la gana (en la práctica, el de inserción), y como las
+ *    reservas se cargan de a varias por cliente la lista se leía agrupada por
+ *    nombre. De ahí la impresión de que el historial estaba ordenado alfabéticamente.
+ *
+ * Sin `from`/`to` cubre los últimos `days` días (60); con rango, exactamente ese
+ * período. En los dos casos se pagina completo.
  */
 export async function getReservationHistory(
   options: {
@@ -1013,6 +1030,9 @@ export async function getReservationHistory(
     days?: number;
     search?: string;
     includeCancelled?: boolean;
+    /** Rango explícito en fechas del hotel (YYYY-MM-DD); reemplaza a `days`. */
+    from?: string;
+    to?: string;
   } = {}
 ): Promise<ReservationHistoryPage> {
   const supabase = await createClient();
@@ -1022,17 +1042,26 @@ export async function getReservationHistory(
   const search = sanitizeSearchTerm(options.search ?? "");
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
-  // Inicio del dia (zona del hotel, no la del servidor) de hace `days` dias: si se
-  // calculara como "ahora menos N×24h", el corte se corre segun la hora del dia en
-  // que se abre la pantalla en vez de caer siempre en un limite de dia prolijo.
-  const sinceKey = addDaysToDateKey(hotelDateKey(new Date()), -days);
-  const sinceIso = localToISO(sinceKey, "00:00", DEFAULT_TZ);
+
+  const todayKey = hotelDateKey(new Date());
+  // Inicio del dia (zona del hotel, no la del servidor): si se calculara como "ahora
+  // menos N×24h", el corte se corre segun la hora del dia en que se abre la pantalla
+  // en vez de caer siempre en un limite de dia prolijo.
+  const desdeKey = options.from ?? addDaysToDateKey(todayKey, -days);
+  // El tope es el arranque del dia SIGUIENTE al ultimo incluido, y se compara con
+  // `lt`: asi entra todo el ultimo dia sin depender de la hora.
+  const hastaKey = addDaysToDateKey(options.to ?? todayKey, 1);
+  const desdeIso = localToISO(desdeKey, "00:00", DEFAULT_TZ);
+  const hastaIso = localToISO(hastaKey, "00:00", DEFAULT_TZ);
 
   let query = supabase
     .from("reservations")
     .select(GUEST_RESERVATION_SELECT, { count: "exact" })
-    .gte("check_in_target", sinceIso)
-    .order("check_in_target", { ascending: false });
+    .gte("check_in_target", desdeIso)
+    .lt("check_in_target", hastaIso)
+    .order("check_in_target", { ascending: false })
+    // Desempate dentro del mismo dia: manda lo ultimo cargado.
+    .order("created_at", { ascending: false });
 
   if (!options.includeCancelled) {
     query = query.neq("status", "cancelled");
