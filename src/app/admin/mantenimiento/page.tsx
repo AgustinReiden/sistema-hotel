@@ -1,14 +1,4 @@
-import Link from "next/link";
-import {
-  BedDouble,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  KeyRound,
-  Lock,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+import { BedDouble, CheckCircle2, KeyRound, Lock, Sparkles, Wrench } from "lucide-react";
 
 import {
   getActiveRoomsBrief,
@@ -18,13 +8,13 @@ import {
 } from "@/lib/data";
 import { localToISO } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
+import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
 import type { CleaningCategory, CleaningLogSummary } from "@/lib/types";
 import AlertsPanel from "./AlertsPanel";
+import PaginationFooter from "../PaginationFooter";
 import CleaningLogFilters from "./CleaningLogFilters";
 
 export const dynamic = "force-dynamic";
-
-const PAGE_SIZE = 25;
 
 function categoryLabel(
   category: CleaningCategory | null
@@ -119,7 +109,7 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
   const to = sp.to ?? "";
   const category = sp.category && ALLOWED_CATEGORIES.has(sp.category) ? sp.category : "";
   const room = sp.room ?? "";
-  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
+  const page = parsePageParam(sp.page);
   const fromIso = from ? localToISO(from, "00:00", tz) : undefined;
   const toIso = to ? localToISO(addOneDay(to), "00:00", tz) : undefined;
   const roomIdParsed = room ? Number(room) : NaN;
@@ -274,43 +264,15 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
               </div>
             )}
 
-            {total > 0 && (
-              <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                <p className="text-xs text-slate-500">
-                  Página {page} de {totalPages}
-                </p>
-                <div className="flex items-center gap-2">
-                  {page > 1 ? (
-                    <Link
-                      href={buildHref(page - 1)}
-                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-bold hover:bg-slate-100 transition-colors flex items-center gap-1"
-                    >
-                      <ChevronLeft size={15} />
-                      Anterior
-                    </Link>
-                  ) : (
-                    <span className="px-3 py-1.5 rounded-lg border border-slate-100 bg-slate-100 text-slate-400 text-sm font-bold flex items-center gap-1 cursor-not-allowed">
-                      <ChevronLeft size={15} />
-                      Anterior
-                    </span>
-                  )}
-                  {page < totalPages ? (
-                    <Link
-                      href={buildHref(page + 1)}
-                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm font-bold hover:bg-slate-100 transition-colors flex items-center gap-1"
-                    >
-                      Siguiente
-                      <ChevronRight size={15} />
-                    </Link>
-                  ) : (
-                    <span className="px-3 py-1.5 rounded-lg border border-slate-100 bg-slate-100 text-slate-400 text-sm font-bold flex items-center gap-1 cursor-not-allowed">
-                      Siguiente
-                      <ChevronRight size={15} />
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            <PaginationFooter
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              firstIndex={firstIndex}
+              lastIndex={lastIndex}
+              noun="registros"
+              hrefFor={buildHref}
+            />
           </div>
         </div>
       </div>

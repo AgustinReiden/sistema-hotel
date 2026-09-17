@@ -7,6 +7,8 @@ import {
   getReservationHistory,
   getUpcomingGuests,
 } from "@/lib/data";
+import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
+import PaginationFooter from "../PaginationFooter";
 import GuestsClientTable from "./GuestsClientTable";
 import GuestDirectoryTable from "./GuestDirectoryTable";
 import UpcomingGuestsTable from "./UpcomingGuestsTable";
@@ -45,7 +47,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
   const search = (params.q ?? "").trim();
   const view = parseView(params.view);
   const includeCancelled = params.cancelled === "1";
-  const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const page = parsePageParam(params.page);
 
   const hotelSettings = await getHotelSettings().catch(() => null);
   const timezone = hotelSettings?.timezone || "America/Argentina/Tucuman";
@@ -54,7 +56,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
   const upcoming = view === "por_llegar" ? await getUpcomingGuests(search) : [];
   const history =
     view === "historial"
-      ? await getReservationHistory({ page, search, includeCancelled })
+      ? await getReservationHistory({ page, pageSize: PAGE_SIZE, search, includeCancelled })
       : null;
 
   const buildHref = (
@@ -141,7 +143,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
         <p className="text-xs text-slate-500 mt-2">
           {view === "directorio" &&
             "Padrón de huéspedes (sin repetir, agrupados por DNI). El descuento se aplica al elegirlos en una reserva."}
-          {view === "historial" && "Reservas de los últimos 60 días, 15 por página."}
+          {view === "historial" && `Reservas de los últimos 60 días, ${PAGE_SIZE} por página.`}
           {view === "por_llegar" && "Todas las reservas próximas, sin límite de tiempo."}
         </p>
       </header>
@@ -162,35 +164,16 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
               searchQuery={search}
               timezone={timezone}
             />
-            <div className="flex items-center justify-between mt-4 text-sm text-slate-600">
-              <span>
-                {history.total} reserva{history.total === 1 ? "" : "s"} · Página {history.page} de{" "}
-                {history.totalPages}
-              </span>
-              <div className="flex gap-2">
-                <a
-                  href={buildHref({ page: history.page - 1 })}
-                  aria-disabled={history.page <= 1}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${
-                    history.page <= 1
-                      ? "pointer-events-none opacity-40 border-slate-200 text-slate-400"
-                      : "bg-white border-slate-200 text-slate-700 hover:border-slate-400"
-                  }`}
-                >
-                  Anterior
-                </a>
-                <a
-                  href={buildHref({ page: history.page + 1 })}
-                  aria-disabled={history.page >= history.totalPages}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${
-                    history.page >= history.totalPages
-                      ? "pointer-events-none opacity-40 border-slate-200 text-slate-400"
-                      : "bg-white border-slate-200 text-slate-700 hover:border-slate-400"
-                  }`}
-                >
-                  Siguiente
-                </a>
-              </div>
+            <div className="mt-4 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+              <PaginationFooter
+                page={history.page}
+                totalPages={history.totalPages}
+                total={history.total}
+                firstIndex={history.total === 0 ? 0 : (history.page - 1) * history.pageSize + 1}
+                lastIndex={Math.min(history.page * history.pageSize, history.total)}
+                noun="reservas"
+                hrefFor={(p) => buildHref({ page: p })}
+              />
             </div>
           </>
         )}

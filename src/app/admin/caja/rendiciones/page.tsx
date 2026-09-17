@@ -3,7 +3,9 @@ import { ArrowLeft, CheckCircle2, AlertTriangle, Clock, User } from "lucide-reac
 
 import { getCurrentUserRole, getHotelSettings, listShifts } from "@/lib/data";
 import { formatAmount, formatShiftCode, formatSignedAmount } from "@/lib/format";
+import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
 import { formatHotelDateTime } from "@/lib/time";
+import PaginationFooter from "../../PaginationFooter";
 
 export const revalidate = 0;
 
@@ -20,11 +22,11 @@ export default async function CajaRendicionesPage({
   searchParams,
 }: CajaRendicionesPageProps) {
   const params = await searchParams;
-  const requestedPage = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const requestedPage = parsePageParam(params.page);
 
   const role = await getCurrentUserRole();
   const [shiftsPage, hotelSettings] = await Promise.all([
-    listShifts({ page: requestedPage, role }),
+    listShifts({ page: requestedPage, pageSize: PAGE_SIZE, role }),
     getHotelSettings().catch(() => null),
   ]);
   const { shifts, total, page, totalPages } = shiftsPage;
@@ -159,39 +161,17 @@ export default async function CajaRendicionesPage({
             </table>
           </div>
         )}
-      </div>
 
-      {total > 0 && (
-        <div className="flex items-center justify-between mt-4 text-sm text-slate-600">
-          <span>
-            {total} turno{total === 1 ? "" : "s"} · Página {page} de {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <Link
-              href={buildHref(page - 1)}
-              aria-disabled={page <= 1}
-              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${
-                page <= 1
-                  ? "pointer-events-none opacity-40 border-slate-200 text-slate-400"
-                  : "bg-white border-slate-200 text-slate-700 hover:border-slate-400"
-              }`}
-            >
-              Anterior
-            </Link>
-            <Link
-              href={buildHref(page + 1)}
-              aria-disabled={page >= totalPages}
-              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${
-                page >= totalPages
-                  ? "pointer-events-none opacity-40 border-slate-200 text-slate-400"
-                  : "bg-white border-slate-200 text-slate-700 hover:border-slate-400"
-              }`}
-            >
-              Siguiente
-            </Link>
-          </div>
-        </div>
-      )}
+        <PaginationFooter
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          firstIndex={total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}
+          lastIndex={Math.min(page * PAGE_SIZE, total)}
+          noun="turnos"
+          hrefFor={buildHref}
+        />
+      </div>
     </div>
   );
 }
