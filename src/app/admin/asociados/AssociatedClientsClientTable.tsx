@@ -13,6 +13,8 @@ import {
   toggleAssociatedClientStatusAction,
   updateAssociatedClientAction,
 } from "./actions";
+import PaginationFooter from "../PaginationFooter";
+import { usePagination } from "../usePagination";
 import type { AssociatedClient } from "@/lib/types";
 
 export default function AssociatedClientsClientTable({
@@ -66,6 +68,10 @@ export default function AssociatedClientsClientTable({
     setChangingStatusId(null);
   };
 
+  // El contador "Activos: N" del header se calcula en el server sobre la lista
+  // completa: no lo toca la paginacion.
+  const { rows: pagina, setPage, ...paginacion } = usePagination(initialClients, searchQuery);
+
   return (
     <>
       <div className="p-4 border-b border-slate-200 flex justify-end bg-slate-50">
@@ -91,7 +97,7 @@ export default function AssociatedClientsClientTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {initialClients.map((client) => (
+            {pagina.map((client) => (
               <tr
                 key={client.id}
                 className={`transition-colors ${client.is_active ? "hover:bg-slate-50/80" : "bg-slate-50/60 text-slate-500"}`}
@@ -167,6 +173,8 @@ export default function AssociatedClientsClientTable({
           </tbody>
         </table>
       </div>
+
+      <PaginationFooter {...paginacion} noun="empresas" onPageChange={setPage} />
 
       {initialClients.length === 0 && (
         <div className="p-8 text-center text-slate-500">

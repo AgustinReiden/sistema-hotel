@@ -124,6 +124,16 @@ function formatDetalleDate(value: string): string {
   return y && m && d ? `${d}/${m}/${y}` : value;
 }
 
+/**
+ * Tope de comprobantes autorizados que trae /admin/fiscal de una sola vez.
+ *
+ * Vive acá y no en data.ts porque la PANTALLA tiene que poder avisar cuando el
+ * listado llegó al tope: ese mismo listado es el CSV que se usa como libro de IVA
+ * ventas, y un archivo fiscal recortado en silencio es peor que uno que no se pudo
+ * bajar. Antes el corte era 200 y no lo decía en ningún lado.
+ */
+export const AUTHORIZED_INVOICES_LIMIT = 2000;
+
 // ─── Control de facturación: etiquetas y lógica de lote ────────────────────────
 // Viven acá y no en ControlClient.tsx porque el CSV que se le manda al contador
 // tiene que decir exactamente lo mismo que la pantalla. Una sola fuente de verdad:

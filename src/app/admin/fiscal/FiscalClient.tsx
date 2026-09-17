@@ -14,7 +14,10 @@ import {
 import InvoicePromptModal, { type InvoicePromptData } from "../InvoicePromptModal";
 import DateRangeFilter from "../DateRangeFilter";
 import DownloadCsvButton from "../DownloadCsvButton";
+import PaginationFooter from "../PaginationFooter";
+import { usePagination } from "../usePagination";
 import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito, isValidCuit } from "@/lib/arca/amounts";
+import { AUTHORIZED_INVOICES_LIMIT } from "@/lib/billing";
 import { buildCsv, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
 import { formatHotelShortDateTime } from "@/lib/time";
@@ -72,6 +75,16 @@ const STATUS_LABEL: Record<string, string> = {
 export default function FiscalClient({ enabled, pending, invoiceable, authorized, from, to, today }: Props) {
   const router = useRouter();
   const presets = buildBillingPresets(today);
+
+  // Una paginacion por seccion: son tres listados distintos en la misma pantalla.
+  // El CSV de "Emitidas" sigue leyendo `authorized` entero, no la pagina.
+  const pendingPage = usePagination(pending);
+  const invoiceablePage = usePagination(invoiceable);
+  const authorizedPage = usePagination(authorized, `${from}|${to}`);
+
+  // El listado llego al tope: puede haber comprobantes del periodo que no estan ni
+  // en la pantalla ni en el CSV. Se avisa, porque ese CSV es el libro de IVA ventas.
+  const authorizedTruncado = authorized.length >= AUTHORIZED_INVOICES_LIMIT;
 
   const applyRange = (desde: string, hasta: string) => {
     const params = new URLSearchParams({ desde, hasta });
@@ -202,7 +215,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
             <p className="text-sm text-slate-400 text-center py-2">Sin facturas pendientes 🎉</p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {pending.map((p) => {
+              {pendingPage.rows.map((p) => {
                 const canEdit = p.status === "rejected" || p.status === "pending";
                 // Una consolidada no cuelga de una reserva: no hay DNI que corregir.
                 // El const local mantiene el narrowing dentro de los callbacks.
@@ -293,6 +306,16 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
               })}
             </ul>
           )}
+
+          <PaginationFooter
+            page={pendingPage.page}
+            totalPages={pendingPage.totalPages}
+            total={pendingPage.total}
+            firstIndex={pendingPage.firstIndex}
+            lastIndex={pendingPage.lastIndex}
+            noun="pendientes"
+            onPageChange={pendingPage.setPage}
+          />
         </div>
       </section>
 
@@ -311,7 +334,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {invoiceable.map((c) => (
+              {invoiceablePage.rows.map((c) => (
                 <li key={c.reservation_id} className="py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-bold text-slate-800 truncate">
@@ -335,6 +358,16 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
               ))}
             </ul>
           )}
+
+          <PaginationFooter
+            page={invoiceablePage.page}
+            totalPages={invoiceablePage.totalPages}
+            total={invoiceablePage.total}
+            firstIndex={invoiceablePage.firstIndex}
+            lastIndex={invoiceablePage.lastIndex}
+            noun="estadías"
+            onPageChange={invoiceablePage.setPage}
+          />
         </div>
       </section>
 
@@ -355,6 +388,13 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
               label="Exportar CSV"
             />
           </div>
+          {authorizedTruncado && (
+            <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Este período tiene más de {AUTHORIZED_INVOICES_LIMIT} comprobantes y se está mostrando
+              sólo esa cantidad. El CSV baja lo mismo que ves, así que para el libro de IVA ventas
+              partí el período en rangos más cortos.
+            </p>
+          )}
           <DateRangeFilter from={from} to={to} presets={presets} onChange={applyRange} />
         </div>
         <div className="p-5">
@@ -362,7 +402,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
             <p className="text-sm text-slate-400 text-center py-2">Todavía no hay facturas emitidas.</p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {authorized.map((a) => {
+              {authorizedPage.rows.map((a) => {
                 const esNc = isNotaCredito(a.cbte_tipo);
                 const anulada = a.anulada_at !== null;
                 return (
@@ -406,6 +446,16 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
               })}
             </ul>
           )}
+
+          <PaginationFooter
+            page={authorizedPage.page}
+            totalPages={authorizedPage.totalPages}
+            total={authorizedPage.total}
+            firstIndex={authorizedPage.firstIndex}
+            lastIndex={authorizedPage.lastIndex}
+            noun="comprobantes"
+            onPageChange={authorizedPage.setPage}
+          />
         </div>
       </section>
 
