@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { UpcomingGuest } from "@/lib/types";
 
@@ -5,10 +7,13 @@ export default function UpcomingGuestsTable({
   guests,
   searchQuery,
   timezone,
+  footer,
 }: {
   guests: UpcomingGuest[];
   searchQuery: string;
   timezone: string;
+  /** El pie de paginación, que la página arma y esto acomoda dentro de la tarjeta. */
+  footer?: ReactNode;
 }) {
   return (
     <div className="bg-white border text-left border-slate-200 rounded-xl overflow-hidden shadow-sm">
@@ -66,6 +71,8 @@ export default function UpcomingGuestsTable({
             : "No hay huéspedes por llegar."}
         </div>
       )}
+
+      {footer}
     </div>
   );
 }
