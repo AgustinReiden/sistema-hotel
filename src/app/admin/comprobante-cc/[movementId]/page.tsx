@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { getHotelSettings } from "@/lib/data";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatShiftCode } from "@/lib/format";
 import { formatHotelDateTime, formatHotelDate } from "@/lib/time";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
 
@@ -32,7 +32,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
     .from("cuenta_corriente_movimientos")
     .select(
       `
-      id, amount, created_at, tipo,
+      id, amount, created_at, tipo, remito_numero,
       associated_client:associated_clients ( display_name, document_id ),
       guest:guests ( full_name, document_id ),
       reservation:reservations ( client_name, check_in_target, check_out_target, rooms ( room_number ) )
@@ -45,6 +45,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
 
   const raw = data as {
     id: string;
+    remito_numero: number | null;
     amount: number | string;
     created_at: string;
     tipo: string;
@@ -80,7 +81,11 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
         <p className="sub">CARGO A CUENTA CORRIENTE</p>
         <p className="row">
           <span>Nro:</span>
-          <span>{raw.id.slice(0, 8)}</span>
+          {/* Correlativo del comprobante (mig 106). El fallback al pedazo de UUID
+              existe por si se lee una fila sin numero, no como camino normal. */}
+          <span>
+            {raw.remito_numero !== null ? formatShiftCode(raw.remito_numero) : raw.id.slice(0, 8)}
+          </span>
         </p>
         <p className="row">
           <span>Fecha:</span>
