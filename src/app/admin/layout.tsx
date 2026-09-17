@@ -82,7 +82,7 @@ export default async function AdminLayout({
         // el panel. h-dvh y no h-screen porque 100vh mide el viewport con la barra de URL
         // retraída y taparía el pie del sidebar; md:min-h-0 es obligatorio porque si sobrevive
         // el min-h-screen, cuando 100vh > 100dvh gana el min-height y vuelve el problema.
-        <div data-admin-shell className="min-h-screen md:min-h-0 md:h-dvh bg-slate-50 flex flex-col md:flex-row md:overflow-hidden">
+        <div data-admin-shell className="h-dvh bg-slate-50 flex flex-col md:flex-row overflow-hidden">
             {role === "receptionist" && <IdleLogout />}
             <MobileTopBar
                 role={role}
@@ -103,14 +103,13 @@ export default async function AdminLayout({
                     mediría h-full + el alto del banner y aparecería una segunda scrollbar
                     inútil cada vez que hay un turno abierto hace rato. Es flex-col porque
                     varias páginas devuelven un fragmento (<header shrink-0> + <div flex-1
-                    overflow-auto>) y dependen de que el padre sea columna flex. Todo con
-                    prefijo md: a propósito: abajo de 768px sigue scrolleando la ventana y
-                    no un contenedor propio. Eso se mantiene aposta: el shell de alto fijo
-                    en el celular pelea con el teclado virtual y con la barra de URL. Lo
-                    que cambió es el menú, que ya no se apila arriba del contenido.
-                    El pb-20 es para que la barra inferior fija no tape el final de la
-                    página; print:pb-0 porque en la comandera esa barra no existe. */}
-                <div data-admin-scroll className="flex-1 min-h-0 flex flex-col pb-20 md:pb-0 print:pb-0 md:overflow-y-auto">
+                    overflow-auto>) y dependen de que el padre sea columna flex.
+                    Vale para TODOS los tamaños, también el celular: mientras ahí scrolleaba
+                    la ventana, la barra de arriba y la de abajo se movían de lugar al
+                    scrollear, porque en iOS la barra de URL se contrae, el viewport cambia
+                    de alto y todo lo sticky/fixed se reacomoda. Con el alto fijo acá, esas
+                    dos barras dejan de ser fijas: son el marco, y el marco no scrollea. */}
+                <div data-admin-scroll className="flex-1 min-h-0 flex flex-col overflow-y-auto">
                     {children}
                 </div>
             </main>

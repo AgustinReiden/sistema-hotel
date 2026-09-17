@@ -91,7 +91,7 @@ export default async function ControlFacturacionPage({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <header className="h-auto bg-white border-b border-slate-200 px-8 py-4 shrink-0">
+      <header className="h-auto bg-white border-b border-slate-200 px-4 md:px-6 py-3 shrink-0">
         <div className="flex items-center space-x-3">
           <div className="p-2 bg-emerald-100 rounded-lg">
             <ClipboardCheck size={20} className="text-emerald-600" />
@@ -105,8 +105,10 @@ export default async function ControlFacturacionPage({
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-4 md:p-8">
-        <div className="max-w-6xl mx-auto">
+      {/* Sin max-w-6xl: son diez columnas y en un monitor de recepción la caja de
+          1152px las mandaba a scroll horizontal aunque sobrara pantalla. */}
+      <div className="flex-1 overflow-auto p-3 md:p-5">
+        <div className="max-w-[1600px] mx-auto">
           <ControlClient
             rows={rows}
             accounts={accounts}

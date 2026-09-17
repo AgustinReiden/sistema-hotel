@@ -140,6 +140,59 @@ export const BILLING_ESTADO_LABEL: Record<BillingControlEstado, string> = {
   falta: "FALTA FACTURAR",
 };
 
+/**
+ * Los DOS grupos con los que se mira el control: o falta hacer algo, o no.
+ *
+ * Los siete estados finos siguen existiendo y siguen yendo enteros al CSV del
+ * contador — son los que explican POR QUÉ una estadía está donde está. Pero como
+ * filtro no servían: siete opciones para contestar "¿qué me falta facturar?"
+ * obligan a barrer una por una para saber si quedó algo suelto. El matiz no se
+ * pierde, baja a una etiqueta al lado del estado (BILLING_ESTADO_MATIZ).
+ */
+export type BillingGrupo = "pendiente" | "facturado";
+
+export const BILLING_GRUPO_LABEL: Record<BillingGrupo, string> = {
+  pendiente: "Pendiente de facturación",
+  facturado: "Facturado",
+};
+
+/**
+ * `no_corresponde` cae en "facturado" porque el grupo responde "¿queda algo por
+ * hacer?", y ahí no queda nada: el huésped no quiso comprobante y el cobro no fue
+ * bancario. No se la etiqueta como facturada en ningún lado — su chip dice "No
+ * corresponde", que es la verdad; el grupo sólo decide de qué lado del filtro cae.
+ */
+export const BILLING_GRUPO_POR_ESTADO: Record<BillingControlEstado, BillingGrupo> = {
+  falta: "pendiente",
+  pendiente_consolidada: "pendiente",
+  en_proceso: "pendiente",
+  facturado: "facturado",
+  facturado_consolidado: "facturado",
+  facturado_externo: "facturado",
+  no_corresponde: "facturado",
+};
+
+export function billingGrupo(estado: BillingControlEstado): BillingGrupo {
+  return BILLING_GRUPO_POR_ESTADO[estado];
+}
+
+/**
+ * La aclaración que va al lado del chip de estado. null = el chip solo ya lo dice
+ * todo (una estadía facturada y punto, o una que falta facturar y punto).
+ *
+ * `no_corresponde` no lleva matiz porque no se muestra como "Facturado": tiene
+ * chip propio en la pantalla.
+ */
+export const BILLING_ESTADO_MATIZ: Record<BillingControlEstado, string | null> = {
+  falta: null,
+  pendiente_consolidada: "espera consolidada",
+  en_proceso: "en ARCA",
+  facturado: null,
+  facturado_consolidado: "consolidada",
+  facturado_externo: "por fuera",
+  no_corresponde: null,
+};
+
 /** Cómo cerró la estadía. Mismo criterio: compartido entre pantalla y CSV. */
 export const BILLING_CIERRE_LABEL: Record<BillingControlCierre, string> = {
   caja: "Caja",

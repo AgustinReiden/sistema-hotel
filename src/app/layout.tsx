@@ -24,7 +24,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body className={`${dmSans.variable} ${montserrat.variable} font-sans bg-slate-50 text-slate-900 min-h-screen antialiased selection:bg-brand-500 selection:text-white`}>
+      {/* min-h-dvh y no min-h-screen: en el celular 100vh mide el viewport con la barra de
+          URL retraída, así que el body quedaba más alto que lo visible y la ventana
+          scrolleaba unos px de más aunque el contenido entrara. Eso movía de lugar al
+          marco del panel. */}
+      <body className={`${dmSans.variable} ${montserrat.variable} font-sans bg-slate-50 text-slate-900 min-h-dvh antialiased selection:bg-brand-500 selection:text-white`}>
         {children}
         <Toaster position="top-right" richColors />
       </body>
