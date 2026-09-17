@@ -572,15 +572,19 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 </button>
               )}
             </div>
-            <div className="pt-1 flex">
-              <button
-                onClick={onCancelReservation}
-                disabled={isPending}
-                className="w-full py-2.5 text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors mt-1 text-center"
-              >
-                Cancelar Reserva
-              </button>
-            </div>
+            {/* Cancelar borra plata y libera la habitación de una: solo admin (mig 102).
+                Recepción, si hay que cancelar, avisa. */}
+            {isAdmin && (
+              <div className="pt-1 flex">
+                <button
+                  onClick={onCancelReservation}
+                  disabled={isPending}
+                  className="w-full py-2.5 text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors mt-1 text-center"
+                >
+                  Cancelar Reserva
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -640,13 +644,16 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 >
                   {passengerPending ? "Hacer Check-In" : "Hacer Check-In Automático"}
                 </button>
-                <button
-                  onClick={onCancelReservation}
-                  disabled={isPending}
-                  className="w-full py-2.5 text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors text-center"
-                >
-                  Cancelar Reserva
-                </button>
+                {/* Idem: la llegada confirmada la cancela el admin (mig 102). */}
+                {isAdmin && (
+                  <button
+                    onClick={onCancelReservation}
+                    disabled={isPending}
+                    className="w-full py-2.5 text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors text-center"
+                  >
+                    Cancelar Reserva
+                  </button>
+                )}
               </>
             ) : (
               <>

@@ -62,6 +62,7 @@ export default async function AdminLayout({
                           }
                 }
                 creditCharged={summary?.creditCharged ?? 0}
+                creditCharges={summary?.creditCharges ?? []}
                 checkoutsCount={summary?.checkoutsCount ?? 0}
             />
         );

@@ -161,7 +161,7 @@ export default function CalendarClient({
     [daysCount, startDateKey]
   );
   const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
-  const canCancel = role === "admin" || role === "receptionist";
+  const isStaff = role === "admin" || role === "receptionist";
   const isAdmin = role === "admin";
   // Hoy según el servidor (nowIso), no el reloj de la PC de recepción.
   const todayKey = hotelDateKey(nowIso, timezone);
@@ -263,19 +263,26 @@ export default function CalendarClient({
           ? "La habitación está fuera de servicio por mantenimiento."
           : null;
   const canCheckInSelected =
-    canCancel && selectedIsPendingArrival && selectedRoomBlockReason === null;
+    isStaff && selectedIsPendingArrival && selectedRoomBlockReason === null;
+  // Cancelar una reserva ya tomada es solo del admin (mig 102): borra plata y libera la
+  // habitación sin vuelta atrás. A recepción le queda el rechazo de una solicitud todavía
+  // pendiente, que es lo mismo que hace en /admin/solicitudes.
+  //
+  // Y ninguno de los dos cancela una estadía terminada: ya se cobró y puede estar
+  // facturada. Ese caso antes no existía porque las checked_out ni llegaban al calendario;
+  // ahora sí, porque la grilla es también el histórico.
+  const canCancelSelected =
+    selectedReservation != null &&
+    selectedReservation.status !== "checked_out" &&
+    (isAdmin || (isStaff && selectedReservation.status === "pending"));
   // Editar desde el calendario: recepción o admin ANTES del check-in (pendiente/confirmada);
   // tras el check-in solo el admin (override). Las finalizadas ahora SÍ llegan al calendario
   // (son el histórico), y quedan afuera de los dos casos: se miran, no se tocan.
   const canEditSelected =
     selectedReservation != null &&
-    ((canCancel &&
+    ((isStaff &&
       (selectedReservation.status === "pending" || selectedReservation.status === "confirmed")) ||
       (isAdmin && selectedReservation.status === "checked_in"));
-  // Una estadía terminada no se "cancela": ya se cobró y puede estar facturada. Antes no
-  // hacía falta mirar el estado porque las checked_out ni llegaban a esta pantalla.
-  const canCancelSelected =
-    canCancel && selectedReservation != null && selectedReservation.status !== "checked_out";
   const selectedIsFinished = selectedReservation?.status === "checked_out";
 
   return (
