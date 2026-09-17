@@ -1,4 +1,4 @@
--- Migration 102: la consolidada puede salir impresa como UN SOLO CONCEPTO.
+-- Migration 103: la consolidada puede salir impresa como UN SOLO CONCEPTO.
 --
 -- QUE PIDE EL CLIENTE: hay empresas que no quieren que en la factura figure quien
 -- durmio donde. Hoy el comprobante consolidado imprime una linea por estadia
@@ -40,7 +40,14 @@
 -- El cuerpo de la funcion es el de la mig 93 con el parametro nuevo y nada mas
 -- (verificado contra PROD: el cuerpo vivo y el de la mig 93 son el mismo).
 --
--- Aplicar a PROD por secciones via select public.exec_ddl($mig102$ ... $mig102$) SIN
+-- RENUMERADA DE 102 A 103. Nacio como 102 en su rama, pero mientras tanto se
+-- aplico a PROD otra 102 (102_cancelar_reserva_solo_admin.sql). Dos archivos con el
+-- mismo numero se pisan en la cabeza de cualquiera que mire el registro, y el numero
+-- duplicado fue justamente lo que hizo que esta migracion se mergeara a main sin
+-- aplicarse: la consolidada quedo rota en PROD (el front mandaba 10 parametros a una
+-- funcion de 9). El numero sale de applied_migrations, no del orden de las ramas.
+--
+-- Aplicar a PROD por secciones via select public.exec_ddl($mig103$ ... $mig103$) SIN
 -- ; final y SIN BEGIN/COMMIT. Requiere la 93 y la 98 aplicadas.
 -- OJO: el DROP+CREATE de rpc_create_consolidated_invoice_draft va en UNA SOLA
 -- seccion, como avisa la mig 93: dos overloads conviviendo dejarian a PostgREST
@@ -388,7 +395,7 @@ GRANT EXECUTE ON FUNCTION public.rpc_create_consolidated_invoice_draft(TEXT, UUI
 DO $$
 BEGIN
   IF to_regprocedure('public.record_migration(text, text)') IS NOT NULL THEN
-    PERFORM public.record_migration('102_consolidada_concepto_unico.sql');
+    PERFORM public.record_migration('103_consolidada_concepto_unico.sql');
   END IF;
 END $$;
 
