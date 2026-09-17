@@ -195,6 +195,10 @@ describe("ConsolidadaClient", () => {
     renderClient();
     await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
 
+    // La no facturable ni siquiera se pinta en "Pendientes": para el tramo hay
+    // que verla en pantalla, así que se pasa a "Todas".
+    fireEvent.click(screen.getByRole("button", { name: "Todas" }));
+
     // Arrancar de cero: por defecto viene todo lo pendiente tildado.
     fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
     expect(filaCheckbox("1")).not.toBeChecked();
@@ -308,6 +312,95 @@ describe("ConsolidadaClient", () => {
     // vacío: con el botón deshabilitado, el toast del motivo ya no se dispara.
     fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "20111111113" } });
     expect(within(barra).getByText(/Falta: CUIT válido y domicilio/)).toBeInTheDocument();
+  });
+
+  describe("filtro de estado y paginación de la lista", () => {
+    it("abre mostrando sólo lo pendiente de facturar", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({
+          success: true,
+          data: [makeRow("r1", "1"), makeRow("r2", "2", { facturable: false })],
+        })
+      );
+      renderClient();
+
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+      expect(screen.getByRole("button", { name: "Pendientes de facturar" })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      );
+      // La ya facturada existe en la cuenta pero no se pinta en "Pendientes".
+      expect(screen.queryByLabelText("Incluir estadía de habitación 2")).not.toBeInTheDocument();
+    });
+
+    it("una estadía ya facturada aparece recién al poner «Todas»", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({
+          success: true,
+          data: [makeRow("r1", "1"), makeRow("r2", "2", { facturable: false })],
+        })
+      );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+      expect(screen.queryByLabelText("Incluir estadía de habitación 2")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Todas" }));
+
+      const yaFacturada = screen.getByLabelText("Incluir estadía de habitación 2");
+      expect(yaFacturada).toBeInTheDocument();
+      expect(yaFacturada).toBeDisabled();
+      expect(yaFacturada).not.toBeChecked();
+    });
+
+    it("con «Pendientes» y cero pendientes, explica que ya está todo facturado y ofrece pasar a «Todas»", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({
+          success: true,
+          data: [makeRow("r1", "1", { facturable: false })],
+        })
+      );
+      renderClient();
+
+      await screen.findByText(/ya están cubiertas/);
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ver todas" }));
+
+      expect(screen.getByLabelText("Incluir estadía de habitación 1")).toBeInTheDocument();
+    });
+
+    it("una estadía tildada en la página 1 sigue tildada y se emite estando parado en la página 2", async () => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      const rows25 = Array.from({ length: 25 }, (_, i) =>
+        makeRow(`r${i + 1}`, `${i + 1}`, { amount: 1000 })
+      );
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({ success: true, data: rows25 })
+      );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+
+      // Arranca de cero: por defecto viene todo lo pendiente tildado, y con las
+      // 25 tildadas el aviso de "fuera de página" no diría nada sobre esta.
+      fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
+      fireEvent.click(fila("1"));
+
+      fireEvent.click(screen.getByRole("button", { name: /Siguiente/ }));
+
+      // La fila 1 quedó en la página anterior: no está a la vista, pero el
+      // aviso dice que sigue tildada.
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      expect(screen.getByText(/1 estadía tildada en otras páginas/)).toBeInTheDocument();
+
+      const barra = screen.getByRole("region", { name: BARRA });
+      expect(barra.textContent).toContain("1 estadía");
+
+      fireEvent.click(screen.getByRole("button", { name: /Emitir factura consolidada/ }));
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
+      expect(payloadEmitido().detalle).toHaveLength(1);
+      expect(payloadEmitido().detalle?.[0].reservationId).toBe("r1");
+    });
   });
 
   describe("forma del detalle impreso (mig 102)", () => {
