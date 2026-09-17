@@ -42,6 +42,11 @@ function makeRow(
     cbte_nro: null,
     cbte_fch: null,
     external_ref: null,
+    // Estado de cobro (mig 109). Sin factura viva no hay nada que cobrar, y
+    // `sin_facturar` sale exactamente cuando `estado` da `pendiente`.
+    imp_total: null,
+    imputado: null,
+    cobro_estado: facturable ? "sin_facturar" : "facturado_externo",
   };
 }
 

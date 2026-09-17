@@ -35,6 +35,13 @@ const movements: CtaCteMovimiento[] = [
     payment_method: null,
     notes: null,
     created_at: "2020-01-05T12:00:00Z",
+    // Un cargo nunca lleva retenciones (la base lo fuerza a 0, mig 109) y se numera
+    // como remito; el recibo de cobranza es del pago.
+    retencion_ganancias: 0,
+    retencion_iibb: 0,
+    retencion_certificado: null,
+    remito_numero: 17,
+    recibo_cc_numero: null,
   },
   {
     id: "m2",
@@ -44,6 +51,11 @@ const movements: CtaCteMovimiento[] = [
     payment_method: "cash",
     notes: null,
     created_at: new Date().toISOString(),
+    retencion_ganancias: 0,
+    retencion_iibb: 0,
+    retencion_certificado: null,
+    remito_numero: null,
+    recibo_cc_numero: 1,
   },
 ];
 

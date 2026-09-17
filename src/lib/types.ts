@@ -309,19 +309,100 @@ export type CtaCteAccount = {
 export type CtaCteMovimiento = {
   id: string;
   tipo: "cargo" | "pago";
+  /**
+   * Lo que el movimiento mueve de deuda. En un pago con retenciones incluye lo
+   * retenido: es lo que CANCELA, no lo que entró a la caja (mig 109).
+   */
   amount: number;
   reservation_id: string | null;
   payment_method: string | null;
   notes: string | null;
   created_at: string;
+  /** Sólo en pagos; en los cargos la base los fuerza a 0 (mig 109). */
+  retencion_ganancias: number;
+  retencion_iibb: number;
+  retencion_certificado: string | null;
+  /** Correlativo del comprobante: remito en los cargos (mig 106)... */
+  remito_numero: number | null;
+  /** ...y recibo de cobranza en los pagos (mig 109). Uno de los dos es null. */
+  recibo_cc_numero: number | null;
 };
 
 export type RegisterAccountPaymentPayload = {
   kind: CtaCteClientKind;
   clientId: string;
+  /** Lo que cancela de deuda: efectivo MÁS retenciones. */
   amount: number;
   method?: string;
   notes?: string;
+  /**
+   * Retenciones que el cliente practicó (mig 109). Van DENTRO de `amount`: el neto
+   * que entró es `amount` menos estas dos.
+   */
+  retencionGanancias?: number;
+  retencionIibb?: number;
+  retencionCertificado?: string;
+  /** A qué facturas se imputa el pago. Puede ir vacío: un pago a cuenta sin imputar. */
+  imputaciones?: { invoiceId: string; amount: number }[];
+};
+
+/** Una factura a la que se imputó un pago, tal como la devuelve el jsonb del RPC. */
+export type CcPagoImputacion = {
+  invoice_id: string;
+  cbte_tipo: number;
+  pto_vta: number;
+  cbte_nro: number | null;
+  cbte_fch: string | null; // date
+  kind: InvoiceKind;
+  /**
+   * La factura se anuló DESPUÉS de este pago. Se informa, no se esconde: el recibo
+   * tiene que seguir mostrando lo mismo que el día que se imprimió.
+   */
+  anulada: boolean;
+  imp_total: number;
+  /** Lo que este pago le imputó a esta factura. */
+  imputado: number;
+};
+
+/** Un pago a cuenta de un cliente, con su desglose y su imputación (mig 109). */
+export type CcClientPaymentRow = {
+  movimiento_id: string;
+  created_at: string;
+  /** Lo que cancela de deuda = neto recibido + retenciones. */
+  amount: number;
+  payment_method: string | null;
+  retencion_ganancias: number;
+  retencion_iibb: number;
+  retencion_certificado: string | null;
+  /** `amount` menos las retenciones: la plata que entró de verdad. */
+  neto_recibido: number;
+  /** Lo del pago que todavía no se aplicó a ninguna factura. */
+  sin_imputar: number;
+  recibo_cc_numero: number | null;
+  notes: string | null;
+  imputaciones: CcPagoImputacion[];
+};
+
+/** Todo lo que necesita el recibo impreso de un pago a cuenta (mig 109). */
+export type CcPaymentReceipt = {
+  movimiento_id: string;
+  recibo_cc_numero: number | null;
+  created_at: string;
+  client_name: string;
+  client_document: string | null;
+  amount: number;
+  payment_method: string | null;
+  retencion_ganancias: number;
+  retencion_iibb: number;
+  retencion_certificado: string | null;
+  neto_recibido: number;
+  notes: string | null;
+  imputaciones: CcPagoImputacion[];
+  /**
+   * Saldo de la cuenta DESPUÉS de este pago, reconstruido a la fecha del movimiento
+   * y no "el de hoy": un recibo tiene que reimprimirse idéntico dentro de tres años.
+   */
+  saldo_despues: number;
 };
 
 /** Resultado de buscar un huésped existente por DNI (anti-duplicados). */
@@ -944,7 +1025,33 @@ export type CcAccountStayRow = {
   cbte_nro: number | null;
   cbte_fch: string | null; // date
   external_ref: string | null;
+  /**
+   * Total de la factura que cubre la estadía, si hay una autorizada y no anulada
+   * (mig 109). Null si no hay nada cobrable: una rechazada no aporta un total que
+   * haga parecer que hay algo por cobrar.
+   */
+  imp_total: number | null;
+  /** Σ imputado a esa factura. Null cuando `imp_total` es null. */
+  imputado: number | null;
+  cobro_estado: CcCobroEstado;
 };
+
+/**
+ * Estado de COBRO de una estadía de cuenta corriente (mig 109). Contesta otra
+ * pregunta que `estado`, que es fiscal, y nunca lo contradice: `sin_facturar` sale
+ * exactamente cuando `estado` da `pendiente`.
+ *
+ * LA UNIDAD DE COBRO ES LA FACTURA, NO LA ESTADÍA: una consolidada de 10 estadías
+ * imputada al 50% deja las 10 en `facturada_impaga`, porque el cliente paga contra el
+ * comprobante y no hay forma de saber qué mitad cubrió. Para eso están `imputado` e
+ * `imp_total`: dejan mostrar "impaga (40.000 de 100.000)" sin inventar un estado.
+ */
+export type CcCobroEstado =
+  | "sin_facturar"
+  | "facturada_impaga"
+  | "facturada_pagada"
+  /** Facturada fuera del sistema (mig 82): no hay comprobante nuestro que cobrar. */
+  | "facturado_externo";
 
 /**
  * Estado fiscal de una estadía en el listado de control.
