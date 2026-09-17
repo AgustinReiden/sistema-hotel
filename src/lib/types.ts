@@ -537,6 +537,15 @@ export type DiscountedClient = {
 };
 
 // Check-in directo (walk-in): mismo fork que el alta de reserva, persona o empresa.
+/**
+ * Entrada retroactiva, como clave de día del hotel (YYYY-MM-DD). Sólo para
+ * regularizar un uso que ya pasó: la mucama avisa a la mañana por una pieza que se
+ * usó anoche. Es una fecha y no un timestamp porque la hora de entrada y la zona
+ * las resuelve la base (mig 104), que también lo acota a 7 días y lo rechaza en el
+ * medio día.
+ */
+type WalkInBackdate = { checkInDate?: string };
+
 export type AssignWalkInPayload =
   | ({
       mode: "person";
@@ -548,7 +557,8 @@ export type AssignWalkInPayload =
       nights: number;
       guestCount?: number;
       stayType?: WalkInStayType;
-    } & GuestRegistryInput)
+    } & GuestRegistryInput &
+      WalkInBackdate)
   | ({
       mode: "company";
       roomId: number;
@@ -559,7 +569,24 @@ export type AssignWalkInPayload =
       passengerDni: string;
       guestCount?: number;
       stayType?: WalkInStayType;
-    } & GuestRegistryInput);
+    } & GuestRegistryInput &
+      WalkInBackdate);
+
+/**
+ * Una alerta de "la pieza figura ocupada y no hay estadía cargada", como la ve
+ * recepción. Viene de `rpc_list_room_occupancy_alerts` (mig 104), que es la única
+ * ventana de staff sobre `admin_alerts`: la tabla es admin-only.
+ */
+export type RoomOccupancyAlert = {
+  alert_id: number;
+  room_id: number | null;
+  room_number: string | null;
+  message: string;
+  created_at: string;
+  /** Cuándo la mucama la marcó: es la fecha que se precarga en la estadía. */
+  detected_at: string;
+  reported_by_name: string | null;
+};
 
 /**
  * Cómo se salda una estadía. OJO: `cuenta_corriente` es una forma de CERRAR el

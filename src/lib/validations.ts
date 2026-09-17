@@ -155,6 +155,16 @@ const walkInBaseSchema = {
     .max(30, "Maximo 30 noches por reserva."),
   guestCount: guestCountSchema,
   stayType: z.enum(["night", "half_day"]).optional(),
+  // Entrada retroactiva (YYYY-MM-DD), para regularizar una pieza que se usó y no se
+  // cargó. Va una FECHA y no un timestamp: la hora y la zona las pone la base.
+  // OJO: sin este campo acá, zod lo descartaría en silencio (los objetos strippean
+  // lo que no declaran) y la estadía se cargaría con la fecha de hoy igual.
+  // Las reglas de negocio (no futura, hasta 7 días atrás, no en medio día) las
+  // vuelve a validar la base en la mig 104; esto sólo valida la forma.
+  checkInDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha de entrada retroactiva es invalida.")
+    .optional(),
   ...guestRegistrySchemaFields,
 };
 

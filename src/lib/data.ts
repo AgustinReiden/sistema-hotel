@@ -85,6 +85,7 @@ import type {
   RoomCategoryUsage,
   CleaningLogResult,
   Room,
+  RoomOccupancyAlert,
   ShiftCreditChargeRow,
   ShiftPaymentRow,
   TodayCleaning,
@@ -1394,6 +1395,9 @@ export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> 
   if (input.guestDocType) params.p_guest_doc_type = input.guestDocType;
   if (input.guestBirthDate) params.p_guest_birth_date = input.guestBirthDate;
   if (input.guestVehicle) params.p_guest_vehicle = input.guestVehicle;
+  // Sólo viaja cuando se está regularizando un uso pasado. En el walk-in normal ni
+  // se manda, así que el RPC cae en su default (now()) y nada cambia.
+  if (input.checkInDate) params.p_check_in_date = input.checkInDate;
 
   const { data, error } = await supabase.rpc("rpc_staff_assign_walk_in", params);
 
@@ -3385,6 +3389,35 @@ export async function resolveAdminAlert(alertId: number, notes?: string): Promis
   const supabase = await createClient();
   const { error } = await supabase.rpc("rpc_resolve_admin_alert", {
     p_alert_id: alertId,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Las alertas de "pieza ocupada sin estadía" que siguen abiertas, para RECEPCIÓN.
+ *
+ * No usa `listAdminAlerts`: esa RPC es admin-only porque `admin_alerts` tiene RLS
+ * de admin. Ésta es una ventana `app_is_staff()` que expone un solo kind (mig 104),
+ * con el mismo criterio que `rpc_close_shift_blockers`.
+ */
+export async function listRoomOccupancyAlerts(): Promise<RoomOccupancyAlert[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_room_occupancy_alerts");
+  if (error) throw error;
+  return (data ?? []) as RoomOccupancyAlert[];
+}
+
+/** Cierra el aviso apuntando a la estadía que se cargó. Idempotente (mig 104). */
+export async function regularizeOccupiedRoom(
+  alertId: number,
+  reservationId: string,
+  notes?: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_regularize_occupied_room", {
+    p_alert_id: alertId,
+    p_reservation_id: reservationId,
     p_notes: notes ?? null,
   });
   if (error) throw error;
