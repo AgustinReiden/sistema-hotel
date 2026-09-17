@@ -7,6 +7,8 @@ import { toast } from "sonner";
 
 import GuestModal from "./GuestModal";
 import { deleteGuestAction } from "./actions";
+import PaginationFooter from "../PaginationFooter";
+import { usePagination } from "../usePagination";
 import { formatHotelDate } from "@/lib/time";
 import type { GuestDirectoryEntry } from "@/lib/types";
 
@@ -43,6 +45,10 @@ export default function GuestDirectoryTable({
     setDeletingId(null);
   };
 
+  // La busqueda se resuelve en el server y llega ya filtrada: `searchQuery` alcanza
+  // como huella para volver a la pagina 1 cuando cambia.
+  const { rows: pagina, setPage, ...paginacion } = usePagination(guests, searchQuery);
+
   return (
     <div className="bg-white border text-left border-slate-200 rounded-xl overflow-hidden shadow-sm">
       <table className="w-full text-left border-collapse">
@@ -58,7 +64,7 @@ export default function GuestDirectoryTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {guests.map((guest) => (
+          {pagina.map((guest) => (
             <tr key={guest.key} className="hover:bg-slate-50/50 transition-colors">
               <td className="px-6 py-4">
                 <div className="flex items-center space-x-3">
@@ -141,6 +147,8 @@ export default function GuestDirectoryTable({
           ))}
         </tbody>
       </table>
+
+      <PaginationFooter {...paginacion} noun="huéspedes" onPageChange={setPage} />
 
       {guests.length === 0 && (
         <div className="p-8 text-center text-slate-500">

@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "./supabase/server";
 import { isValidCuit } from "./arca/amounts";
+import { AUTHORIZED_INVOICES_LIMIT } from "./billing";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
 import { localToISO } from "./format";
 import { addDaysToDateKey, DEFAULT_TZ, hotelDateKey } from "./time";
@@ -3779,7 +3780,11 @@ export async function listInvoiceableCheckouts(): Promise<InvoiceableCheckoutRow
 /**
  * Comprobantes autorizados (para reimprimir/anular y para el libro de IVA ventas
  * de /admin/fiscal). Filtra por `cbte_fch` (fecha del comprobante, no de creación
- * del registro) cuando se pasa un rango; sin rango trae los últimos 200.
+ * del registro) cuando se pasa un rango.
+ *
+ * El tope (AUTHORIZED_INVOICES_LIMIT) es compartido con la pantalla a propósito:
+ * cuando el listado lo alcanza, la pantalla lo dice. Recortar en silencio el listado
+ * que se exporta como libro de IVA ventas es el peor modo de falla de esta pantalla.
  */
 export async function listAuthorizedInvoices(from?: string, to?: string): Promise<AuthorizedInvoiceRow[]> {
   const supabase = await createClient();
@@ -3791,7 +3796,9 @@ export async function listAuthorizedInvoices(from?: string, to?: string): Promis
     .eq("status", "authorized");
   if (from) query = query.gte("cbte_fch", from);
   if (to) query = query.lte("cbte_fch", to);
-  const { data, error } = await query.order("updated_at", { ascending: false }).limit(200);
+  const { data, error } = await query
+    .order("updated_at", { ascending: false })
+    .limit(AUTHORIZED_INVOICES_LIMIT);
   if (error) throw error;
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     invoice_id: String(r.id),

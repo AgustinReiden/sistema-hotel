@@ -9,6 +9,8 @@ import { toast } from "sonner";
 import { loadCtaCteAccountAction, registerAccountPaymentAction } from "./actions";
 import DateRangeFilter from "../DateRangeFilter";
 import DownloadCsvButton from "../DownloadCsvButton";
+import PaginationFooter from "../PaginationFooter";
+import { usePagination } from "../usePagination";
 import { buildCsv, csvField, formatAmountAr, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets, formatKey } from "@/lib/date-range";
 import { hotelDateKey } from "@/lib/time";
@@ -60,6 +62,10 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
     );
   }, [accounts, query]);
 
+  // El CSV y los totales del header siguen leyendo `filtered` entero; esto decide
+  // nada mas que filas se pintan.
+  const { rows: pagina, setPage, ...paginacion } = usePagination(filtered, query);
+
   return (
     <>
       <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
@@ -92,7 +98,7 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filtered.map((a) => (
+            {pagina.map((a) => (
               <tr key={`${a.kind}-${a.id}`} className="hover:bg-slate-50/60 transition-colors">
                 <td className="px-6 py-4 font-medium text-slate-900">{a.name}</td>
                 <td className="px-6 py-4">
@@ -142,6 +148,8 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
           </tbody>
         </table>
       </div>
+
+      <PaginationFooter {...paginacion} noun="cuentas" onPageChange={setPage} />
 
       {filtered.length === 0 && (
         <div className="p-8 text-center text-slate-500">
@@ -379,6 +387,13 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
     return { count: filteredMovements.length, cargos, pagos };
   }, [filteredMovements]);
 
+  // Las estadisticas del periodo y el CSV siguen sobre `filteredMovements` completo.
+  const {
+    rows: movimientosPagina,
+    setPage: setMovementsPage,
+    ...paginacionMovimientos
+  } = usePagination(filteredMovements, `${rangeFrom}|${rangeTo}`);
+
   const hasExcluded =
     (rangeFrom !== "" || rangeTo !== "") && filteredMovements.length < movements.length;
 
@@ -440,7 +455,7 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
             <p className="text-center text-slate-500 py-8">Sin movimientos en este período.</p>
           ) : (
             <div className="space-y-2">
-              {filteredMovements.map((m) => (
+              {movimientosPagina.map((m) => (
                 <div
                   key={m.id}
                   className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-4 py-2.5"
@@ -482,6 +497,12 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
                   </div>
                 </div>
               ))}
+
+              <PaginationFooter
+                {...paginacionMovimientos}
+                noun="movimientos"
+                onPageChange={setMovementsPage}
+              />
             </div>
           )}
         </div>

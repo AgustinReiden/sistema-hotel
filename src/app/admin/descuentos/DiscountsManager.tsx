@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import GuestSelector from "../GuestSelector";
 import AssociatedClientSelector from "../AssociatedClientSelector";
 import { updateCompanyDiscountAction, updateGuestDiscountAction } from "../actions";
+import PaginationFooter from "../PaginationFooter";
+import { usePagination } from "../usePagination";
 import type { AssociatedClient, DiscountedClient, GuestDirectoryEntry } from "@/lib/types";
 
 type Props = {
@@ -172,6 +174,8 @@ export default function DiscountsManager({ initialDiscounted, companies }: Props
   const [percent, setPercent] = useState("10");
   const [saving, setSaving] = useState(false);
 
+  const { rows: pagina, setPage, ...paginacion } = usePagination(initialDiscounted);
+
   const onGuestSelect = (entry: GuestDirectoryEntry) =>
     setGuest({ id: entry.id, name: entry.client_name, dni: entry.client_dni });
 
@@ -319,11 +323,14 @@ export default function DiscountsManager({ initialDiscounted, companies }: Props
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {initialDiscounted.map((row) => (
+            {pagina.map((row) => (
               <DiscountRow key={`${row.kind}-${row.id}`} row={row} />
             ))}
           </tbody>
         </table>
+
+        <PaginationFooter {...paginacion} noun="descuentos" onPageChange={setPage} />
+
         {initialDiscounted.length === 0 && (
           <div className="p-8 text-center text-slate-500">
             Todavía no hay descuentos asignados. Agregá uno arriba.
