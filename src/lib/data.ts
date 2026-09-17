@@ -61,6 +61,7 @@ import type {
   BillingControlRow,
   BillingPendingCounts,
   CcAccountStayRow,
+  ClientInvoiceRow,
   ConsolidatedInvoicePayload,
   FacturacionModo,
   InvoiceKind,
@@ -3983,6 +3984,42 @@ export async function listCcAccountStays(
     cbte_nro: r.cbte_nro === null || r.cbte_nro === undefined ? null : Number(r.cbte_nro),
     cbte_fch: (r.cbte_fch as string | null) ?? null,
     external_ref: (r.external_ref as string | null) ?? null,
+  }));
+}
+
+/**
+ * Comprobantes emitidos a un cliente de cuenta corriente (mig 108).
+ *
+ * El filtro por cliente lo resuelve la RPC, no acá: `invoices` no tiene columna de
+ * cliente y el vínculo va por dos caminos distintos según cómo nació la factura.
+ */
+export async function listClientInvoices(
+  kind: CtaCteClientKind,
+  clientId: string,
+  from?: string,
+  to?: string
+): Promise<ClientInvoiceRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_list_client_invoices", {
+    p_associated_client_id: kind === "company" ? clientId : null,
+    p_guest_id: kind === "guest" ? clientId : null,
+    p_from: from ?? null,
+    p_to: to ?? null,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    invoice_id: String(r.invoice_id),
+    kind: (r.kind as ClientInvoiceRow["kind"]) ?? "checkout",
+    status: (r.status as ClientInvoiceRow["status"]) ?? "pending",
+    cbte_tipo: Number(r.cbte_tipo) || 0,
+    pto_vta: Number(r.pto_vta) || 0,
+    cbte_nro: r.cbte_nro === null || r.cbte_nro === undefined ? null : Number(r.cbte_nro),
+    cbte_fch: (r.cbte_fch as string | null) ?? null,
+    imp_total: Number(r.imp_total) || 0,
+    anulada_at: (r.anulada_at as string | null) ?? null,
+    receptor_nombre: (r.receptor_nombre as string | null) ?? null,
+    estadias: Number(r.estadias) || 0,
+    created_at: String(r.created_at),
   }));
 }
 

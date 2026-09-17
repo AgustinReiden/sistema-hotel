@@ -2,10 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 
-import { getCtaCteMovements, registerAccountPayment } from "@/lib/data";
+import { getCtaCteMovements, listClientInvoices, registerAccountPayment } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
 import { assertAdmin } from "@/lib/server-auth";
-import type { ActionResult, CtaCteClientKind, CtaCteMovimiento } from "@/lib/types";
+import type {
+  ActionResult,
+  ClientInvoiceRow,
+  CtaCteClientKind,
+  CtaCteMovimiento,
+} from "@/lib/types";
 
 // El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
 const assertCuentasAdmin = () =>
@@ -21,6 +26,24 @@ export async function loadCtaCteAccountAction(
     return { success: true, data };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo cargar la cuenta.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/** Solapa "Facturas" de la ficha: los comprobantes emitidos a ese cliente (mig 108). */
+export async function loadClientInvoicesAction(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<ActionResult<ClientInvoiceRow[]>> {
+  try {
+    await assertCuentasAdmin();
+    if (!clientId) {
+      return { success: false, error: "Falta el cliente." };
+    }
+    const data = await listClientInvoices(kind, clientId);
+    return { success: true, data };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudieron cargar las facturas.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

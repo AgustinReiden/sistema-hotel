@@ -5,6 +5,8 @@ import { Building2, CreditCard, Loader2, Percent, X } from "lucide-react";
 
 import { loadAssociatedClientLedgerAction } from "./actions";
 import { loadCtaCteAccountAction } from "../cuentas/actions";
+import PaginationFooter from "../PaginationFooter";
+import { usePagination } from "../usePagination";
 import { formatHotelShortDate } from "@/lib/time";
 import type { AssociatedClient, AssociatedClientLedger } from "@/lib/types";
 
@@ -155,62 +157,88 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
               <h3 className="text-sm font-bold text-slate-700 mb-2">
                 Historial de estadías ({ledger.count})
               </h3>
-              {ledger.reservations.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-sm border border-dashed border-slate-200 rounded-xl">
-                  Esta empresa/convenio todavía no tiene estadías registradas.
-                </div>
-              ) : (
-                <div className="border border-slate-200 rounded-xl overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-3 py-2">Fecha</th>
-                        <th className="px-3 py-2">Hab.</th>
-                        <th className="px-3 py-2">Pasajero</th>
-                        <th className="px-3 py-2 text-right">Total</th>
-                        <th className="px-3 py-2 text-right">Pagado</th>
-                        <th className="px-3 py-2 text-right">Saldo</th>
-                        <th className="px-3 py-2">Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {ledger.reservations.map((r) => {
-                        const saldo = Math.max(0, r.total_price - r.paid_amount);
-                        const st = STATUS_LABEL[r.status] ?? STATUS_LABEL.checked_out;
-                        return (
-                          <tr key={r.id} className={r.status === "cancelled" ? "opacity-50" : ""}>
-                            <td className="px-3 py-2 whitespace-nowrap">
-                              {formatHotelShortDate(r.check_in_target)}
-                            </td>
-                            <td className="px-3 py-2">{r.room_number ?? "—"}</td>
-                            <td className="px-3 py-2 text-xs text-slate-600 max-w-[200px] truncate">
-                              {r.passenger ?? "—"}
-                            </td>
-                            <td className="px-3 py-2 text-right">${money(r.total_price)}</td>
-                            <td className="px-3 py-2 text-right text-emerald-600">${money(r.paid_amount)}</td>
-                            <td
-                              className={`px-3 py-2 text-right font-semibold ${
-                                saldo > 0 ? "text-red-600" : "text-slate-500"
-                              }`}
-                            >
-                              ${money(saldo)}
-                            </td>
-                            <td className="px-3 py-2">
-                              <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold border ${st.cls}`}>
-                                {st.label}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <HistorialEstadias reservations={ledger.reservations} />
             </>
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Historial de estadías de la empresa. Va paginado con las mismas piezas que el
+ * resto del panel: una empresa con convenio de años acumula cientos de estadías, y
+ * pintarlas todas hacía un scroll interminable dentro del modal.
+ *
+ * Subcomponente y no un bloque más arriba porque `usePagination` es un hook: acá
+ * puede llamarse siempre, en el mismo orden, sin depender de si el ledger cargó.
+ */
+function HistorialEstadias({
+  reservations,
+}: {
+  reservations: AssociatedClientLedger["reservations"];
+}) {
+  const { rows: pagina, setPage, ...paginacion } = usePagination(reservations);
+
+  if (reservations.length === 0) {
+    return (
+      <div className="p-8 text-center text-slate-500 text-sm border border-dashed border-slate-200 rounded-xl">
+        Esta empresa/convenio todavía no tiene estadías registradas.
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Fecha</th>
+              <th className="px-3 py-2">Hab.</th>
+              <th className="px-3 py-2">Pasajero</th>
+              <th className="px-3 py-2 text-right">Total</th>
+              <th className="px-3 py-2 text-right">Pagado</th>
+              <th className="px-3 py-2 text-right">Saldo</th>
+              <th className="px-3 py-2">Estado</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {pagina.map((r) => {
+              const saldo = Math.max(0, r.total_price - r.paid_amount);
+              const st = STATUS_LABEL[r.status] ?? STATUS_LABEL.checked_out;
+              return (
+                <tr key={r.id} className={r.status === "cancelled" ? "opacity-50" : ""}>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {formatHotelShortDate(r.check_in_target)}
+                  </td>
+                  <td className="px-3 py-2">{r.room_number ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600 max-w-[200px] truncate">
+                    {r.passenger ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">${money(r.total_price)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-600">${money(r.paid_amount)}</td>
+                  <td
+                    className={`px-3 py-2 text-right font-semibold ${
+                      saldo > 0 ? "text-red-600" : "text-slate-500"
+                    }`}
+                  >
+                    ${money(saldo)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold border ${st.cls}`}>
+                      {st.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <PaginationFooter {...paginacion} noun="estadías" onPageChange={setPage} />
     </div>
   );
 }
