@@ -34,7 +34,7 @@ import {
   type UpdateReservationInput,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import { assertAdmin, assertStaff } from "@/lib/server-auth";
+import { assertAdmin } from "@/lib/server-auth";
 import { notifyReservationWebhook } from "@/lib/webhook";
 import {
   buildCancellationMessage,
@@ -213,6 +213,12 @@ export async function handleAssignWalkIn(
  * Regulariza una pieza que figuraba ocupada sin estadía: carga el walk-in y cierra
  * el aviso apuntando a esa reserva.
  *
+ * SOLO ADMIN (mig 106). El recepcionista VE el aviso y ve en qué terminó, pero no
+ * decide si la pieza se cobra: cargar la estadía es elegir a nombre de quién, por
+ * cuántas noches y a qué tarifa, y sobre un uso que ya pasó y que nadie sabe de
+ * quién fue, esa no es una decisión del mostrador. Si el pasajero todavía está en
+ * la habitación no hace falta pasar por acá: es un walk-in normal desde la tarjeta.
+ *
  * SON DOS ESCRITURAS Y NO HAY TRANSACCIÓN QUE LAS ABRACE. Si la segunda falla, la
  * estadía YA quedó cargada: decir "no se pudo" sería mentira y llevaría a cargarla
  * de nuevo, duplicando la reserva. Por eso el éxito parcial se reporta como éxito,
@@ -224,7 +230,7 @@ export async function regularizeOccupiedRoomAction(input: {
   walkIn: AssignWalkInPayload;
 }): Promise<ActionResult<{ reservationId: string; alertPendiente: boolean }>> {
   try {
-    await assertStaff("Permisos insuficientes para cargar la estadia.");
+    await assertAdmin("Solo el administrador decide si esta pieza se cobra.");
     const validated = assignWalkInSchema.parse(input.walkIn);
     const reservationId = await assignWalkIn(validated);
 
