@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { findPendingArrival, isPendingArrival } from "@/lib/arrivals";
+import {
+  findPendingArrival,
+  isPendingArrival,
+  occupancyCheckInDateKey,
+} from "@/lib/arrivals";
 
 const TZ = "America/Argentina/Tucuman";
 
@@ -120,5 +124,22 @@ describe("findPendingArrival", () => {
 
     expect(findPendingArrival([futura], "2026-08-05T15:00:00Z", TZ)).toBeNull();
     expect(findPendingArrival([], "2026-08-05T15:00:00Z", TZ)).toBeNull();
+  });
+});
+
+describe("occupancyCheckInDateKey — desde cuándo se cobra una pieza usada sin cargar", () => {
+  it("toma el día ANTERIOR a la detección: la mucama ve el rastro de anoche", () => {
+    // 11:14 de Tucumán del 11/09, que es cuando caen las marcas reales en PROD.
+    expect(occupancyCheckInDateKey("2026-09-11T14:14:34Z", TZ)).toBe("2026-09-10");
+  });
+
+  it("resuelve el día en la zona del hotel, no en UTC", () => {
+    // 00:30 UTC del 12/09 todavía es el 11/09 a las 21:30 en Tucumán, así que la
+    // noche que se cobra es la del 10, no la del 11. Sin la zona, se erraba un día.
+    expect(occupancyCheckInDateKey("2026-09-12T00:30:00Z", TZ)).toBe("2026-09-10");
+  });
+
+  it("cruza bien el fin de mes", () => {
+    expect(occupancyCheckInDateKey("2026-09-01T14:00:00Z", TZ)).toBe("2026-08-31");
   });
 });

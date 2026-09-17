@@ -1,4 +1,4 @@
-import { hotelDateKey } from "./time";
+import { addDaysToDateKey, hotelDateKey } from "./time";
 
 // Llegadas pendientes: reservas confirmadas cuyo día de entrada ya llegó y que
 // todavía no tienen el check-in hecho.
@@ -68,4 +68,20 @@ export function findPendingArrival<T extends ArrivalCandidate>(
   }
 
   return best;
+}
+
+/**
+ * Desde qué día se cobra una pieza que limpieza encontró ocupada sin estadía cargada.
+ *
+ * ES EL DÍA ANTERIOR A LA DETECCIÓN, no el de la detección. Las mucamas recorren las
+ * piezas a la mañana (en PROD las marcas caen cerca de las 11), así que lo que
+ * encuentran es el rastro de LA NOCHE ANTERIOR. Cargarlo con la fecha de hoy correría
+ * la salida a mañana y el sistema creería que el pasajero sigue adentro, justo cuando
+ * la pieza ya está libre.
+ *
+ * Con el día anterior, una noche da salida hoy a la hora de check-out estándar: la
+ * estadía queda vencida y pide el check-out, que es lo que efectivamente hay que hacer.
+ */
+export function occupancyCheckInDateKey(detectedAt: string, timezone: string): string {
+  return addDaysToDateKey(hotelDateKey(detectedAt, timezone), -1);
 }

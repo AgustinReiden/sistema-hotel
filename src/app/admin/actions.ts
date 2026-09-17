@@ -23,6 +23,7 @@ import {
   getReservationWithRoom,
   getRoomsAvailableForReservation,
   markRoomAsAvailable,
+  regularizeOccupiedRoom,
   searchCompanyPassengers,
   setCompanyDiscount,
   setGuestPersonalDiscount,
@@ -33,7 +34,7 @@ import {
   type UpdateReservationInput,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import { assertAdmin } from "@/lib/server-auth";
+import { assertAdmin, assertStaff } from "@/lib/server-auth";
 import { notifyReservationWebhook } from "@/lib/webhook";
 import {
   buildCancellationMessage,
@@ -204,6 +205,45 @@ export async function handleAssignWalkIn(
     return { success: true, data: { reservationId } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al asignar la habitacion.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Regulariza una pieza que figuraba ocupada sin estadía: carga el walk-in y cierra
+ * el aviso apuntando a esa reserva.
+ *
+ * SON DOS ESCRITURAS Y NO HAY TRANSACCIÓN QUE LAS ABRACE. Si la segunda falla, la
+ * estadía YA quedó cargada: decir "no se pudo" sería mentira y llevaría a cargarla
+ * de nuevo, duplicando la reserva. Por eso el éxito parcial se reporta como éxito,
+ * con el aviso de que el cartel sigue ahí. `rpc_regularize_occupied_room` es
+ * idempotente, así que el próximo intento lo cierra sin romper nada.
+ */
+export async function regularizeOccupiedRoomAction(input: {
+  alertId: number;
+  walkIn: AssignWalkInPayload;
+}): Promise<ActionResult<{ reservationId: string; alertPendiente: boolean }>> {
+  try {
+    await assertStaff("Permisos insuficientes para cargar la estadia.");
+    const validated = assignWalkInSchema.parse(input.walkIn);
+    const reservationId = await assignWalkIn(validated);
+
+    let alertPendiente = false;
+    try {
+      await regularizeOccupiedRoom(input.alertId, reservationId);
+    } catch (error: unknown) {
+      console.error("[regularizeOccupiedRoomAction] la estadia entro, el aviso no se cerro:", error);
+      alertPendiente = true;
+    }
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/mantenimiento");
+    revalidateCalendarViews();
+    revalidatePath("/admin/guests");
+
+    return { success: true, data: { reservationId, alertPendiente } };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "Error al cargar la estadia.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

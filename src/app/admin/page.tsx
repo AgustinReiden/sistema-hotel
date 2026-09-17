@@ -15,6 +15,7 @@ const EMPTY_INVOICE_PREFILL: InvoiceReceptorPrefill = {
   complete: false,
 };
 import NewReservationButton from "./NewReservationButton";
+import OccupiedRoomAlertBanner from "./OccupiedRoomAlertBanner";
 import RoomCard from "./RoomCard";
 import { PageHeader } from "./PageShell";
 import {
@@ -24,6 +25,7 @@ import {
   getFiscalSettings,
   getPendingSolicitudesCount,
   getUnresolvedAdminAlertsCount,
+  listRoomOccupancyAlerts,
 } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
@@ -75,13 +77,16 @@ function isRoomOccupiedNow(reservation: { status: string }) {
 }
 
 export default async function Dashboard() {
-  const [{ rooms, reservations, accountCreditByReservation, facturacionModoByReservation, invoicePrefillByReservation, priorPaymentMethodsByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount, fiscalSettings] = await Promise.all([
+  const [{ rooms, reservations, accountCreditByReservation, facturacionModoByReservation, invoicePrefillByReservation, priorPaymentMethodsByReservation, hotelSettings }, associatedClients, role, pendingSolicitudesCount, unresolvedAlertsCount, fiscalSettings, occupancyAlerts] = await Promise.all([
     getDashboardData(),
     getActiveAssociatedClients(),
     getCurrentUserRole(),
     getPendingSolicitudesCount(),
     getUnresolvedAdminAlertsCount().catch(() => 0),
     getFiscalSettings().catch(() => null),
+    // Se cae a vacío a propósito: un problema leyendo los avisos no puede dejar sin
+    // tablero al que tiene que ver el estado de las habitaciones.
+    listRoomOccupancyAlerts().catch(() => []),
   ]);
   const fiscalEnabled = Boolean(fiscalSettings?.enabled);
   const isAdmin = role === "admin";
@@ -225,6 +230,23 @@ export default async function Dashboard() {
       </PageHeader>
 
       <div className="flex-1 overflow-auto p-4 md:p-8">
+        {/* Va PRIMERO de los tres avisos: es el único que significa plata que se está
+            perdiendo. Los otros dos son cosas para revisar. */}
+        <OccupiedRoomAlertBanner
+          alerts={occupancyAlerts}
+          pricingByRoomId={Object.fromEntries(
+            rooms.map((room) => [
+              room.id,
+              {
+                roomNumber: room.room_number,
+                basePrice: room.base_price,
+                halfDayPrice: room.half_day_price,
+              },
+            ])
+          )}
+          associatedClients={associatedClients}
+          timezone={hotelSettings.timezone}
+        />
         {isAdmin && unresolvedAlertsCount > 0 && (
           <div className="mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-3">
@@ -232,11 +254,14 @@ export default async function Dashboard() {
                 <Sparkles size={20} />
               </div>
               <div>
+                {/* El conteo sale de rpc_list_admin_alerts, que trae TODOS los kinds
+                    (limpieza, tarifa a autorizar, cierre de turno, sobrepago). El texto
+                    decía "limpiezas no esperadas" y rotulaba mal a los otros cuatro. */}
                 <p className="font-bold text-amber-900">
-                  Tenés {unresolvedAlertsCount} alerta{unresolvedAlertsCount === 1 ? "" : "s"} de mantenimiento
+                  Tenés {unresolvedAlertsCount} aviso{unresolvedAlertsCount === 1 ? "" : "s"} sin revisar
                 </p>
                 <p className="text-sm text-amber-700">
-                  Limpiezas no esperadas registradas por mantenimiento. Revisa el panel.
+                  Autorizaciones de tarifa, limpiezas no esperadas y otros avisos del panel.
                 </p>
               </div>
             </div>

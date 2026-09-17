@@ -46,9 +46,19 @@ export function buildPresets(todayKey: string): RangePreset[] {
 }
 
 /**
+ * Ancla de "desde siempre" para facturación. Es una fecha y no un `null` porque
+ * `rpc_list_billing_control` exige rango (22023 si le llega NULL). Anterior a
+ * cualquier dato cargado en este sistema, así que en la práctica no recorta nada.
+ */
+export const BILLING_EPOCH = "2020-01-01";
+
+/**
  * Presets para facturación: razonan por mes, no por "últimos N días" (a diferencia
- * de buildPresets, pensado para los tableros de ocupación). El preset "Todo" no vive
- * acá: lo agrega el componente que lo use, porque no es un rango de fechas real.
+ * de buildPresets, pensado para los tableros de ocupación).
+ *
+ * "Desde siempre" existe porque el default de la pantalla es el mes en curso: sin
+ * este preset, una estadía sin facturar de hace cuatro meses no aparecía en ningún
+ * lado y había que tipear la fecha a mano sabiendo que estaba.
  */
 export function buildBillingPresets(todayKey: string): RangePreset[] {
   const [ty, tm] = todayKey.split("-").map(Number);
@@ -66,5 +76,6 @@ export function buildBillingPresets(todayKey: string): RangePreset[] {
     },
     { label: "Últimos 90 días", from: addDaysToDateKey(todayKey, -89), to: todayKey },
     { label: "Este año", from: yearStart, to: todayKey },
+    { label: "Desde siempre", from: BILLING_EPOCH, to: todayKey },
   ];
 }

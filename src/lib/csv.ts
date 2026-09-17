@@ -156,6 +156,14 @@ export function buildBillingControlCsv(rows: BillingControlRow[]): string {
     { header: "Habitacion", type: "plano", value: (r) => r.room_number },
     { header: "Cliente", type: "texto", value: (r) => r.cliente },
     { header: "Cierre", type: "plano", value: (r) => BILLING_CIERRE_LABEL[r.cierre] },
+    {
+      // La pantalla lo muestra como un chip violeta al lado del estado; el CSV lo
+      // necesita como columna propia porque "Cierre" no lo dice: una estadía
+      // pagada con tarjeta cierra por caja igual que una pagada en efectivo.
+      header: "Bancaria",
+      type: "plano",
+      value: (r) => (r.bancario ? "SI" : "NO"),
+    },
     { header: "Total", type: "monto", value: (r) => r.total_price },
     {
       // "plano" en vez de "monto" SÓLO por el null: la estadía que cerró por caja

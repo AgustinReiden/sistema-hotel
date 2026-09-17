@@ -1,10 +1,24 @@
 import { redirect } from "next/navigation";
 import { ClipboardCheck } from "lucide-react";
 
-import { getCtaCteAccounts, getCurrentUserRole, listBillingControl } from "@/lib/data";
+import {
+  countBillingPending,
+  getCtaCteAccounts,
+  getCurrentUserRole,
+  listBillingControl,
+} from "@/lib/data";
+import { isBillingCobroFilter } from "@/lib/billing";
 import { hotelDateKey } from "@/lib/time";
 import type { CtaCteClientKind } from "@/lib/types";
 import ControlClient from "./ControlClient";
+
+/**
+ * Ventana del contador "en todo el historial". No es `allowAll`: la RPC
+ * `rpc_list_billing_control` exige rango (22023 con NULL), así que se usa una
+ * ventana larga en días. Diez años cubre todo lo que este hotel puede tener
+ * cargado y evita una migración para algo que ya se resuelve con un parámetro.
+ */
+const DIAS_HISTORICO = 3650;
 
 export const dynamic = "force-dynamic";
 
@@ -30,14 +44,21 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export default async function ControlFacturacionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ desde?: string; hasta?: string; cliente?: string; estado?: string }>;
+  searchParams: Promise<{
+    desde?: string;
+    hasta?: string;
+    cliente?: string;
+    estado?: string;
+    cobro?: string;
+    rastro?: string;
+  }>;
 }) {
   const role = await getCurrentUserRole();
   if (role !== "admin") {
     redirect("/forbidden");
   }
 
-  const { desde, hasta, cliente, estado } = await searchParams;
+  const { desde, hasta, cliente, estado, cobro, rastro } = await searchParams;
   // El "hoy" del hotel se resuelve en el server y viaja como prop: si lo calculara
   // el navegador, los presets dependerían de la zona de la máquina del empleado.
   const todayKey = hotelDateKey(new Date());
@@ -51,10 +72,22 @@ export default async function ControlFacturacionPage({
     rawKind === "company" || rawKind === "guest" ? rawKind : undefined;
   const clientId = clientKind && rawId ? rawId : undefined;
 
-  const [rows, accounts] = await Promise.all([
+  // Un filtro inventado en la URL no puede esconder filas: `matchesCobro` deja
+  // pasar todo ante un valor desconocido, y acá además no se refleja en el select.
+  const cobroFilter = cobro && isBillingCobroFilter(cobro) ? cobro : "";
+
+  const [rows, accounts, historico] = await Promise.all([
     listBillingControl(from, to, clientKind, clientId).catch(() => []),
     getCtaCteAccounts().catch(() => []),
+    // Cuánto falta facturar EN TODO EL HISTORIAL, no sólo en el rango que se ve.
+    // Sin esto, una estadía de hace cuatro meses no aparece en ninguna pantalla:
+    // el listado abre en el mes en curso y el badge del menú mira 60 días.
+    countBillingPending(DIAS_HISTORICO).catch(() => null),
   ]);
+
+  const totalHistorico = historico
+    ? historico.falta + historico.pendiente_consolidada
+    : 0;
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -83,6 +116,9 @@ export default async function ControlFacturacionPage({
             to={to}
             cliente={cliente ?? ""}
             estado={estado ?? ""}
+            cobro={cobroFilter}
+            rastro={rastro === "1"}
+            totalHistorico={totalHistorico}
             todayKey={todayKey}
           />
         </div>
