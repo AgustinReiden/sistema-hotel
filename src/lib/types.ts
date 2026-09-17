@@ -880,6 +880,32 @@ export type InvoiceStayRow = {
   descripcion: string | null;
 };
 
+/**
+ * Un comprobante emitido a un cliente de cuenta corriente (mig 108).
+ *
+ * `invoices` no tiene columna de cliente: el vínculo se reconstruye por
+ * `invoice_reservations`, por el movimiento de cuenta corriente (consolidadas) o por
+ * la reserva (de check-out). La unidad de la lista es el COMPROBANTE, no la estadía:
+ * una consolidada cubre N estadías y sale en UNA fila, con el N en `estadias`.
+ */
+export type ClientInvoiceRow = {
+  invoice_id: string;
+  kind: InvoiceKind;
+  status: "pending" | "processing" | "authorized" | "rejected";
+  cbte_tipo: number;
+  pto_vta: number;
+  /** null mientras ARCA no dio CAE: el número lo asigna la autorización. */
+  cbte_nro: number | null;
+  cbte_fch: string | null; // date
+  imp_total: number;
+  /** Con valor si una nota de crédito ya anuló el comprobante (mig 80). */
+  anulada_at: string | null;
+  receptor_nombre: string | null;
+  /** Cuántas estadías cubre. 1 en las de check-out, N en las consolidadas. */
+  estadias: number;
+  created_at: string;
+};
+
 /** Estado fiscal de una estadía de cuenta corriente. */
 export type CcStayEstado =
   | "pendiente"
