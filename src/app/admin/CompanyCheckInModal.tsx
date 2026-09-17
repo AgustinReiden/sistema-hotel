@@ -71,8 +71,8 @@ export default function CompanyCheckInModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-auto overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-left max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg mx-auto overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-left max-h-[92dvh] sm:max-h-[88dvh] overflow-y-auto">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
           <div>
             <h2 className="text-xl font-bold text-slate-800">Check-in · Hab. {roomNumber}</h2>

@@ -72,7 +72,7 @@ export default async function ControlFacturacionPage({
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 md:p-8">
         <div className="max-w-6xl mx-auto">
           <ControlClient
             rows={rows}

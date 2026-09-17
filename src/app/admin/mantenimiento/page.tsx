@@ -157,7 +157,7 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
 
   return (
     <div className="flex flex-col h-full">
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center px-8 shrink-0">
+      <header className="min-h-16 bg-white border-b border-slate-200 flex flex-wrap items-center gap-2 px-4 py-3 md:px-8 md:py-0 shrink-0">
         <div className="flex items-center space-x-3">
           <div className="p-2 bg-slate-100 rounded-lg">
             <Sparkles size={20} className="text-slate-600" />
@@ -166,7 +166,7 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-8 bg-slate-50">
+      <div className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50">
         <div className="max-w-5xl mx-auto">
           <AlertsPanel alerts={alerts} hotelTimezone={tz} />
 

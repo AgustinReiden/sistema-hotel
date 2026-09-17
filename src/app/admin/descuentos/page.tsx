@@ -33,7 +33,7 @@ export default async function DiscountsPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 md:p-8">
         <DiscountsManager initialDiscounted={discounted} companies={companies} />
       </div>
     </div>

@@ -66,7 +66,7 @@ export default async function ConsolidadaPage({
         </p>
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 md:p-8">
         <div className="max-w-5xl mx-auto">
           <ConsolidadaClient
             enabled={Boolean(settings?.enabled)}

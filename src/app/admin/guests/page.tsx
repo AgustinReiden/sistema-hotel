@@ -146,7 +146,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
         </p>
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 md:p-8">
         {view === "directorio" && (
           <GuestDirectoryTable guests={directory} searchQuery={search} timezone={timezone} />
         )}

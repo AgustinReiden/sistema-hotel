@@ -10,6 +10,7 @@ import {
   listPendingInvoices,
 } from "@/lib/data";
 import { DATE_KEY } from "@/lib/date-range";
+import { PageHeader } from "../PageShell";
 import { isCurrentUserAdmin } from "@/lib/server-auth";
 import { hotelDateKey } from "@/lib/time";
 import FiscalClient from "./FiscalClient";
@@ -50,25 +51,20 @@ export default async function FiscalPage({ searchParams }: PageProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center px-8 shrink-0">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-emerald-100 rounded-lg">
-            <FileText size={20} className="text-emerald-600" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">Facturación</h1>
-            <p className="text-xs text-slate-400 -mt-0.5">
-              {settings?.enabled
-                ? settings.environment === "homologacion"
-                  ? "Ambiente de PRUEBA (homologación): los comprobantes no tienen valor fiscal."
-                  : "Ambiente de PRODUCCIÓN: se emiten facturas reales."
-                : "La facturación electrónica no está habilitada (Ajustes → Facturación electrónica)."}
-            </p>
-          </div>
-        </div>
-      </header>
+      <PageHeader
+        icon={<FileText size={20} className="text-emerald-600" />}
+        iconTone="emerald"
+        title="Facturación"
+        subtitle={
+          settings?.enabled
+            ? settings.environment === "homologacion"
+              ? "Ambiente de PRUEBA (homologación): los comprobantes no tienen valor fiscal."
+              : "Ambiente de PRODUCCIÓN: se emiten facturas reales."
+            : "La facturación electrónica no está habilitada (Ajustes → Facturación electrónica)."
+        }
+      />
 
-      <div className="flex-1 overflow-auto p-8 bg-slate-50">
+      <div className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50">
         <div className="max-w-4xl mx-auto">
           <FiscalClient
             enabled={Boolean(settings?.enabled)}

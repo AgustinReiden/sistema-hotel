@@ -45,7 +45,7 @@ export default async function CuentasPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 md:p-8">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <CuentasClient accounts={accounts} />
         </div>

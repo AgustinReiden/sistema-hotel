@@ -325,9 +325,9 @@ export default function CloseShiftModal({
       { label: "Otro", amount: totalsByMethod.other },
     ].filter((r) => r.amount > 0);
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+      <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
         <div
-          className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+          className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="close-shift-modal-title"
@@ -468,9 +468,9 @@ export default function CloseShiftModal({
   const hasBlockers = blockers !== null && blockers.length > 0;
   if (blockers === null || hasBlockers) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+      <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
         <div
-          className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col"
+          className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[92dvh] sm:max-h-[88dvh] flex flex-col"
           role="dialog"
           aria-modal="true"
           aria-labelledby="close-shift-modal-title"
@@ -677,9 +677,9 @@ export default function CloseShiftModal({
 
   // ── Paso 2: arqueo a ciegas ──
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
       <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col"
+        className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[92dvh] sm:max-h-[88dvh] flex flex-col"
         role="dialog"
         aria-modal="true"
         aria-labelledby="close-shift-modal-title"

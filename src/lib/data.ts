@@ -99,6 +99,16 @@ const ACTIVE_RESERVATION_STATUSES: ReservationStatus[] = [
   "checked_in",
 ];
 
+// El calendario muestra ocupación histórica, no sólo lo que viene: una estadía terminada
+// tiene que seguir dibujada en sus fechas. NO se reutiliza ACTIVE_RESERVATION_STATUSES
+// porque esa lista también define qué reserva BLOQUEA una habitación (ver el chequeo de
+// solapamiento más abajo): sumarle checked_out haría figurar como ocupadas habitaciones
+// que ya se liberaron. Las canceladas siguen afuera: nunca ocuparon nada.
+const CALENDAR_RESERVATION_STATUSES: ReservationStatus[] = [
+  ...ACTIVE_RESERVATION_STATUSES,
+  "checked_out",
+];
+
 type DashboardData = {
   rooms: Room[];
   reservations: {
@@ -749,12 +759,13 @@ export async function getTimelineData(days = 7, startKey?: string): Promise<Time
   end.setDate(end.getDate() + span);
 
   const [roomsResult, reservationsResult] = await Promise.all([
-    // Solo habitaciones activas: las desactivadas se ocultan del calendario.
-    supabase.from("rooms").select("*").eq("is_active", true).order("room_number"),
+    // Se traen todas, activas o no: el filtro de activas se aplica abajo, después de
+    // saber cuáles tienen historia en la ventana visible.
+    supabase.from("rooms").select("*").order("room_number"),
     supabase
       .from("reservations")
       .select("*")
-      .in("status", ACTIVE_RESERVATION_STATUSES)
+      .in("status", CALENDAR_RESERVATION_STATUSES)
       .or(
         `and(check_in_target.lte.${end.toISOString()},check_out_target.gte.${today.toISOString()})`
       ),
@@ -780,8 +791,16 @@ export async function getTimelineData(days = 7, startKey?: string): Promise<Time
     guest_count: Number(reservation.guest_count ?? 1) || 1,
   })) as Reservation[];
 
+  // Las habitaciones desactivadas se ocultan del calendario, salvo que tengan reservas en
+  // la ventana visible: si no, desactivar una habitación le borraría toda la historia.
+  // Son 12 filas, así que se filtra acá y no con otra query.
+  const roomIdsWithStay = new Set(reservations.map((reservation) => reservation.room_id));
+  const rooms = ((roomsResult.data ?? []) as Room[]).filter(
+    (room) => room.is_active || roomIdsWithStay.has(room.id)
+  );
+
   return {
-    rooms: sortRoomsByNumber((roomsResult.data ?? []) as Room[]),
+    rooms: sortRoomsByNumber(rooms),
     reservations,
     startDate: today,
     endDate: end,

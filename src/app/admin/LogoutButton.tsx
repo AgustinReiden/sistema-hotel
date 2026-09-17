@@ -15,7 +15,9 @@ export default function LogoutButton() {
             title="Cerrar Sesión"
         >
             <LogOut size={16} />
-            <span className="hidden sm:inline">{isPending ? "Saliendo..." : "Salir"}</span>
+            {/* Sin ocultarlo en pantallas chicas: en el cajón del celular un icono suelto
+                no dice nada, y en escritorio ya se veía igual. */}
+            <span>{isPending ? "Saliendo..." : "Salir"}</span>
         </button>
     );
 }

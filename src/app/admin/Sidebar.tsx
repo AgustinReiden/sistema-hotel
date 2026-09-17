@@ -1,15 +1,27 @@
 import Link from 'next/link';
-import { CalendarDays, CalendarCheck, BedDouble, Users, BarChart3, Settings, Wallet, ClipboardCheck, ClipboardList, Building2, Tags, CircleDollarSign, Sparkles, Percent, FileText } from 'lucide-react';
+import { BedDouble } from 'lucide-react';
 import LogoutButton from './LogoutButton';
+import { getNavSections, type NavBadge } from './nav-links';
+
+const BADGE_TONE: Record<NavBadge['tone'], string> = {
+    ok: 'text-emerald-400 bg-emerald-950/40',
+    warn: 'text-amber-400 bg-amber-950/40',
+    alert: 'text-rose-300 bg-rose-950/50',
+};
 
 export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount = 0 }: { role: string; userEmail: string; hasOpenShift?: boolean; unbilledCount?: number }) {
     const isAdmin = role === 'admin';
+    const sections = getNavSections(role, { hasOpenShift, unbilledCount });
 
+    // Sólo escritorio: abajo de 768px el menú lo manejan <MobileTopBar> y <MobileTabBar>.
+    // Antes este mismo <aside> se estiraba a w-full y se apilaba arriba del contenido, así
+    // que en el celular había que scrollear medio metro de links para ver el primer dato.
+    //
     // h-dvh (no min-h-screen) para que el sidebar mida exactamente lo mismo que el shell:
     // con el min-height mandando, el pie con el usuario y "Cerrar sesión" queda fuera de la
     // ventana y el <nav flex-1 overflow-y-auto> nunca llega a scrollear solo.
     return (
-        <aside className="w-full md:w-64 bg-slate-900 text-slate-300 md:h-dvh flex flex-col border-r border-slate-800 shrink-0 shadow-2xl z-10 transition-all duration-300">
+        <aside className="hidden md:flex md:w-64 md:h-dvh bg-slate-900 text-slate-300 flex-col border-r border-slate-800 shrink-0 shadow-2xl z-10">
             <div className="h-16 flex items-center px-6 bg-slate-950/50 border-b border-slate-800">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center mr-3 shadow-lg shadow-emerald-500/20">
                     <BedDouble size={18} className="text-white" />
@@ -20,87 +32,37 @@ export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount =
             </div>
 
             <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1">
-                <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Recepción</p>
-                <Link href="/admin" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors focus:bg-brand-500/10 focus:text-emerald-400">
-                    <CalendarCheck size={18} className="mr-3" />
-                    <span className="font-medium">Dashboard Hoy</span>
-                </Link>
-                <Link href="/admin/calendario" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                    <CalendarDays size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                    <span className="font-medium">Calendario</span>
-                </Link>
-                <Link href="/admin/solicitudes" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                    <ClipboardList size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                    <span className="font-medium">Solicitudes</span>
-                </Link>
-                <Link href="/admin/caja" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                    <CircleDollarSign size={18} className={`mr-3 transition-colors ${hasOpenShift ? 'text-emerald-400' : 'group-hover:text-emerald-400'}`} />
-                    <span className="font-medium flex-1">Caja</span>
-                    {hasOpenShift ? (
-                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded" title="Turno abierto">ABIERTA</span>
-                    ) : (
-                        <span className="text-[10px] font-bold text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded" title="Sin turno">CERRADA</span>
-                    )}
-                </Link>
-                <Link href="/admin/fiscal" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                    <FileText size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                    <span className="font-medium">Facturación</span>
-                </Link>
-
-                {isAdmin && (
-                    <>
-                        <p className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-6">Administración</p>
-                        <Link href="/admin/guests" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Users size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Huéspedes</span>
-                        </Link>
-                        <Link href="/admin/finances" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Wallet size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Finanzas</span>
-                        </Link>
-                        <Link href="/admin/rooms" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <BedDouble size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Habitaciones</span>
-                        </Link>
-                        <Link href="/admin/categorias" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Tags size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Categorias</span>
-                        </Link>
-                        <Link href="/admin/asociados" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Building2 size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Empresas / Convenios</span>
-                        </Link>
-                        <Link href="/admin/descuentos" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Percent size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Descuentos</span>
-                        </Link>
-                        <Link href="/admin/cuentas" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <CircleDollarSign size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Cuenta Corriente</span>
-                        </Link>
-                        <Link href="/admin/fiscal/control" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <ClipboardCheck size={18} className={`mr-3 transition-colors ${unbilledCount > 0 ? 'text-rose-400' : 'group-hover:text-emerald-400'}`} />
-                            <span className="font-medium flex-1">Control de facturación</span>
-                            {unbilledCount > 0 && (
-                                <span className="text-[10px] font-bold text-rose-300 bg-rose-950/50 px-1.5 py-0.5 rounded" title={`${unbilledCount} estadías sin facturar en los últimos 60 días`}>
-                                    {unbilledCount}
-                                </span>
-                            )}
-                        </Link>
-                        <Link href="/admin/settings" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Settings size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Ajustes</span>
-                        </Link>
-                        <Link href="/admin/mantenimiento" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <Sparkles size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Mantenimiento</span>
-                        </Link>
-                        <Link href="/admin/analytics" className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors">
-                            <BarChart3 size={18} className="mr-3 group-hover:text-emerald-400 transition-colors" />
-                            <span className="font-medium">Tablero</span>
-                        </Link>
-                    </>
-                )}
+                {sections.map((section, sectionIndex) => (
+                    <div key={section.title}>
+                        <p className={`px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ${sectionIndex > 0 ? 'mt-6' : ''}`}>
+                            {section.title}
+                        </p>
+                        {section.items.map((item) => {
+                            const Icon = item.icon;
+                            return (
+                                <Link
+                                    key={item.href}
+                                    href={item.href}
+                                    className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors"
+                                >
+                                    <Icon
+                                        size={18}
+                                        className={`mr-3 shrink-0 transition-colors ${item.highlighted ? 'text-emerald-400' : 'group-hover:text-emerald-400'}`}
+                                    />
+                                    <span className="font-medium flex-1">{item.label}</span>
+                                    {item.badge && (
+                                        <span
+                                            title={item.badge.title}
+                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${BADGE_TONE[item.badge.tone]}`}
+                                        >
+                                            {item.badge.text}
+                                        </span>
+                                    )}
+                                </Link>
+                            );
+                        })}
+                    </div>
+                ))}
             </nav>
 
             <div className="p-4 border-t border-slate-800">

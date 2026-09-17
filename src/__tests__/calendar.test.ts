@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { getCalendarCellState } from "@/lib/calendar";
+import { buildReservationPlacement, classifyReservations, isFinishedStay } from "@/lib/calendar";
 import type { Reservation } from "@/lib/types";
+
+const TZ = "America/Argentina/Tucuman";
+/** "Ahora" fijo para todos los casos: jueves 9 de abril de 2026, mediodia del hotel. */
+const NOW = "2026-04-09T12:00:00-03:00";
 
 function makeReservation(overrides: Partial<Reservation> & { id: string; room_id: number }): Reservation {
   return {
@@ -29,67 +33,242 @@ function makeReservation(overrides: Partial<Reservation> & { id: string; room_id
   };
 }
 
-describe("getCalendarCellState", () => {
-  it("marks stay on the night cell and checkout on the departure day", () => {
+describe("buildReservationPlacement", () => {
+  it("ubica una estadia entera dentro de la ventana", () => {
     const reservation = makeReservation({
       id: "res-1",
       room_id: 1,
-      check_in_target: "2026-04-07T14:00:00-03:00",
-      check_out_target: "2026-04-08T10:00:00-03:00",
+      check_in_target: "2026-04-09T14:00:00-03:00",
+      check_out_target: "2026-04-11T10:00:00-03:00",
     });
 
-    const checkInDay = getCalendarCellState([reservation], 1, new Date("2026-04-07T12:00:00-03:00"));
-    const checkoutDay = getCalendarCellState([reservation], 1, new Date("2026-04-08T12:00:00-03:00"));
+    const placement = buildReservationPlacement(reservation, "2026-04-07", 14, TZ);
 
-    expect(checkInDay.stayReservation?.id).toBe("res-1");
-    expect(checkInDay.checkoutReservation).toBeNull();
-    expect(checkoutDay.stayReservation).toBeNull();
-    expect(checkoutDay.checkoutReservation?.id).toBe("res-1");
+    expect(placement).not.toBeNull();
+    expect(placement?.visibleStartIndex).toBe(2);
+    // Del 09 al 11 inclusive: la salida tambien ocupa columna (ahi va la diagonal).
+    expect(placement?.cellSpan).toBe(3);
+    expect(placement?.startsBeforeRange).toBe(false);
+    expect(placement?.endsAfterRange).toBe(false);
   });
 
-  it("shows checkout diagonal and new stay on the same day when reservations touch", () => {
-    const leavingReservation = makeReservation({
-      id: "res-out",
-      room_id: 4,
-      client_name: "Leaving Guest",
-      check_in_target: "2026-04-07T14:00:00-03:00",
-      check_out_target: "2026-04-08T10:00:00-03:00",
-    });
-    const arrivingReservation = makeReservation({
-      id: "res-in",
-      room_id: 4,
-      client_name: "Arriving Guest",
-      check_in_target: "2026-04-08T14:00:00-03:00",
-      check_out_target: "2026-04-10T10:00:00-03:00",
-    });
-
-    const sharedDay = getCalendarCellState(
-      [leavingReservation, arrivingReservation],
-      4,
-      new Date("2026-04-08T12:00:00-03:00")
-    );
-
-    expect(sharedDay.checkoutReservation?.id).toBe("res-out");
-    expect(sharedDay.stayReservation?.id).toBe("res-in");
-  });
-
-  it("cuenta el check-in en su dia hotelero aunque entre a las 22:00 (ya seria otro dia en UTC)", () => {
-    // 22:00 del 7 de abril en Tucuman (UTC-3) == 01:00 UTC del 8. Con startOfDay/isSameDay
-    // (date-fns, reloj del proceso) esto se corria de dia en un servidor en UTC.
+  it("recorta una estadia que arranco antes de la ventana", () => {
     const reservation = makeReservation({
-      id: "res-night",
+      id: "res-2",
+      room_id: 1,
+      check_in_target: "2026-04-04T14:00:00-03:00",
+      check_out_target: "2026-04-09T10:00:00-03:00",
+    });
+
+    const placement = buildReservationPlacement(reservation, "2026-04-07", 14, TZ);
+
+    expect(placement?.visibleStartIndex).toBe(0);
+    expect(placement?.startsBeforeRange).toBe(true);
+    expect(placement?.endsAfterRange).toBe(false);
+    expect(placement?.cellSpan).toBe(3);
+  });
+
+  it("recorta una estadia que sigue despues de la ventana", () => {
+    const reservation = makeReservation({
+      id: "res-3",
+      room_id: 1,
+      check_in_target: "2026-04-08T14:00:00-03:00",
+      check_out_target: "2026-04-30T10:00:00-03:00",
+    });
+
+    const placement = buildReservationPlacement(reservation, "2026-04-07", 7, TZ);
+
+    expect(placement?.visibleStartIndex).toBe(1);
+    expect(placement?.endsAfterRange).toBe(true);
+    expect(placement?.cellSpan).toBe(6);
+  });
+
+  it("devuelve null si la estadia quedo fuera de la ventana", () => {
+    const yaTermino = makeReservation({
+      id: "res-viejo",
+      room_id: 1,
+      check_in_target: "2026-03-01T14:00:00-03:00",
+      check_out_target: "2026-03-03T10:00:00-03:00",
+    });
+    const todaviaNoEmpieza = makeReservation({
+      id: "res-lejano",
+      room_id: 1,
+      check_in_target: "2026-05-01T14:00:00-03:00",
+      check_out_target: "2026-05-03T10:00:00-03:00",
+    });
+
+    expect(buildReservationPlacement(yaTermino, "2026-04-07", 14, TZ)).toBeNull();
+    expect(buildReservationPlacement(todaviaNoEmpieza, "2026-04-07", 14, TZ)).toBeNull();
+  });
+
+  it("cuenta el dia hotelero de una entrada a las 22:00 (en UTC ya seria el dia siguiente)", () => {
+    const reservation = makeReservation({
+      id: "res-noche",
       room_id: 2,
       check_in_target: "2026-04-07T22:00:00-03:00",
       check_out_target: "2026-04-09T10:00:00-03:00",
     });
 
-    const entryDay = getCalendarCellState([reservation], 2, new Date("2026-04-07T12:00:00-03:00"));
-    const nextDay = getCalendarCellState([reservation], 2, new Date("2026-04-08T12:00:00-03:00"));
-    const dayBefore = getCalendarCellState([reservation], 2, new Date("2026-04-06T12:00:00-03:00"));
+    const placement = buildReservationPlacement(reservation, "2026-04-07", 14, TZ);
 
-    expect(entryDay.stayReservation?.id).toBe("res-night");
-    expect(nextDay.stayReservation?.id).toBe("res-night");
-    expect(nextDay.checkoutReservation).toBeNull();
-    expect(dayBefore.stayReservation).toBeNull();
+    expect(placement?.visibleStartIndex).toBe(0);
+  });
+});
+
+describe("isFinishedStay", () => {
+  it("una estadia con check-out hecho es pasado", () => {
+    const finalizada = makeReservation({ id: "a", room_id: 1, status: "checked_out" });
+    expect(isFinishedStay(finalizada, NOW)).toBe(true);
+  });
+
+  it("el pasajero adentro sigue en curso aunque la salida prevista ya haya pasado", () => {
+    // Medio dia / salida vencida sin check-out: el pasajero todavia esta en la habitacion.
+    const adentro = makeReservation({
+      id: "b",
+      room_id: 1,
+      status: "checked_in",
+      check_in_target: "2026-04-06T14:00:00-03:00",
+      check_out_target: "2026-04-08T10:00:00-03:00",
+    });
+    expect(isFinishedStay(adentro, NOW)).toBe(false);
+  });
+
+  it("una confirmada que nunca se uso y ya vencio es pasado", () => {
+    const noShow = makeReservation({
+      id: "c",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-01T14:00:00-03:00",
+      check_out_target: "2026-04-03T10:00:00-03:00",
+    });
+    expect(isFinishedStay(noShow, NOW)).toBe(true);
+  });
+
+  it("una confirmada que todavia no vencio no es pasado", () => {
+    const porVenir = makeReservation({
+      id: "d",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-12T14:00:00-03:00",
+      check_out_target: "2026-04-14T10:00:00-03:00",
+    });
+    expect(isFinishedStay(porVenir, NOW)).toBe(false);
+  });
+});
+
+describe("classifyReservations", () => {
+  it("marca como pasada la estadia con check-out hecho", () => {
+    const finalizada = makeReservation({
+      id: "res-fin",
+      room_id: 1,
+      status: "checked_out",
+      check_in_target: "2026-04-05T14:00:00-03:00",
+      check_out_target: "2026-04-07T10:00:00-03:00",
+    });
+
+    expect(classifyReservations([finalizada], NOW, TZ).get("res-fin")).toBe("finished");
+  });
+
+  it("una estadia pasada NO se queda con el cupo de proxima llegada", () => {
+    // Es la regresion que aparece al traer el pasado a la grilla: la estadia vieja va
+    // primera en el orden por fecha de entrada y se pintaba de amarillo como si el
+    // pasajero estuviera por llegar.
+    const finalizada = makeReservation({
+      id: "res-fin",
+      room_id: 1,
+      status: "checked_out",
+      check_in_target: "2026-04-05T14:00:00-03:00",
+      check_out_target: "2026-04-07T10:00:00-03:00",
+    });
+    const proxima = makeReservation({
+      id: "res-prox",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-12T14:00:00-03:00",
+      check_out_target: "2026-04-14T10:00:00-03:00",
+    });
+    const masAdelante = makeReservation({
+      id: "res-lejos",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-20T14:00:00-03:00",
+      check_out_target: "2026-04-22T10:00:00-03:00",
+    });
+
+    const categories = classifyReservations([finalizada, proxima, masAdelante], NOW, TZ);
+
+    expect(categories.get("res-fin")).toBe("finished");
+    expect(categories.get("res-prox")).toBe("next");
+    expect(categories.get("res-lejos")).toBe("future");
+  });
+
+  it("el pasajero adentro sigue activo aunque su salida prevista ya haya pasado", () => {
+    const adentro = makeReservation({
+      id: "res-adentro",
+      room_id: 1,
+      status: "checked_in",
+      check_in_target: "2026-04-06T14:00:00-03:00",
+      check_out_target: "2026-04-08T10:00:00-03:00",
+    });
+
+    expect(classifyReservations([adentro], NOW, TZ).get("res-adentro")).toBe("active");
+  });
+
+  it("una reserva sin confirmar que todavia no vencio queda pendiente", () => {
+    const sinConfirmar = makeReservation({
+      id: "res-pend",
+      room_id: 1,
+      status: "pending",
+      check_in_target: "2026-04-15T14:00:00-03:00",
+      check_out_target: "2026-04-16T10:00:00-03:00",
+    });
+
+    expect(classifyReservations([sinConfirmar], NOW, TZ).get("res-pend")).toBe("pending");
+  });
+
+  it("marca en rojo la llegada cuyo dia de entrada ya paso y la estadia sigue corriendo", () => {
+    const atrasada = makeReservation({
+      id: "res-atras",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-07T14:00:00-03:00",
+      check_out_target: "2026-04-14T10:00:00-03:00",
+    });
+
+    expect(classifyReservations([atrasada], NOW, TZ).get("res-atras")).toBe("overdue");
+  });
+
+  it("un no-show viejo va a pasado, no a rojo ni a amarillo", () => {
+    const noShow = makeReservation({
+      id: "res-noshow",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-01T14:00:00-03:00",
+      check_out_target: "2026-04-03T10:00:00-03:00",
+    });
+
+    expect(classifyReservations([noShow], NOW, TZ).get("res-noshow")).toBe("finished");
+  });
+
+  it("la clasificacion no depende del orden en que venga el array", () => {
+    const finalizada = makeReservation({
+      id: "res-fin",
+      room_id: 1,
+      status: "checked_out",
+      check_in_target: "2026-04-05T14:00:00-03:00",
+      check_out_target: "2026-04-07T10:00:00-03:00",
+    });
+    const proxima = makeReservation({
+      id: "res-prox",
+      room_id: 1,
+      status: "confirmed",
+      check_in_target: "2026-04-12T14:00:00-03:00",
+      check_out_target: "2026-04-14T10:00:00-03:00",
+    });
+
+    const desordenado = classifyReservations([proxima, finalizada], NOW, TZ);
+
+    expect(desordenado.get("res-prox")).toBe("next");
+    expect(desordenado.get("res-fin")).toBe("finished");
   });
 });

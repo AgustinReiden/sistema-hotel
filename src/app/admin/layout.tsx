@@ -1,4 +1,5 @@
 import Sidebar from './Sidebar';
+import { MobileTabBar, MobileTopBar } from './MobileNav';
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { countBillingPending, getActiveOpenShift, getShiftSummary } from "@/lib/data";
@@ -83,6 +84,12 @@ export default async function AdminLayout({
         // el min-h-screen, cuando 100vh > 100dvh gana el min-height y vuelve el problema.
         <div data-admin-shell className="min-h-screen md:min-h-0 md:h-dvh bg-slate-50 flex flex-col md:flex-row md:overflow-hidden">
             {role === "receptionist" && <IdleLogout />}
+            <MobileTopBar
+                role={role}
+                userEmail={userEmail}
+                hasOpenShift={!!openShift}
+                unbilledCount={unbilledCount}
+            />
             <Sidebar
                 role={role}
                 userEmail={userEmail}
@@ -97,12 +104,17 @@ export default async function AdminLayout({
                     inútil cada vez que hay un turno abierto hace rato. Es flex-col porque
                     varias páginas devuelven un fragmento (<header shrink-0> + <div flex-1
                     overflow-auto>) y dependen de que el padre sea columna flex. Todo con
-                    prefijo md: a propósito: abajo de 768px el panel queda como siempre,
-                    sidebar apilado y scroll de ventana. */}
-                <div data-admin-scroll className="flex-1 min-h-0 flex flex-col md:overflow-y-auto">
+                    prefijo md: a propósito: abajo de 768px sigue scrolleando la ventana y
+                    no un contenedor propio. Eso se mantiene aposta: el shell de alto fijo
+                    en el celular pelea con el teclado virtual y con la barra de URL. Lo
+                    que cambió es el menú, que ya no se apila arriba del contenido.
+                    El pb-20 es para que la barra inferior fija no tape el final de la
+                    página; print:pb-0 porque en la comandera esa barra no existe. */}
+                <div data-admin-scroll className="flex-1 min-h-0 flex flex-col pb-20 md:pb-0 print:pb-0 md:overflow-y-auto">
                     {children}
                 </div>
             </main>
+            <MobileTabBar hasOpenShift={!!openShift} />
         </div>
     );
 }

@@ -121,7 +121,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   ].filter((leg) => leg.value !== 0);
 
   return (
-    <div className="p-8 pb-20 overflow-y-auto w-full">
+    <div className="p-4 pb-24 md:p-8 md:pb-20 overflow-y-auto w-full">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">

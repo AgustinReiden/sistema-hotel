@@ -217,8 +217,8 @@ function RegisterPaymentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
           <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
             <Wallet size={18} className="text-emerald-600" />
@@ -383,8 +383,8 @@ function MovementsModal({ account, onClose }: { account: CtaCteAccount; onClose:
     (rangeFrom !== "" || rangeTo !== "") && filteredMovements.length < movements.length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[92dvh] sm:max-h-[88dvh] flex flex-col">
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
           <div>
             <h2 className="text-lg font-bold text-slate-800">{account.name}</h2>

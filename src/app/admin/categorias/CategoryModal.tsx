@@ -116,8 +116,8 @@ export default function CategoryModal({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[92dvh] sm:max-h-[88dvh] flex flex-col">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                     <h2 className="text-xl font-bold text-slate-800">{title}</h2>
                     <button

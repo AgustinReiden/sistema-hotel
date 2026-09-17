@@ -3,6 +3,7 @@ import { CalendarDays } from "lucide-react";
 import CalendarClient from "./CalendarClient";
 import CalendarNav from "./CalendarNav";
 import NewReservationButton from "../NewReservationButton";
+import { PageHeader } from "../PageShell";
 import {
   getActiveAssociatedClients,
   getCurrentUserRole,
@@ -15,17 +16,22 @@ export const dynamic = "force-dynamic";
 // Ventana visible del calendario: máximo 14 días. Por defecto arranca hoy; con ?start=YYYY-MM-DD
 // se ancla en otra fecha para navegar hacia adelante/atrás sin superar ese máximo.
 const CALENDAR_WINDOW_DAYS = 14;
+// En el teléfono 14 columnas son ~1000px: casi tres pantallas de scroll horizontal. Con
+// ?days=7 la grilla entra de un vistazo. Sólo se aceptan esos dos valores: la ventana es
+// también la paginación (Anterior/Siguiente saltan daysCount días).
+const CALENDAR_NARROW_DAYS = 7;
 
 export default async function CalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string }>;
+  searchParams: Promise<{ start?: string; days?: string }>;
 }) {
-  const { start } = await searchParams;
+  const { start, days } = await searchParams;
+  const windowDays = days === String(CALENDAR_NARROW_DAYS) ? CALENDAR_NARROW_DAYS : CALENDAR_WINDOW_DAYS;
 
   const [{ rooms, reservations, startDate, daysCount }, hotelSettings, role, associatedClients] =
     await Promise.all([
-      getTimelineData(CALENDAR_WINDOW_DAYS, start),
+      getTimelineData(windowDays, start),
       getHotelSettings(),
       getCurrentUserRole(),
       getActiveAssociatedClients(),
@@ -48,22 +54,19 @@ export default async function CalendarPage({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-slate-100 rounded-lg">
-            <CalendarDays size={20} className="text-slate-600" />
-          </div>
-          <h1 className="text-xl font-bold text-slate-800">Calendario de Reservas</h1>
-        </div>
+      <PageHeader
+        icon={<CalendarDays size={20} className="text-slate-600" />}
+        title="Calendario de Reservas"
+      >
         <NewReservationButton
           rooms={rooms}
           associatedClients={associatedClients}
           standardCheckInTime={hotelSettings.standard_check_in_time.slice(0, 5)}
           standardCheckOutTime={hotelSettings.standard_check_out_time.slice(0, 5)}
         />
-      </header>
+      </PageHeader>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-3 md:p-4">
         <CalendarNav startDateKey={startDateKey} daysCount={daysCount} todayKey={todayKey} />
         <CalendarClient
           rooms={rooms}

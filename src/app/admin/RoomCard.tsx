@@ -548,7 +548,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
               <button
                 onClick={() => setIsExtrasModalOpen(true)}
                 disabled={isPending}
-                className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
+                className="flex items-center justify-center gap-1 px-2 py-3 md:py-2 rounded-lg text-xs font-bold transition-colors bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
               >
                 <Plus size={13} />
                 Extra
@@ -556,7 +556,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
               <button
                 onClick={() => setIsChangeRoomModalOpen(true)}
                 disabled={isPending}
-                className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
+                className="flex items-center justify-center gap-1 px-2 py-3 md:py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
               >
                 <Replace size={13} />
                 Cambiar
@@ -565,7 +565,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 <button
                   onClick={() => setIsEditModalOpen(true)}
                   disabled={isPending}
-                  className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
+                  className="flex items-center justify-center gap-1 px-2 py-3 md:py-2 rounded-lg text-xs font-bold transition-colors bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 disabled:opacity-50"
                 >
                   <Pencil size={13} />
                   Editar
@@ -579,7 +579,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 <button
                   onClick={onCancelReservation}
                   disabled={isPending}
-                  className="w-full text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors mt-2 text-center"
+                  className="w-full py-2.5 text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors mt-1 text-center"
                 >
                   Cancelar Reserva
                 </button>
@@ -649,7 +649,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                   <button
                     onClick={onCancelReservation}
                     disabled={isPending}
-                    className="w-full text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors text-center"
+                    className="w-full py-2.5 text-xs font-bold text-red-500 hover:text-red-600 hover:underline transition-colors text-center"
                   >
                     Cancelar Reserva
                   </button>
@@ -791,8 +791,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       )}
 
       {isCheckoutConfirmOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-sm overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]">
             <h3 className="text-xl font-bold text-slate-800 mb-2">
               {early ? "Confirmar salida anticipada" : "Confirmar Check-Out"}
             </h3>
@@ -833,8 +833,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       )}
 
       {isExtendModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-sm overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Ampliar Reserva</h3>
             <p className="text-sm text-slate-600 mb-4">
               Extendé la estadía de <strong>{room.client}</strong>.
@@ -940,8 +940,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       )}
 
       {isCancelConfirmOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden p-6 relative">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Cancelar Reserva</h3>
             <p className="text-sm text-slate-600 mb-4">
               Indica el motivo de cancelación para la reserva de <strong>{room.client}</strong>. Quedará auditado en la tabla de control.
