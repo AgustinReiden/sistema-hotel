@@ -19,6 +19,8 @@ import { toast } from "sonner";
 
 import InvoicePromptModal, { type InvoicePromptData } from "../../InvoicePromptModal";
 import ClientFilter from "./ClientFilter";
+import PaginationFooter from "../../PaginationFooter";
+import { usePagination } from "../../usePagination";
 import DateRangeFilter from "../../DateRangeFilter";
 import DownloadCsvButton from "../../DownloadCsvButton";
 import StickyActionBar from "../../StickyActionBar";
@@ -36,6 +38,8 @@ import {
   billingComprobante,
   billingGrupo,
   bulkBillingAction,
+  countSelectedOffPage,
+  shiftRangeIds,
   isPendingBilling,
   isPendingWithTrail,
   matchesCobro,
@@ -136,8 +140,10 @@ export default function ControlClient({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
-  // Ancla del shift+click: índice dentro de `visible` de la última fila clickeada.
-  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+  // Ancla del shift+click: el ID de la última fila clickeada, no su índice. Un
+  // índice sobrevive a un cambio de página o de filtro apuntando a OTRA fila (ver
+  // shiftRangeIds); un id que ya no está a la vista simplemente no ancla nada.
+  const [anchorId, setAnchorId] = useState<string | null>(null);
 
   const busy = busyId !== null || bulkBusy;
 
@@ -193,20 +199,38 @@ export default function ControlClient({
     [rows, grupoFiltrado, cobro, rastro]
   );
 
+  // `visible` es todo lo filtrado y sigue alimentando el CSV y los contadores;
+  // `pagina` es lo que se pinta. La huella incluye los filtros del server y los del
+  // cliente: cualquier cambio vuelve a la página 1.
+  const {
+    rows: pagina,
+    setPage,
+    ...paginacion
+  } = usePagination(visible, `${from}|${to}|${cliente}|${estado}|${cobro}|${rastro ? "1" : ""}`);
+
   /**
-   * La selección efectiva se deriva SIEMPRE intersecando con lo que está en
-   * pantalla. Así una fila que salió del filtro no puede quedar seleccionada de
-   * forma invisible: sobre un hecho fiscal irreversible, el empleado tiene que
-   * estar viendo exactamente aquello sobre lo que actúa.
+   * La selección efectiva se deriva SIEMPRE de lo que está en pantalla, que ahora
+   * es la página actual. Así una fila que salió del filtro —o que quedó en otra
+   * página— no puede entrar en una acción fiscal irreversible sin que el empleado
+   * la esté viendo.
    */
   const selectedRows = useMemo(
-    () => visible.filter((r) => selectedIds.has(r.reservation_id)),
-    [visible, selectedIds]
+    () => pagina.filter((r) => selectedIds.has(r.reservation_id)),
+    [pagina, selectedIds]
+  );
+
+  /**
+   * Tildes que quedaron en otras páginas. No entran en ninguna acción, pero hay que
+   * decirlo: leer "Marcar 4" cuando uno tildó 14 es el malentendido a evitar.
+   */
+  const seleccionadasFueraDePagina = useMemo(
+    () => countSelectedOffPage(visible, pagina, selectedIds),
+    [visible, pagina, selectedIds]
   );
 
   const clearSelection = () => {
     setSelectedIds(new Set());
-    setAnchorIndex(null);
+    setAnchorId(null);
   };
 
   /**
@@ -215,23 +239,27 @@ export default function ControlClient({
    * y también el Espacio del teclado (el navegador sintetiza un click que burbujea).
    */
   const toggleRow = (index: number, shiftKey: boolean) => {
-    const row = visible[index];
+    const row = pagina[index];
     if (!row) return;
 
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (shiftKey && anchorIndex !== null && anchorIndex < visible.length) {
+      if (shiftKey) {
         // Shift+click EXTIENDE: agrega el rango, nunca deselecciona. Sobre una
         // acción irreversible, el gesto ambiguo siempre tiene que sumar de menos.
-        const [lo, hi] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex];
-        for (let i = lo; i <= hi; i++) next.add(visible[i].reservation_id);
-        return next;
+        // El rango no cruza el borde de la página: sin ancla a la vista queda vacío
+        // y el gesto cae en el toggle de una sola fila, que es el default seguro.
+        const rango = shiftRangeIds(pagina, anchorId, index);
+        if (rango.length > 0) {
+          for (const id of rango) next.add(id);
+          return next;
+        }
       }
       if (next.has(row.reservation_id)) next.delete(row.reservation_id);
       else next.add(row.reservation_id);
       return next;
     });
-    setAnchorIndex(index);
+    setAnchorId(row.reservation_id);
   };
 
   const handleRowClick = (index: number, event: React.MouseEvent) => {
@@ -240,12 +268,14 @@ export default function ControlClient({
     toggleRow(index, event.shiftKey);
   };
 
-  const allSelected = visible.length > 0 && selectedRows.length === visible.length;
+  // "Todo" es la página que se está viendo, no el filtro entero: es lo que el
+  // empleado tiene delante antes de una acción que no se deshace.
+  const allSelected = pagina.length > 0 && selectedRows.length === pagina.length;
   const someSelected = selectedRows.length > 0 && !allSelected;
 
   const toggleAll = () => {
     if (allSelected) clearSelection();
-    else setSelectedIds(new Set(visible.map((r) => r.reservation_id)));
+    else setSelectedIds(new Set(pagina.map((r) => r.reservation_id)));
   };
 
   const openExternalModal = (targets: BillingControlRow[]) => {
@@ -356,6 +386,20 @@ export default function ControlClient({
     });
   };
 
+  // El aviso va en el pie Y en la barra de acciones: el pie puede quedar fuera de
+  // pantalla justo cuando el empleado está por apretar el botón.
+  const avisoFueraDePagina =
+    seleccionadasFueraDePagina > 0 ? (
+      <span className="text-amber-700">
+        Tenés {seleccionadasFueraDePagina}{" "}
+        {seleccionadasFueraDePagina === 1 ? "estadía tildada" : "estadías tildadas"} en otras
+        páginas. Las acciones alcanzan sólo a las de esta página.{" "}
+        <button type="button" onClick={clearSelection} className="underline font-bold">
+          Limpiar todo
+        </button>
+      </span>
+    ) : null;
+
   const accionLote = bulkBillingAction(selectedRows);
   const n = selectedRows.length;
 
@@ -416,12 +460,14 @@ export default function ControlClient({
             </select>
           </div>
 
-          {/* Baja EXACTAMENTE lo que está en pantalla, armado en memoria sobre las
-              mismas filas: el archivo no puede decir algo distinto del listado. */}
+          {/* Baja TODO lo filtrado, no la página que se está viendo: el archivo es
+              para el contador, y partirlo en pedazos de 20 no le sirve a nadie. Se
+              arma en memoria sobre las mismas filas del listado, así que no puede
+              decir algo distinto de lo que se ve al recorrer las páginas. */}
           <DownloadCsvButton
             filename={billingControlCsvFilename(from, to)}
             build={() => buildBillingControlCsv(visible)}
-            label="Exportar a Excel"
+            label="Exportar a Excel (todo lo filtrado)"
             className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
           />
 
@@ -506,16 +552,16 @@ export default function ControlClient({
                 <th
                   className="px-3 py-2.5 w-10"
                   onClick={() => {
-                    if (visible.length > 0) toggleAll();
+                    if (pagina.length > 0) toggleAll();
                   }}
                 >
                   <input
                     type="checkbox"
-                    aria-label="Seleccionar todo lo que se ve"
+                    aria-label="Seleccionar todo lo de esta página"
                     checked={allSelected}
                     // Controlado por el onClick del <th>: un solo camino de toggle.
                     onChange={() => {}}
-                    disabled={visible.length === 0}
+                    disabled={pagina.length === 0}
                     ref={(el) => {
                       // `indeterminate` no existe como atributo JSX: sólo por DOM.
                       if (el) el.indeterminate = someSelected;
@@ -537,14 +583,14 @@ export default function ControlClient({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visible.length === 0 ? (
+              {pagina.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-400">
                     No hay check-outs en este rango con los filtros elegidos.
                   </td>
                 </tr>
               ) : (
-                visible.map((r, index) => {
+                pagina.map((r, index) => {
                   const selected = selectedIds.has(r.reservation_id);
                   const comprobante = billingComprobante(r);
                   return (
@@ -706,6 +752,13 @@ export default function ControlClient({
             </tbody>
           </table>
         </div>
+
+        <PaginationFooter
+          {...paginacion}
+          noun="estadías"
+          onPageChange={setPage}
+          note={avisoFueraDePagina}
+        />
       </section>
 
       {/* Acciones en lote. Aparece sólo con selección, y nunca ofrece una acción
@@ -714,7 +767,10 @@ export default function ControlClient({
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm font-bold text-slate-700">
             {n} {n === 1 ? "estadía seleccionada" : "estadías seleccionadas"}
+            {seleccionadasFueraDePagina > 0 && " en esta página"}
           </span>
+
+          {avisoFueraDePagina && <span className="text-sm">{avisoFueraDePagina}</span>}
 
           {accionLote === "mezclado" && (
             <span className="text-sm text-amber-700">
