@@ -5,6 +5,8 @@ import {
   billingComprobante,
   billingGrupo,
   bulkBillingAction,
+  countSelectedOffPage,
+  shiftRangeIds,
   isPendingWithTrail,
   matchesCobro,
 } from "@/lib/billing";
@@ -116,6 +118,54 @@ describe("billingGrupo — los dos grupos del filtro de estado", () => {
     expect(BILLING_ESTADO_MATIZ.pendiente_consolidada).toBe("espera consolidada");
     expect(BILLING_ESTADO_MATIZ.falta).toBeNull();
     expect(BILLING_ESTADO_MATIZ.facturado).toBeNull();
+  });
+});
+
+describe("shiftRangeIds — el rango del shift+click, siempre sobre lo que se ve", () => {
+  const pagina = [{ reservation_id: "a" }, { reservation_id: "b" }, { reservation_id: "c" }];
+
+  it("toma el rango entre el ancla y la fila clickeada, inclusive", () => {
+    expect(shiftRangeIds(pagina, "a", 2)).toEqual(["a", "b", "c"]);
+  });
+
+  it("da lo mismo hacia arriba que hacia abajo", () => {
+    expect(shiftRangeIds(pagina, "c", 0)).toEqual(["a", "b", "c"]);
+  });
+
+  it("ancla y destino en la misma fila es esa sola fila", () => {
+    expect(shiftRangeIds(pagina, "b", 1)).toEqual(["b"]);
+  });
+
+  it("si el ancla no está a la vista NO selecciona nada", () => {
+    // El caso que motivó guardar el id y no el índice: el ancla quedó en otra
+    // página (o la sacó un filtro). Un índice viejo seguiría estando "en rango" y
+    // tildaría filas equivocadas sin que nada falle a la vista.
+    expect(shiftRangeIds(pagina, "z", 2)).toEqual([]);
+    expect(shiftRangeIds(pagina, null, 2)).toEqual([]);
+  });
+
+  it("un índice fuera de la página no inventa filas", () => {
+    expect(shiftRangeIds(pagina, "a", 9)).toEqual([]);
+    expect(shiftRangeIds(pagina, "a", -1)).toEqual([]);
+  });
+});
+
+describe("countSelectedOffPage — cuántas tildes quedaron fuera de la vista", () => {
+  const todo = [
+    { reservation_id: "a" },
+    { reservation_id: "b" },
+    { reservation_id: "c" },
+    { reservation_id: "d" },
+  ];
+  const pagina = [{ reservation_id: "a" }, { reservation_id: "b" }];
+
+  it("cuenta sólo las que no están en la página", () => {
+    expect(countSelectedOffPage(todo, pagina, new Set(["a", "c", "d"]))).toBe(2);
+  });
+
+  it("es 0 cuando todo lo tildado está a la vista", () => {
+    expect(countSelectedOffPage(todo, pagina, new Set(["a", "b"]))).toBe(0);
+    expect(countSelectedOffPage(todo, pagina, new Set())).toBe(0);
   });
 });
 

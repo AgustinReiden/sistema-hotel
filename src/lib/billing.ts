@@ -245,6 +245,46 @@ export function billingComprobante(row: {
  */
 export type BulkBillingAction = "marcar" | "deshacer" | "mezclado" | "sin_accion" | "vacio";
 
+/**
+ * Ids que agrega un shift+click, desde el ancla hasta la fila clickeada, SOBRE LAS
+ * FILAS QUE SE ESTÁN VIENDO.
+ *
+ * El ancla se busca por id y no se guarda como índice a propósito. Un índice viejo
+ * —de otra página, o de antes de cambiar un filtro— sigue estando "en rango" y
+ * seleccionaría filas equivocadas sin que nada falle a la vista: sobre una acción
+ * fiscal irreversible es el peor modo de falla posible. Con el id, si el ancla no
+ * está entre las filas visibles el rango es vacío y el gesto queda en un click
+ * simple, que sobre este tipo de acción es el default que suma de menos.
+ */
+export function shiftRangeIds(
+  rows: readonly { reservation_id: string }[],
+  anchorId: string | null,
+  index: number
+): string[] {
+  if (anchorId === null) return [];
+  const anchorIndex = rows.findIndex((r) => r.reservation_id === anchorId);
+  if (anchorIndex < 0 || index < 0 || index >= rows.length) return [];
+  const [lo, hi] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex];
+  return rows.slice(lo, hi + 1).map((r) => r.reservation_id);
+}
+
+/**
+ * Cuántas filas tildadas quedaron fuera de la página que se está viendo.
+ *
+ * No se usa para actuar sobre ellas —las acciones alcanzan sólo a lo visible— sino
+ * para poder decirlo: leer "Marcar 4 como ya facturadas afuera" cuando uno tildó 14
+ * es exactamente el malentendido que hay que evitar.
+ */
+export function countSelectedOffPage(
+  all: readonly { reservation_id: string }[],
+  pageRows: readonly { reservation_id: string }[],
+  selectedIds: ReadonlySet<string>
+): number {
+  const enPagina = new Set(pageRows.map((r) => r.reservation_id));
+  return all.filter((r) => selectedIds.has(r.reservation_id) && !enPagina.has(r.reservation_id))
+    .length;
+}
+
 /** Estados desde los que todavía falta facturar: son los que se pueden marcar. */
 const MARCABLES: readonly BillingControlEstado[] = ["falta", "pendiente_consolidada"];
 
