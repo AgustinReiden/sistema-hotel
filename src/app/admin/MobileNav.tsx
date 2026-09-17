@@ -60,7 +60,10 @@ export function MobileTopBar({ role, userEmail, hasOpenShift, unbilledCount }: M
 
   return (
     <>
-      <header className="md:hidden sticky top-0 z-40 flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900 px-4 shadow-lg">
+      {/* Ni sticky ni fixed: es un hijo flex del shell de alto fijo, así que no se mueve
+          nunca. Con position fija y scroll de ventana, en iOS saltaba cada vez que la
+          barra de URL se contraía. */}
+      <header className="md:hidden shrink-0 flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900 px-4 shadow-lg">
         <Link href="/admin" className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 shadow-lg shadow-emerald-500/20">
             <BedDouble size={18} className="text-white" />
@@ -171,7 +174,9 @@ export function MobileTabBar({ hasOpenShift }: NavState) {
 
   return (
     <nav
-      className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-800 bg-slate-900 print:hidden"
+      // Idem la barra de arriba: hijo flex del shell, no fixed. Así no tapa el final de la
+      // página (no hace falta padding extra) ni se mueve al scrollear.
+      className="md:hidden shrink-0 grid grid-cols-5 border-t border-slate-800 bg-slate-900 print:hidden"
       aria-label="Accesos de recepción"
     >
       {items.map((item) => {
