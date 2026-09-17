@@ -987,6 +987,29 @@ export type ClientInvoiceRow = {
   created_at: string;
 };
 
+/**
+ * Una factura del cliente que todavía tiene saldo, para imputarle un cobro (mig 109).
+ *
+ * `saldo` es lo que falta cobrarle: `imp_total` menos lo que ya le imputaron otros
+ * pagos. Es el techo que la RPC valida con la fila lockeada (P0038), así que acá es
+ * una foto: entre que la pantalla lo lee y el admin guarda, otro pago pudo haber
+ * entrado. Sirve para no ofrecer un imposible, no para garantizarlo.
+ */
+export type CcOpenInvoiceRow = {
+  invoice_id: string;
+  kind: InvoiceKind;
+  cbte_tipo: number;
+  pto_vta: number;
+  cbte_nro: number | null;
+  cbte_fch: string | null; // date
+  imp_total: number;
+  /** Σ imputado por todos los pagos anteriores. */
+  imputado: number;
+  /** `imp_total` − `imputado`: lo que todavía se le puede imputar. */
+  saldo: number;
+  created_at: string;
+};
+
 /** Estado fiscal de una estadía de cuenta corriente. */
 export type CcStayEstado =
   | "pendiente"
@@ -1096,6 +1119,13 @@ export type BillingControlRow = {
   pto_vta: number | null;
   cbte_nro: number | null;
   imp_total: number | null;
+  /**
+   * Σ imputado a esa factura por los pagos de cuenta corriente (mig 109). No lo
+   * devuelve la RPC: se resuelve en el data layer con una lectura aparte de
+   * `cc_pago_imputaciones`, para no tener que tocar `rpc_list_billing_control`.
+   * Null cuando la estadía no tiene factura nuestra.
+   */
+  imputado: number | null;
   /** Comprobante externo declarado por el admin, si la marcó como facturada afuera. */
   external_ref: string | null;
   /** Se cobró por tarjeta/transferencia/MP: facturarla no es opcional (mig 83). */

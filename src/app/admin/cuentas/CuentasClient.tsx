@@ -3,12 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, DollarSign, FileText, Loader2, ScrollText, Search, UserRound, Wallet, X } from "lucide-react";
-import { toast } from "sonner";
+import { Building2, DollarSign, FileText, ScrollText, Search, UserRound } from "lucide-react";
 
-import { registerAccountPaymentAction } from "./actions";
 import BalanceTag from "./BalanceTag";
 import FichaClienteModal from "./FichaClienteModal";
+import RegisterPaymentModal from "./RegisterPaymentModal";
 import DownloadCsvButton from "../DownloadCsvButton";
 import PaginationFooter from "../PaginationFooter";
 import { usePagination } from "../usePagination";
@@ -152,132 +151,5 @@ export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] 
         />
       )}
     </>
-  );
-}
-
-const METHODS = [
-  { value: "cash", label: "Efectivo" },
-  { value: "bank_transfer", label: "Transferencia" },
-  { value: "mercado_pago", label: "Mercado Pago" },
-  { value: "other", label: "Otro" },
-];
-
-function RegisterPaymentModal({
-  account,
-  onClose,
-  onSaved,
-}: {
-  account: CtaCteAccount;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [amount, setAmount] = useState(account.balance > 0 ? account.balance.toString() : "");
-  const [method, setMethod] = useState("cash");
-  const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const parsed = Number(amount);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      toast.error("El monto debe ser mayor a 0.");
-      return;
-    }
-    setSaving(true);
-    const result = await registerAccountPaymentAction({
-      kind: account.kind,
-      clientId: account.id,
-      amount: parsed,
-      method,
-      notes: notes.trim() || undefined,
-    });
-    setSaving(false);
-    if (result.success) {
-      toast.success("Pago a cuenta registrado.");
-      onSaved();
-    } else {
-      toast.error(result.error);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]">
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
-            <Wallet size={18} className="text-emerald-600" />
-            Registrar pago a cuenta
-          </h2>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-full">
-            <X size={20} />
-          </button>
-        </div>
-        <form onSubmit={submit} className="p-6 space-y-4">
-          <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 text-sm">
-            <p className="font-semibold text-slate-800">{account.name}</p>
-            <p className="text-slate-500">
-              Saldo actual: <BalanceTag balance={account.balance} />
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5">Monto</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-bold"
-              required
-              autoFocus
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5">Método (informativo)</label>
-            <select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-            >
-              {METHODS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-500 mt-1">
-              No impacta el arqueo de caja; queda como registro de la cuenta corriente.
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5">Notas</label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-              placeholder="Opcional. Ej. comprobante N° / transferencia"
-            />
-          </div>
-          <div className="pt-2 flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 font-semibold rounded-xl hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {saving ? <Loader2 size={18} className="animate-spin" /> : <DollarSign size={18} />}
-              Registrar
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   );
 }

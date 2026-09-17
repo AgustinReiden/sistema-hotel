@@ -1,7 +1,9 @@
 import { formatCbteNumero } from "./arca/amounts";
+import { estadoPago, type EstadoPago } from "./cc-pagos";
 import type {
   BillingControlCierre,
   BillingControlEstado,
+  CcCobroEstado,
   PaymentMethod,
 } from "./types";
 
@@ -375,4 +377,67 @@ export function isPendingWithTrail(
     isPendingBilling(row.estado) &&
     (row.bancario || row.cierre === "cuenta_corriente")
   );
+}
+
+// ─── Estado de COBRO de una estadía (mig 109) ─────────────────────────────────
+// Mismo criterio que arriba: el texto vive acá porque lo comparten la pantalla, el
+// CSV del contador y las dos vistas que lo muestran (la ficha del cliente y el
+// control de facturación). El color queda en cada pantalla.
+
+/** Texto de cada estado de cobro. `sin_facturar` no se etiqueta: no hay qué cobrar. */
+export const ESTADO_PAGO_LABEL: Record<EstadoPago, string> = {
+  sin_facturar: "Sin facturar",
+  facturado_externo: "Cobro por fuera",
+  impaga: "Impaga",
+  parcial: "Pago parcial",
+  pagada: "Pagada",
+};
+
+/**
+ * Estado de cobro de una fila del control de facturación.
+ *
+ * El control no pasa por `rpc_list_cc_account_stays` —cubre TODAS las estadías, no
+ * sólo las de cuenta corriente— así que el "¿hay factura nuestra?" se deduce del
+ * `estado` fiscal, que ya lo contesta. Los importes los completa el data layer
+ * leyendo `cc_pago_imputaciones`.
+ *
+ * `no_corresponde` (vale blanco o cliente que no factura) no tiene estado de cobro:
+ * no hay comprobante contra el cual imputar, y decir "impaga" mandaría a perseguir
+ * una cobranza que no existe.
+ */
+export function estadoPagoDeControl(row: {
+  estado: BillingControlEstado;
+  imp_total: number | null;
+  imputado: number | null;
+}): EstadoPago | null {
+  if (row.estado === "no_corresponde") return null;
+  return estadoPago({
+    externa: row.estado === "facturado_externo",
+    facturada:
+      row.estado === "facturado" ||
+      row.estado === "facturado_consolidado" ||
+      row.estado === "en_proceso",
+    impTotal: row.imp_total,
+    imputado: row.imputado,
+  });
+}
+
+/**
+ * Estado de cobro de una estadía de cuenta corriente, a partir del `cobro_estado`
+ * que ya resolvió la RPC. Se lo refina en un grado: la base sólo distingue pagada de
+ * impaga (la unidad de cobro es la factura), pero para leer una lista importa la
+ * diferencia entre "no entró nada" y "entró una parte".
+ */
+export function estadoPagoDeEstadia(row: {
+  cobro_estado: CcCobroEstado;
+  imp_total: number | null;
+  imputado: number | null;
+}): EstadoPago {
+  if (row.cobro_estado === "sin_facturar") return "sin_facturar";
+  return estadoPago({
+    externa: row.cobro_estado === "facturado_externo",
+    facturada: true,
+    impTotal: row.imp_total,
+    imputado: row.imputado,
+  });
 }

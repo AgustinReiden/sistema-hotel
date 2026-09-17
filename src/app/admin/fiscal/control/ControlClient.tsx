@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import InvoicePromptModal, { type InvoicePromptData } from "../../InvoicePromptModal";
 import ClientFilter from "./ClientFilter";
+import EstadoPagoTag from "../../EstadoPagoTag";
 import PaginationFooter from "../../PaginationFooter";
 import { usePagination } from "../../usePagination";
 import DateRangeFilter from "../../DateRangeFilter";
@@ -43,6 +44,7 @@ import {
   isPendingBilling,
   isPendingWithTrail,
   matchesCobro,
+  estadoPagoDeControl,
 } from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
 import { BILLING_EPOCH, buildBillingPresets } from "@/lib/date-range";
@@ -578,6 +580,10 @@ export default function ControlClient({
                 <th className="px-3 py-2.5 text-right">Total</th>
                 <th className="px-3 py-2.5 text-right">Cargo cta. cte.</th>
                 <th className="px-3 py-2.5">Estado</th>
+                {/* Columna PROPIA y no otro chip adentro de "Estado": facturada y
+                    cobrada son dos preguntas distintas, y mezclarlas en una sola
+                    celda es exactamente el malentendido que esto viene a sacar. */}
+                <th className="px-3 py-2.5">Cobro</th>
                 <th className="px-3 py-2.5 hidden xl:table-cell">Comprobante</th>
                 <th className="px-3 py-2.5 text-right">Acción</th>
               </tr>
@@ -585,7 +591,7 @@ export default function ControlClient({
             <tbody className="divide-y divide-slate-100">
               {pagina.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={11} className="px-3 py-8 text-center text-sm text-slate-400">
                     No hay check-outs en este rango con los filtros elegidos.
                   </td>
                 </tr>
@@ -593,6 +599,7 @@ export default function ControlClient({
                 pagina.map((r, index) => {
                   const selected = selectedIds.has(r.reservation_id);
                   const comprobante = billingComprobante(r);
+                  const estadoCobro = estadoPagoDeControl(r);
                   return (
                     <tr
                       key={r.reservation_id}
@@ -662,6 +669,20 @@ export default function ControlClient({
                           >
                             Bancaria
                           </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {/* null = no hay comprobante contra el cual imputar (vale
+                            blanco o cliente que no factura): un "impaga" ahí
+                            mandaría a perseguir una cobranza que no existe. */}
+                        {estadoCobro ? (
+                          <EstadoPagoTag
+                            estado={estadoCobro}
+                            impTotal={r.imp_total}
+                            imputado={r.imputado}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-xs font-mono text-slate-500 whitespace-nowrap hidden xl:table-cell">

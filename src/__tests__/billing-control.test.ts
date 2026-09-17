@@ -36,6 +36,7 @@ function row(partial: Partial<BillingControlRow> = {}): BillingControlRow {
     pto_vta: null,
     cbte_nro: null,
     imp_total: null,
+    imputado: null,
     external_ref: null,
     bancario: false,
     ...partial,
@@ -190,11 +191,13 @@ describe("billingComprobante", () => {
 });
 
 describe("buildBillingControlCsv — el archivo que se le manda al contador", () => {
-  it("lleva las 9 columnas acordadas, en orden", () => {
+  it("lleva las 10 columnas acordadas, en orden", () => {
     const csv = buildBillingControlCsv([]);
     const header = csv.replace(/^﻿/, "").split("\r\n")[0];
+    // "Cobro" va aparte de "Estado" (mig 109): facturada y cobrada son dos preguntas
+    // distintas, y el contador concilia con la segunda.
     expect(header).toBe(
-      "Salida;Habitacion;Cliente;Cierre;Bancaria;Total;Cargo cta. cte.;Estado;Comprobante"
+      "Salida;Habitacion;Cliente;Cierre;Bancaria;Total;Cargo cta. cte.;Estado;Cobro;Comprobante"
     );
   });
 
@@ -242,7 +245,7 @@ describe("buildBillingControlCsv — el archivo que se le manda al contador", ()
     ]);
     const fields = dataRows(csv)[0];
     expect(fields[2].replace(/^"/, "").startsWith("'")).toBe(true);
-    expect(fields[8].replace(/^"/, "").startsWith("'")).toBe(true);
+    expect(fields[9].replace(/^"/, "").startsWith("'")).toBe(true);
   });
 
   it("no deja que un ';' en el nombre corra las columnas", () => {

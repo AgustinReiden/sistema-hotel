@@ -2,7 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CuentasClient from "./CuentasClient";
-import type { ClientInvoiceRow, CtaCteAccount, CtaCteMovimiento } from "@/lib/types";
+import type {
+  CcAccountStayRow,
+  CcClientPaymentRow,
+  ClientInvoiceRow,
+  CtaCteAccount,
+  CtaCteMovimiento,
+} from "@/lib/types";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -14,9 +20,14 @@ vi.mock("next/navigation", () => ({
 
 const loadCtaCteAccountAction = vi.fn();
 const loadClientInvoicesAction = vi.fn();
+const loadClientPaymentsAction = vi.fn();
+const loadCcAccountStaysAction = vi.fn();
 vi.mock("./actions", () => ({
   loadCtaCteAccountAction: (...args: unknown[]) => loadCtaCteAccountAction(...args),
   loadClientInvoicesAction: (...args: unknown[]) => loadClientInvoicesAction(...args),
+  loadClientPaymentsAction: (...args: unknown[]) => loadClientPaymentsAction(...args),
+  loadCcAccountStaysAction: (...args: unknown[]) => loadCcAccountStaysAction(...args),
+  loadClientOpenInvoicesAction: vi.fn().mockResolvedValue({ success: true, data: [] }),
   registerAccountPaymentAction: vi.fn(),
 }));
 
@@ -109,6 +120,12 @@ describe("CuentasClient — FichaClienteModal", () => {
     });
     loadClientInvoicesAction.mockReset();
     loadClientInvoicesAction.mockResolvedValue({ success: true, data: invoices });
+    loadClientPaymentsAction.mockReset();
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: [] });
+    // La solapa Movimientos pide aparte el estado de cobro de cada estadía: es una
+    // lectura decorativa, así que por defecto no devuelve ninguna.
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: [] });
   });
 
   it("el saldo del encabezado NO cambia al aplicar un filtro de fecha: el filtro es de vista, no de cobro", async () => {
@@ -167,5 +184,142 @@ describe("CuentasClient — FichaClienteModal", () => {
     expect(solapa.queryByRole("table")).toBeNull();
     // Y tiene que decir dónde se factura, no sólo que no hay nada.
     expect(solapa.getByRole("link", { name: "Facturar" })).toBeTruthy();
+  });
+});
+
+/** Un cobro con las dos retenciones, imputado a la consolidada y con vuelto a cuenta. */
+const pagos: CcClientPaymentRow[] = [
+  {
+    movimiento_id: "m2",
+    created_at: "2026-09-15T13:00:00.000Z",
+    amount: 100000,
+    payment_method: "bank_transfer",
+    retencion_ganancias: 2000,
+    retencion_iibb: 1500,
+    retencion_certificado: "RG-4444",
+    neto_recibido: 96500,
+    sin_imputar: 40000,
+    recibo_cc_numero: 7,
+    notes: null,
+    imputaciones: [
+      {
+        invoice_id: "f1",
+        cbte_tipo: 1,
+        pto_vta: 8,
+        cbte_nro: 1,
+        cbte_fch: "2026-09-17",
+        kind: "consolidada",
+        anulada: false,
+        imp_total: 1480000,
+        imputado: 60000,
+      },
+    ],
+  },
+];
+
+/** La estadía del cargo m1: facturada en consolidada y cobrada a medias. */
+const estadias: CcAccountStayRow[] = [
+  {
+    reservation_id: "r1",
+    movimiento_id: "m1",
+    room_number: "5",
+    passenger: "Juan Pérez",
+    fch_desde: "2020-01-03",
+    fch_hasta: "2020-01-05",
+    amount: 20000,
+    total_price: 20000,
+    actual_check_out: "2020-01-05T14:00:00.000Z",
+    mixed_payment: false,
+    facturable: false,
+    estado: "facturado_consolidado",
+    invoice_id: "f1",
+    invoice_kind: "consolidada",
+    invoice_status: "authorized",
+    cbte_tipo: 1,
+    pto_vta: 8,
+    cbte_nro: 1,
+    cbte_fch: "2026-09-17",
+    external_ref: null,
+    imp_total: 100000,
+    imputado: 60000,
+    cobro_estado: "facturada_impaga",
+  },
+];
+
+/** Abre la ficha y pasa a la solapa Pagos. */
+async function abrirSolapaPagos() {
+  render(<CuentasClient accounts={accounts} />);
+  fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
+  fireEvent.click(screen.getByRole("button", { name: "Pagos" }));
+  await waitFor(() => expect(loadClientPaymentsAction).toHaveBeenCalledWith("company", "acme"));
+}
+
+describe("CuentasClient — solapa Pagos", () => {
+  beforeEach(() => {
+    loadCtaCteAccountAction.mockReset();
+    loadCtaCteAccountAction.mockResolvedValue({
+      success: true,
+      data: { movements, balance: 15000 },
+    });
+    loadClientInvoicesAction.mockReset();
+    loadClientInvoicesAction.mockResolvedValue({ success: true, data: [] });
+    loadClientPaymentsAction.mockReset();
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: pagos });
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: estadias });
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  it("desglosa las retenciones y el neto: el monto grande es lo que CANCELA de deuda", async () => {
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    // Lo que cancela (100.000) y lo que entró (96.500) son números distintos, y los
+    // dos tienen que estar: hasta ahora sólo se veía uno.
+    expect(fila.getByText("$100.000,00")).toBeTruthy();
+    expect(fila.getByText("cancela de deuda")).toBeTruthy();
+    expect(fila.getByText("−$2.000,00")).toBeTruthy();
+    expect(fila.getByText("−$1.500,00")).toBeTruthy();
+    expect(fila.getByText("RG-4444")).toBeTruthy();
+    expect(fila.getByText("$96.500,00")).toBeTruthy();
+    // Número de recibo y a qué factura se imputó.
+    expect(fila.getByText("000007")).toBeTruthy();
+    expect(fila.getByText(/Factura A 00008-00000001/)).toBeTruthy();
+    expect(fila.getByText("$60.000,00")).toBeTruthy();
+    expect(fila.getByText(/\$40\.000,00 quedaron a cuenta/)).toBeTruthy();
+  });
+
+  it("reimprime el recibo en la misma ventana que el resto de los impresos", async () => {
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByLabelText("Reimprimir el recibo de cobranza"));
+
+    expect(window.open).toHaveBeenCalledWith(
+      "/admin/recibo-cc/m2?autoprint=1",
+      "recibo-cc-m2",
+      "width=420,height=720"
+    );
+  });
+
+  it("sin pagos explica dónde se cargan, en vez de una lista vacía", async () => {
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: [] });
+    await abrirSolapaPagos();
+
+    const solapa = within(await screen.findByTestId("solapa-pagos"));
+    expect(
+      solapa.getByText("Este cliente todavía no registró ningún pago a cuenta.")
+    ).toBeTruthy();
+  });
+
+  it("en Movimientos, cada estadía dice DOS cosas: si se facturó y si se cobró", async () => {
+    render(<CuentasClient accounts={accounts} />);
+    fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
+
+    const pastillas = within(await screen.findByTestId("pastillas-estadia"));
+    expect(pastillas.getByText("En consolidada")).toBeTruthy();
+    // Cobrada a medias: ni "pagada" ni "impaga", y con los importes de la factura,
+    // que es la unidad de cobro.
+    expect(pastillas.getByText("Pago parcial")).toBeTruthy();
+    expect(pastillas.getByText("· $60.000,00 de $100.000,00")).toBeTruthy();
   });
 });
