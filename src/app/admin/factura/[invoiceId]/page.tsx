@@ -1,11 +1,46 @@
+import { cache } from "react";
+import type { Metadata } from "next";
+
 import { cbteLetra, formatCbteNumero, formatCuit, isNotaCredito } from "@/lib/arca/amounts";
+import { nombreComprobante, prefijoArchivo } from "@/lib/comprobante-nombre";
 import { defaultStayDescription } from "@/lib/billing";
 import { qrPngDataUrl } from "@/lib/arca/qr";
 import { getFiscalSettings, getHotelSettings, getInvoiceById, getInvoiceStays } from "@/lib/data";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
 import InvoicePrintActions from "./InvoicePrintActions";
+import ThermalStyles from "@/app/admin/components/ThermalStyles";
 
 export const dynamic = "force-dynamic";
+
+// `cache` de React dedupe por request: generateMetadata y la página piden lo mismo
+// y la base lo recibe una sola vez.
+const invoiceCached = cache(getInvoiceById);
+const fiscalCached = cache(getFiscalSettings);
+
+/**
+ * El <title> es lo que el navegador propone como nombre de archivo al "Guardar como
+ * PDF". Sin esto, los cuatro papeles del sistema se guardaban todos como
+ * "El Refugio | Hotel & Servicios de Ruta.pdf" y había que renombrarlos a mano.
+ */
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { invoiceId } = await params;
+  const [invoice, fiscal] = await Promise.all([
+    invoiceCached(invoiceId).catch(() => null),
+    fiscalCached().catch(() => null),
+  ]);
+
+  if (!invoice || invoice.cbte_nro === null) return { title: "Comprobante" };
+
+  return {
+    title: nombreComprobante({
+      prefijo: prefijoArchivo(fiscal?.prefijo_archivos, fiscal?.razon_social),
+      tipo: isNotaCredito(invoice.cbte_tipo) ? "NC" : "Fact",
+      // El mismo helper que imprime el número en el papel: el archivo y el
+      // comprobante no pueden decir números distintos.
+      numero: formatCbteNumero(invoice.pto_vta, invoice.cbte_nro),
+    }),
+  };
+}
 
 type PageProps = {
   params: Promise<{ invoiceId: string }>;
@@ -37,8 +72,8 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
   const autoPrint = autoprint === "1";
 
   const [invoice, fiscal, hotel] = await Promise.all([
-    getInvoiceById(invoiceId).catch(() => null),
-    getFiscalSettings().catch(() => null),
+    invoiceCached(invoiceId).catch(() => null),
+    fiscalCached().catch(() => null),
     getHotelSettings().catch(() => null),
   ]);
 
@@ -66,7 +101,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
   // el <CbtesAsoc> del envío y RG 1415 en la representación impresa.
   const isNC = isNotaCredito(invoice.cbte_tipo);
   const anulado = invoice.nota_credito_de
-    ? await getInvoiceById(invoice.nota_credito_de).catch(() => null)
+    ? await invoiceCached(invoice.nota_credito_de).catch(() => null)
     : null;
 
   // Consolidada (mig 79): cubre N estadías. El detalle sólo va al impreso —
@@ -348,72 +383,20 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
       {autoPrint && <ReceiptAutoPrint closeOnDone />}
 
       <style>{`
-        @page { size: 80mm auto; margin: 0; }
-        @media print {
-          body {
-            background: white !important;
-            color: #000 !important;
-            margin: 0 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .no-print { display: none !important; }
-        }
-        /* El papel útil son 66mm (72 menos los márgenes): un renglón entra en unos
-           38 caracteres a 9pt. Los cuerpos de antes (10.5pt, todo en negrita)
-           desbordaban ese ancho y el navegador partía lo primero que encontraba,
-           que terminaba siendo la etiqueta ("Domicili / o:") o el importe
-           ("$1.480. / 000,00"). Por eso NO hay un word-break global acá: cada tipo
-           de fila declara abajo qué parte puede envolver y cuál tiene que salir
-           entera. */
-        .thermal {
-          font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-          background: white;
-          color: #000;
-          width: 72mm;
-          max-width: 72mm;
-          margin: 0 auto;
-          line-height: 1.25;
-        }
-        .thermal-page { padding: 0 3mm; }
+        /* Lo propio de la factura; el resto del papel térmico vive en ThermalStyles. */
         .thermal-feed { height: 10mm; }
-        .thermal h1 { font-size: 12pt; font-weight: 900; margin: 0 0 1px; text-align: center; line-height: 1.15; }
-        .thermal .addr { font-size: 8pt; font-weight: 600; text-align: center; margin: 0 0 4px; }
-        .thermal h2 { font-size: 11pt; font-weight: 900; margin: 3px 0; text-align: center; letter-spacing: 0.3px; }
-        .thermal hr { border: none; border-top: 1px solid #000; margin: 4px 0; }
-        /* Rótulo de sección: separa emisor / cliente / detalle de un vistazo. */
-        .thermal .seccion { font-size: 7pt; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin: 4px 0 1px; }
-
-        /* Etiqueta + valor. La etiqueta sale SIEMPRE entera; el que envuelve, si
-           hace falta, es el valor (un domicilio largo, una razón social). */
-        .thermal .row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 9pt; margin: 1.5px 0; }
-        .thermal .row > span:first-child { flex: 0 0 auto; white-space: nowrap; font-weight: 700; }
-        .thermal .row > span:last-child { flex: 1 1 auto; min-width: 0; text-align: right; font-weight: 600; overflow-wrap: break-word; }
-        .thermal .row.small { font-size: 8pt; }
-
-        /* Concepto + importe: exactamente al revés. El texto envuelve y el importe
-           queda entero, que es lo que se lee primero en un comprobante. */
-        .thermal .item { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 9pt; margin: 1.5px 0; }
-        .thermal .item > span:first-child { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: break-word; }
-        .thermal .item > span:last-child { flex: 0 0 auto; white-space: nowrap; font-weight: 700; }
-        .thermal .item.small { font-size: 8pt; }
-
-        /* Ningún importe se parte en dos renglones, esté donde esté. */
-        .thermal .money { white-space: nowrap; }
-
-        .thermal .total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12pt; font-weight: 900; margin: 5px 0 3px; border-top: 1px solid #000; padding-top: 4px; }
         .tipo-box { display: flex; flex-direction: column; align-items: center; margin: 3px 0 0; }
         .tipo-letra { font-size: 16pt; font-weight: 900; border: 1.5px solid #000; padding: 0 10px; line-height: 1.25; }
         .tipo-cod { font-size: 7pt; font-weight: 700; }
         .transparencia { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; }
         .transparencia-title { font-size: 7.5pt; font-weight: 800; text-align: center; margin: 0 0 2px; }
-        .thermal .nota { font-size: 8pt; font-weight: 600; margin: 3px 0 1px; overflow-wrap: break-word; }
         .leyenda { border: 1px solid #000; padding: 3px 4px; margin: 4px 0; font-size: 7pt; font-weight: 600; text-align: justify; }
         .leyenda p { margin: 0; }
         .qr-wrap { display: flex; justify-content: center; margin: 5px 0 2px; }
         .qr { width: 26mm; height: 26mm; }
         .homo-band { font-size: 8pt; font-weight: 900; text-align: center; border: 2px dashed #000; padding: 2px 4px; margin: 4px 0; }
       `}</style>
+      <ThermalStyles />
       </div>
     </>
   );

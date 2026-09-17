@@ -740,6 +740,12 @@ export type FiscalSettings = {
   concepto: number;
   iva_pct: number;
   /**
+   * Sigla del emisor para el NOMBRE DE ARCHIVO de los comprobantes impresos
+   * ("COMB - Fact - 00008-00000001"). Vacío = se usan las primeras letras de la
+   * razón social (mig 107).
+   */
+  prefijo_archivos: string | null;
+  /**
    * Días entre emisión y vencimiento (FchVtoPago) de una consolidada de cuenta
    * corriente (mig 98). Las de check-out y las notas de crédito vencen el mismo día.
    */

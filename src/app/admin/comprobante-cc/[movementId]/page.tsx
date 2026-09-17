@@ -1,10 +1,14 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { getHotelSettings } from "@/lib/data";
+import { getFiscalSettings, getHotelSettings } from "@/lib/data";
+import { nombreComprobante, prefijoArchivo } from "@/lib/comprobante-nombre";
 import { formatAmount, formatShiftCode } from "@/lib/format";
 import { formatHotelDateTime, formatHotelDate } from "@/lib/time";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
+import ThermalStyles from "@/app/admin/components/ThermalStyles";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +25,41 @@ type PageProps = {
   params: Promise<{ movementId: string }>;
   searchParams: Promise<{ autoprint?: string }>;
 };
+
+/** Sólo el número, para el título. Cacheado por request: no duplica la consulta. */
+const remitoNumeroCached = cache(async (movementId: string): Promise<number | null> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("cuenta_corriente_movimientos")
+    .select("remito_numero")
+    .eq("id", movementId)
+    .maybeSingle();
+  const numero = (data as { remito_numero: number | null } | null)?.remito_numero;
+  return numero ?? null;
+});
+
+const fiscalCached = cache(getFiscalSettings);
+
+/**
+ * El <title> es lo que el navegador propone como nombre de archivo al "Guardar como
+ * PDF": "COMB - Rem - 000017". Antes los cuatro papeles del sistema se guardaban
+ * todos como "El Refugio | Hotel & Servicios de Ruta.pdf".
+ */
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { movementId } = await params;
+  const [numero, fiscal] = await Promise.all([
+    remitoNumeroCached(movementId).catch(() => null),
+    fiscalCached().catch(() => null),
+  ]);
+
+  return {
+    title: nombreComprobante({
+      prefijo: prefijoArchivo(fiscal?.prefijo_archivos, fiscal?.razon_social),
+      tipo: "Rem",
+      numero: numero !== null ? formatShiftCode(numero) : "",
+    }),
+  };
+}
 
 export default async function AccountVoucherPage({ params, searchParams }: PageProps) {
   const { movementId } = await params;
@@ -92,6 +131,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
           <span>{formatHotelDateTime(raw.created_at, tz)}</span>
         </p>
         <hr />
+        <p className="seccion">Cliente</p>
         <p className="row">
           <span>Cliente:</span>
           <span>{clientName}</span>
@@ -119,7 +159,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
         <hr />
         <p className="total">
           <span>CARGADO A CUENTA</span>
-          <span>{money(amount)}</span>
+          <span className="money">{money(amount)}</span>
         </p>
         <hr />
         <p className="note">
@@ -133,27 +173,9 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
       {autoPrint && <ReceiptAutoPrint closeOnDone />}
 
       <style>{`
-        @page { size: 80mm auto; margin: 0; }
-        @media print {
-          body { background: white !important; color: #000 !important; margin: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .no-print { display: none !important; }
-        }
-        .thermal { font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; background: white; color: #000; width: 72mm; max-width: 72mm; margin: 0 auto; line-height: 1.2; word-break: break-word; }
-        .thermal-page { padding: 0 3mm; }
         .thermal-feed { height: 2mm; }
-        .thermal h1 { font-size: 15pt; font-weight: 900; margin: 0 0 2px; text-align: center; }
-        .thermal .addr { font-size: 9pt; font-weight: 700; text-align: center; margin: 0 0 5px; }
-        .thermal h2 { font-size: 12.5pt; font-weight: 900; margin: 6px 0 2px; text-align: center; letter-spacing: 0.6px; }
-        .thermal .sub { font-size: 10pt; font-weight: 800; text-align: center; margin: 0 0 6px; letter-spacing: 1.5px; }
-        .thermal hr { border: none; border-top: 1.5px solid #000; margin: 5px 0; }
-        .thermal .row { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5pt; font-weight: 700; margin: 1.5px 0; }
-        .thermal .row span:first-child { font-weight: 800; margin-right: 6px; }
-        .thermal .row span:last-child { text-align: right; }
-        .thermal .total { display: flex; justify-content: space-between; gap: 8px; font-size: 13pt; font-weight: 900; margin: 6px 0 4px; }
-        .thermal .note { font-size: 9pt; font-weight: 700; margin: 6px 0; }
-        .thermal .footer { font-size: 10pt; font-weight: 800; text-align: center; margin: 10px 0 0; }
-        .thermal .footer.muted { color: #000; margin-top: 4px; font-weight: 700; }
       `}</style>
+      <ThermalStyles />
     </div>
   );
 }
