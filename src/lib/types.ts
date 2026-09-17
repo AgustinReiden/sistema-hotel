@@ -586,6 +586,12 @@ export type RoomOccupancyAlert = {
   /** Cuándo la mucama la marcó: es la fecha que se precarga en la estadía. */
   detected_at: string;
   reported_by_name: string | null;
+  /** null = sigue abierta. Las resueltas se arrastran 48 h para mostrar en qué terminaron. */
+  resolved_at: string | null;
+  /** `"regularizada"` = se cargó la estadía. Resuelta sin esto = se cerró sin cobrar. */
+  decision: string | null;
+  resolved_notes: string | null;
+  resolved_by_name: string | null;
 };
 
 /**
