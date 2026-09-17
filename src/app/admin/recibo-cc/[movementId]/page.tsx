@@ -176,17 +176,34 @@ function ReceiptCopy({
         <>
           <hr />
           <p className="seccion">Imputado a</p>
+          {/*
+            La clave es imputacion_id y no invoice_id: desde la mig 111 una misma
+            factura puede figurar dos veces en el mismo pago (una línea desimputada y
+            la que la reemplazó), y con invoice_id React vería claves repetidas.
+          */}
           {receipt.imputaciones.map((imp) => (
-            <p className="item small" key={imp.invoice_id}>
+            <p className="item small" key={imp.imputacion_id}>
               <span>
                 {cbteNombre(imp.cbte_tipo)}{" "}
                 {imp.cbte_nro !== null ? formatCbteNumero(imp.pto_vta, imp.cbte_nro) : "s/nro"}
                 {imp.cbte_fch ? ` - ${formatDateCol(imp.cbte_fch)}` : ""}
                 {imp.anulada ? " (anulada)" : ""}
+                {imp.revertida ? " (desimputada)" : ""}
               </span>
               <span className="money">{money(imp.imputado)}</span>
             </p>
           ))}
+          {/*
+            Se imprime sólo si hay alguna desimputada. Sin esta línea el recibo listaría
+            importes que ya no cancelan nada y quedaría sin explicar por qué la suma de
+            "Imputado a" no coincide con lo que la factura tiene aplicado hoy.
+          */}
+          {receipt.imputaciones.some((imp) => imp.revertida) && (
+            <p className="note">
+              Las líneas marcadas como desimputadas ya no cancelan esa factura: ese
+              importe volvió a quedar disponible en este pago.
+            </p>
+          )}
         </>
       )}
       <hr />

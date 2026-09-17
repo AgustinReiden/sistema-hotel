@@ -528,6 +528,64 @@ export async function registerAccountPayment(
   };
 }
 
+/**
+ * Suelta una imputación: esa plata deja de cancelar esa factura y vuelve a quedar
+ * disponible en el pago (mig 111). La fila no se borra, se marca con quién y por qué.
+ *
+ * El caso que motivó esto: una nota de crédito anula la factura y el trigger de la
+ * mig 80 ya la suelta solo. Ésta es la puerta manual, para los errores de carga
+ * ("me equivoqué de factura", "le puse 1000 y eran 800").
+ */
+export async function revertPaymentImputacion(input: {
+  imputacionId: string;
+  motivo: string;
+}): Promise<{ movementId: string; liberado: number; sinImputar: number }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_revert_payment_imputacion", {
+    p_imputacion_id: input.imputacionId,
+    p_motivo: input.motivo,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as {
+    movement_id?: string;
+    liberado?: number | string;
+    sin_imputar?: number | string;
+  };
+  return {
+    movementId: String(result.movement_id ?? ""),
+    liberado: Number(result.liberado) || 0,
+    sinImputar: Number(result.sin_imputar) || 0,
+  };
+}
+
+/**
+ * Aplica un pago YA registrado a facturas (mig 111). Es la contraparte de desimputar:
+ * sin esto la plata liberada queda suelta, porque `registerAccountPayment` crea el
+ * movimiento y sus imputaciones juntos y no hay forma de agregarle una después.
+ *
+ * El cliente no viaja: la RPC lo lee del propio movimiento, así que no se puede
+ * imputar el pago de una empresa a la factura de otra.
+ */
+export async function addPaymentImputaciones(input: {
+  movementId: string;
+  imputaciones: ReadonlyArray<{ invoiceId: string; amount: number }>;
+}): Promise<{ imputado: number; sinImputar: number }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_add_payment_imputaciones", {
+    p_movimiento_id: input.movementId,
+    p_imputaciones: input.imputaciones.map((i) => ({
+      invoice_id: i.invoiceId,
+      amount: i.amount,
+    })),
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { imputado?: number | string; sin_imputar?: number | string };
+  return {
+    imputado: Number(result.imputado) || 0,
+    sinImputar: Number(result.sin_imputar) || 0,
+  };
+}
+
 /** Normaliza el jsonb de imputaciones que devuelven los RPC de cuenta corriente. */
 function mapCcImputaciones(raw: unknown): CcPagoImputacion[] {
   return ((raw ?? []) as Array<Record<string, unknown>>).map((i) => ({
@@ -540,6 +598,10 @@ function mapCcImputaciones(raw: unknown): CcPagoImputacion[] {
     anulada: Boolean(i.anulada),
     imp_total: Number(i.imp_total) || 0,
     imputado: Number(i.imputado) || 0,
+    imputacion_id: String(i.imputacion_id),
+    revertida: Boolean(i.revertida),
+    revertida_at: (i.revertida_at as string | null) ?? null,
+    revertida_motivo: (i.revertida_motivo as string | null) ?? null,
   }));
 }
 
@@ -644,8 +706,11 @@ export async function getCcPaymentReceipt(movementId: string): Promise<CcPayment
     supabase
       .from("cc_pago_imputaciones")
       .select(
-        "amount, invoice:invoices ( id, cbte_tipo, pto_vta, cbte_nro, cbte_fch, kind, anulada_at, imp_total )"
+        "id, amount, revertida_at, revertida_motivo, invoice:invoices ( id, cbte_tipo, pto_vta, cbte_nro, cbte_fch, kind, anulada_at, imp_total )"
       )
+      // Sin filtrar por revertida_at: la línea desimputada se imprime marcada, no se
+      // borra. Un recibo tiene que seguir diciendo lo mismo que el día que salió —
+      // el mismo motivo por el que `anulada` viaja en vez de esconder la factura.
       .eq("movimiento_id", movementId),
     // Los movimientos de la cuenta hasta este pago inclusive, para el saldo posterior.
     supabase
@@ -659,7 +724,10 @@ export async function getCcPaymentReceipt(movementId: string): Promise<CcPayment
   if (movRes.error) throw movRes.error;
 
   type RawImputacion = {
+    id: string;
     amount: number | string;
+    revertida_at: string | null;
+    revertida_motivo: string | null;
     invoice: RelationOne<{
       id: string;
       cbte_tipo: number;
@@ -685,10 +753,22 @@ export async function getCcPaymentReceipt(movementId: string): Promise<CcPayment
         anulada: inv.anulada_at !== null,
         imp_total: Number(inv.imp_total) || 0,
         imputado: Number(row.amount) || 0,
+        imputacion_id: String(row.id),
+        revertida: row.revertida_at !== null,
+        revertida_at: row.revertida_at,
+        revertida_motivo: row.revertida_motivo,
       };
     })
     .filter((i): i is CcPagoImputacion => i !== null)
-    .sort((a, b) => (a.cbte_fch ?? "").localeCompare(b.cbte_fch ?? "") || (a.cbte_nro ?? 0) - (b.cbte_nro ?? 0));
+    // Las vivas primero y las desimputadas al final, igual que ordena
+    // rpc_list_client_payments: el recibo muestra lo que cancela y deja la historia
+    // abajo.
+    .sort(
+      (a, b) =>
+        Number(a.revertida) - Number(b.revertida) ||
+        (a.cbte_fch ?? "").localeCompare(b.cbte_fch ?? "") ||
+        (a.cbte_nro ?? 0) - (b.cbte_nro ?? 0)
+    );
 
   // `lte` sobre created_at puede traer otro movimiento del mismo instante: se
   // desempata por id, el mismo criterio con el que la migración numeró el backfill.
