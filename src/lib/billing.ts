@@ -4,6 +4,7 @@ import type {
   BillingControlCierre,
   BillingControlEstado,
   CcCobroEstado,
+  InvoiceReceptorInput,
   PaymentMethod,
 } from "./types";
 
@@ -30,8 +31,13 @@ export function isBankPaymentMethod(method: string | null | undefined): boolean 
   return BANK_PAYMENT_METHODS.includes(method as PaymentMethod);
 }
 
-/** Los pasos del prompt de facturación post check-out. */
-export type InvoiceStep = "ask" | "confirmNo" | "tipo" | "formCuit" | "confirmDirecto";
+/**
+ * Los pasos del prompt de facturación post check-out. `confirmar` es la última
+ * pantalla antes de ARCA y la atraviesan LOS DOS caminos (consumidor final y CUIT):
+ * ahí se lee letra, nombre, documento y total. Antes sólo existía para el caso de
+ * ficha completa, y por eso una Factura A pudo salir sin que nadie la viera.
+ */
+export type InvoiceStep = "ask" | "confirmNo" | "tipo" | "formB" | "formCuit" | "confirmar";
 
 type InvoiceStepInput = {
   /** Se entró desde /admin/fiscal o el control: la decisión de facturar ya está tomada. */
@@ -57,14 +63,28 @@ export function initialInvoiceStep({
   prefillComplete,
 }: InvoiceStepInput): InvoiceStep {
   if (startAtTipo || mandatory) {
-    return prefillComplete ? "confirmDirecto" : "tipo";
+    return prefillComplete ? "confirmar" : "tipo";
   }
   return "ask";
 }
 
+/**
+ * La letra del comprobante que sale para un receptor elegido. Vive acá y no en el
+ * modal porque es LA regla que se rompió el 18/09/2026: con "Consumidor Final"
+ * elegido salió una Factura A, porque la letra no se derivaba de lo elegido sino de
+ * la ficha del cliente (ver la mig 112). Consumidor final es B y punto; con CUIT, la
+ * condición frente al IVA decide: exento → B, Responsable Inscripto / Monotributo → A.
+ *
+ * ESPEJO de la derivación de `rpc_create_invoice_draft`. Si cambia una, cambia la otra.
+ */
+export function letraDeReceptor(receptor: InvoiceReceptorInput): "A" | "B" {
+  if (receptor.tipo === "B") return "B";
+  return receptor.condicionIva === "exento" ? "B" : "A";
+}
+
 /** Paso al que lleva el SÍ del prompt (o el atajo cuando ya hay datos cargados). */
 export function stepAfterYes(prefillComplete: boolean): InvoiceStep {
-  return prefillComplete ? "confirmDirecto" : "tipo";
+  return prefillComplete ? "confirmar" : "tipo";
 }
 
 /**

@@ -98,11 +98,19 @@ export default function GuestsClientTable({
                     Hab. {guest.room_number}
                   </span>
                 </td>
+                {/* Cuál es cuál va escrito: la lista se puede estar ordenando por
+                    cualquiera de las dos, y dos fechas sueltas no lo dicen. */}
                 <td className="px-6 py-4">
                   <p className="text-sm text-slate-900 font-medium">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mr-1">
+                      Entrada
+                    </span>
                     {formatHotelShortDateTime(guest.check_in_target, timezone)}
                   </p>
                   <p className="text-xs text-slate-500">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold mr-1">
+                      Salida
+                    </span>
                     {formatHotelDate(guest.check_out_target, timezone)}
                   </p>
                 </td>

@@ -9,7 +9,7 @@ import {
 } from "@/lib/data";
 import { PAGE_SIZE, paginate, parsePageParam } from "@/lib/pagination";
 import { hotelDateKey } from "@/lib/time";
-import HistoryRangeFilter from "./HistoryRangeFilter";
+import HistoryRangeFilter, { type HistoryOrder } from "./HistoryRangeFilter";
 import PaginationFooter from "../PaginationFooter";
 import GuestsClientTable from "./GuestsClientTable";
 import GuestDirectoryTable from "./GuestDirectoryTable";
@@ -27,6 +27,7 @@ type GuestsPageProps = {
     cancelled?: string;
     desde?: string;
     hasta?: string;
+    orden?: string;
   }>;
 };
 
@@ -60,6 +61,8 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   const desde = params.desde && DATE_RE.test(params.desde) ? params.desde : "";
   const hasta = params.hasta && DATE_RE.test(params.hasta) ? params.hasta : "";
+  // Entrada o salida: recorta el período Y ordena la lista (ver HistoryRangeFilter).
+  const orden: HistoryOrder = params.orden === "salida" ? "salida" : "entrada";
   const todayKey = hotelDateKey(new Date());
 
   const directory = view === "directorio" ? await getGuestDirectory(search) : [];
@@ -76,6 +79,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
           includeCancelled,
           from: desde || undefined,
           to: hasta || undefined,
+          orderBy: orden === "salida" ? "check_out" : "check_in",
         })
       : null;
 
@@ -92,6 +96,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
     // El período elegido sobrevive al cambio de página y al de pestaña.
     if (desde) parts.push(`desde=${desde}`);
     if (hasta) parts.push(`hasta=${hasta}`);
+    if (orden === "salida") parts.push("orden=salida");
     if (overrides.page && overrides.page > 1) parts.push(`page=${overrides.page}`);
     return parts.length > 0 ? `/admin/guests?${parts.join("&")}` : "/admin/guests";
   };
@@ -110,6 +115,9 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
           <form method="get" className="relative">
             <input type="hidden" name="view" value={view} />
             {includeCancelled && <input type="hidden" name="cancelled" value="1" />}
+            {orden === "salida" && <input type="hidden" name="orden" value="salida" />}
+            {desde && <input type="hidden" name="desde" value={desde} />}
+            {hasta && <input type="hidden" name="hasta" value={hasta} />}
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               size={16}
@@ -168,8 +176,8 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
             "Padrón de huéspedes (sin repetir, agrupados por DNI). El descuento se aplica al elegirlos en una reserva."}
           {view === "historial" &&
             (desde || hasta
-              ? `Reservas del período elegido, ${PAGE_SIZE} por página.`
-              : `Reservas que ya ocurrieron, últimos 60 días, ${PAGE_SIZE} por página.`)}
+              ? `Reservas del período elegido por fecha de ${orden}, ${PAGE_SIZE} por página.`
+              : `Reservas que ya ocurrieron, últimos 60 días por fecha de ${orden}, ${PAGE_SIZE} por página.`)}
           {view === "por_llegar" && "Todas las reservas próximas, sin límite de tiempo."}
         </p>
       </header>
@@ -206,6 +214,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
               todayKey={todayKey}
               search={search}
               includeCancelled={includeCancelled}
+              orden={orden}
             />
             <GuestsClientTable
               initialGuests={history.rows}

@@ -906,7 +906,9 @@ export type InvoiceRecord = {
  *   (RI/Monotributo → Factura A; Exento → Factura B con CUIT).
  */
 export type InvoiceReceptorInput =
-  | { tipo: "B" }
+  /** Consumidor final: Factura B con el DNI de la reserva. `razonSocial` es el
+   *  nombre impreso — se precarga con el de la reserva y es editable (mig 112). */
+  | { tipo: "B"; razonSocial: string }
   | {
       tipo: "cuit";
       condicionIva: ReceptorCondicionCuit;

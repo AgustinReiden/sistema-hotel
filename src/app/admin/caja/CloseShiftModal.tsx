@@ -450,16 +450,18 @@ export default function CloseShiftModal({
       </div>
     ) : null;
 
-  // Cerrado el turno, el playero ya no puede facturar estos check-outs: tiene que
-  // pedírselo al administrador. Por eso el aviso va acá y no después.
+  // Emitir una factura fuera del check-out quedó en manos del administrador
+  // (18/09/2026): el playero ya no ve los check-outs sin facturar en Facturación.
+  // El aviso igual va acá —y no después— porque es el último momento en que alguien
+  // los tiene presentes, y de acá sale el pedido al administrador.
   const unbilledBanner =
     unbilledCount > 0 ? (
       <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
         <FileText size={18} className="text-rose-500 shrink-0 mt-0.5" />
         <div className="text-sm font-semibold text-rose-800">
-          Te {unbilledCount === 1 ? "queda 1 check-out" : `quedan ${unbilledCount} check-outs`} de
-          este turno <strong>sin facturar</strong>. Si corresponde facturarlos, hacelo desde
-          Facturación <strong>antes de cerrar</strong> — después sólo puede el administrador.
+          {unbilledCount === 1 ? "Queda 1 check-out" : `Quedan ${unbilledCount} check-outs`} de
+          este turno <strong>sin facturar</strong>. Si el huésped pidió factura, el
+          administrador puede emitirla desde Facturación.
         </div>
       </div>
     ) : null;

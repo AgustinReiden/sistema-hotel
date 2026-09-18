@@ -46,7 +46,9 @@ export default async function FiscalPage({ searchParams }: PageProps) {
   const [settings, pending, invoiceable, authorized] = await Promise.all([
     getFiscalSettings().catch(() => null),
     listPendingInvoices().catch(() => []),
-    listInvoiceableCheckouts().catch(() => []),
+    // Los check-outs sin facturar son del administrador: al recepcionista ni se le
+    // piden. Lo suyo son las pendientes/con error de su turno abierto.
+    isAdmin ? listInvoiceableCheckouts().catch(() => []) : Promise.resolve([]),
     listAuthorizedInvoices(fromKey, toKey).catch(() => []),
   ]);
 
