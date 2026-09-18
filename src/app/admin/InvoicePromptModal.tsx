@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, Building2, FileText, Loader2, User, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, FileText, Loader2, User, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -10,13 +10,24 @@ import {
   lookupReceptorByCuitAction,
 } from "./fiscal/actions";
 import { formatCuit, isValidCuit } from "@/lib/arca/amounts";
-import { initialInvoiceStep, stepAfterYes, type InvoiceStep } from "@/lib/billing";
+import {
+  initialInvoiceStep,
+  letraDeReceptor,
+  stepAfterYes,
+  type InvoiceStep,
+} from "@/lib/billing";
 import type { EmitInvoiceOutcome, InvoiceReceptorInput, ReceptorCondicionCuit } from "@/lib/types";
 
 export type InvoicePromptData = {
   reservationId: string;
   clientName: string | null;
   total: number;
+  /**
+   * DNI cargado en la reserva: es el documento que va a llevar la Factura B, así que
+   * se muestra en la confirmación. `undefined` cuando la pantalla que abre el modal
+   * no lo tiene a mano (Control de facturación): ahí no se valida y decide el server.
+   */
+  clientDni?: string | null;
   /** Prefill para el receptor con CUIT (empresa de la ficha o CUIT ya en la reserva). */
   aPrefill: {
     razonSocial: string;
@@ -43,6 +54,9 @@ type Props = {
   startAtTipo?: boolean;
 };
 
+/** A dónde vuelve el botón "Volver" desde la pantalla de confirmación. */
+type ConfirmBack = "tipo" | "formB" | "formCuit";
+
 function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -64,6 +78,13 @@ function openInvoicePrint(invoiceId: string) {
  * reserva es de una empresa de la ficha. Si ARCA no responde, la factura queda
  * pendiente en /admin/fiscal — el check-out ya está hecho y no se traba.
  *
+ * NADA SALE SIN PASAR POR LA CONFIRMACIÓN. Los dos caminos terminan en la misma
+ * pantalla, que muestra letra, nombre, documento y total antes de tocar ARCA. Es la
+ * corrección del 18/09/2026: elegir "Consumidor Final" emitió una Factura A a nombre
+ * de otra empresa sin mostrar nada, y una factura con CAE ya no se borra — se anula
+ * con nota de crédito y quedan los dos papeles. Mirar antes de emitir cuesta un clic;
+ * el par factura+NC cuesta una explicación al contador.
+ *
  * El estado se inicializa desde `data` en el montaje; el padre pasa `key` (el
  * reservationId) para que se remonte fresco cada vez que abre un prompt nuevo.
  */
@@ -83,11 +104,33 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     condicionIva: (data?.aPrefill.condicionIva ?? "") as ReceptorCondicionCuit | "",
     domicilio: data?.aPrefill.domicilio ?? "",
   }));
+  // Nombre impreso en la Factura B: precargado con el de la reserva y editable
+  // (el pasajero se anota apurado y la factura la quiere con el nombre completo).
+  const [nombreB, setNombreB] = useState(() => data?.clientName ?? "");
+  /** Lo que se va a emitir, ya armado. Se mira en "confirmar" y recién ahí se emite. */
+  const [pending, setPending] = useState<InvoiceReceptorInput | null>(() =>
+    data && prefillComplete
+      ? {
+          tipo: "cuit",
+          condicionIva: data.aPrefill.condicionIva as ReceptorCondicionCuit,
+          cuit: data.aPrefill.cuit,
+          razonSocial: data.aPrefill.razonSocial,
+          domicilio: data.aPrefill.domicilio,
+        }
+      : null
+  );
+  const [confirmBack, setConfirmBack] = useState<ConfirmBack>("tipo");
 
   if (!data) return null;
 
   // La condición IVA deriva el comprobante: exento → B; RI/Monotributo → A.
   const derivedLetra = form.condicionIva === "exento" ? "B" : form.condicionIva ? "A" : null;
+
+  // DNI que va a llevar la Factura B. `undefined` = la pantalla no lo trajo: no se
+  // valida acá (el RPC igual rechaza un DNI que no sirve, con el mismo mensaje).
+  const dniDigits = (data.clientDni ?? "").replace(/\D/g, "");
+  const dniConocido = data.clientDni !== undefined && data.clientDni !== null;
+  const dniSirve = dniDigits.length === 7 || dniDigits.length === 8;
 
   const handleOutcome = (outcome: EmitInvoiceOutcome) => {
     if (outcome.status === "authorized") {
@@ -105,10 +148,17 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     onClose();
   };
 
-  const emit = async (receptor: InvoiceReceptorInput) => {
-    if (emitting) return; // anti doble click
+  /** Arma el receptor y lleva a confirmar. Emitir de acá para abajo es un solo lugar. */
+  const revisar = (receptor: InvoiceReceptorInput, back: ConfirmBack) => {
+    setPending(receptor);
+    setConfirmBack(back);
+    setStep("confirmar");
+  };
+
+  const emitPending = async () => {
+    if (emitting || !pending) return; // anti doble click
     setEmitting(true);
-    const result = await emitInvoiceForReservationAction(data.reservationId, receptor);
+    const result = await emitInvoiceForReservationAction(data.reservationId, pending);
     setEmitting(false);
 
     if (!result.success) {
@@ -160,15 +210,14 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     }));
   };
 
-  /** Emite con lo que ya está en la ficha, sin volver a preguntar nada. */
-  const emitFromPrefill = () =>
-    emit({
-      tipo: "cuit",
-      condicionIva: data.aPrefill.condicionIva as ReceptorCondicionCuit,
-      cuit: data.aPrefill.cuit,
-      razonSocial: data.aPrefill.razonSocial,
-      domicilio: data.aPrefill.domicilio,
-    });
+  const submitFormB = () => {
+    const nombre = nombreB.trim();
+    if (!nombre) {
+      toast.error("Ingresá el nombre que va en la factura.");
+      return;
+    }
+    revisar({ tipo: "B", razonSocial: nombre }, "formB");
+  };
 
   const submitFormCuit = () => {
     const cuitDigits = form.cuit.replace(/\D/g, "");
@@ -192,14 +241,24 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       toast.error("Ingresá el domicilio del receptor.");
       return;
     }
-    emit({
-      tipo: "cuit",
-      condicionIva: form.condicionIva,
-      cuit: cuitDigits,
-      razonSocial: form.razonSocial.trim(),
-      domicilio: form.domicilio.trim(),
-    });
+    revisar(
+      {
+        tipo: "cuit",
+        condicionIva: form.condicionIva,
+        cuit: cuitDigits,
+        razonSocial: form.razonSocial.trim(),
+        domicilio: form.domicilio.trim(),
+      },
+      "formCuit"
+    );
   };
+
+  const tituloPaso =
+    step === "formCuit" || step === "formB"
+      ? "Datos de facturación"
+      : step === "confirmar"
+        ? "Revisá antes de emitir"
+        : "¿Emitir factura?";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
@@ -210,9 +269,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               <FileText size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">
-                {step === "formCuit" ? "Datos de facturación" : "¿Emitir factura?"}
-              </h2>
+              <h2 className="text-xl font-bold text-slate-800">{tituloPaso}</h2>
               <p className="text-slate-500 text-sm font-medium">
                 {data.clientName ?? "Huésped"} — ${formatMoney(data.total)}
               </p>
@@ -282,45 +339,78 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 </button>
               </div>
             </>
-          ) : step === "confirmDirecto" ? (
-            // La ficha ya tiene todo: se muestra qué sale y se confirma con un clic.
-            // El "Cambiar" existe porque el pasajero de una empresa puede querer la
-            // factura a nombre propio, y una vez emitida sólo se arregla con NC.
+          ) : step === "confirmar" && pending ? (
+            // La última pantalla antes de ARCA: dice LETRA, NOMBRE, DOCUMENTO y TOTAL.
+            // Lo que se lee acá es exactamente lo que se imprime.
             <>
               {mandatory && (
                 <p className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-3 text-center">
                   Se cobró por medio bancario: esta estadía se factura sí o sí.
                 </p>
               )}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4">
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">
                   Se va a emitir
                 </p>
                 <p className="text-2xl font-black text-slate-800 mt-1">
-                  Factura {data.aPrefill.condicionIva === "exento" ? "B" : "A"}
+                  Factura {letraDeReceptor(pending)}
+                  <span className="text-sm font-bold text-slate-500 ml-2">
+                    {pending.tipo === "B" ? "Consumidor Final" : "con CUIT"}
+                  </span>
                 </p>
-                <p className="text-sm font-bold text-slate-700 mt-2">{data.aPrefill.razonSocial}</p>
-                <p className="text-xs text-slate-500 font-mono">
-                  CUIT {formatCuit(data.aPrefill.cuit)}
+
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mt-3">
+                  A nombre de
                 </p>
-                <p className="text-xs text-slate-500">{data.aPrefill.domicilio}</p>
-                <p className="text-lg font-black text-slate-800 mt-2">
-                  ${formatMoney(data.total)}
+                <p className="text-lg font-bold text-slate-800 leading-tight break-words">
+                  {pending.razonSocial || data.clientName || "—"}
                 </p>
+
+                {pending.tipo === "B" ? (
+                  <p className="text-xs text-slate-500 font-mono mt-1">
+                    DNI {dniConocido ? dniDigits || "(sin cargar)" : "de la reserva"}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-500 font-mono mt-1">
+                      CUIT {formatCuit(pending.cuit)}
+                    </p>
+                    <p className="text-xs text-slate-500">{pending.domicilio}</p>
+                  </>
+                )}
+
+                <p className="text-2xl font-black text-slate-800 mt-3">${formatMoney(data.total)}</p>
               </div>
+
+              {pending.tipo === "B" && dniConocido && !dniSirve && (
+                <div className="mt-3 flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-xl p-3">
+                  <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
+                  <p className="text-xs font-semibold text-rose-800">
+                    El documento de la reserva ({dniDigits || "vacío"}) no es un DNI de 7 u 8
+                    dígitos, así que ARCA la va a rechazar. Corregilo en la reserva, o volvé y
+                    facturá con CUIT.
+                  </p>
+                </div>
+              )}
+
               <button
                 type="button"
-                onClick={() => void emitFromPrefill()}
-                className="w-full mt-4 py-5 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-black rounded-2xl transition-colors"
+                onClick={() => void emitPending()}
+                disabled={pending.tipo === "B" && dniConocido && !dniSirve}
+                className="w-full mt-4 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-lg font-black rounded-2xl transition-colors"
               >
-                Emitir
+                Confirmar y emitir
               </button>
+              <p className="text-[11px] text-slate-400 mt-3 text-center">
+                Una vez emitida, corregirla exige una nota de crédito: quedan los dos
+                comprobantes.
+              </p>
               <button
                 type="button"
-                onClick={() => setStep("tipo")}
+                onClick={() => setStep(confirmBack)}
                 className="mt-3 w-full text-xs font-semibold text-slate-400 hover:text-slate-600"
               >
-                Cambiar tipo o datos
+                {confirmBack === "tipo" ? "Cambiar tipo o datos" : "Volver y corregir"}
               </button>
             </>
           ) : step === "tipo" ? (
@@ -336,7 +426,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               <div className="grid grid-cols-1 gap-3">
                 <button
                   type="button"
-                  onClick={() => emit({ tipo: "B" })}
+                  onClick={() => setStep("formB")}
                   className={`flex items-center gap-3 p-4 rounded-2xl border-2 text-left transition-colors ${
                     data.suggestA
                       ? "border-slate-200 hover:bg-slate-50"
@@ -373,7 +463,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               <button
                 type="button"
                 onClick={() => {
-                  if (prefillComplete) setStep("confirmDirecto");
+                  if (prefillComplete && pending) setStep("confirmar");
                   else if (startAtTipo || mandatory) onClose();
                   else setStep("ask");
                 }}
@@ -383,6 +473,63 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 {prefillComplete || !(startAtTipo || mandatory) ? "Volver" : "Cancelar"}
               </button>
             </>
+          ) : step === "formB" ? (
+            // Consumidor Final: el ÚNICO dato que se escribe es el nombre. El documento
+            // sale de la reserva y no se toca acá (corregirlo es editar la reserva).
+            <div className="space-y-4">
+              <div>
+                <label
+                  className="block text-sm font-semibold text-slate-700 mb-1.5"
+                  htmlFor="fb-nombre"
+                >
+                  Nombre para la factura
+                </label>
+                <input
+                  id="fb-nombre"
+                  type="text"
+                  autoFocus
+                  value={nombreB}
+                  onChange={(e) => setNombreB(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="Nombre y apellido del huésped"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Viene con el nombre de la reserva. Corregilo si el huésped lo pide con el
+                  nombre completo.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+                  Documento (sale de la reserva)
+                </p>
+                <p className="text-sm font-bold text-slate-700 font-mono mt-0.5">
+                  DNI {dniConocido ? dniDigits || "(sin cargar)" : "de la reserva"}
+                </p>
+                {dniConocido && !dniSirve && (
+                  <p className="text-[11px] font-semibold text-rose-600 mt-1">
+                    No es un DNI de 7 u 8 dígitos: corregilo en la reserva o facturá con CUIT.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setStep("tipo")}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2.5 border border-slate-200 text-slate-600 font-semibold rounded-xl hover:bg-slate-50 transition-colors"
+                >
+                  <ArrowLeft size={16} /> Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={submitFormB}
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 transition-colors shadow-md shadow-emerald-600/20"
+                >
+                  Continuar
+                </button>
+              </div>
+            </div>
           ) : (
             // step === "formCuit"
             <div className="space-y-4">
@@ -493,7 +640,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                   onClick={submitFormCuit}
                   className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 transition-colors shadow-md shadow-emerald-600/20"
                 >
-                  {derivedLetra ? `Emitir Factura ${derivedLetra}` : "Emitir factura"}
+                  {derivedLetra ? `Revisar Factura ${derivedLetra}` : "Revisar factura"}
                 </button>
               </div>
             </div>
