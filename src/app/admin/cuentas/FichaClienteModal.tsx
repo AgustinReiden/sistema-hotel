@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Building2,
@@ -8,6 +8,7 @@ import {
   FileText,
   Loader2,
   Printer,
+  RotateCcw,
   ScrollText,
   UserRound,
   Wallet,
@@ -20,6 +21,7 @@ import {
   loadClientInvoicesAction,
   loadClientPaymentsAction,
   loadCtaCteAccountAction,
+  revertPaymentImputacionAction,
 } from "./actions";
 import BalanceTag, { money } from "./BalanceTag";
 import DateRangeFilter from "../DateRangeFilter";
@@ -36,6 +38,7 @@ import { hotelDateKey } from "@/lib/time";
 import type {
   CcAccountStayRow,
   CcClientPaymentRow,
+  CcPagoImputacion,
   CcStayEstado,
   ClientInvoiceRow,
   CtaCteAccount,
@@ -629,6 +632,20 @@ function SolapaPagos({ account }: { account: CtaCteAccount }) {
     };
   }, [account.kind, account.id]);
 
+  /**
+   * Relectura después de desimputar. Sin esto la fila seguiría viéndose viva y el
+   * "quedaron a cuenta" mostraría el número viejo: el admin creería que la plata
+   * sigue aplicada a una factura de la que ya la sacó.
+   */
+  const recargar = useCallback(async () => {
+    const result = await loadClientPaymentsAction(account.kind, account.id);
+    if (result.success) {
+      setPagos(result.data ?? []);
+    } else {
+      toast.error(result.error);
+    }
+  }, [account.kind, account.id]);
+
   const { rows: pagina, setPage, ...paginacion } = usePagination(pagos);
 
   if (loading) {
@@ -664,7 +681,7 @@ function SolapaPagos({ account }: { account: CtaCteAccount }) {
     <div className="flex-1 overflow-y-auto" data-testid="solapa-pagos">
       <div className="p-4 sm:p-6 space-y-3">
         {pagina.map((pago) => (
-          <FilaPago key={pago.movimiento_id} pago={pago} />
+          <FilaPago key={pago.movimiento_id} pago={pago} onCambio={recargar} />
         ))}
       </div>
       <PaginationFooter {...paginacion} noun="pagos" onPageChange={setPage} />
@@ -672,8 +689,43 @@ function SolapaPagos({ account }: { account: CtaCteAccount }) {
   );
 }
 
-function FilaPago({ pago }: { pago: CcClientPaymentRow }) {
+function FilaPago({
+  pago,
+  onCambio,
+}: {
+  pago: CcClientPaymentRow;
+  onCambio: () => Promise<void>;
+}) {
   const retenciones = pago.retencion_ganancias + pago.retencion_iibb;
+  // Qué imputación está esperando confirmación, y el motivo que se está tipeando. Una
+  // sola a la vez a propósito: desimputar mueve plata, no es una casilla que se tilda
+  // al pasar.
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  async function desimputar(imp: CcPagoImputacion) {
+    setGuardando(true);
+    const result = await revertPaymentImputacionAction({
+      imputacionId: imp.imputacion_id,
+      motivo,
+    });
+    setGuardando(false);
+    if (!result.success) {
+      toast.error(result.error);
+      return;
+    }
+    // Se dice cuánto quedó libre y no un "listo" pelado: lo que el admin necesita
+    // saber ahora es con cuánta plata cuenta para la factura de reemplazo.
+    toast.success(
+      `Se desimputó ${formatAmount(result.data?.liberado ?? 0)}. Quedan ${formatAmount(
+        result.data?.sinImputar ?? 0
+      )} a cuenta.`
+    );
+    setConfirmando(null);
+    setMotivo("");
+    await onCambio();
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 p-4" data-testid="fila-pago">
@@ -780,15 +832,70 @@ function FilaPago({ pago }: { pago: CcClientPaymentRow }) {
                     </span>
                   )}
                 </span>
-                <span
-                  className={
-                    imp.revertida
-                      ? "font-semibold text-slate-400 line-through"
-                      : "font-semibold text-slate-800"
-                  }
-                >
-                  {formatAmount(imp.imputado)}
+                <span className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={
+                      imp.revertida
+                        ? "font-semibold text-slate-400 line-through"
+                        : "font-semibold text-slate-800"
+                    }
+                  >
+                    {formatAmount(imp.imputado)}
+                  </span>
+                  {/* Sólo en las vivas: la RPC rechaza la segunda vuelta con P0040,
+                      así que ofrecer el botón sería ofrecer un error. */}
+                  {!imp.revertida && confirmando !== imp.imputacion_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmando(imp.imputacion_id);
+                        setMotivo("");
+                      }}
+                      className="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors"
+                      title="Desimputar: esta plata deja de cancelar esta factura y vuelve a quedar a cuenta"
+                      aria-label="Desimputar"
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  )}
                 </span>
+                {confirmando === imp.imputacion_id && (
+                  <div className="w-full mt-1 p-3 rounded-lg border border-amber-200 bg-amber-50">
+                    <p className="text-xs font-semibold text-amber-900">
+                      Se van a soltar {formatAmount(imp.imputado)}: esta factura deja de
+                      estar cobrada por este pago y ese importe vuelve a quedar a cuenta.
+                    </p>
+                    <input
+                      type="text"
+                      value={motivo}
+                      onChange={(e) => setMotivo(e.target.value)}
+                      placeholder="Por qué se desimputa (obligatorio)"
+                      className="mt-2 w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={guardando || motivo.trim() === ""}
+                        onClick={() => desimputar(imp)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                      >
+                        {guardando && <Loader2 size={14} className="animate-spin" />}
+                        Confirmar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={guardando}
+                        onClick={() => {
+                          setConfirmando(null);
+                          setMotivo("");
+                        }}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-300 hover:bg-white rounded-lg transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
