@@ -7,6 +7,7 @@ import {
   defaultStayDescription,
   initialInvoiceStep,
   isBankPaymentMethod,
+  letraDeReceptor,
   sanitizeDetalleLine,
   stepAfterYes,
 } from "@/lib/billing";
@@ -77,7 +78,7 @@ describe("initialInvoiceStep", () => {
   it("pago bancario + ficha completa va directo a confirmar", () => {
     expect(
       initialInvoiceStep({ startAtTipo: false, mandatory: true, prefillComplete: true })
-    ).toBe("confirmDirecto");
+    ).toBe("confirmar");
   });
 
   it("desde Facturación (startAtTipo) nunca muestra el SÍ/NO", () => {
@@ -86,7 +87,7 @@ describe("initialInvoiceStep", () => {
     ).toBe("tipo");
     expect(
       initialInvoiceStep({ startAtTipo: true, mandatory: false, prefillComplete: true })
-    ).toBe("confirmDirecto");
+    ).toBe("confirmar");
   });
 
   it("matriz completa: el SÍ/NO aparece sólo si no hay obligación ni entrada directa", () => {
@@ -97,7 +98,7 @@ describe("initialInvoiceStep", () => {
           if (!startAtTipo && !mandatory) {
             expect(step).toBe("ask");
           } else {
-            expect(step).toBe(prefillComplete ? "confirmDirecto" : "tipo");
+            expect(step).toBe(prefillComplete ? "confirmar" : "tipo");
           }
         }
       }
@@ -107,7 +108,7 @@ describe("initialInvoiceStep", () => {
 
 describe("stepAfterYes", () => {
   it("con ficha completa confirma; sin ficha pregunta el tipo", () => {
-    expect(stepAfterYes(true)).toBe("confirmDirecto");
+    expect(stepAfterYes(true)).toBe("confirmar");
     expect(stepAfterYes(false)).toBe("tipo");
   });
 });
@@ -208,5 +209,22 @@ describe("defaultStayDescription", () => {
     expect(out.length).toBeLessThanOrEqual(DETALLE_LINEA_MAX);
     // Y sobrevive al saneo sin cambiar: es lo que se guarda cuando nadie edita.
     expect(sanitizeDetalleLine(out)).toBe(out);
+  });
+});
+
+describe("letraDeReceptor", () => {
+  // El bug del 18/09/2026 en una línea: se eligió consumidor final y salió una A.
+  it("consumidor final es SIEMPRE Factura B", () => {
+    expect(letraDeReceptor({ tipo: "B", razonSocial: "PEREZ JUAN" })).toBe("B");
+    // Aunque el nombre escrito parezca una empresa: la letra la da lo elegido.
+    expect(letraDeReceptor({ tipo: "B", razonSocial: "TRANSPORTES DEL NORTE SRL" })).toBe("B");
+  });
+
+  it("con CUIT, la condición frente al IVA decide la letra", () => {
+    const base = { tipo: "cuit", cuit: "30711111118", razonSocial: "X SRL", domicilio: "Calle 1" } as const;
+    expect(letraDeReceptor({ ...base, condicionIva: "responsable_inscripto" })).toBe("A");
+    expect(letraDeReceptor({ ...base, condicionIva: "monotributo" })).toBe("A");
+    // Exento lleva CUIT pero el comprobante es B.
+    expect(letraDeReceptor({ ...base, condicionIva: "exento" })).toBe("B");
   });
 });

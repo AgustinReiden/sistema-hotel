@@ -1347,6 +1347,13 @@ export async function getReservationHistory(
     /** Rango explícito en fechas del hotel (YYYY-MM-DD); reemplaza a `days`. */
     from?: string;
     to?: string;
+    /**
+     * Por qué fecha se recorta el período Y se ordena la lista: la entrada (default)
+     * o la salida. No son dos cosas separadas a propósito: una estadía que entró en
+     * mayo y salió en junio no aparecía buscando junio, y el que la busca no tiene
+     * por qué acordarse de cuándo entró — se acuerda de cuándo se fue.
+     */
+    orderBy?: "check_in" | "check_out";
   } = {}
 ): Promise<ReservationHistoryPage> {
   const supabase = await createClient();
@@ -1368,12 +1375,17 @@ export async function getReservationHistory(
   const desdeIso = localToISO(desdeKey, "00:00", DEFAULT_TZ);
   const hastaIso = localToISO(hastaKey, "00:00", DEFAULT_TZ);
 
+  // `check_out_target` y no `actual_check_out`: la salida real es NULL en todo lo que
+  // no cerró todavía (y en lo cancelado), y esas filas desaparecerían del historial
+  // al cambiar el criterio. La prevista existe siempre.
+  const dateColumn = options.orderBy === "check_out" ? "check_out_target" : "check_in_target";
+
   let query = supabase
     .from("reservations")
     .select(GUEST_RESERVATION_SELECT, { count: "exact" })
-    .gte("check_in_target", desdeIso)
-    .lt("check_in_target", hastaIso)
-    .order("check_in_target", { ascending: false })
+    .gte(dateColumn, desdeIso)
+    .lt(dateColumn, hastaIso)
+    .order(dateColumn, { ascending: false })
     // Desempate dentro del mismo dia: manda lo ultimo cargado.
     .order("created_at", { ascending: false });
 
@@ -3862,9 +3874,10 @@ export async function createInvoiceDraft(
   receptor?: InvoiceReceptorInput
 ): Promise<{ invoiceId: string; status: string; reused: boolean }> {
   const supabase = await createClient();
-  // Default = Factura B (consumidor final con el DNI de la reserva). Para receptores
-  // con CUIT se pasa la condición IVA (que deriva A o B en el RPC) + razón social +
-  // domicilio (precargados de la ficha o cargados a mano).
+  // La condición frente al IVA viaja SIEMPRE explícita, incluido el consumidor final
+  // (mig 112). No mandarla era el bug de PROD del 18/09/2026: el RPC la copiaba de la
+  // ficha del cliente y "Consumidor Final" salía como Factura A a nombre de la
+  // empresa del huésped. La ficha precarga la pantalla; no elige el comprobante.
   const params: Record<string, unknown> = { p_reservation_id: reservationId };
   if (receptor?.tipo === "cuit") {
     // p_tipo es vestigial (el RPC decide por condición IVA); lo mandamos por compat.
@@ -3873,6 +3886,12 @@ export async function createInvoiceDraft(
     params.p_condicion_iva = receptor.condicionIva;
     params.p_razon_social = receptor.razonSocial;
     params.p_domicilio = receptor.domicilio;
+  } else {
+    params.p_tipo = "B";
+    params.p_condicion_iva = "consumidor_final";
+    // Nombre impreso en la B: lo escribe el que factura (precargado con el de la
+    // reserva). Vacío = el RPC cae al nombre de la reserva, como siempre.
+    params.p_razon_social = receptor?.razonSocial ?? null;
   }
   const { data, error } = await supabase.rpc("rpc_create_invoice_draft", params);
   if (error) throw error;

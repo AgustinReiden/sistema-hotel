@@ -287,6 +287,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     return {
       reservationId: room.reservationId,
       clientName: room.client,
+      // El DNI se muestra en la confirmación: es el documento que lleva la Factura B.
+      clientDni: room.clientDni,
       total: early ? early.newTotal : room.totalPrice,
       aPrefill: {
         razonSocial: prefill.razonSocial || room.client || "",

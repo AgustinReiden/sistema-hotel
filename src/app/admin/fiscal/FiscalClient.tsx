@@ -36,6 +36,13 @@ type Props = {
   from: string;
   to: string;
   today: string;
+  /**
+   * Los check-outs sin facturar son del administrador. El recepcionista acá sólo
+   * ve —y reintenta— las facturas que no salieron por ARCA o por la red, y sólo
+   * mientras su turno esté abierto (el gate real vive en las RPC del listado).
+   * Decisión de Agustín, 18/09/2026.
+   */
+  isAdmin: boolean;
 };
 
 function money(n: number) {
@@ -72,7 +79,16 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rechazada",
 };
 
-export default function FiscalClient({ enabled, pending, invoiceable, authorized, from, to, today }: Props) {
+export default function FiscalClient({
+  enabled,
+  pending,
+  invoiceable,
+  authorized,
+  from,
+  to,
+  today,
+  isAdmin,
+}: Props) {
   const router = useRouter();
   const presets = buildBillingPresets(today);
 
@@ -143,6 +159,7 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
     setInvoicePrompt({
       reservationId: c.reservation_id,
       clientName: c.client_name,
+      clientDni: c.client_dni,
       total: c.total_price,
       aPrefill: {
         razonSocial: c.client_name ?? "",
@@ -319,57 +336,72 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
         </div>
       </section>
 
-      {/* Check-outs sin facturar */}
-      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Si al momento del check-out elegiste NO, acá podés emitir la factura igual.
-          </p>
-        </div>
-        <div className="p-5">
-          {invoiceable.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-2">
-              No hay check-outs sin facturar a tu alcance.
-            </p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {invoiceablePage.rows.map((c) => (
-                <li key={c.reservation_id} className="py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-800 truncate">
-                      Hab. {c.room_number} — {c.client_name} — ${money(c.total_price)}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Check-out: {formatHotelShortDateTime(c.actual_check_out)}
-                      {c.client_dni ? ` · DNI ${c.client_dni}` : ""}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => openEmitModal(c)}
-                    disabled={busyId !== null}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shrink-0"
-                  >
-                    <FileText size={14} />
-                    Emitir factura
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+      {/* Decirlo en vez de dejar un hueco: el que no lo ve tiene que saber que existe
+          y a quién pedírselo, no quedarse buscando una lista que no está. */}
+      {!isAdmin && (
+        <p className="text-xs text-slate-400 bg-white border border-slate-200 rounded-2xl p-4">
+          Las estadías que quedaron sin facturar las ve el administrador. Vos facturás en
+          el check-out; si ARCA o la red fallan, la factura te queda acá arriba para
+          reintentarla mientras tu turno esté abierto.
+        </p>
+      )}
 
-          <PaginationFooter
-            page={invoiceablePage.page}
-            totalPages={invoiceablePage.totalPages}
-            total={invoiceablePage.total}
-            firstIndex={invoiceablePage.firstIndex}
-            lastIndex={invoiceablePage.lastIndex}
-            noun="estadías"
-            onPageChange={invoiceablePage.setPage}
-          />
-        </div>
-      </section>
+      {/* Check-outs sin facturar. Sólo el administrador: el recepcionista factura en
+          el check-out, y si algo falla lo reintenta arriba. Ver el comentario de
+          `isAdmin` en Props. */}
+      {isAdmin && (
+        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Estadías cerradas que nadie facturó. Emitirlas desde acá es cosa del
+              administrador: revisá bien a nombre de quién sale antes de confirmar.
+            </p>
+          </div>
+          <div className="p-5">
+            {invoiceable.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-2">
+                No hay check-outs sin facturar a tu alcance.
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {invoiceablePage.rows.map((c) => (
+                  <li key={c.reservation_id} className="py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-800 truncate">
+                        Hab. {c.room_number} — {c.client_name} — ${money(c.total_price)}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Check-out: {formatHotelShortDateTime(c.actual_check_out)}
+                        {c.client_dni ? ` · DNI ${c.client_dni}` : ""}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEmitModal(c)}
+                      disabled={busyId !== null}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shrink-0"
+                    >
+                      <FileText size={14} />
+                      Emitir factura
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <PaginationFooter
+              page={invoiceablePage.page}
+              totalPages={invoiceablePage.totalPages}
+              total={invoiceablePage.total}
+              firstIndex={invoiceablePage.firstIndex}
+              lastIndex={invoiceablePage.lastIndex}
+              noun="estadías"
+              onPageChange={invoiceablePage.setPage}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Emitidas recientes */}
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">

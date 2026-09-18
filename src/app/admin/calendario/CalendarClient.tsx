@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CreditCard, FileText, LogIn, Pencil, Phone, Users as UsersIcon, UserRound, XCircle } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  FileText,
+  LogIn,
+  Pencil,
+  Phone,
+  Users as UsersIcon,
+  UserRound,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import NewReservationModal from "../NewReservationModal";
@@ -73,10 +84,17 @@ type CreateDraft = {
   checkOut: string;
 };
 
-// Compacto: para que entren ~16 habitaciones a lo alto y 15 dias a lo ancho sin scroll
-// en una pantalla de escritorio (estilo sistema viejo del hotel).
-const CELL_WIDTH = 64;
-const ROOM_COLUMN_WIDTH = 108;
+// Alto compacto: entran ~16 habitaciones sin scroll vertical (estilo sistema viejo
+// del hotel). El ANCHO es otra historia: con 64px por dia la grilla entraba entera en
+// la pantalla pero los nombres salian cortados a la mitad ("GONZALEZ M...", "Hilber
+// seba..."), y mirando para atras —donde las 14 columnas estan llenas— no se leia
+// nada. Decision de Agustin (18/09/2026): que el ancho sea comodo aunque haya que
+// mover la grilla; para eso estan la barra de scroll gruesa y las flechas.
+//
+// 14 dias x 112px + la columna de habitacion = ~1700px. En un monitor de recepcion
+// (1920) entra casi todo; en uno de 1366 se mueve con las flechas.
+const CELL_WIDTH = 112;
+const ROOM_COLUMN_WIDTH = 124;
 const ROW_HEIGHT = 34;
 const BAR_TOP = 3;
 const BAR_HEIGHT = 26;
@@ -285,6 +303,39 @@ export default function CalendarClient({
       (isAdmin && selectedReservation.status === "checked_in"));
   const selectedIsFinished = selectedReservation?.status === "checked_out";
 
+  // ── Scroll horizontal de la grilla ──────────────────────────────────────────
+  // La grilla es mas ancha que la pantalla a proposito (ver CELL_WIDTH), asi que
+  // moverla tiene que ser obvio: barra de scroll gruesa + una flecha de cada lado.
+  // El estado dice si queda algo para ese lado, para apagar la flecha que no lleva
+  // a ningun lado.
+  //
+  // Se mide en el callback ref y en el onScroll —no en un useEffect— porque el
+  // lint de React marca cualquier setState alcanzable desde un efecto, y para esto
+  // no hace falta ninguno: al montar mide una vez, y despues cada scroll.
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
+
+  const measureScroll = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    const max = node.scrollWidth - node.clientWidth;
+    const left = node.scrollLeft > 4;
+    const right = node.scrollLeft < max - 4;
+    setScrollEdges((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+
+  const attachGrid = useCallback(
+    (node: HTMLDivElement | null) => {
+      gridRef.current = node;
+      measureScroll(node);
+    },
+    [measureScroll]
+  );
+
+  /** Mover la ventana visible ~3 dias por clic: un gesto, un pedazo de semana. */
+  const scrollDays = (days: number) => {
+    gridRef.current?.scrollBy({ left: days * CELL_WIDTH, behavior: "smooth" });
+  };
+
   return (
     <>
       <style>{`
@@ -302,6 +353,27 @@ export default function CalendarClient({
         @keyframes float-ribbon {
           0%, 100% { transform: translateY(0); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05)); }
           50% { transform: translateY(-3px); filter: drop-shadow(0 8px 8px rgba(0,0,0,0.1)); }
+        }
+        /* Barra de scroll visible y agarrable: es el modo natural de mover la
+           grilla, y la de 6px por defecto de Windows no se ve ni se pincha. */
+        .calendar-scroll {
+          scrollbar-width: auto;
+          scrollbar-color: #94a3b8 #f1f5f9;
+        }
+        .calendar-scroll::-webkit-scrollbar {
+          height: 14px;
+          width: 14px;
+        }
+        .calendar-scroll::-webkit-scrollbar-track {
+          background: #f1f5f9;
+        }
+        .calendar-scroll::-webkit-scrollbar-thumb {
+          background: #94a3b8;
+          border-radius: 999px;
+          border: 3px solid #f1f5f9;
+        }
+        .calendar-scroll::-webkit-scrollbar-thumb:hover {
+          background: #64748b;
         }
         .animate-float-ribbon:hover {
           animation-play-state: paused;
@@ -331,191 +403,220 @@ export default function CalendarClient({
           la grilla se pasaba de largo. En pantalla chica ocupa menos alto a propósito: un
           contenedor con scroll propio de casi toda la pantalla, dentro de una página que
           también scrollea, es un pozo del que no se sale. */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-auto shadow-sm max-h-[65dvh] md:max-h-[calc(100dvh-13rem)]">
-        <div className="min-w-max">
-          <div className="flex border-b border-slate-200 sticky top-0 z-30 bg-slate-50">
-            <div
-              className="shrink-0 px-2 py-1.5 text-sm font-semibold text-slate-700 border-r border-slate-200 sticky left-0 z-40 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
-              style={{ width: `${ROOM_COLUMN_WIDTH}px` }}
-            >
-              Habitacion
-            </div>
-            {days.map((dayKey, dayIndex) => (
+      <div className="relative">
+        <div
+          ref={attachGrid}
+          onScroll={(e) => measureScroll(e.currentTarget)}
+          className="calendar-scroll bg-white border border-slate-200 rounded-xl overflow-auto shadow-sm max-h-[65dvh] md:max-h-[calc(100dvh-13rem)]"
+        >
+          <div className="min-w-max">
+            <div className="flex border-b border-slate-200 sticky top-0 z-30 bg-slate-50">
               <div
-                key={dayKey}
-                className={`shrink-0 py-1.5 px-1 text-center border-r border-slate-200 ${
-                  dayIndex % 2 === 1 ? "bg-slate-100" : "bg-slate-50/70"
-                }`}
-                style={{ width: `${CELL_WIDTH}px` }}
+                className="shrink-0 px-2 py-1.5 text-sm font-semibold text-slate-700 border-r border-slate-200 sticky left-0 z-40 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]"
+                style={{ width: `${ROOM_COLUMN_WIDTH}px` }}
               >
-                <p className="text-[10px] text-slate-500 uppercase font-medium leading-tight">{weekdayLabel(dayKey)}</p>
-                <p className="text-xs font-bold text-slate-800 leading-tight">{dayMonthLabel(dayKey)}</p>
+                Habitacion
               </div>
-            ))}
-          </div>
-
-          {rooms.map((room, roomIndex) => {
-            const roomReservations = reservations
-              .filter((reservation) => reservation.room_id === room.id)
-              .sort(
-                (left, right) =>
-                  new Date(left.check_in_target).getTime() - new Date(right.check_in_target).getTime()
-              );
-
-            const placements = roomReservations
-              .map((reservation) =>
-                buildReservationPlacement(reservation, startDateKey, daysCount, timezone)
-              )
-              .filter((placement) => placement !== null);
-
-            const categoryMap = classifyReservations(roomReservations, nowIso, timezone);
-
-            // Zebra de filas: banda primaria blanco / gris para distinguir habitaciones.
-            const rowBg = roomIndex % 2 === 1 ? "bg-slate-100" : "bg-white";
-
-            return (
-              <div key={room.id} className="flex border-b border-slate-100">
+              {days.map((dayKey, dayIndex) => (
                 <div
-                  className={`shrink-0 px-2 py-1 text-sm font-medium text-slate-800 border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0] flex flex-col justify-center leading-tight ${rowBg}`}
-                  style={{ width: `${ROOM_COLUMN_WIDTH}px`, minHeight: `${ROW_HEIGHT}px` }}
+                  key={dayKey}
+                  className={`shrink-0 py-1.5 px-1 text-center border-r border-slate-200 ${
+                    dayIndex % 2 === 1 ? "bg-slate-100" : "bg-slate-50/70"
+                  }`}
+                  style={{ width: `${CELL_WIDTH}px` }}
                 >
-                  Hab. {room.room_number}
-                  <span className="text-[9px] text-slate-500 block truncate">{room.room_type}</span>
+                  <p className="text-[10px] text-slate-500 uppercase font-medium leading-tight">{weekdayLabel(dayKey)}</p>
+                  <p className="text-xs font-bold text-slate-800 leading-tight">{dayMonthLabel(dayKey)}</p>
                 </div>
+              ))}
+            </div>
 
-                <div
-                  className={`relative shrink-0 ${rowBg}`}
-                  style={{ width: `${daysCount * CELL_WIDTH}px`, height: `${ROW_HEIGHT}px` }}
-                >
-                  <div className="absolute inset-0 flex">
-                    {days.map((dayKey, dayIndex) => {
-                      // En los días pasados la celda no invita al clic: sin resaltado al
-                      // pasar el mouse y sin cursor de mano. El clic igual avisa por qué.
-                      const isPast = dayKey < todayKey;
+            {rooms.map((room, roomIndex) => {
+              const roomReservations = reservations
+                .filter((reservation) => reservation.room_id === room.id)
+                .sort(
+                  (left, right) =>
+                    new Date(left.check_in_target).getTime() - new Date(right.check_in_target).getTime()
+                );
+
+              const placements = roomReservations
+                .map((reservation) =>
+                  buildReservationPlacement(reservation, startDateKey, daysCount, timezone)
+                )
+                .filter((placement) => placement !== null);
+
+              const categoryMap = classifyReservations(roomReservations, nowIso, timezone);
+
+              // Zebra de filas: banda primaria blanco / gris para distinguir habitaciones.
+              const rowBg = roomIndex % 2 === 1 ? "bg-slate-100" : "bg-white";
+
+              return (
+                <div key={room.id} className="flex border-b border-slate-100">
+                  <div
+                    className={`shrink-0 px-2 py-1 text-sm font-medium text-slate-800 border-r border-slate-200 sticky left-0 z-20 shadow-[1px_0_0_0_#e2e8f0] flex flex-col justify-center leading-tight ${rowBg}`}
+                    style={{ width: `${ROOM_COLUMN_WIDTH}px`, minHeight: `${ROW_HEIGHT}px` }}
+                  >
+                    Hab. {room.room_number}
+                    <span className="text-[9px] text-slate-500 block truncate">{room.room_type}</span>
+                  </div>
+
+                  <div
+                    className={`relative shrink-0 ${rowBg}`}
+                    style={{ width: `${daysCount * CELL_WIDTH}px`, height: `${ROW_HEIGHT}px` }}
+                  >
+                    <div className="absolute inset-0 flex">
+                      {days.map((dayKey, dayIndex) => {
+                        // En los días pasados la celda no invita al clic: sin resaltado al
+                        // pasar el mouse y sin cursor de mano. El clic igual avisa por qué.
+                        const isPast = dayKey < todayKey;
+                        return (
+                          <button
+                            type="button"
+                            key={`${room.id}-${dayKey}`}
+                            onClick={() => openCreateModal(room.id, dayKey)}
+                            className={`h-full shrink-0 border-r border-slate-100 transition-colors ${
+                              isPast ? "cursor-default" : "hover:bg-brand-50"
+                            } ${dayIndex % 2 === 1 ? "bg-slate-500/5" : ""}`}
+                            style={{ width: `${CELL_WIDTH}px` }}
+                            aria-label={
+                              isPast
+                                ? `${ddmmyyyy(dayKey)}: fecha pasada, no se reserva desde la grilla`
+                                : `Crear reserva para habitación ${room.room_number} el ${ddmmyyyy(dayKey)}`
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {placements.map((placement) => {
+                      const { cellSpan, startsBeforeRange, endsAfterRange } = placement;
+                      const category = categoryMap.get(placement.reservation.id) ?? "pending";
+                      const palette = getReservationPalette(category);
+                      const width = cellSpan * CELL_WIDTH;
+
+                      const gap = 6;
+                      const paddingV = 4;
+                      const tl_x = startsBeforeRange ? 0 : gap;
+                      const bl_x = startsBeforeRange ? 0 : CELL_WIDTH + gap;
+                      const tr_x = endsAfterRange ? width : width - CELL_WIDTH - gap;
+                      const br_x = endsAfterRange ? width : width - gap;
+
+                      const points = `${tl_x},${paddingV} ${tr_x},${paddingV} ${br_x},${BAR_HEIGHT - paddingV} ${bl_x},${BAR_HEIGHT - paddingV}`;
+
+                      const left = placement.visibleStartIndex * CELL_WIDTH;
+                      const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
+                      const showText = horizontalWidth >= 56;
+                      // El pasado se queda quieto: con una ventana vieja llena, veinte barras
+                      // flotando es ruido. Además el gris claro necesita texto oscuro.
+                      const isFinished = category === "finished";
+
                       return (
-                        <button
-                          type="button"
-                          key={`${room.id}-${dayKey}`}
-                          onClick={() => openCreateModal(room.id, dayKey)}
-                          className={`h-full shrink-0 border-r border-slate-100 transition-colors ${
-                            isPast ? "cursor-default" : "hover:bg-brand-50"
-                          } ${dayIndex % 2 === 1 ? "bg-slate-500/5" : ""}`}
-                          style={{ width: `${CELL_WIDTH}px` }}
-                          aria-label={
-                            isPast
-                              ? `${ddmmyyyy(dayKey)}: fecha pasada, no se reserva desde la grilla`
-                              : `Crear reserva para habitación ${room.room_number} el ${ddmmyyyy(dayKey)}`
-                          }
-                        />
+                        <div
+                          key={`stay-${placement.reservation.id}`}
+                          className={`absolute z-10 group pointer-events-none ${
+                            isFinished ? "" : "animate-float-ribbon"
+                          }`}
+                          style={{
+                            left: `${left}px`,
+                            top: `${BAR_TOP}px`,
+                            width: `${width}px`,
+                            height: `${BAR_HEIGHT}px`,
+                          }}
+                        >
+                          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
+                            <defs>
+                              <linearGradient id={`grad-${placement.reservation.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stopColor={palette.from} />
+                                <stop offset="100%" stopColor={palette.to} />
+                              </linearGradient>
+                            </defs>
+                            <polygon
+                              points={points}
+                              fill={`url(#grad-${placement.reservation.id})`}
+                              stroke={`url(#grad-${placement.reservation.id})`}
+                              strokeWidth="4"
+                              strokeLinejoin="round"
+                              className="drop-shadow-sm transition-opacity group-hover:opacity-90 pointer-events-auto cursor-pointer"
+                              onClick={() => openReservationDetails(placement.reservation)}
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Ver detalle de la reserva de ${placement.reservation.client_name}`}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  openReservationDetails(placement.reservation);
+                                }
+                              }}
+                            />
+                          </svg>
+
+                          {showText && (
+                            <div className="relative z-10 flex h-full flex-col justify-center items-center pointer-events-none px-1 overflow-hidden">
+                              <p
+                                className={`text-[10px] font-black tracking-tight whitespace-nowrap leading-none ${
+                                  isFinished ? "text-slate-600" : "text-white drop-shadow-md"
+                                }`}
+                              >
+                                {placement.reservation.client_name}
+                              </p>
+                              <p
+                                className={`text-[7px] uppercase font-black tracking-widest whitespace-nowrap leading-none mt-0.5 ${
+                                  isFinished ? "text-slate-500" : "text-white/90 drop-shadow-md"
+                                }`}
+                              >
+                                {isFinished
+                                  ? finishedStayLabel(placement.reservation)
+                                  : category === "overdue"
+                                    ? "Falta check-in"
+                                    : placement.reservation.status === "checked_in"
+                                      ? "En estadia"
+                                      : placement.reservation.status === "pending"
+                                        ? "Pendiente"
+                                        : "Confirmada"}
+                              </p>
+                            </div>
+                          )}
+                          {/* "Salida" sólo en lo que todavía está por pasar: en una ventana
+                              del pasado, repetirlo en cada barra terminada choca con el
+                              nombre de la reserva de al lado y no le dice nada a nadie (la
+                              diagonal ya muestra dónde terminó). */}
+                          {!endsAfterRange && !isFinished && (
+                            <span className="absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
+                              Salida
+                            </span>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
-
-                  {placements.map((placement) => {
-                    const { cellSpan, startsBeforeRange, endsAfterRange } = placement;
-                    const category = categoryMap.get(placement.reservation.id) ?? "pending";
-                    const palette = getReservationPalette(category);
-                    const width = cellSpan * CELL_WIDTH;
-
-                    const gap = 6;
-                    const paddingV = 4;
-                    const tl_x = startsBeforeRange ? 0 : gap;
-                    const bl_x = startsBeforeRange ? 0 : CELL_WIDTH + gap;
-                    const tr_x = endsAfterRange ? width : width - CELL_WIDTH - gap;
-                    const br_x = endsAfterRange ? width : width - gap;
-
-                    const points = `${tl_x},${paddingV} ${tr_x},${paddingV} ${br_x},${BAR_HEIGHT - paddingV} ${bl_x},${BAR_HEIGHT - paddingV}`;
-
-                    const left = placement.visibleStartIndex * CELL_WIDTH;
-                    const horizontalWidth = (cellSpan - (endsAfterRange ? 0 : 1)) * CELL_WIDTH;
-                    const showText = horizontalWidth >= 56;
-                    // El pasado se queda quieto: con una ventana vieja llena, veinte barras
-                    // flotando es ruido. Además el gris claro necesita texto oscuro.
-                    const isFinished = category === "finished";
-
-                    return (
-                      <div
-                        key={`stay-${placement.reservation.id}`}
-                        className={`absolute z-10 group pointer-events-none ${
-                          isFinished ? "" : "animate-float-ribbon"
-                        }`}
-                        style={{
-                          left: `${left}px`,
-                          top: `${BAR_TOP}px`,
-                          width: `${width}px`,
-                          height: `${BAR_HEIGHT}px`,
-                        }}
-                      >
-                        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
-                          <defs>
-                            <linearGradient id={`grad-${placement.reservation.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                              <stop offset="0%" stopColor={palette.from} />
-                              <stop offset="100%" stopColor={palette.to} />
-                            </linearGradient>
-                          </defs>
-                          <polygon
-                            points={points}
-                            fill={`url(#grad-${placement.reservation.id})`}
-                            stroke={`url(#grad-${placement.reservation.id})`}
-                            strokeWidth="4"
-                            strokeLinejoin="round"
-                            className="drop-shadow-sm transition-opacity group-hover:opacity-90 pointer-events-auto cursor-pointer"
-                            onClick={() => openReservationDetails(placement.reservation)}
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`Ver detalle de la reserva de ${placement.reservation.client_name}`}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                openReservationDetails(placement.reservation);
-                              }
-                            }}
-                          />
-                        </svg>
-
-                        {showText && (
-                          <div className="relative z-10 flex h-full flex-col justify-center items-center pointer-events-none px-1 overflow-hidden">
-                            <p
-                              className={`text-[10px] font-black tracking-tight whitespace-nowrap leading-none ${
-                                isFinished ? "text-slate-600" : "text-white drop-shadow-md"
-                              }`}
-                            >
-                              {placement.reservation.client_name}
-                            </p>
-                            <p
-                              className={`text-[7px] uppercase font-black tracking-widest whitespace-nowrap leading-none mt-0.5 ${
-                                isFinished ? "text-slate-500" : "text-white/90 drop-shadow-md"
-                              }`}
-                            >
-                              {isFinished
-                                ? finishedStayLabel(placement.reservation)
-                                : category === "overdue"
-                                  ? "Falta check-in"
-                                  : placement.reservation.status === "checked_in"
-                                    ? "En estadia"
-                                    : placement.reservation.status === "pending"
-                                      ? "Pendiente"
-                                      : "Confirmada"}
-                            </p>
-                          </div>
-                        )}
-                        {/* "Salida" sólo en lo que todavía está por pasar: en una ventana
-                            del pasado, repetirlo en cada barra terminada choca con el
-                            nombre de la reserva de al lado y no le dice nada a nadie (la
-                            diagonal ya muestra dónde terminó). */}
-                        {!endsAfterRange && !isFinished && (
-                          <span className="absolute bottom-[2px] right-[8px] z-10 text-[7px] font-black uppercase tracking-widest text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] pointer-events-none">
-                            Salida
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
+
+        {/* Las flechas: el mismo gesto que la barra de scroll, para el que no la
+            busca abajo. Sólo aparece la que lleva a alguna parte. */}
+        {scrollEdges.left && (
+          <button
+            type="button"
+            onClick={() => scrollDays(-3)}
+            aria-label="Ver días anteriores de la ventana"
+            className="absolute left-1 top-1/2 -translate-y-1/2 z-40 rounded-full bg-white/95 border border-slate-300 shadow-lg p-2 text-slate-600 hover:text-brand-700 hover:border-brand-400 transition-colors"
+          >
+            <ChevronLeft size={22} />
+          </button>
+        )}
+        {scrollEdges.right && (
+          <button
+            type="button"
+            onClick={() => scrollDays(3)}
+            aria-label="Ver días siguientes de la ventana"
+            className="absolute right-1 top-1/2 -translate-y-1/2 z-40 rounded-full bg-white/95 border border-slate-300 shadow-lg p-2 text-slate-600 hover:text-brand-700 hover:border-brand-400 transition-colors"
+          >
+            <ChevronRight size={22} />
+          </button>
+        )}
       </div>
 
       <NewReservationModal
