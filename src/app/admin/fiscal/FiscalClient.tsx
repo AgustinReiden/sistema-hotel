@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, FileMinus, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ClipboardCheck, FileMinus, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -351,17 +352,34 @@ export default function FiscalClient({
           `isAdmin` en Props. */}
       {isAdmin && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          {/* Este bloque NO es la lista de todo lo que falta facturar: la RPC lo
+              recorta a los últimos 10 días y además sólo trae clientes que facturan
+              por check-out. Decirlo importa — leído como la lista completa, hace
+              creer que no quedó nada. La lista entera vive en el control de
+              facturación, a un link de acá.
+              Ver docs/solapamiento-cuentas-facturacion.md. */}
           <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Estadías cerradas que nadie facturó. Emitirlas desde acá es cosa del
-              administrador: revisá bien a nombre de quién sale antes de confirmar.
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Las salidas de los <strong>últimos 10 días</strong> que nadie facturó.
+                  Emitirlas desde acá es cosa del administrador: revisá bien a nombre de
+                  quién sale antes de confirmar.
+                </p>
+              </div>
+              <Link
+                href="/admin/fiscal/control?estado=pendiente"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2"
+              >
+                <ClipboardCheck size={14} /> Ver todo lo que falta facturar
+              </Link>
+            </div>
           </div>
           <div className="p-5">
             {invoiceable.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-2">
-                No hay check-outs sin facturar a tu alcance.
+                No hay check-outs sin facturar en los últimos 10 días.
               </p>
             ) : (
               <ul className="divide-y divide-slate-100">

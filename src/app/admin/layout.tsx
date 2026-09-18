@@ -3,6 +3,7 @@ import { MobileTabBar, MobileTopBar } from './MobileNav';
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { countBillingPending, getActiveOpenShift, getShiftSummary } from "@/lib/data";
+import { BILLING_PENDING_DAYS, totalPendingBilling } from "@/lib/billing";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 import IdleLogout from "./IdleLogout";
 import ForcedShiftHandover from "./caja/ForcedShiftHandover";
@@ -70,9 +71,15 @@ export default async function AdminLayout({
 
     // Contador de "falta facturar" para el badge del admin: el listado de control
     // sólo sirve si alguien lo mira, y este número es lo que hace que lo miren.
+    //
+    // Misma ventana y misma suma que el control, que es la pantalla que este badge
+    // abre. Antes el badge miraba 60 días y sólo `falta` mientras la pantalla sumaba
+    // las dos mitades sobre todo el historial: 165 acá y 286 allá, para el mismo dato.
     const unbilledCount =
         role === "admin"
-            ? await countBillingPending().then((c) => c.falta).catch(() => 0)
+            ? await countBillingPending(BILLING_PENDING_DAYS)
+                  .then(totalPendingBilling)
+                  .catch(() => 0)
             : 0;
 
     return (
