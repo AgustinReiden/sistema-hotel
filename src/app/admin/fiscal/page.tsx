@@ -14,10 +14,11 @@ import { PageHeader } from "../PageShell";
 import { isCurrentUserAdmin } from "@/lib/server-auth";
 import { hotelDateKey } from "@/lib/time";
 import FiscalClient from "./FiscalClient";
+import { parseFiscalView } from "./views";
 
 export const dynamic = "force-dynamic";
 
-type PageProps = { searchParams: Promise<{ desde?: string; hasta?: string }> };
+type PageProps = { searchParams: Promise<{ desde?: string; hasta?: string; view?: string }> };
 
 export default async function FiscalPage({ searchParams }: PageProps) {
   // Barrido de facturas trabadas: una consolidada se emite una vez por mes, así que
@@ -38,18 +39,23 @@ export default async function FiscalPage({ searchParams }: PageProps) {
   const hotelSettings = await getHotelSettings().catch(() => null);
   const todayKey = hotelDateKey(new Date(), hotelSettings?.timezone);
   const monthStartKey = `${todayKey.slice(0, 7)}-01`;
-  const { desde, hasta } = await searchParams;
+  const { desde, hasta, view: viewParam } = await searchParams;
+  const view = parseFiscalView(viewParam, isAdmin);
   let fromKey = desde && DATE_KEY.test(desde) ? desde : monthStartKey;
   let toKey = hasta && DATE_KEY.test(hasta) ? hasta : todayKey;
   if (fromKey > toKey) [fromKey, toKey] = [toKey, fromKey];
 
+  // Cada solapa trae sólo su lista: las otras dos no se ven, así que pedirlas sería
+  // pagar tres consultas para pintar una.
   const [settings, pending, invoiceable, authorized] = await Promise.all([
     getFiscalSettings().catch(() => null),
-    listPendingInvoices().catch(() => []),
+    view === "pendientes" ? listPendingInvoices().catch(() => []) : Promise.resolve([]),
     // Los check-outs sin facturar son del administrador: al recepcionista ni se le
     // piden. Lo suyo son las pendientes/con error de su turno abierto.
-    isAdmin ? listInvoiceableCheckouts().catch(() => []) : Promise.resolve([]),
-    listAuthorizedInvoices(fromKey, toKey).catch(() => []),
+    isAdmin && view === "sin_facturar"
+      ? listInvoiceableCheckouts().catch(() => [])
+      : Promise.resolve([]),
+    view === "emitidas" ? listAuthorizedInvoices(fromKey, toKey).catch(() => []) : Promise.resolve([]),
   ]);
 
   return (
@@ -78,6 +84,7 @@ export default async function FiscalPage({ searchParams }: PageProps) {
             to={toKey}
             today={todayKey}
             isAdmin={isAdmin}
+            view={view}
           />
         </div>
       </div>

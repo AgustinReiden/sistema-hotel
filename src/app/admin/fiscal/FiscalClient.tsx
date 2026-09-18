@@ -22,6 +22,7 @@ import { AUTHORIZED_INVOICES_LIMIT } from "@/lib/billing";
 import { buildCsv, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
 import { formatHotelShortDateTime } from "@/lib/time";
+import { FISCAL_VIEWS, type FiscalView } from "./views";
 import type {
   AuthorizedInvoiceRow,
   EmitInvoiceOutcome,
@@ -44,6 +45,8 @@ type Props = {
    * Decisión de Agustín, 18/09/2026.
    */
   isAdmin: boolean;
+  /** Solapa activa. Viaja en la URL como ?view=; la resuelve el servidor. */
+  view: FiscalView;
 };
 
 function money(n: number) {
@@ -89,23 +92,38 @@ export default function FiscalClient({
   to,
   today,
   isAdmin,
+  view,
 }: Props) {
   const router = useRouter();
   const presets = buildBillingPresets(today);
 
-  // Una paginacion por seccion: son tres listados distintos en la misma pantalla.
+  // Una paginacion por solapa: son tres listados distintos, cada uno con la suya.
   // El CSV de "Emitidas" sigue leyendo `authorized` entero, no la pagina.
-  const pendingPage = usePagination(pending);
-  const invoiceablePage = usePagination(invoiceable);
-  const authorizedPage = usePagination(authorized, `${from}|${to}`);
+  //
+  // `view` va en el resetKey: cambiar de solapa no desmonta este componente (es la
+  // misma ruta con otro querystring), asi que sin eso la solapa nueva se abriria en la
+  // pagina 7 de la anterior, muchas veces vacia.
+  const pendingPage = usePagination(pending, view);
+  const invoiceablePage = usePagination(invoiceable, view);
+  const authorizedPage = usePagination(authorized, `${view}|${from}|${to}`);
 
   // El listado llego al tope: puede haber comprobantes del periodo que no estan ni
   // en la pantalla ni en el CSV. Se avisa, porque ese CSV es el libro de IVA ventas.
   const authorizedTruncado = authorized.length >= AUTHORIZED_INVOICES_LIMIT;
 
+  // El rango es de la solapa "Emitidas", pero se navega igual: sin `view` la vuelta
+  // caeria en la solapa por defecto y el filtro pareceria no haber hecho nada.
   const applyRange = (desde: string, hasta: string) => {
-    const params = new URLSearchParams({ desde, hasta });
+    const params = new URLSearchParams({ view, desde, hasta });
     router.push(`/admin/fiscal?${params.toString()}`);
+  };
+
+  // El periodo elegido sobrevive al cambio de solapa.
+  const buildHref = (nextView: FiscalView) => {
+    const params = new URLSearchParams({ view: nextView });
+    if (from) params.set("desde", from);
+    if (to) params.set("hasta", to);
+    return `/admin/fiscal?${params.toString()}`;
   };
   const [busyId, setBusyId] = useState<string | null>(null);
   // Mini-form de "Corregir DNI" abierto para una factura puntual.
@@ -219,123 +237,148 @@ export default function FiscalClient({
 
   return (
     <div className="space-y-8">
-      {/* Pendientes / con error */}
-      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-base font-bold text-slate-800">Pendientes y con error</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Facturas que no llegaron a emitirse (ARCA caído, DNI inválido, etc.). Reintentá cuando
-            esté resuelto.
-          </p>
+      {/* Solapas. El recepcionista ve una sola lista: una sola solapa no es una solapa,
+          asi que no se le pinta la barra (ver el gate `isAdmin` en Props). */}
+      {isAdmin && (
+        <div className="flex flex-wrap gap-2">
+          {FISCAL_VIEWS.map((v) => {
+            const isActive = view === v.value;
+            return (
+              <a
+                key={v.value}
+                href={buildHref(v.value)}
+                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+                  isActive
+                    ? "bg-emerald-600 text-white border-emerald-600"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
+                }`}
+              >
+                {v.label}
+              </a>
+            );
+          })}
         </div>
-        <div className="p-5">
-          {pending.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-2">Sin facturas pendientes 🎉</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {pendingPage.rows.map((p) => {
-                const canEdit = p.status === "rejected" || p.status === "pending";
-                // Una consolidada no cuelga de una reserva: no hay DNI que corregir.
-                // El const local mantiene el narrowing dentro de los callbacks.
-                const reservationId = p.reservation_id;
-                const canFixDni = canEdit && reservationId !== null;
-                const isConsolidada = reservationId === null;
-                const editing = dniEditId === p.invoice_id;
-                return (
-                  <li key={p.invoice_id} className="py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-bold text-slate-800 truncate">
-                          {isConsolidada ? "Consolidada" : `Hab. ${p.room_number}`} —{" "}
-                          {p.receptor_nombre ?? "Sin nombre"} — ${money(p.imp_total)}
-                        </p>
-                        <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
-                          <AlertTriangle size={12} className="text-amber-500 shrink-0" />
-                          {STATUS_LABEL[p.status] ?? p.status}
-                          {p.attempt_count > 0 && ` · ${p.attempt_count} intento${p.attempt_count === 1 ? "" : "s"}`}
-                          {p.last_error && ` · ${p.last_error}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {canFixDni && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDniEditId(editing ? null : p.invoice_id);
-                              setDniValue("");
-                            }}
-                            disabled={busyId !== null}
-                            className="px-3 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 disabled:opacity-60 transition-colors flex items-center gap-1.5"
-                          >
-                            <Pencil size={13} />
-                            Corregir DNI
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => retry(p.invoice_id)}
-                          disabled={busyId !== null}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
-                        >
-                          {busyId === p.invoice_id && !editing ? (
-                            <Loader2 className="animate-spin" size={14} />
-                          ) : (
-                            <RefreshCw size={14} />
-                          )}
-                          Reintentar
-                        </button>
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => discard(p.invoice_id)}
-                            disabled={busyId !== null}
-                            title="Descartar la factura"
-                            className="p-2 border border-slate-200 text-slate-400 rounded-lg hover:border-rose-300 hover:text-rose-600 disabled:opacity-60 transition-colors"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {editing && reservationId !== null && (
-                      <div className="mt-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={dniValue}
-                          onChange={(e) => setDniValue(e.target.value.replace(/\D/g, "").slice(0, 8))}
-                          placeholder="DNI del huésped (7 u 8 dígitos)"
-                          autoFocus
-                          className="flex-1 px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none text-sm font-medium"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => fixDni(p.invoice_id, reservationId)}
-                          disabled={busyId !== null}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
-                        >
-                          {busyId === p.invoice_id ? <Loader2 className="animate-spin" size={14} /> : null}
-                          Corregir y reintentar
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+      )}
 
-          <PaginationFooter
-            page={pendingPage.page}
-            totalPages={pendingPage.totalPages}
-            total={pendingPage.total}
-            firstIndex={pendingPage.firstIndex}
-            lastIndex={pendingPage.lastIndex}
-            noun="pendientes"
-            onPageChange={pendingPage.setPage}
-          />
-        </div>
-      </section>
+      {/* Pendientes / con error */}
+      {view === "pendientes" && (
+        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="text-base font-bold text-slate-800">Pendientes y con error</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Facturas que no llegaron a emitirse (ARCA caído, DNI inválido, etc.). Reintentá cuando
+              esté resuelto.
+            </p>
+          </div>
+          <div className="p-5">
+            {pending.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-2">Sin facturas pendientes 🎉</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {pendingPage.rows.map((p) => {
+                  const canEdit = p.status === "rejected" || p.status === "pending";
+                  // Una consolidada no cuelga de una reserva: no hay DNI que corregir.
+                  // El const local mantiene el narrowing dentro de los callbacks.
+                  const reservationId = p.reservation_id;
+                  const canFixDni = canEdit && reservationId !== null;
+                  const isConsolidada = reservationId === null;
+                  const editing = dniEditId === p.invoice_id;
+                  return (
+                    <li key={p.invoice_id} className="py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-800 truncate">
+                            {isConsolidada ? "Consolidada" : `Hab. ${p.room_number}`} —{" "}
+                            {p.receptor_nombre ?? "Sin nombre"} — ${money(p.imp_total)}
+                          </p>
+                          <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+                            <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+                            {STATUS_LABEL[p.status] ?? p.status}
+                            {p.attempt_count > 0 && ` · ${p.attempt_count} intento${p.attempt_count === 1 ? "" : "s"}`}
+                            {p.last_error && ` · ${p.last_error}`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {canFixDni && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDniEditId(editing ? null : p.invoice_id);
+                                setDniValue("");
+                              }}
+                              disabled={busyId !== null}
+                              className="px-3 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 disabled:opacity-60 transition-colors flex items-center gap-1.5"
+                            >
+                              <Pencil size={13} />
+                              Corregir DNI
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => retry(p.invoice_id)}
+                            disabled={busyId !== null}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
+                          >
+                            {busyId === p.invoice_id && !editing ? (
+                              <Loader2 className="animate-spin" size={14} />
+                            ) : (
+                              <RefreshCw size={14} />
+                            )}
+                            Reintentar
+                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => discard(p.invoice_id)}
+                              disabled={busyId !== null}
+                              title="Descartar la factura"
+                              className="p-2 border border-slate-200 text-slate-400 rounded-lg hover:border-rose-300 hover:text-rose-600 disabled:opacity-60 transition-colors"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {editing && reservationId !== null && (
+                        <div className="mt-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={dniValue}
+                            onChange={(e) => setDniValue(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                            placeholder="DNI del huésped (7 u 8 dígitos)"
+                            autoFocus
+                            className="flex-1 px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none text-sm font-medium"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => fixDni(p.invoice_id, reservationId)}
+                            disabled={busyId !== null}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
+                          >
+                            {busyId === p.invoice_id ? <Loader2 className="animate-spin" size={14} /> : null}
+                            Corregir y reintentar
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <PaginationFooter
+              page={pendingPage.page}
+              totalPages={pendingPage.totalPages}
+              total={pendingPage.total}
+              firstIndex={pendingPage.firstIndex}
+              lastIndex={pendingPage.lastIndex}
+              noun="pendientes"
+              onPageChange={pendingPage.setPage}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Decirlo en vez de dejar un hueco: el que no lo ve tiene que saber que existe
           y a quién pedírselo, no quedarse buscando una lista que no está. */}
@@ -350,7 +393,7 @@ export default function FiscalClient({
       {/* Check-outs sin facturar. Sólo el administrador: el recepcionista factura en
           el check-out, y si algo falla lo reintenta arriba. Ver el comentario de
           `isAdmin` en Props. */}
-      {isAdmin && (
+      {isAdmin && view === "sin_facturar" && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           {/* Este bloque NO es la lista de todo lo que falta facturar: la RPC lo
               recorta a los últimos 10 días y además sólo trae clientes que facturan
@@ -422,92 +465,94 @@ export default function FiscalClient({
       )}
 
       {/* Emitidas recientes */}
-      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-800">Emitidas</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Reimprimí la representación con QR. Si una factura salió mal, anulala con nota de
-                crédito y volvé a emitirla. Es el libro de IVA ventas del período elegido.
-              </p>
+      {view === "emitidas" && (
+        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100 bg-slate-50/50 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Emitidas</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Reimprimí la representación con QR. Si una factura salió mal, anulala con nota de
+                  crédito y volvé a emitirla. Es el libro de IVA ventas del período elegido.
+                </p>
+              </div>
+              <DownloadCsvButton
+                filename={`facturas_${from}_a_${to}.csv`}
+                build={() => buildCsv(AUTHORIZED_CSV_COLUMNS, authorized)}
+                label="Exportar CSV"
+              />
             </div>
-            <DownloadCsvButton
-              filename={`facturas_${from}_a_${to}.csv`}
-              build={() => buildCsv(AUTHORIZED_CSV_COLUMNS, authorized)}
-              label="Exportar CSV"
-            />
+            {authorizedTruncado && (
+              <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                Este período tiene más de {AUTHORIZED_INVOICES_LIMIT} comprobantes y se está mostrando
+                sólo esa cantidad. El CSV baja lo mismo que ves, así que para el libro de IVA ventas
+                partí el período en rangos más cortos.
+              </p>
+            )}
+            <DateRangeFilter from={from} to={to} presets={presets} onChange={applyRange} />
           </div>
-          {authorizedTruncado && (
-            <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-              Este período tiene más de {AUTHORIZED_INVOICES_LIMIT} comprobantes y se está mostrando
-              sólo esa cantidad. El CSV baja lo mismo que ves, así que para el libro de IVA ventas
-              partí el período en rangos más cortos.
-            </p>
-          )}
-          <DateRangeFilter from={from} to={to} presets={presets} onChange={applyRange} />
-        </div>
-        <div className="p-5">
-          {authorized.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-2">Todavía no hay facturas emitidas.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {authorizedPage.rows.map((a) => {
-                const esNc = isNotaCredito(a.cbte_tipo);
-                const anulada = a.anulada_at !== null;
-                return (
-                  <li key={a.invoice_id} className="py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-800 truncate">
-                        {cbteNombre(a.cbte_tipo)} {cbteLetra(a.cbte_tipo)}{" "}
-                        {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
-                        {a.receptor_nombre ?? "Sin nombre"} — ${money(a.imp_total)}
-                      </p>
-                      {anulada && (
-                        <p className="text-[11px] font-bold text-rose-600 mt-0.5">
-                          ANULADA por nota de crédito
+          <div className="p-5">
+            {authorized.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-2">Todavía no hay facturas emitidas.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {authorizedPage.rows.map((a) => {
+                  const esNc = isNotaCredito(a.cbte_tipo);
+                  const anulada = a.anulada_at !== null;
+                  return (
+                    <li key={a.invoice_id} className="py-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-800 truncate">
+                          {cbteNombre(a.cbte_tipo)} {cbteLetra(a.cbte_tipo)}{" "}
+                          {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
+                          {a.receptor_nombre ?? "Sin nombre"} — ${money(a.imp_total)}
                         </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {!esNc && !anulada && (
+                        {anulada && (
+                          <p className="text-[11px] font-bold text-rose-600 mt-0.5">
+                            ANULADA por nota de crédito
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!esNc && !anulada && (
+                          <button
+                            type="button"
+                            onClick={() => setNcTarget(a)}
+                            disabled={busyId !== null}
+                            className="px-3 py-2 border border-rose-200 text-rose-700 text-sm font-bold rounded-lg hover:bg-rose-50 disabled:opacity-60 transition-colors flex items-center gap-1.5"
+                            title="Anular con nota de crédito"
+                          >
+                            <FileMinus size={14} />
+                            Nota de crédito
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => setNcTarget(a)}
-                          disabled={busyId !== null}
-                          className="px-3 py-2 border border-rose-200 text-rose-700 text-sm font-bold rounded-lg hover:bg-rose-50 disabled:opacity-60 transition-colors flex items-center gap-1.5"
-                          title="Anular con nota de crédito"
+                          onClick={() => openInvoicePrint(a.invoice_id)}
+                          className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
                         >
-                          <FileMinus size={14} />
-                          Nota de crédito
+                          <Printer size={14} />
+                          Reimprimir
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => openInvoicePrint(a.invoice_id)}
-                        className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
-                      >
-                        <Printer size={14} />
-                        Reimprimir
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
-          <PaginationFooter
-            page={authorizedPage.page}
-            totalPages={authorizedPage.totalPages}
-            total={authorizedPage.total}
-            firstIndex={authorizedPage.firstIndex}
-            lastIndex={authorizedPage.lastIndex}
-            noun="comprobantes"
-            onPageChange={authorizedPage.setPage}
-          />
-        </div>
-      </section>
+            <PaginationFooter
+              page={authorizedPage.page}
+              totalPages={authorizedPage.totalPages}
+              total={authorizedPage.total}
+              firstIndex={authorizedPage.firstIndex}
+              lastIndex={authorizedPage.lastIndex}
+              noun="comprobantes"
+              onPageChange={authorizedPage.setPage}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Confirmación de nota de crédito: es irreversible y genera un 3er papel. */}
       {ncTarget && (
