@@ -51,6 +51,16 @@
 -- cuerpo de un lado y del otro sea el mismo. Al aplicar, sacar BEGIN/COMMIT y partir
 -- en dos llamadas (funcion, y despues grants + registro).
 --
+-- HAY DOS 112, A PROPOSITO. Main mergeo su propia 112 (lo_que_se_elige_es_lo_que_se_factura)
+-- mientras esta rama estaba abierta. Tocan funciones DISTINTAS -- aquella
+-- rpc_create_invoice_draft y rpc_list_invoiceable_checkouts, esta rpc_list_billing_control --
+-- y las dos estan aplicadas y sanas en PROD (la otra 14:51, esta 19:13 del 2026-09-18).
+-- NO se renumero esta a 113 porque ya estaba aplicada y anotada en applied_migrations como
+-- 112: mover el archivo habria dejado el registro diciendo una cosa y el repo otra, que es
+-- exactamente la deriva que ese registro existe para evitar. Precedente en esta carpeta: ya
+-- hay dos 59_ y dos 106_. Al reconstruir desde cero el orden alfabetico las corre bien
+-- (lo_que... antes que rescate...), que es el mismo orden en que se aplicaron.
+--
 -- APLICADA en PROD el 2026-09-18. md5 del cuerpo, repo y PROD:
 -- a44f10f4c3b285798754a8bf8f08e7cb (4262 chars).
 
