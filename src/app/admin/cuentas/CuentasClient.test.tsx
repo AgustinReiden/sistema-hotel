@@ -22,6 +22,7 @@ const loadCtaCteAccountAction = vi.fn();
 const loadClientInvoicesAction = vi.fn();
 const loadClientPaymentsAction = vi.fn();
 const loadCcAccountStaysAction = vi.fn();
+const revertPaymentImputacionAction = vi.fn();
 vi.mock("./actions", () => ({
   loadCtaCteAccountAction: (...args: unknown[]) => loadCtaCteAccountAction(...args),
   loadClientInvoicesAction: (...args: unknown[]) => loadClientInvoicesAction(...args),
@@ -29,6 +30,8 @@ vi.mock("./actions", () => ({
   loadCcAccountStaysAction: (...args: unknown[]) => loadCcAccountStaysAction(...args),
   loadClientOpenInvoicesAction: vi.fn().mockResolvedValue({ success: true, data: [] }),
   registerAccountPaymentAction: vi.fn(),
+  revertPaymentImputacionAction: (...args: unknown[]) =>
+    revertPaymentImputacionAction(...args),
 }));
 
 const accounts: CtaCteAccount[] = [
@@ -345,5 +348,113 @@ describe("CuentasClient — solapa Pagos", () => {
     // que es la unidad de cobro.
     expect(pastillas.getByText("Pago parcial")).toBeTruthy();
     expect(pastillas.getByText("· $60.000,00 de $100.000,00")).toBeTruthy();
+  });
+});
+
+/**
+ * Desimputar desde la ficha (mig 111). Hasta acá la solapa MOSTRABA la imputación
+ * revertida pero no había forma de revertir ninguna: la RPC y la action existían sin
+ * un solo consumidor, así que soltar plata seguía siendo algo que se hacía en la base.
+ */
+describe("CuentasClient — desimputar desde la solapa Pagos", () => {
+  beforeEach(() => {
+    loadCtaCteAccountAction.mockReset();
+    loadCtaCteAccountAction.mockResolvedValue({
+      success: true,
+      data: { movements, balance: 15000 },
+    });
+    loadClientInvoicesAction.mockReset();
+    loadClientInvoicesAction.mockResolvedValue({ success: true, data: [] });
+    loadClientPaymentsAction.mockReset();
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: pagos });
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: estadias });
+    revertPaymentImputacionAction.mockReset();
+    revertPaymentImputacionAction.mockResolvedValue({
+      success: true,
+      data: { liberado: 60000, sinImputar: 100000 },
+    });
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  it("ofrece desimputar sólo en las imputaciones vivas", async () => {
+    // El fixture tiene una viva (i1) y una ya desimputada (i2). La RPC rechaza la
+    // segunda vuelta con P0040, así que ofrecer el botón ahí sería ofrecer un error.
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getAllByRole("button", { name: "Desimputar" })).toHaveLength(1);
+  });
+
+  it("no deja confirmar sin motivo y manda el que se escribió", async () => {
+    // El motivo es obligatorio en la RPC y en la action. Lo que se fija acá es que
+    // llegue de verdad: una fila revertida sin porqué no le sirve a nadie dentro de
+    // un año, que es la mitad de la razón por la que se marca en vez de borrarse.
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+
+    const confirmar = screen.getByRole("button", { name: /Confirmar/ });
+    expect(confirmar).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
+      target: { value: "Se facturó de nuevo en la consolidada de septiembre" },
+    });
+    expect(confirmar).not.toBeDisabled();
+
+    fireEvent.click(confirmar);
+
+    await waitFor(() =>
+      expect(revertPaymentImputacionAction).toHaveBeenCalledWith({
+        imputacionId: "i1",
+        motivo: "Se facturó de nuevo en la consolidada de septiembre",
+      })
+    );
+  });
+
+  it("vuelve a leer los pagos después de desimputar", async () => {
+    // Sin la relectura la fila seguiría viéndose viva y el "quedaron a cuenta" mostraría
+    // el número viejo: el admin creería que la plata sigue aplicada a una factura de la
+    // que ya la sacó.
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
+      target: { value: "Error de carga" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Confirmar/ }));
+
+    await waitFor(() => expect(loadClientPaymentsAction).toHaveBeenCalledTimes(2));
+  });
+
+  it("cancelar no llama a la action", async () => {
+    // Abrir el panel no puede tener efecto: lo que mueve plata es Confirmar.
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(revertPaymentImputacionAction).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText(/Por qué se desimputa/)).toBeNull();
+  });
+
+  it("si la RPC rechaza, no recarga y la pantalla no miente", async () => {
+    // Un P0040 (ya estaba desimputada) o un 42501 tienen que quedar a la vista sin que
+    // la fila cambie: lo peor sería mostrarla como soltada cuando la base dijo que no.
+    revertPaymentImputacionAction.mockResolvedValue({
+      success: false,
+      error: "Esa imputación ya estaba desimputada.",
+    });
+
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
+      target: { value: "Probando" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Confirmar/ }));
+
+    await waitFor(() => expect(revertPaymentImputacionAction).toHaveBeenCalled());
+    expect(loadClientPaymentsAction).toHaveBeenCalledTimes(1);
   });
 });
