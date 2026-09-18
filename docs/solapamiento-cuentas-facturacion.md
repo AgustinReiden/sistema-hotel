@@ -155,7 +155,8 @@ una capacidad real. **Se quedan las dos, como están.**
 
 ## 3. Hallazgos secundarios
 
-Ninguno de estos se toca en este cambio. Quedan documentados.
+El 3.1 se corrigió (migración 112). Los otros tres quedan documentados y sin tocar: no son
+errores de código sino consecuencias de que tres funciones contesten preguntas distintas.
 
 ### 3.1 El control era el único sin la rama de rescate por `invoices` — corregido (mig 112)
 
@@ -171,7 +172,7 @@ listado y a la vez no se contaría en el badge.
 `app_sync_invoice_reservation_link` (mig 111:906) mantiene las dos tablas alineadas. Era una
 divergencia **latente, no un bug activo**.
 
-**Corregido en la migración 112.** Un `LATERAL` busca la factura huérfana sólo cuando no hay
+**Corregido en la migración 112**, aplicada a PROD el 2026-09-18. Un `LATERAL` busca la factura huérfana sólo cuando no hay
 vínculo vivo, y la fila recupera dos cosas: su `estado` real (dos ramas nuevas en el `CASE`) y
 su comprobante (`COALESCE` sobre las columnas de `invoices`). Lo segundo no es adorno: decir
 "Facturado" sin poder mostrar cuál es exactamente la media respuesta que este trabajo vino a

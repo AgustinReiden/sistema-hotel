@@ -41,6 +41,18 @@
 -- prosrc comparado antes de escribir esto). OJO si se vuelve a tocar esta funcion:
 -- la definen las migraciones 79, 82 y 83. Partir de la primera que aparece en un
 -- grep borraria la columna `bancario`.
+--
+-- TRAMPA DEL CONECTOR, para el que aplique la proxima. El conector MCP de Supabase
+-- parsea comillas por su cuenta antes de mandar el SQL, y se le indigesta una comilla
+-- suelta DENTRO de un comentario -- devuelve 'syntax error at or near ";"', que no
+-- tiene nada que ver. Por eso los comentarios de adentro de la funcion no llevan
+-- comillas simples ni dobles. Importa que no las lleven: los comentarios de adentro
+-- del cuerpo SI viajan a prosrc, y este archivo esta escrito para que el md5 del
+-- cuerpo de un lado y del otro sea el mismo. Al aplicar, sacar BEGIN/COMMIT y partir
+-- en dos llamadas (funcion, y despues grants + registro).
+--
+-- APLICADA en PROD el 2026-09-18. md5 del cuerpo, repo y PROD:
+-- a44f10f4c3b285798754a8bf8f08e7cb (4262 chars).
 
 BEGIN;
 
@@ -121,8 +133,8 @@ BEGIN
       WHEN i.status = 'authorized' THEN 'facturado'
       WHEN i.id IS NOT NULL THEN 'en_proceso'
       -- Rescate (mig 112): factura viva colgada de la reserva a la que se le perdió
-      -- el vínculo. Va ACÁ, antes de vale_blanco y de 'no_factura': si el comprobante
-      -- existe, ya no importa si "correspondía" emitirlo. Existe.
+      -- el vínculo. Va ACÁ, antes de vale_blanco y de no_factura: si el comprobante
+      -- existe, ya no importa si correspondía emitirlo. Existe.
       WHEN resc.status = 'authorized' THEN 'facturado'
       WHEN resc.id IS NOT NULL THEN 'en_proceso'
       WHEN EXISTS (SELECT 1 FROM public.payments p
@@ -148,8 +160,8 @@ BEGIN
   LEFT JOIN public.invoice_reservations ir
          ON ir.reservation_id = r.id AND ir.unlinked_at IS NULL
   LEFT JOIN public.invoices i ON i.id = ir.invoice_id
-  -- Sólo busca cuando NO hay factura por el vínculo y NO es una marca de "facturado
-  -- por fuera" (esa no tiene comprobante nuestro que mostrar). Con el trigger sano
+  -- Sólo busca cuando NO hay factura por el vínculo y NO es una marca de facturado
+  -- por fuera (esa no tiene comprobante nuestro que mostrar). Con el trigger sano
   -- no devuelve nada nunca: es una red, no un camino.
   LEFT JOIN LATERAL (
     SELECT i2.id, i2.kind, i2.status, i2.cbte_tipo, i2.pto_vta, i2.cbte_nro, i2.imp_total
