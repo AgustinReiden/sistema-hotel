@@ -157,7 +157,7 @@ una capacidad real. **Se quedan las dos, como están.**
 
 Ninguno de estos se toca en este cambio. Quedan documentados.
 
-### 3.1 El control es el único sin la rama de rescate por `invoices`
+### 3.1 El control era el único sin la rama de rescate por `invoices` — corregido (mig 112)
 
 El predicado canónico de "esta estadía ya está facturada" tiene dos mitades: una factura viva
 en `invoices`, o un vínculo vivo en `invoice_reservations`.
@@ -168,9 +168,24 @@ En teoría, una reserva con factura viva pero sin vínculo vivo saldría como `f
 listado y a la vez no se contaría en el badge.
 
 **Verificado contra PROD: 0 filas en esa situación.** El trigger
-`app_sync_invoice_reservation_link` (mig 111:906) mantiene las dos tablas alineadas. Es una
-divergencia **latente, no un bug activo**. Arreglarla es una migración sobre una RPC del
-circuito de emisión; queda como seguimiento y fuera del alcance de este cambio.
+`app_sync_invoice_reservation_link` (mig 111:906) mantiene las dos tablas alineadas. Era una
+divergencia **latente, no un bug activo**.
+
+**Corregido en la migración 112.** Un `LATERAL` busca la factura huérfana sólo cuando no hay
+vínculo vivo, y la fila recupera dos cosas: su `estado` real (dos ramas nuevas en el `CASE`) y
+su comprobante (`COALESCE` sobre las columnas de `invoices`). Lo segundo no es adorno: decir
+"Facturado" sin poder mostrar cuál es exactamente la media respuesta que este trabajo vino a
+sacar.
+
+Verificado contra PROD, sin escribir nada:
+
+- **Inocua sobre los datos de hoy**: se corrió el `CASE` viejo y el nuevo sobre las 410
+  estadías cerradas. **0 estados cambian** y 0 comprobantes se rescatan. `falta` (221) +
+  `pendiente_consolidada` (65) = **286**, que es el número del badge.
+- **La rama dispara cuando tiene que disparar**: simulando el vínculo roto sobre 6 estadías que
+  sí tienen factura autorizada, el `CASE` viejo las mandaba a `falta` —o sea, le pedía al admin
+  facturar algo que ya estaba facturado— y el nuevo las marca `facturado` y recupera el número
+  de comprobante en las 6.
 
 ### 3.2 `invoice_decision = 'no'` se trata distinto en cada lado
 
