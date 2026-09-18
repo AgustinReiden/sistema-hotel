@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   BILLING_ESTADO_MATIZ,
+  BILLING_PENDING_DAYS,
   billingComprobante,
   billingGrupo,
   bulkBillingAction,
   countSelectedOffPage,
   shiftRangeIds,
+  isPendingBilling,
   isPendingWithTrail,
   matchesCobro,
+  totalPendingBilling,
 } from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
 import type { BillingControlEstado, BillingControlRow } from "@/lib/types";
@@ -338,5 +341,54 @@ describe("isPendingWithTrail — el atajo de la planilla del gerente", () => {
     expect(isPendingWithTrail(row({ estado: "facturado", bancario: true }))).toBe(false);
     expect(isPendingWithTrail(row({ estado: "facturado_externo", bancario: true }))).toBe(false);
     expect(isPendingWithTrail(row({ estado: "no_corresponde", bancario: true }))).toBe(false);
+  });
+});
+
+/**
+ * El criterio que el badge del menú y el encabezado del control COMPARTEN. Antes
+ * cada uno contaba lo suyo y mostraban 165 y 286 para el mismo dato.
+ */
+describe("isPendingBilling — qué cuenta como pendiente de facturar", () => {
+  it("son las dos mitades: lo que falta y lo que espera la consolidada", () => {
+    expect(isPendingBilling("falta")).toBe(true);
+    expect(isPendingBilling("pendiente_consolidada")).toBe(true);
+  });
+
+  it("lo ya resuelto no cuenta, por cualquiera de los tres caminos", () => {
+    expect(isPendingBilling("facturado")).toBe(false);
+    expect(isPendingBilling("facturado_consolidado")).toBe(false);
+    expect(isPendingBilling("facturado_externo")).toBe(false);
+  });
+
+  it("`no_corresponde` no cuenta: no hay nada que facturar", () => {
+    expect(isPendingBilling("no_corresponde")).toBe(false);
+  });
+
+  /**
+   * La trampa: `billingGrupo` mete `en_proceso` en "pendiente" (para filtrar la
+   * pantalla tiene sentido: todavía no hay CAE), pero CONTARLO haría que el
+   * encabezado no coincida con el badge. Son criterios distintos a propósito.
+   */
+  it("`en_proceso` no se cuenta, aunque el filtro de pantalla lo agrupe en pendiente", () => {
+    expect(isPendingBilling("en_proceso")).toBe(false);
+    expect(billingGrupo("en_proceso")).toBe("pendiente");
+  });
+});
+
+describe("totalPendingBilling — un solo número de 'falta facturar'", () => {
+  it("suma las dos mitades", () => {
+    expect(totalPendingBilling({ falta: 221, pendiente_consolidada: 65 })).toBe(286);
+  });
+
+  it("sin nada pendiente da cero, que es lo que apaga el badge", () => {
+    expect(totalPendingBilling({ falta: 0, pendiente_consolidada: 0 })).toBe(0);
+  });
+
+  it("no se queda con una sola mitad: una consolidada pendiente también falta facturar", () => {
+    expect(totalPendingBilling({ falta: 0, pendiente_consolidada: 65 })).toBe(65);
+  });
+
+  it("la ventana es todo el historial, no un mes ni 60 días", () => {
+    expect(BILLING_PENDING_DAYS).toBeGreaterThan(365 * 5);
   });
 });

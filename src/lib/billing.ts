@@ -294,9 +294,44 @@ const MARCABLES: readonly BillingControlEstado[] = ["falta", "pendiente_consolid
  * ¿Esta estadía sigue reclamando una factura? Mismo criterio que
  * `rpc_count_billing_pending` suma en la base, para que el contador "en todo el
  * historial" y lo que se ve en pantalla se puedan comparar sin mentir.
+ *
+ * OJO: no es lo mismo que `billingGrupo(estado) === "pendiente"`, que además mete
+ * `en_proceso`. Para CONTAR lo pendiente va siempre esta función, que es la que el
+ * badge del menú y el encabezado del control tienen que compartir.
  */
 export function isPendingBilling(estado: BillingControlEstado): boolean {
   return MARCABLES.includes(estado);
+}
+
+/**
+ * La ventana de "qué falta facturar": todo el historial.
+ *
+ * No tiene mes. Una estadía sin facturar de hace cuatro meses es exactamente la que
+ * hay que ver, y abrir en el mes en curso la escondía: eran 222 de 286 invisibles.
+ * Está acá, y no en cada pantalla, porque antes había CINCO respuestas distintas a
+ * la misma pregunta (10 días en el SQL del bloque de recepción, mes en curso en el
+ * listado del control, 60 días en el badge, 3650 en su aviso, "todo" en la
+ * consolidada). Ver docs/solapamiento-cuentas-facturacion.md.
+ *
+ * Son días porque `rpc_count_billing_pending` toma días. Su equivalente en fecha,
+ * para las pantallas que piden rango, es `BILLING_EPOCH` (src/lib/date-range.ts):
+ * las dos constantes significan "todo" y cubren de sobra cualquier dato cargado.
+ */
+export const BILLING_PENDING_DAYS = 3650;
+
+/**
+ * Cuánto falta facturar, en un solo número.
+ *
+ * Son las dos cosas: lo que no tiene factura (`falta`) y lo que espera la
+ * consolidada del mes (`pendiente_consolidada`). El badge mostraba sólo la primera
+ * mitad mientras la pantalla que abría sumaba las dos, así que los dos números no
+ * podían coincidir nunca.
+ */
+export function totalPendingBilling(c: {
+  falta: number;
+  pendiente_consolidada: number;
+}): number {
+  return c.falta + c.pendiente_consolidada;
 }
 
 export function bulkBillingAction(

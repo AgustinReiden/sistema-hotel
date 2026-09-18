@@ -91,7 +91,9 @@ function getAdminItems({ unbilledCount = 0 }: NavState = {}): NavItem[] {
           ? {
               text: String(unbilledCount),
               tone: "alert",
-              title: `${unbilledCount} estadías sin facturar en los últimos 60 días`,
+              // Sin ventana en el texto: el número es de todo el historial, y es el
+              // mismo que muestra el control al abrir.
+              title: `${unbilledCount} estadías sin facturar`,
             }
           : undefined,
     },
