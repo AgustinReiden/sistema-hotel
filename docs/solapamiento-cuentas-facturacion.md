@@ -6,6 +6,36 @@
 
 ---
 
+## En una carilla (si no vas a leer el resto)
+
+**Qué pasaba.** Preguntabas "¿qué me falta facturar?" y el sistema te daba cuatro números
+distintos según dónde miraras: 28, 64, 165 o 286. El correcto era **286**. Ninguna pantalla lo
+mostraba al abrirla.
+
+**Por qué.** Cada pantalla miraba un período de tiempo distinto —una 10 días, otra el mes en
+curso, otra 60 días, otra todo— sin decírtelo. No era un error de cuentas: era que nadie había
+elegido un criterio único.
+
+**Qué se hizo.** Ya está arreglado y va en este mismo cambio. **No tenés nada que ejecutar.**
+
+1. El **Control de facturación** pasa a ser la pantalla dueña de esa pregunta. Abre mostrando
+   las 286, sin que toques ningún filtro.
+2. El **numerito rojo del menú** ahora dice 286, el mismo número que la pantalla que abre.
+3. **Facturación** (la de recepción) dice que muestra sólo los últimos 10 días, y tiene un link
+   a la lista completa.
+4. Se borraron una consulta, dos botones y tres criterios de fecha que sobraban.
+
+**Qué te queda a vos.** Una sola cosa, y no es de programación: **hay 286 estadías sin
+facturar**. El sistema antes te las escondía; ahora las ves todas juntas. De esas, 221 esperan
+una factura suelta y 65 esperan la consolidada del mes. Entrá a Control de facturación y usá
+el botón violeta "Falta facturar y deja rastro": son las que ya cobraste por cuenta corriente
+o por tarjeta, o sea las que no conviene dejar pasar.
+
+Lo que sigue es el detalle técnico de cómo se llegó a eso. No hace falta leerlo para usar el
+sistema.
+
+---
+
 ## Veredicto
 
 **El problema no es que haya cuatro pantallas. Es que cada una usa una ventana de fechas
