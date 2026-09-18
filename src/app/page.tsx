@@ -23,6 +23,19 @@ function getWhatsappHref(phone?: string | null): string | undefined {
   return digits ? `https://wa.me/${digits}` : undefined;
 }
 
+function getInstagramHref(value?: string | null): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const username = trimmed.replace(/^@/, "");
+  return `https://instagram.com/${username}`;
+}
+
+function getMapsHref(address?: string | null): string | undefined {
+  const trimmed = address?.trim();
+  return trimmed ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trimmed)}` : undefined;
+}
+
 // Mismo contenedor y los mismos 4 bloques (3 campos + boton) que <PublicSearchForm>,
 // con placeholders en vez de contenido real: el alto sale igual por construccion
 // (mismas clases de padding), asi el Suspense no hace saltar el layout.
@@ -305,10 +318,15 @@ export default async function Home({ searchParams }: PageProps) {
               )}
             </div>
             {settings?.address && (
-              <p className="text-slate-500 font-light text-sm leading-relaxed max-w-xs">
+              <a
+                href={getMapsHref(settings.address)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-slate-500 hover:text-white transition-colors font-light text-sm leading-relaxed max-w-xs"
+              >
                 <MapPin size={14} className="inline mr-2 relative -top-[1px]" />
                 {settings.address}
-              </p>
+              </a>
             )}
           </div>
 
@@ -322,8 +340,15 @@ export default async function Home({ searchParams }: PageProps) {
                   </li>
                 )}
                 {settings?.contact_instagram && (
-                  <li className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors">
-                    <Instagram size={16} className="shrink-0" /> {settings.contact_instagram}
+                  <li>
+                    <a
+                      href={getInstagramHref(settings.contact_instagram)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-start md:justify-end gap-3 hover:text-white transition-colors"
+                    >
+                      <Instagram size={16} className="shrink-0" /> {settings.contact_instagram}
+                    </a>
                   </li>
                 )}
                 {whatsappPhone && (
