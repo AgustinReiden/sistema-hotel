@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle,
   ExternalLink,
   Eye,
   FileText,
@@ -47,7 +46,7 @@ import {
   estadoPagoDeControl,
 } from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
-import { BILLING_EPOCH, buildBillingPresets } from "@/lib/date-range";
+import { buildBillingPresets } from "@/lib/date-range";
 import type { BillingControlEstado, BillingControlRow, CtaCteAccount } from "@/lib/types";
 import type { BillingGrupo } from "@/lib/billing";
 
@@ -62,8 +61,6 @@ type Props = {
   cobro: string;
   /** Atajo de un clic a "falta facturar Y deja rastro" (ver `isPendingWithTrail`). */
   rastro: boolean;
-  /** Sin facturar en TODO el historial, para avisar de lo que cae fuera del rango. */
-  totalHistorico: number;
   /** "Hoy" en la zona del hotel, resuelto en el server (ver page.tsx). */
   todayKey: string;
 };
@@ -127,7 +124,6 @@ export default function ControlClient({
   estado,
   cobro,
   rastro,
-  totalHistorico,
   todayKey,
 }: Props) {
   const router = useRouter();
@@ -152,39 +148,39 @@ export default function ControlClient({
   // Los contadores respetan cobro y rastro pero NO el grupo: el grupo es justamente
   // lo que estos botones eligen. Si contaran sobre `rows` a secas, "Pendiente: 50"
   // llevaría a una tabla de 3 filas cuando hay un filtro de cobro puesto.
+  /**
+   * "Pendiente" acá es `isPendingBilling` (falta + espera consolidada), que es
+   * EXACTAMENTE lo que suma `rpc_count_billing_pending` para el badge del menú. Se
+   * cuenta y se filtra con el mismo predicado a propósito: el número de la pastilla,
+   * el de las filas que quedan al hacerle clic y el del badge tienen que ser el
+   * mismo, o volvemos a tener dos respuestas para la misma pregunta.
+   *
+   * Por eso NO se usa `billingGrupo` para este grupo: además mete `en_proceso`, que
+   * es una estadía que YA tiene factura, todavía sin CAE. Esa tiene su propia
+   * pantalla —"Pendientes y con error" en /admin/fiscal— y sigue visible acá con el
+   * filtro en "Todas".
+   */
+  const esPendiente = (r: BillingControlRow) => isPendingBilling(r.estado);
+
   const counts = useMemo(() => {
     const map: Record<BillingGrupo, number> = { pendiente: 0, facturado: 0 };
     for (const r of rows) {
       if (!matchesCobro(r, cobro)) continue;
       if (rastro && !isPendingWithTrail(r)) continue;
-      map[billingGrupo(r.estado)] += 1;
+      if (esPendiente(r)) map.pendiente += 1;
+      else if (billingGrupo(r.estado) === "facturado") map.facturado += 1;
     }
     return map;
   }, [rows, cobro, rastro]);
 
-  /**
-   * Pendientes DENTRO del rango que se está viendo. OJO: usa `isPendingBilling`
-   * (falta + espera consolidada) y NO `billingGrupo === "pendiente"`, que además
-   * incluye `en_proceso`. No es un descuido: el número contra el que se compara es
-   * `totalHistorico`, que sale de `rpc_count_billing_pending`, y esa RPC cuenta
-   * exactamente esos dos estados. Comparar dos criterios distintos haría aparecer
-   * el aviso cuando no corresponde, o peor, lo escondería justo cuando hay algo
-   * viejo sin facturar.
-   *
-   * Se cuenta sobre `rows` crudas —sin cobro ni rastro— por lo mismo: el total
-   * histórico tampoco los aplica.
-   */
-  const pendientesEnRango = useMemo(
-    () => rows.filter((r) => isPendingBilling(r.estado)).length,
-    [rows]
-  );
-
   /** Cuántas filas del rango actual califican para el atajo de la planilla. */
   const rastroDisponible = useMemo(() => rows.filter(isPendingWithTrail).length, [rows]);
 
-  // `estado` en la URL ya no es un estado fino sino un grupo ("pendiente" |
-  // "facturado"). Un valor viejo o inventado no filtra nada: se muestra todo, que
-  // es el default seguro — nunca esconder filas por un parámetro que no se entiende.
+  // `estado` en la URL es un grupo ("pendiente" | "facturado"). Sin parámetro el
+  // server manda "pendiente", que es con lo que abre la pantalla; "todas" es el
+  // valor explícito para no filtrar. Un valor viejo o inventado tampoco filtra: se
+  // muestra todo, que es el default seguro — nunca esconder filas por un parámetro
+  // que no se entiende.
   const grupoFiltrado: BillingGrupo | null =
     estado === "pendiente" || estado === "facturado" ? estado : null;
 
@@ -194,7 +190,10 @@ export default function ControlClient({
     () =>
       rows.filter(
         (r) =>
-          (!grupoFiltrado || billingGrupo(r.estado) === grupoFiltrado) &&
+          (!grupoFiltrado ||
+            (grupoFiltrado === "pendiente"
+              ? esPendiente(r)
+              : billingGrupo(r.estado) === grupoFiltrado)) &&
           matchesCobro(r, cobro) &&
           (!rastro || isPendingWithTrail(r))
       ),
@@ -430,11 +429,11 @@ export default function ControlClient({
             </label>
             <select
               id="control-estado"
-              value={grupoFiltrado ?? ""}
+              value={grupoFiltrado ?? "todas"}
               onChange={(e) => applyFilters({ estado: e.target.value })}
               className={inputClass}
             >
-              <option value="">Todos</option>
+              <option value="todas">Todos</option>
               {GRUPOS.map((g) => (
                 <option key={g} value={g}>
                   {BILLING_GRUPO_LABEL[g]}
@@ -473,12 +472,10 @@ export default function ControlClient({
             className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
           />
 
-          <Link
-            href="/admin/fiscal/consolidada"
-            className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-colors"
-          >
-            <Layers size={16} /> Factura consolidada
-          </Link>
+          {/* Acá había un "Factura consolidada" sin parámetros: el único acceso a esa
+              pantalla sin cliente elegido, o sea un formulario que había que completar
+              a mano. A la consolidada se entra con el cliente puesto: por "Consolidar"
+              de cada fila, o por "Facturar" en /admin/cuentas. */}
         </div>
       </section>
 
@@ -488,7 +485,7 @@ export default function ControlClient({
       {(rastro || rastroDisponible > 0) && (
         <button
           type="button"
-          onClick={() => applyFilters({ rastro: rastro ? "" : "1", estado: "", cobro: "" })}
+          onClick={() => applyFilters({ rastro: rastro ? "" : "1", estado: "todas", cobro: "" })}
           className={`w-full sm:w-auto flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
             rastro
               ? "bg-violet-600 text-white hover:bg-violet-700"
@@ -506,25 +503,9 @@ export default function ControlClient({
         </button>
       )}
 
-      {/* Lo que queda FUERA del rango elegido. Sin este aviso, una estadía vieja sin
-          facturar no aparece en ninguna pantalla: acá se abre en el mes en curso y
-          el badge del menú mira 60 días. El número viejo tiene que encontrarte a vos. */}
-      {totalHistorico > pendientesEnRango && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
-          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-          <span className="text-amber-900">
-            Hay <strong>{totalHistorico}</strong> estadías sin facturar en todo el historial y en
-            este rango se ven <strong>{pendientesEnRango}</strong>.
-          </span>
-          <button
-            type="button"
-            onClick={() => applyFilters({ desde: BILLING_EPOCH, hasta: todayKey })}
-            className="font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
-          >
-            Ver todas
-          </button>
-        </div>
-      )}
+      {/* Acá vivía un aviso de "hay N en todo el historial y en este rango se ven M",
+          con un botón "Ver todas". Se fue junto con su consulta: la pantalla ahora
+          ABRE en todo el historial, así que M ya es N y no hay a dónde escapar. */}
 
       {/* Contadores: los mismos dos grupos del filtro, y clickeables. */}
       <div className="flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wide">
@@ -532,7 +513,7 @@ export default function ControlClient({
           <button
             key={g}
             type="button"
-            onClick={() => applyFilters({ estado: grupoFiltrado === g ? "" : g })}
+            onClick={() => applyFilters({ estado: grupoFiltrado === g ? "todas" : g })}
             className={`px-3 py-1 rounded-full transition-opacity ${
               g === "pendiente" ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
             } ${grupoFiltrado && grupoFiltrado !== g ? "opacity-40" : ""}`}

@@ -1,43 +1,14 @@
 import { redirect } from "next/navigation";
 import { ClipboardCheck } from "lucide-react";
 
-import {
-  countBillingPending,
-  getCtaCteAccounts,
-  getCurrentUserRole,
-  listBillingControl,
-} from "@/lib/data";
+import { getCtaCteAccounts, getCurrentUserRole, listBillingControl } from "@/lib/data";
 import { isBillingCobroFilter } from "@/lib/billing";
+import { BILLING_EPOCH } from "@/lib/date-range";
 import { hotelDateKey } from "@/lib/time";
 import type { CtaCteClientKind } from "@/lib/types";
 import ControlClient from "./ControlClient";
 
-/**
- * Ventana del contador "en todo el historial". No es `allowAll`: la RPC
- * `rpc_list_billing_control` exige rango (22023 con NULL), así que se usa una
- * ventana larga en días. Diez años cubre todo lo que este hotel puede tener
- * cargado y evita una migración para algo que ya se resuelve con un parámetro.
- */
-const DIAS_HISTORICO = 3650;
-
 export const dynamic = "force-dynamic";
-
-/**
- * Primer y último día del mes en curso EN LA ZONA DEL HOTEL, en formato YYYY-MM-DD.
- *
- * Antes se resolvía con getUTCMonth(): entre las 21hs y la medianoche de Tucumán
- * del último día del mes ya es el día 1 en UTC, así que el listado abría por
- * defecto en el mes equivocado y el empleado veía vacío lo que recién había
- * cerrado. hotelDateKey resuelve el día contra la zona del hotel.
- */
-function currentMonthRange(): { from: string; to: string } {
-  const [y, m] = hotelDateKey(new Date()).split("-").map(Number);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  // Día 0 del mes siguiente = último día de este mes. Se calcula en UTC a
-  // propósito: acá `y`/`m` ya son el mes del hotel, es pura aritmética de calendario.
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { from: `${y}-${pad(m)}-01`, to: `${y}-${pad(m)}-${pad(lastDay)}` };
-}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -62,9 +33,14 @@ export default async function ControlFacturacionPage({
   // El "hoy" del hotel se resuelve en el server y viaja como prop: si lo calculara
   // el navegador, los presets dependerían de la zona de la máquina del empleado.
   const todayKey = hotelDateKey(new Date());
-  const defaults = currentMonthRange();
-  const from = desde && DATE_RE.test(desde) ? desde : defaults.from;
-  const to = hasta && DATE_RE.test(hasta) ? hasta : defaults.to;
+
+  // Esta pantalla abre sobre TODO el historial, no sobre el mes en curso. "Qué falta
+  // facturar" no tiene mes: una estadía sin facturar de hace cuatro meses es justo la
+  // que hay que ver, y abrir en el mes la escondía (eran 222 de 286 invisibles). El
+  // parche era un segundo contador que te decía el número que no podías ver; abriendo
+  // así, ese contador sobra. Ver docs/solapamiento-cuentas-facturacion.md.
+  const from = desde && DATE_RE.test(desde) ? desde : BILLING_EPOCH;
+  const to = hasta && DATE_RE.test(hasta) ? hasta : todayKey;
 
   // `cliente` viaja como "company:<uuid>" | "guest:<uuid>".
   const [rawKind, rawId] = (cliente ?? "").split(":");
@@ -76,18 +52,15 @@ export default async function ControlFacturacionPage({
   // pasar todo ante un valor desconocido, y acá además no se refleja en el select.
   const cobroFilter = cobro && isBillingCobroFilter(cobro) ? cobro : "";
 
-  const [rows, accounts, historico] = await Promise.all([
+  // Sin parámetro, la pantalla abre en lo que falta facturar: es la pregunta que
+  // vino a contestar. "todas" es el valor explícito para no filtrar, porque con el
+  // default nuevo la cadena vacía ya no puede significarlo.
+  const estadoFiltro = estado ?? "pendiente";
+
+  const [rows, accounts] = await Promise.all([
     listBillingControl(from, to, clientKind, clientId).catch(() => []),
     getCtaCteAccounts().catch(() => []),
-    // Cuánto falta facturar EN TODO EL HISTORIAL, no sólo en el rango que se ve.
-    // Sin esto, una estadía de hace cuatro meses no aparece en ninguna pantalla:
-    // el listado abre en el mes en curso y el badge del menú mira 60 días.
-    countBillingPending(DIAS_HISTORICO).catch(() => null),
   ]);
-
-  const totalHistorico = historico
-    ? historico.falta + historico.pendiente_consolidada
-    : 0;
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -99,7 +72,7 @@ export default async function ControlFacturacionPage({
           <div>
             <h1 className="text-xl font-bold text-slate-800">Control de facturación</h1>
             <p className="text-sm text-slate-500">
-              Qué está facturado y qué no, estadía por estadía. Sin límite de días.
+              Todo lo que falta facturar, estadía por estadía y sin límite de fecha.
             </p>
           </div>
         </div>
@@ -115,10 +88,9 @@ export default async function ControlFacturacionPage({
             from={from}
             to={to}
             cliente={cliente ?? ""}
-            estado={estado ?? ""}
+            estado={estadoFiltro}
             cobro={cobroFilter}
             rastro={rastro === "1"}
-            totalHistorico={totalHistorico}
             todayKey={todayKey}
           />
         </div>
