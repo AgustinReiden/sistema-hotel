@@ -63,6 +63,7 @@ import type {
   BillingPendingCounts,
   CcAccountStayRow,
   CcClientPaymentRow,
+  CcOpenInvoiceRow,
   CcPagoImputacion,
   CcPaymentReceipt,
   ClientInvoiceRow,
@@ -4341,6 +4342,98 @@ export async function listClientInvoices(
 }
 
 /**
+ * Σ imputado VIVO por factura, para las pantallas que ya tienen las facturas a la
+ * vista. Lo revertido no cuenta (mig 111).
+ *
+ * Lee `cc_pago_imputaciones` directo (la RLS de staff lo permite, mig 109) en vez de
+ * ampliar las RPC que ya devuelven las facturas: son dos pantallas distintas —el
+ * control de facturación y el modal de cobro— y las dos necesitan lo mismo, así que
+ * el agregado vive una sola vez acá. Devuelve sólo las que tienen algo imputado; el
+ * llamador trata la ausencia como cero.
+ *
+ * Va de a tandas porque el `in(...)` viaja en la URL: el control de facturación
+ * puede traer miles de estadías en "todo el historial" y una lista entera de ids
+ * pasaría el largo máximo de la query.
+ */
+export async function getImputadoPorFactura(
+  invoiceIds: readonly string[]
+): Promise<Record<string, number>> {
+  const ids = [...new Set(invoiceIds.filter(Boolean))];
+  if (ids.length === 0) return {};
+
+  const supabase = await createClient();
+  const totales: Record<string, number> = {};
+  const TANDA = 200;
+
+  for (let i = 0; i < ids.length; i += TANDA) {
+    const { data, error } = await supabase
+      .from("cc_pago_imputaciones")
+      .select("invoice_id, amount")
+      // Sólo las VIVAS: una imputación revertida (mig 111) no cancela nada, y si
+      // siguiera sumando acá la factura se vería cobrada con plata que ya se soltó.
+      // Mismo filtro que usa `app_validar_imputacion` para medir el techo.
+      .is("revertida_at", null)
+      .in("invoice_id", ids.slice(i, i + TANDA));
+    if (error) throw error;
+    for (const row of (data ?? []) as { invoice_id: string; amount: number | string }[]) {
+      totales[row.invoice_id] = (totales[row.invoice_id] ?? 0) + (Number(row.amount) || 0);
+    }
+  }
+
+  for (const id of Object.keys(totales)) {
+    totales[id] = Math.round((totales[id] + Number.EPSILON) * 100) / 100;
+  }
+  return totales;
+}
+
+/**
+ * Facturas del cliente con saldo pendiente, de la más vieja a la más nueva: lo que
+ * el modal de cobro ofrece para imputar.
+ *
+ * Sólo autorizadas y no anuladas, que son las únicas que la RPC deja imputar (P0036
+ * y P0031). Una factura saldada no se devuelve: ofrecerla sería ofrecer un rechazo.
+ *
+ * Reusa `listClientInvoices` en vez de una consulta propia porque resolver QUÉ
+ * facturas son de este cliente es la parte difícil (el vínculo va por dos caminos
+ * según cómo nació la factura) y ese predicado ya vive en `rpc_list_client_invoices`.
+ */
+export async function listClientOpenInvoices(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<CcOpenInvoiceRow[]> {
+  const facturas = (await listClientInvoices(kind, clientId)).filter(
+    (f) => f.status === "authorized" && f.anulada_at === null
+  );
+  if (facturas.length === 0) return [];
+
+  const imputados = await getImputadoPorFactura(facturas.map((f) => f.invoice_id));
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  return facturas
+    .map((f) => {
+      const imputado = imputados[f.invoice_id] ?? 0;
+      return {
+        invoice_id: f.invoice_id,
+        kind: f.kind,
+        cbte_tipo: f.cbte_tipo,
+        pto_vta: f.pto_vta,
+        cbte_nro: f.cbte_nro,
+        cbte_fch: f.cbte_fch,
+        imp_total: f.imp_total,
+        imputado: round2(imputado),
+        saldo: round2(f.imp_total - imputado),
+        created_at: f.created_at,
+      };
+    })
+    .filter((f) => f.saldo > 0)
+    .sort(
+      (a, b) =>
+        (a.cbte_fch ?? "").localeCompare(b.cbte_fch ?? "") ||
+        (a.cbte_nro ?? 0) - (b.cbte_nro ?? 0)
+    );
+}
+
+/**
  * Crea el draft de una factura consolidada (N estadías → 1 comprobante). Devuelve
  * el id para que el llamador lo pase a emitInvoice(), igual que el flujo normal.
  */
@@ -4393,7 +4486,16 @@ export async function listBillingControl(
     p_client_id: clientId ?? null,
   });
   if (error) throw error;
-  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+  const filas = (data ?? []) as Array<Record<string, unknown>>;
+
+  // Lo cobrado de cada factura, en una sola lectura para todo el listado (mig 109).
+  // La RPC no lo devuelve y ampliarla obligaría a un DROP+CREATE en producción por
+  // un dato que no participa de ninguno de sus filtros.
+  const imputados = await getImputadoPorFactura(
+    filas.map((r) => (r.invoice_id === null ? "" : String(r.invoice_id))).filter(Boolean)
+  );
+
+  return filas.map((r) => ({
     reservation_id: String(r.reservation_id),
     room_number: String(r.room_number),
     client_name: String(r.client_name),
@@ -4415,6 +4517,9 @@ export async function listBillingControl(
     pto_vta: r.pto_vta === null ? null : Number(r.pto_vta),
     cbte_nro: r.cbte_nro === null ? null : Number(r.cbte_nro),
     imp_total: r.imp_total === null ? null : Number(r.imp_total),
+    // Null (y no 0) cuando no hay factura: "cero cobrado" y "no hay nada que cobrar"
+    // son cosas distintas, y la pastilla de la pantalla las pinta distinto.
+    imputado: r.invoice_id === null ? null : imputados[String(r.invoice_id)] ?? 0,
     external_ref: (r.external_ref as string | null) ?? null,
     bancario: Boolean(r.bancario),
   }));

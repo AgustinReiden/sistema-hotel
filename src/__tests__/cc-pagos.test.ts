@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   estaPagada,
+  estadoPago,
   facturaExcedente,
   imputacionExcedente,
   imputadoTotal,
   netoRecibido,
+  problemasDelPago,
+  repartirMasViejoPrimero,
+  resumenPago,
   retencionExcedente,
   retencionesTotal,
   sinImputar,
+  type FacturaAImputar,
+  type ImputacionEnPantalla,
 } from "@/lib/cc-pagos";
 
 /**
@@ -149,6 +155,261 @@ describe("no se puede imputar de más", () => {
 
   it("una factura ya saldada no admite un peso más", () => {
     expect(facturaExcedente({ impTotal: 100000, imputado: 100000 }, 1)).toBe(1);
+  });
+});
+
+describe("el resumen en vivo del modal de cobro", () => {
+  // Es el número que la gente se equivoca, y por eso está arriba del botón y no en
+  // el recibo: con retenciones, lo que cancela de deuda y lo que entra a la cuenta
+  // bancaria NO son lo mismo.
+  it("separa lo que cancela de lo que entra", () => {
+    const resumen = resumenPago({
+      amount: 100000,
+      retencionGanancias: 2000,
+      retencionIibb: 1500,
+    });
+
+    expect(resumen.cancela).toBe(100000);
+    expect(resumen.retenciones).toBe(3500);
+    expect(resumen.entran).toBe(96500);
+    // La identidad que sostiene toda la migración 109, escrita como identidad.
+    expect(resumen.entran + resumen.retenciones).toBe(resumen.cancela);
+  });
+
+  it("sin retenciones, cancela y entra lo mismo", () => {
+    // El caso normal: la enorme mayoría de los cobros no retiene nada, y ahí el
+    // resumen no puede sembrar la duda de que falte plata.
+    const resumen = resumenPago({ amount: 50000 });
+    expect(resumen.cancela).toBe(50000);
+    expect(resumen.entran).toBe(50000);
+    expect(resumen.retenciones).toBe(0);
+  });
+
+  it("una retención que se come el pago entero deja en cero lo que entra, no en negativo", () => {
+    const resumen = resumenPago({ amount: 8000, retencionGanancias: 8000 });
+    expect(resumen.entran).toBe(0);
+    expect(resumen.cancela).toBe(8000);
+  });
+
+  it("dice cuánto se aplicó a facturas y cuánto queda a cuenta", () => {
+    // Imputar de menos es legítimo: el cliente adelanta plata y la factura sale
+    // después. El resumen tiene que decirlo, no esconderlo.
+    const resumen = resumenPago({ amount: 100000, retencionGanancias: 3000 }, [
+      { amount: 60000 },
+    ]);
+    expect(resumen.imputado).toBe(60000);
+    expect(resumen.sinImputar).toBe(40000);
+    // Lo imputado se mide contra lo que CANCELA (100.000), no contra lo que entró
+    // (97.000): la retención cancela factura igual que el efectivo.
+    expect(resumen.sinImputar).toBe(resumen.cancela - resumen.imputado);
+  });
+
+  it("no arrastra el error de coma flotante", () => {
+    const resumen = resumenPago({ amount: 1000, retencionGanancias: 0.1, retencionIibb: 0.2 });
+    expect(resumen.retenciones).toBe(0.3);
+    expect(resumen.entran).toBe(999.7);
+  });
+});
+
+describe("aplicar a lo más viejo primero", () => {
+  // El caso normal de una empresa que transfiere: paga lo que debe y nadie quiere
+  // cargar seis renglones a mano.
+  const facturas: FacturaAImputar[] = [
+    { invoiceId: "nueva", fecha: "2026-09-01", numero: 30, saldo: 50000 },
+    { invoiceId: "vieja", fecha: "2026-07-01", numero: 10, saldo: 40000 },
+    { invoiceId: "media", fecha: "2026-08-01", numero: 20, saldo: 30000 },
+  ];
+
+  it("salda la más vieja antes de tocar la siguiente", () => {
+    const reparto = repartirMasViejoPrimero(100000, facturas);
+
+    expect(reparto).toEqual([
+      { invoiceId: "vieja", amount: 40000 },
+      { invoiceId: "media", amount: 30000 },
+      { invoiceId: "nueva", amount: 30000 },
+    ]);
+  });
+
+  it("el orden lo decide el reparto, no cómo venía la lista", () => {
+    // Si dependiera del orden de entrada, un cambio de ordenamiento en la pantalla
+    // cambiaría en silencio a qué factura se imputa la plata.
+    const alReves = [...facturas].reverse();
+    expect(repartirMasViejoPrimero(100000, alReves)).toEqual(
+      repartirMasViejoPrimero(100000, facturas)
+    );
+  });
+
+  it("nunca le imputa a una factura más que su saldo", () => {
+    // Es el techo que la RPC valida con la fila lockeada (P0038): lo que sale de acá
+    // tiene que pasarlo por construcción.
+    const reparto = repartirMasViejoPrimero(1000000, facturas);
+    for (const imputacion of reparto) {
+      const factura = facturas.find((f) => f.invoiceId === imputacion.invoiceId);
+      expect(imputacion.amount).toBeLessThanOrEqual(factura!.saldo);
+    }
+    // Y el sobrante NO se fuerza a ninguna: queda a cuenta.
+    expect(imputadoTotal(reparto)).toBe(120000);
+  });
+
+  it("un monto que no alcanza deja la última factura a medias y no toca las de atrás", () => {
+    const reparto = repartirMasViejoPrimero(55000, facturas);
+    expect(reparto).toEqual([
+      { invoiceId: "vieja", amount: 40000 },
+      { invoiceId: "media", amount: 15000 },
+    ]);
+    expect(imputacionExcedente({ amount: 55000 }, reparto)).toBe(0);
+  });
+
+  it("las facturas sin fecha van al final, no primero", () => {
+    // Una factura sin CAE no tiene lugar en la fila de antigüedad: ponerla primera
+    // haría que el reparto empiece por lo que todavía no es exigible.
+    const conHuerfana: FacturaAImputar[] = [
+      { invoiceId: "sin-fecha", fecha: null, numero: null, saldo: 10000 },
+      { invoiceId: "vieja", fecha: "2026-07-01", numero: 10, saldo: 10000 },
+    ];
+    expect(repartirMasViejoPrimero(15000, conHuerfana)[0].invoiceId).toBe("vieja");
+  });
+
+  it("no reparte nada con monto cero, y no revienta", () => {
+    expect(repartirMasViejoPrimero(0, facturas)).toEqual([]);
+    expect(repartirMasViejoPrimero(10000, [])).toEqual([]);
+  });
+
+  it("saltea las facturas ya saldadas en vez de imputarles cero", () => {
+    const conSaldada: FacturaAImputar[] = [
+      { invoiceId: "saldada", fecha: "2026-06-01", numero: 5, saldo: 0 },
+      { invoiceId: "vieja", fecha: "2026-07-01", numero: 10, saldo: 40000 },
+    ];
+    expect(repartirMasViejoPrimero(40000, conSaldada)).toEqual([
+      { invoiceId: "vieja", amount: 40000 },
+    ]);
+  });
+});
+
+describe("lo que la pantalla NO deja mandar", () => {
+  // Los mensajes dicen qué corregir y con cuánto: el que carga el pago tiene la
+  // transferencia a la vista y necesita saber qué número mover.
+  const factura = (amount: number, saldo = 30000): ImputacionEnPantalla => ({
+    invoiceId: "f1",
+    etiqueta: "Factura B 00008-00000042",
+    saldo,
+    amount,
+  });
+
+  it("una imputación que se pasa del saldo de la factura", () => {
+    const problemas = problemasDelPago({ amount: 100000, imputaciones: [factura(40000)] });
+
+    expect(problemas).toHaveLength(1);
+    expect(problemas[0]).toContain("Factura B 00008-00000042");
+    // Dice cuánto falta, cuánto se imputó y cuánto sobra: los tres números que hacen
+    // falta para corregirlo sin volver a la calculadora.
+    expect(problemas[0]).toContain("$30.000,00");
+    expect(problemas[0]).toContain("$40.000,00");
+    expect(problemas[0]).toContain("$10.000,00");
+  });
+
+  it("imputar exactamente el saldo sí entra", () => {
+    // El caso límite tiene que pasar: si no, una factura nunca se podría cerrar.
+    expect(problemasDelPago({ amount: 30000, imputaciones: [factura(30000)] })).toEqual([]);
+  });
+
+  it("una imputación que se pasa del monto del pago", () => {
+    const problemas = problemasDelPago({
+      amount: 50000,
+      imputaciones: [
+        { invoiceId: "a", etiqueta: "Factura B 1", saldo: 40000, amount: 40000 },
+        { invoiceId: "b", etiqueta: "Factura B 2", saldo: 40000, amount: 20000 },
+      ],
+    });
+
+    expect(problemas).toHaveLength(1);
+    expect(problemas[0]).toContain("$10.000,00");
+  });
+
+  it("retenciones que se pasan del monto: el monto YA las incluye", () => {
+    const problemas = problemasDelPago({
+      amount: 10000,
+      retencionGanancias: 9000,
+      retencionIibb: 2000,
+      imputaciones: [],
+    });
+
+    expect(problemas).toHaveLength(1);
+    expect(problemas[0]).toContain("se pasan");
+    // Y propone el monto que haría entrar la retención, en vez de sólo rechazar.
+    expect(problemas[0]).toContain("$11.000,00");
+  });
+
+  it("junta TODOS los problemas de una vez, no el primero", () => {
+    // Corregir uno y descubrir el otro al reintentar es el ida y vuelta que esta
+    // pantalla viene a sacar.
+    const problemas = problemasDelPago({
+      amount: 10000,
+      retencionGanancias: 20000,
+      imputaciones: [factura(50000)],
+    });
+    expect(problemas.length).toBeGreaterThan(1);
+  });
+
+  it("un pago sin imputar a nada es válido: es lo que se hace hoy", () => {
+    // La regresión que no se puede permitir. El pago a cuenta sin factura existía
+    // antes de la migración 109 y tiene que seguir andando.
+    expect(problemasDelPago({ amount: 100000, imputaciones: [] })).toEqual([]);
+  });
+
+  it("un monto vacío o en cero se explica, no se manda", () => {
+    expect(problemasDelPago({ amount: 0, imputaciones: [] })[0]).toContain("monto");
+    expect(problemasDelPago({ amount: Number.NaN, imputaciones: [] })[0]).toContain("monto");
+  });
+
+  it("una factura tildada sin importe pide el importe o que la destilden", () => {
+    const problemas = problemasDelPago({ amount: 100000, imputaciones: [factura(0)] });
+    expect(problemas[0]).toContain("destilda");
+  });
+});
+
+describe("estado de cobro de una estadía", () => {
+  // La pastilla de la pantalla. Es OTRA pregunta que la de facturación: la factura
+  // sale en el momento y la transferencia llega a los treinta días.
+  it("sin factura no hay nada que cobrar", () => {
+    expect(
+      estadoPago({ facturada: false, externa: false, impTotal: null, imputado: null })
+    ).toBe("sin_facturar");
+  });
+
+  it("facturada y sin un peso imputado es impaga", () => {
+    expect(
+      estadoPago({ facturada: true, externa: false, impTotal: 100000, imputado: 0 })
+    ).toBe("impaga");
+  });
+
+  it("cobrada a medias es parcial, y no se redondea a pagada", () => {
+    expect(
+      estadoPago({ facturada: true, externa: false, impTotal: 100000, imputado: 40000 })
+    ).toBe("parcial");
+    // Un centavo de menos sigue siendo parcial: sin epsilon, igual que el SQL.
+    expect(
+      estadoPago({ facturada: true, externa: false, impTotal: 100000, imputado: 99999.99 })
+    ).toBe("parcial");
+  });
+
+  it("cuando lo imputado alcanza el total, está pagada", () => {
+    expect(
+      estadoPago({ facturada: true, externa: false, impTotal: 100000, imputado: 100000 })
+    ).toBe("pagada");
+  });
+
+  it("facturada afuera no se mide: no hay comprobante nuestro que cobrar", () => {
+    expect(
+      estadoPago({ facturada: true, externa: true, impTotal: null, imputado: null })
+    ).toBe("facturado_externo");
+  });
+
+  it("una factura en trámite (sin CAE todavía) es impaga, no 'sin facturar'", () => {
+    // Decir "sin facturar" ahí mandaría a alguien a facturarla de nuevo.
+    expect(
+      estadoPago({ facturada: true, externa: false, impTotal: null, imputado: null })
+    ).toBe("impaga");
   });
 });
 

@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import {
   addPaymentImputaciones,
   getCtaCteMovements,
+  listCcAccountStays,
   listClientInvoices,
+  listClientOpenInvoices,
   listClientPayments,
   registerAccountPayment,
   revertPaymentImputacion,
@@ -16,7 +18,9 @@ import { formatAmount } from "@/lib/format";
 import { assertAdmin } from "@/lib/server-auth";
 import type {
   ActionResult,
+  CcAccountStayRow,
   CcClientPaymentRow,
+  CcOpenInvoiceRow,
   ClientInvoiceRow,
   CtaCteClientKind,
   CtaCteMovimiento,
@@ -72,6 +76,54 @@ export async function loadClientPaymentsAction(
     return { success: true, data };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudieron cargar los pagos.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Estado de cobro de las estadías de la cuenta, para las pastillas de la solapa
+ * Movimientos (mig 109).
+ *
+ * Trae la cuenta entera sin rango: la ficha ya tiene todos los movimientos cargados
+ * y necesita poder etiquetar cualquiera de ellos, no sólo los de un período.
+ */
+export async function loadCcAccountStaysAction(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<ActionResult<CcAccountStayRow[]>> {
+  try {
+    await assertCuentasAdmin();
+    if (!clientId) {
+      return { success: false, error: "Falta el cliente." };
+    }
+    const data = await listCcAccountStays(kind, clientId);
+    return { success: true, data };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo cargar el estado de cobro.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Facturas con saldo del cliente: lo que el modal de cobro ofrece para imputar.
+ *
+ * El saldo que devuelve es una FOTO. El techo real lo valida la RPC con la fila de la
+ * factura lockeada (P0038): entre que esto se lee y el admin guarda, otro pago pudo
+ * haber entrado. Sirve para no ofrecer un imposible, no para garantizarlo.
+ */
+export async function loadClientOpenInvoicesAction(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<ActionResult<CcOpenInvoiceRow[]>> {
+  try {
+    await assertCuentasAdmin();
+    if (!clientId) {
+      return { success: false, error: "Falta el cliente." };
+    }
+    const data = await listClientOpenInvoices(kind, clientId);
+    return { success: true, data };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudieron cargar las facturas impagas.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

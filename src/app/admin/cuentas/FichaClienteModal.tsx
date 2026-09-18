@@ -10,21 +10,37 @@ import {
   Printer,
   ScrollText,
   UserRound,
+  Wallet,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { loadClientInvoicesAction, loadCtaCteAccountAction } from "./actions";
+import {
+  loadCcAccountStaysAction,
+  loadClientInvoicesAction,
+  loadClientPaymentsAction,
+  loadCtaCteAccountAction,
+} from "./actions";
 import BalanceTag, { money } from "./BalanceTag";
 import DateRangeFilter from "../DateRangeFilter";
 import DownloadCsvButton from "../DownloadCsvButton";
+import EstadoPagoTag from "../EstadoPagoTag";
 import PaginationFooter from "../PaginationFooter";
 import { usePagination } from "../usePagination";
 import { cbteLetra, formatCbteNumero } from "@/lib/arca/amounts";
+import { estadoPagoDeEstadia } from "@/lib/billing";
 import { buildCsv, csvField, formatAmountAr, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets, formatKey } from "@/lib/date-range";
+import { formatAmount, formatShiftCode } from "@/lib/format";
 import { hotelDateKey } from "@/lib/time";
-import type { ClientInvoiceRow, CtaCteAccount, CtaCteMovimiento } from "@/lib/types";
+import type {
+  CcAccountStayRow,
+  CcClientPaymentRow,
+  CcStayEstado,
+  ClientInvoiceRow,
+  CtaCteAccount,
+  CtaCteMovimiento,
+} from "@/lib/types";
 
 /**
  * Ficha del cliente de cuenta corriente: lo que hay que mirar para decidir si se le
@@ -71,17 +87,15 @@ function buildMovementsCsv(
 }
 
 /**
- * Las solapas de la ficha.
- *
- * Está pensado para crecer: la próxima es "Pagos" (los pagos a cuenta con su
- * comprobante, hoy mezclados entre los movimientos). Para agregarla alcanza con un
- * item más acá y una rama más en el cuerpo — no hay nada más que tocar.
+ * Las solapas de la ficha. Cada una contesta una pregunta distinta sobre el mismo
+ * cliente: qué se movió, qué se le facturó y qué pagó.
  */
-type Solapa = "movimientos" | "facturas";
+type Solapa = "movimientos" | "facturas" | "pagos";
 
 const SOLAPAS: { id: Solapa; label: string; Icono: typeof ScrollText }[] = [
   { id: "movimientos", label: "Movimientos", Icono: ScrollText },
   { id: "facturas", label: "Facturas", Icono: FileText },
+  { id: "pagos", label: "Pagos", Icono: Wallet },
 ];
 
 export default function FichaClienteModal({
@@ -165,16 +179,16 @@ export default function FichaClienteModal({
           ))}
         </div>
 
-        {solapa === "movimientos" ? (
+        {solapa === "movimientos" && (
           <SolapaMovimientos
             account={account}
             balance={balance}
             movements={movements}
             loading={loading}
           />
-        ) : (
-          <SolapaFacturas account={account} />
         )}
+        {solapa === "facturas" && <SolapaFacturas account={account} />}
+        {solapa === "pagos" && <SolapaPagos account={account} />}
       </div>
     </div>
   );
@@ -195,6 +209,26 @@ function SolapaMovimientos({
   // encabezado, que sigue siendo el de la cuenta completa.
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+
+  // Estado fiscal y de cobro de cada estadía, indexado por el movimiento que la
+  // cargó. Es una lectura APARTE de los movimientos y puede llegar después: sin
+  // ella la lista se ve igual, sólo sin las pastillas. Que el saldo tarde por un
+  // dato decorativo sería peor que mostrarlo en dos tiempos.
+  const [estadias, setEstadias] = useState<Record<string, CcAccountStayRow>>({});
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const result = await loadCcAccountStaysAction(account.kind, account.id);
+      if (!active || !result.success) return;
+      setEstadias(
+        Object.fromEntries((result.data ?? []).map((r) => [r.movimiento_id, r]))
+      );
+    })();
+    return () => {
+      active = false;
+    };
+  }, [account.kind, account.id]);
   const todayKey = useMemo(() => hotelDateKey(new Date()), []);
   const presets = useMemo(() => buildBillingPresets(todayKey), [todayKey]);
 
@@ -287,6 +321,11 @@ function SolapaMovimientos({
                     })}
                     {m.notes ? ` · ${m.notes}` : ""}
                   </p>
+                  {/* DOS pastillas y no una: facturada y cobrada son preguntas
+                      distintas. La factura sale en el momento y la transferencia
+                      llega a los treinta días, así que "facturada" nunca alcanzó
+                      para saber qué reserva quedó sin cobrar. */}
+                  {estadias[m.id] && <PastillasEstadia estadia={estadias[m.id]} />}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span
@@ -324,12 +363,57 @@ function SolapaMovimientos({
   );
 }
 
+/**
+ * Estado FISCAL de una estadía. Es la pregunta vieja —¿salió el comprobante?— y
+ * sigue estando: lo que cambia es que ahora tiene al lado la otra, la de si se
+ * cobró. El color repite el del control de facturación.
+ */
+const ESTADO_FISCAL: Record<CcStayEstado, { label: string; clase: string }> = {
+  pendiente: { label: "Sin facturar", clase: "bg-rose-100 text-rose-700" },
+  en_proceso: { label: "Factura en proceso", clase: "bg-amber-100 text-amber-700" },
+  facturado: { label: "Facturada", clase: "bg-emerald-100 text-emerald-700" },
+  facturado_consolidado: { label: "En consolidada", clase: "bg-teal-100 text-teal-700" },
+  facturado_externo: { label: "Facturada afuera", clase: "bg-indigo-100 text-indigo-700" },
+};
+
+function PastillasEstadia({ estadia }: { estadia: CcAccountStayRow }) {
+  const fiscal = ESTADO_FISCAL[estadia.estado];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-1.5" data-testid="pastillas-estadia">
+      <span
+        className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${fiscal.clase}`}
+      >
+        {fiscal.label}
+      </span>
+      <EstadoPagoTag
+        estado={estadoPagoDeEstadia(estadia)}
+        impTotal={estadia.imp_total}
+        imputado={estadia.imputado}
+      />
+    </div>
+  );
+}
+
 /** Comprobante de cta cte (el que firma el cliente), en la misma ventana que usa RoomCard. */
 function openAccountVoucher(movementId: string) {
   if (typeof window === "undefined") return;
   window.open(
     `/admin/comprobante-cc/${movementId}?autoprint=1`,
     `comprobante-cc-${movementId}`,
+    "width=420,height=720"
+  );
+}
+
+/**
+ * Recibo de cobranza de un pago a cuenta, con auto-impresión. Misma firma de ventana
+ * que `openAccountVoucher`: los dos papeles salen por la misma comandera y con el
+ * mismo ancho, así que abrirlos distinto sólo haría que uno saliera mal.
+ */
+function openPaymentReceipt(movementId: string) {
+  if (typeof window === "undefined") return;
+  window.open(
+    `/admin/recibo-cc/${movementId}?autoprint=1`,
+    `recibo-cc-${movementId}`,
     "width=420,height=720"
   );
 }
@@ -495,6 +579,226 @@ function SolapaFacturas({ account }: { account: CtaCteAccount }) {
       </div>
 
       <PaginationFooter {...paginacion} noun="facturas" onPageChange={setPage} />
+    </div>
+  );
+}
+
+/** Método del pago. El texto es libre en la base, así que lo desconocido se imprime tal cual. */
+const METODO_LABEL: Record<string, string> = {
+  cash: "Efectivo",
+  bank_transfer: "Transferencia",
+  mercado_pago: "Mercado Pago",
+  credit_card: "Tarjeta de crédito",
+  debit_card: "Tarjeta de débito",
+  cheque: "Cheque",
+  other: "Otro",
+};
+
+function metodoLabel(method: string | null): string {
+  if (!method) return "Sin método";
+  return METODO_LABEL[method] ?? method;
+}
+
+/**
+ * Solapa "Pagos": los cobros del cliente con todo lo que la migración 109 puso en la
+ * base y hasta ahora no se veía en ningún lado.
+ *
+ * Los pagos también están en Movimientos, pero ahí son una línea con un importe: no
+ * dicen cuánto se retuvo, cuánto entró de verdad ni qué facturas quedaron pagas. Eso
+ * es justo lo que pregunta la empresa que transfirió y lo que el contador necesita
+ * para conciliar, y por eso tiene solapa propia en vez de una columna más.
+ */
+function SolapaPagos({ account }: { account: CtaCteAccount }) {
+  const [loading, setLoading] = useState(true);
+  const [pagos, setPagos] = useState<CcClientPaymentRow[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const result = await loadClientPaymentsAction(account.kind, account.id);
+      if (!active) return;
+      if (result.success) {
+        setPagos(result.data ?? []);
+      } else {
+        toast.error(result.error);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [account.kind, account.id]);
+
+  const { rows: pagina, setPage, ...paginacion } = usePagination(pagos);
+
+  if (loading) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6" data-testid="solapa-pagos">
+        <div className="flex items-center justify-center text-slate-500 py-8">
+          <Loader2 size={20} className="animate-spin mr-2" /> Cargando pagos…
+        </div>
+      </div>
+    );
+  }
+
+  // Vacío explicado: que no haya pagos es información (puede deber todo), y el
+  // empleado tiene que saber dónde se cargan.
+  if (pagos.length === 0) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6" data-testid="solapa-pagos">
+        <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl">
+          <Wallet size={28} className="mx-auto text-slate-300 mb-2" />
+          <p className="text-sm font-bold text-slate-600">
+            Este cliente todavía no registró ningún pago a cuenta.
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Los cobros se cargan con el botón <span className="font-bold">Pago</span> del
+            listado de cuentas corrientes.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto" data-testid="solapa-pagos">
+      <div className="p-4 sm:p-6 space-y-3">
+        {pagina.map((pago) => (
+          <FilaPago key={pago.movimiento_id} pago={pago} />
+        ))}
+      </div>
+      <PaginationFooter {...paginacion} noun="pagos" onPageChange={setPage} />
+    </div>
+  );
+}
+
+function FilaPago({ pago }: { pago: CcClientPaymentRow }) {
+  const retenciones = pago.retencion_ganancias + pago.retencion_iibb;
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-4" data-testid="fila-pago">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-800">
+            {new Date(pago.created_at).toLocaleDateString("es-AR", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            })}{" "}
+            · {metodoLabel(pago.payment_method)}
+          </p>
+          <p className="text-xs text-slate-500">
+            Recibo N°{" "}
+            {pago.recibo_cc_numero !== null ? (
+              <span className="font-mono">{formatShiftCode(pago.recibo_cc_numero)}</span>
+            ) : (
+              "sin número"
+            )}
+            {pago.notes ? ` · ${pago.notes}` : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            {/* El importe grande es lo que CANCELA de deuda; el neto va abajo. El
+                número con el que se concilia la cuenta corriente es éste. */}
+            <p className="text-lg font-bold text-emerald-700">{formatAmount(pago.amount)}</p>
+            <p className="text-[11px] text-slate-500">cancela de deuda</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => openPaymentReceipt(pago.movimiento_id)}
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            title="Reimprimir el recibo de cobranza"
+            aria-label="Reimprimir el recibo de cobranza"
+          >
+            <Printer size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Las retenciones, desglosadas. Sólo si las hubo: la enorme mayoría de los
+          cobros no retiene nada y cuatro renglones en cero serían ruido. */}
+      {retenciones > 0 && (
+        <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs space-y-1">
+          {pago.retencion_ganancias > 0 && (
+            <p className="flex justify-between gap-3 text-slate-600">
+              <span>Retención Ganancias</span>
+              <span className="font-semibold">−{formatAmount(pago.retencion_ganancias)}</span>
+            </p>
+          )}
+          {pago.retencion_iibb > 0 && (
+            <p className="flex justify-between gap-3 text-slate-600">
+              <span>Retención Ingresos Brutos</span>
+              <span className="font-semibold">−{formatAmount(pago.retencion_iibb)}</span>
+            </p>
+          )}
+          {pago.retencion_certificado && (
+            <p className="flex justify-between gap-3 text-slate-500">
+              <span>Certificado</span>
+              <span className="font-mono">{pago.retencion_certificado}</span>
+            </p>
+          )}
+          <p className="flex justify-between gap-3 text-slate-800 font-bold pt-1 border-t border-slate-200">
+            <span>Neto recibido</span>
+            <span>{formatAmount(pago.neto_recibido)}</span>
+          </p>
+        </div>
+      )}
+
+      <div className="mt-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Imputado a</p>
+        {pago.imputaciones.length === 0 ? (
+          // Un pago sin imputar no es un error: el cliente adelantó plata y la factura
+          // sale después. Decirlo evita que alguien lo "arregle" imputándolo a
+          // cualquier cosa.
+          <p className="text-xs text-slate-500 mt-0.5">A cuenta, sin factura asignada.</p>
+        ) : (
+          <ul className="mt-1 space-y-1">
+            {pago.imputaciones.map((imp) => (
+              <li
+                key={imp.imputacion_id}
+                className="flex flex-wrap justify-between gap-2 text-xs text-slate-600"
+              >
+                <span>
+                  {/* Una imputación revertida (mig 111) se muestra tachada y no se
+                      esconde —un recibo reimpreso dice lo mismo que el día que
+                      salió—, pero su importe ya NO cancela esta factura: esa plata
+                      volvió a quedar disponible en el pago. */}
+                  <span className={imp.revertida ? "line-through text-slate-400" : ""}>
+                    Factura {cbteLetra(imp.cbte_tipo)}{" "}
+                    {imp.cbte_nro !== null ? formatCbteNumero(imp.pto_vta, imp.cbte_nro) : "s/nro"}
+                    {imp.cbte_fch ? ` · ${formatKey(imp.cbte_fch)}` : ""}
+                  </span>
+                  {/* La factura se anuló DESPUÉS del cobro: se informa, no se
+                      esconde. El recibo impreso sigue diciendo lo mismo. */}
+                  {imp.anulada && (
+                    <span className="ml-1.5 text-[11px] font-bold text-red-600">(anulada)</span>
+                  )}
+                  {imp.revertida && (
+                    <span className="ml-1.5 text-[11px] font-bold text-slate-500">
+                      desimputada{imp.revertida_motivo ? `: ${imp.revertida_motivo}` : ""}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={
+                    imp.revertida
+                      ? "font-semibold text-slate-400 line-through"
+                      : "font-semibold text-slate-800"
+                  }
+                >
+                  {formatAmount(imp.imputado)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {pago.sin_imputar > 0 && pago.imputaciones.length > 0 && (
+          <p className="text-xs font-semibold text-amber-600 mt-1">
+            {formatAmount(pago.sin_imputar)} quedaron a cuenta, sin factura.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

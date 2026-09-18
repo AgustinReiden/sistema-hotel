@@ -10,6 +10,8 @@ import {
   BILLING_CIERRE_LABEL,
   BILLING_ESTADO_LABEL,
   billingComprobante,
+  ESTADO_PAGO_LABEL,
+  estadoPagoDeControl,
 } from "./billing";
 import type { BillingControlRow, CheckoutExportRow } from "./types";
 
@@ -176,6 +178,17 @@ export function buildBillingControlCsv(rows: BillingControlRow[]): string {
       value: (r) => (r.cargo_cc === null ? "" : formatAmountAr(r.cargo_cc)),
     },
     { header: "Estado", type: "plano", value: (r) => BILLING_ESTADO_LABEL[r.estado] },
+    {
+      // Columna propia, igual que en la pantalla: facturada y cobrada son dos
+      // preguntas distintas. Vacía cuando no hay comprobante contra el cual
+      // imputar (vale blanco o cliente que no factura).
+      header: "Cobro",
+      type: "plano",
+      value: (r) => {
+        const estado = estadoPagoDeControl(r);
+        return estado ? ESTADO_PAGO_LABEL[estado] : "";
+      },
+    },
     { header: "Comprobante", type: "texto", value: (r) => billingComprobante(r) ?? "" },
   ];
   return buildCsv(columns, rows);
