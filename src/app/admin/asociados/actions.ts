@@ -19,6 +19,7 @@ type AssociatedClientFormPayload = {
   razonSocial?: string;
   domicilio?: string;
   facturacionModo?: "por_checkout" | "consolidada" | "no_factura";
+  robinetId?: number;
 };
 
 // El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
@@ -49,6 +50,7 @@ export async function createAssociatedClientAction(
       razon_social: validated.razonSocial ?? null,
       domicilio: validated.domicilio ?? null,
       facturacion_modo: validated.facturacionModo,
+      robinet_id: validated.robinetId ?? null,
     });
 
     if (error) throw error;
@@ -82,6 +84,7 @@ export async function updateAssociatedClientAction(
         razon_social: validated.razonSocial ?? null,
         domicilio: validated.domicilio ?? null,
         facturacion_modo: validated.facturacionModo,
+        robinet_id: validated.robinetId ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

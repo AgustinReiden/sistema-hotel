@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CreditCard, Loader2, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
+import { AlertTriangle, CreditCard, Hash, Loader2, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AssociatedClient, CondicionIva, FacturacionModo } from "@/lib/types";
@@ -21,6 +21,7 @@ type AssociatedClientModalProps = {
     razonSocial?: string;
     domicilio?: string;
     facturacionModo?: FacturacionModo;
+    robinetId?: number;
   }) => Promise<{ success: boolean; error?: string }>;
   initialClient?: AssociatedClient | null;
   title: string;
@@ -37,6 +38,7 @@ type FormState = {
   razonSocial: string;
   domicilio: string;
   facturacionModo: FacturacionModo;
+  robinetId: string;
 };
 
 function buildInitialState(initialClient?: AssociatedClient | null): FormState {
@@ -54,6 +56,7 @@ function buildInitialState(initialClient?: AssociatedClient | null): FormState {
     razonSocial: initialClient?.razon_social ?? "",
     domicilio: initialClient?.domicilio ?? "",
     facturacionModo: initialClient?.facturacion_modo ?? "por_checkout",
+    robinetId: initialClient?.robinet_id != null ? initialClient.robinet_id.toString() : "",
   };
 }
 
@@ -107,6 +110,7 @@ export default function AssociatedClientModal({
         razonSocial: form.razonSocial.trim() || undefined,
         domicilio: form.domicilio.trim() || undefined,
         facturacionModo: form.facturacionModo,
+        robinetId: form.robinetId.trim() ? Number(form.robinetId.trim()) : undefined,
       });
 
       if (result.success) {
@@ -347,6 +351,28 @@ export default function AssociatedClientModal({
               />
               <p className="text-[11px] text-slate-500 mt-1">
                 Domicilio del receptor en la factura. Se puede completar al facturar.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-robinet-id">
+                <span className="flex items-center gap-1.5">
+                  <Hash size={14} />
+                  N° de cliente en Robinet
+                </span>
+              </label>
+              <input
+                id="associated-robinet-id"
+                type="number"
+                min={1}
+                step={1}
+                value={form.robinetId}
+                onChange={(e) => setForm((current) => ({ ...current, robinetId: e.target.value }))}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                placeholder="Opcional"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Id de esta empresa en Robinet, el otro sistema del hotel.
               </p>
             </div>
 
