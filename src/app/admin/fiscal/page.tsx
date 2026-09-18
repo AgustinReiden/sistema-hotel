@@ -29,7 +29,8 @@ export default async function FiscalPage({ searchParams }: PageProps) {
   // milisegundo a la carga de la pantalla aunque ARCA tarde. La contracara es que lo
   // reconciliado se ve recién al refrescar; para algo que hoy puede quedar semanas
   // trabado, esperar un refresh es barato. `sweepStaleInvoices` nunca lanza.
-  if (await isCurrentUserAdmin()) {
+  const isAdmin = await isCurrentUserAdmin();
+  if (isAdmin) {
     after(sweepStaleInvoices());
   }
 
@@ -74,6 +75,7 @@ export default async function FiscalPage({ searchParams }: PageProps) {
             from={fromKey}
             to={toKey}
             today={todayKey}
+            isAdmin={isAdmin}
           />
         </div>
       </div>

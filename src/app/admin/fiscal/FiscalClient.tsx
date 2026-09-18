@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, FileMinus, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ClipboardCheck, FileMinus, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -36,6 +37,8 @@ type Props = {
   from: string;
   to: string;
   today: string;
+  /** Define el alcance del bloque de check-outs y si se ofrece el link al control. */
+  isAdmin: boolean;
 };
 
 function money(n: number) {
@@ -72,7 +75,7 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rechazada",
 };
 
-export default function FiscalClient({ enabled, pending, invoiceable, authorized, from, to, today }: Props) {
+export default function FiscalClient({ enabled, pending, invoiceable, authorized, from, to, today, isAdmin }: Props) {
   const router = useRouter();
   const presets = buildBillingPresets(today);
 
@@ -321,11 +324,29 @@ export default function FiscalClient({ enabled, pending, invoiceable, authorized
 
       {/* Check-outs sin facturar */}
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        {/* Este bloque NO es la lista de todo lo que falta facturar, y decirlo importa:
+            la RPC lo recorta al turno abierto (o a 10 días si sos admin) y además sólo
+            trae clientes que facturan por check-out. Esa lista completa vive en el
+            control de facturación — ver docs/solapamiento-cuentas-facturacion.md. */}
         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Si al momento del check-out elegiste NO, acá podés emitir la factura igual.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isAdmin
+                  ? "Las salidas de los últimos 10 días. Si al momento del check-out elegiste NO, acá podés emitir la factura igual."
+                  : "Las salidas de tu turno abierto. Si al momento del check-out elegiste NO, acá podés emitir la factura igual."}
+              </p>
+            </div>
+            {isAdmin && (
+              <Link
+                href="/admin/fiscal/control?estado=pendiente"
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2"
+              >
+                <ClipboardCheck size={14} /> Ver todo lo que falta facturar
+              </Link>
+            )}
+          </div>
         </div>
         <div className="p-5">
           {invoiceable.length === 0 ? (
