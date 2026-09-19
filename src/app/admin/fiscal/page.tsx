@@ -18,7 +18,13 @@ import { parseFiscalView } from "./views";
 
 export const dynamic = "force-dynamic";
 
-type PageProps = { searchParams: Promise<{ desde?: string; hasta?: string; view?: string }> };
+type PageProps = {
+  searchParams: Promise<{ desde?: string; hasta?: string; view?: string; tipo?: string; q?: string }>;
+};
+
+// Los cuatro comprobantes que emite el sistema (ver cbteNombre/cbteLetra en
+// src/lib/arca/amounts.ts): 1 y 6 son facturas, 3 y 8 sus notas de crédito.
+const TIPO_FILTROS = new Set(["1", "6", "3", "8"]);
 
 export default async function FiscalPage({ searchParams }: PageProps) {
   // Barrido de facturas trabadas: una consolidada se emite una vez por mes, así que
@@ -39,11 +45,16 @@ export default async function FiscalPage({ searchParams }: PageProps) {
   const hotelSettings = await getHotelSettings().catch(() => null);
   const todayKey = hotelDateKey(new Date(), hotelSettings?.timezone);
   const monthStartKey = `${todayKey.slice(0, 7)}-01`;
-  const { desde, hasta, view: viewParam } = await searchParams;
+  const { desde, hasta, view: viewParam, tipo: tipoParam, q: qParam } = await searchParams;
   const view = parseFiscalView(viewParam, isAdmin);
   let fromKey = desde && DATE_KEY.test(desde) ? desde : monthStartKey;
   let toKey = hasta && DATE_KEY.test(hasta) ? hasta : todayKey;
   if (fromKey > toKey) [fromKey, toKey] = [toKey, fromKey];
+  // Filtro y búsqueda de "Emitidas": se resuelven en el cliente sobre lo que ya
+  // trajo listAuthorizedInvoices, así que acá sólo se valida lo que llega por URL
+  // para que un link compartido abra ya filtrado.
+  const tipo = tipoParam && TIPO_FILTROS.has(tipoParam) ? tipoParam : "";
+  const q = qParam ?? "";
 
   // Cada solapa trae sólo su lista: las otras dos no se ven, así que pedirlas sería
   // pagar tres consultas para pintar una.
@@ -85,6 +96,8 @@ export default async function FiscalPage({ searchParams }: PageProps) {
             today={todayKey}
             isAdmin={isAdmin}
             view={view}
+            tipo={tipo}
+            q={q}
           />
         </div>
       </div>

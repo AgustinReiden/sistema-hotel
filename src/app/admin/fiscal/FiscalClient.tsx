@@ -1,9 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, ClipboardCheck, FileMinus, FileText, Loader2, Pencil, Printer, RefreshCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ClipboardCheck,
+  FileMinus,
+  FileText,
+  Loader2,
+  Pencil,
+  Printer,
+  RefreshCw,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -47,10 +58,40 @@ type Props = {
   isAdmin: boolean;
   /** Solapa activa. Viaja en la URL como ?view=; la resuelve el servidor. */
   view: FiscalView;
+  /** Filtro de tipo de comprobante de "Emitidas" ("" = todos). Viaja como ?tipo=. */
+  tipo: string;
+  /** Búsqueda de "Emitidas" (CUIT/DNI, número o nombre). Viaja como ?q=. */
+  q: string;
 };
 
 function money(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Los cuatro comprobantes que emite el sistema. El nombre y la letra de cada uno
+// salen de cbteNombre/cbteLetra (src/lib/arca/amounts.ts): no se repite ese mapeo acá.
+const CBTE_TIPO_FILTROS = [1, 6, 3, 8];
+
+/** Sin tildes ni mayúsculas: nadie busca "López" con tilde cuando está apurado. */
+function normalizarTexto(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+/**
+ * Un comprobante matchea si el texto buscado aparece en el CUIT/DNI (comparando
+ * sólo dígitos, así "30712345678" encuentra a "30-71234567-8"), en el número de
+ * comprobante, o en el nombre del receptor (sin tildes ni mayúsculas).
+ */
+function matchesBusqueda(row: AuthorizedInvoiceRow, query: string): boolean {
+  const q = query.trim();
+  if (!q) return true;
+  const digitos = q.replace(/\D/g, "");
+  if (digitos && (row.doc_nro ?? "").replace(/\D/g, "").includes(digitos)) return true;
+  if (digitos && String(row.cbte_nro).includes(digitos)) return true;
+  return normalizarTexto(row.receptor_nombre ?? "").includes(normalizarTexto(q));
 }
 
 // Libro de IVA ventas del período: una fila por comprobante autorizado, tal como
@@ -93,36 +134,84 @@ export default function FiscalClient({
   today,
   isAdmin,
   view,
+  tipo,
+  q,
 }: Props) {
   const router = useRouter();
   const presets = buildBillingPresets(today);
 
+  // La búsqueda de texto es la única que NO navega: escribir letra por letra no
+  // puede disparar una vuelta al servidor por cada tecla (page.tsx es
+  // force-dynamic). Se filtra en memoria y se refleja en la URL con
+  // history.replaceState (ver actualizarQ), sin pasar por el router. `tipo` sí
+  // navega: es un cambio discreto, igual que el rango de fechas o la solapa.
+  const [qFiltro, setQFiltro] = useState(q);
+
   // Una paginacion por solapa: son tres listados distintos, cada uno con la suya.
-  // El CSV de "Emitidas" sigue leyendo `authorized` entero, no la pagina.
+  // El CSV de "Emitidas" sigue leyendo lo filtrado entero, no la pagina.
   //
   // `view` va en el resetKey: cambiar de solapa no desmonta este componente (es la
   // misma ruta con otro querystring), asi que sin eso la solapa nueva se abriria en la
   // pagina 7 de la anterior, muchas veces vacia.
   const pendingPage = usePagination(pending, view);
   const invoiceablePage = usePagination(invoiceable, view);
-  const authorizedPage = usePagination(authorized, `${view}|${from}|${to}`);
+
+  // El tipo y la búsqueda se aplican en el cliente, sobre las filas que ya trajo
+  // listAuthorizedInvoices para el rango elegido: no hay una consulta nueva por
+  // cada letra tipeada ni por cada tipo elegido.
+  const authorizedFiltered = useMemo(() => {
+    const tipoNum = tipo ? Number(tipo) : null;
+    return authorized.filter(
+      (a) => (tipoNum === null || a.cbte_tipo === tipoNum) && matchesBusqueda(a, qFiltro)
+    );
+  }, [authorized, tipo, qFiltro]);
+
+  const authorizedPage = usePagination(authorizedFiltered, `${view}|${from}|${to}|${tipo}|${qFiltro}`);
 
   // El listado llego al tope: puede haber comprobantes del periodo que no estan ni
   // en la pantalla ni en el CSV. Se avisa, porque ese CSV es el libro de IVA ventas.
+  // Es sobre lo que trajo el servidor, no sobre lo filtrado: el tope es del período,
+  // no del filtro.
   const authorizedTruncado = authorized.length >= AUTHORIZED_INVOICES_LIMIT;
 
-  // El rango es de la solapa "Emitidas", pero se navega igual: sin `view` la vuelta
-  // caeria en la solapa por defecto y el filtro pareceria no haber hecho nada.
+  // El rango, el tipo y la búsqueda son de la solapa "Emitidas", pero se navega con
+  // los cuatro: sin `view` la vuelta caeria en la solapa por defecto, y perder el
+  // tipo o la búsqueda al cambiar de fecha haría parecer que el filtro se rompió.
   const applyRange = (desde: string, hasta: string) => {
     const params = new URLSearchParams({ view, desde, hasta });
+    if (tipo) params.set("tipo", tipo);
+    if (qFiltro) params.set("q", qFiltro);
     router.push(`/admin/fiscal?${params.toString()}`);
   };
 
-  // El periodo elegido sobrevive al cambio de solapa.
+  const applyTipo = (nextTipo: string) => {
+    const params = new URLSearchParams({ view });
+    if (from) params.set("desde", from);
+    if (to) params.set("hasta", to);
+    if (nextTipo) params.set("tipo", nextTipo);
+    if (qFiltro) params.set("q", qFiltro);
+    router.push(`/admin/fiscal?${params.toString()}`);
+  };
+
+  // Sólo actualiza la URL visible (para que se pueda copiar el link con el filtro
+  // puesto); no navega, así que no dispara ni una consulta ni un remount.
+  const actualizarQ = (nextQ: string) => {
+    setQFiltro(nextQ);
+    const params = new URLSearchParams({ view });
+    if (from) params.set("desde", from);
+    if (to) params.set("hasta", to);
+    if (tipo) params.set("tipo", tipo);
+    if (nextQ) params.set("q", nextQ);
+    window.history.replaceState(null, "", `/admin/fiscal?${params.toString()}`);
+  };
+
+  // El periodo, el tipo y la búsqueda eligidos sobreviven al cambio de solapa.
   const buildHref = (nextView: FiscalView) => {
     const params = new URLSearchParams({ view: nextView });
     if (from) params.set("desde", from);
     if (to) params.set("hasta", to);
+    if (tipo) params.set("tipo", tipo);
+    if (qFiltro) params.set("q", qFiltro);
     return `/admin/fiscal?${params.toString()}`;
   };
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -476,10 +565,13 @@ export default function FiscalClient({
                   crédito y volvé a emitirla. Es el libro de IVA ventas del período elegido.
                 </p>
               </div>
+              {/* Baja TODO lo filtrado (tipo + búsqueda + rango), no la página que se
+                  está viendo: es el libro de IVA ventas, y un recorte silencioso ahí
+                  es el peor modo de falla de esta pantalla. */}
               <DownloadCsvButton
                 filename={`facturas_${from}_a_${to}.csv`}
-                build={() => buildCsv(AUTHORIZED_CSV_COLUMNS, authorized)}
-                label="Exportar CSV"
+                build={() => buildCsv(AUTHORIZED_CSV_COLUMNS, authorizedFiltered)}
+                label="Exportar a Excel (todo lo filtrado)"
               />
             </div>
             {authorizedTruncado && (
@@ -490,10 +582,51 @@ export default function FiscalClient({
               </p>
             )}
             <DateRangeFilter from={from} to={to} presets={presets} onChange={applyRange} />
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="fiscal-tipo">
+                  Tipo de comprobante
+                </label>
+                <select
+                  id="fiscal-tipo"
+                  value={tipo}
+                  onChange={(e) => applyTipo(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
+                >
+                  <option value="">Todos los tipos</option>
+                  {CBTE_TIPO_FILTROS.map((t) => (
+                    <option key={t} value={String(t)}>
+                      {cbteNombre(t)} {cbteLetra(t)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="relative flex-1 min-w-[240px]">
+                <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="fiscal-q">
+                  Buscar
+                </label>
+                <Search
+                  size={15}
+                  className="absolute left-3 top-[calc(50%+9px)] -translate-y-1/2 text-slate-400 pointer-events-none"
+                />
+                <input
+                  id="fiscal-q"
+                  type="text"
+                  value={qFiltro}
+                  onChange={(e) => actualizarQ(e.target.value)}
+                  placeholder="CUIT/DNI, número de comprobante o nombre…"
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
+                />
+              </div>
+            </div>
           </div>
           <div className="p-5">
             {authorized.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-2">Todavía no hay facturas emitidas.</p>
+            ) : authorizedFiltered.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-2">
+                Ningún comprobante coincide con el filtro.
+              </p>
             ) : (
               <ul className="divide-y divide-slate-100">
                 {authorizedPage.rows.map((a) => {
