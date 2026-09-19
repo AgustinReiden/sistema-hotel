@@ -19,11 +19,6 @@ import ExportCsvButton from "../../ExportCsvButton";
 
 export const revalidate = 0;
 
-function money(n: number | null) {
-  if (n === null) return "---";
-  return formatAmount(n);
-}
-
 const METHOD_LABELS: Record<string, string> = {
   cash: "Efectivo",
   mercado_pago: "Mercado Pago",
@@ -132,12 +127,12 @@ function ShiftCopy(props: ShiftCopyProps) {
       {cobradoRows.map(([label, amount]) => (
         <p className="row" key={label}>
           <span>{label}:</span>
-          <span>{money(amount)}</span>
+          <span>{formatAmount(amount)}</span>
         </p>
       ))}
       <p className="row big">
         <span>TOTAL:</span>
-        <span>{money(totalIncome)}</span>
+        <span>{formatAmount(totalIncome)}</span>
       </p>
       {creditCharged > 0 && (
         <>
@@ -147,7 +142,7 @@ function ShiftCopy(props: ShiftCopyProps) {
             <div key={charge.id} className="payment-line">
               <p className="row small">
                 <span>{charge.time} - Fiado</span>
-                <span>{money(charge.amount)}</span>
+                <span>{formatAmount(charge.amount)}</span>
               </p>
               <p className="row small muted indent">
                 {charge.clientName}
@@ -157,7 +152,7 @@ function ShiftCopy(props: ShiftCopyProps) {
           ))}
           <p className="row big">
             <span>TOTAL CTA CTE:</span>
-            <span>{money(creditCharged)}</span>
+            <span>{formatAmount(creditCharged)}</span>
           </p>
           <p className="row small indent">no cobrado, va a la cuenta</p>
         </>
@@ -167,11 +162,11 @@ function ShiftCopy(props: ShiftCopyProps) {
       <p className="section">ARQUEO EFECTIVO</p>
       <p className="row">
         <span>Efectivo contado:</span>
-        <span>{money(actualCash)}</span>
+        <span>{actualCash === null ? "---" : formatAmount(actualCash)}</span>
       </p>
       <p className="row">
         <span>Esperado:</span>
-        <span>{money(expectedCash)}</span>
+        <span>{expectedCash === null ? "---" : formatAmount(expectedCash)}</span>
       </p>
       <p className="row big">
         <span>Diferencia:</span>
@@ -188,7 +183,7 @@ function ShiftCopy(props: ShiftCopyProps) {
                 <span>
                   {payment.time} - {payment.methodLabel}
                 </span>
-                <span>{money(payment.amount)}</span>
+                <span>{formatAmount(payment.amount)}</span>
               </p>
               <p className="row small muted indent">
                 {payment.clientName}

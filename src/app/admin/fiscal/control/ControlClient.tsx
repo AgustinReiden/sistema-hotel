@@ -47,6 +47,7 @@ import {
 } from "@/lib/billing";
 import { billingControlCsvFilename, buildBillingControlCsv } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
+import { formatAmount } from "@/lib/format";
 import type { BillingControlEstado, BillingControlRow, CtaCteAccount } from "@/lib/types";
 import type { BillingGrupo } from "@/lib/billing";
 
@@ -65,9 +66,6 @@ type Props = {
   todayKey: string;
 };
 
-function money(n: number) {
-  return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function shortDate(iso: string) {
   const [y, m, d] = iso.split("-");
@@ -615,10 +613,10 @@ export default function ControlClient({
                         {BILLING_CIERRE_LABEL[r.cierre]}
                       </td>
                       <td className="px-3 py-2.5 text-sm text-slate-700 text-right whitespace-nowrap">
-                        ${money(r.total_price)}
+                        {formatAmount(r.total_price)}
                       </td>
                       <td className="px-3 py-2.5 text-sm text-slate-700 text-right whitespace-nowrap">
-                        {r.cargo_cc === null ? "—" : `$${money(r.cargo_cc)}`}
+                        {r.cargo_cc === null ? "—" : formatAmount(r.cargo_cc)}
                       </td>
                       <td className="px-3 py-2.5">
                         <span
@@ -856,7 +854,7 @@ export default function ControlClient({
               <ul className="text-sm text-slate-600 space-y-1 max-h-40 overflow-y-auto">
                 {externalTargets.map((t) => (
                   <li key={t.reservation_id}>
-                    {describeRow(t)} · {t.cliente} · ${money(t.cargo_cc ?? t.total_price)}
+                    {describeRow(t)} · {t.cliente} · {formatAmount(t.cargo_cc ?? t.total_price)}
                   </li>
                 ))}
               </ul>

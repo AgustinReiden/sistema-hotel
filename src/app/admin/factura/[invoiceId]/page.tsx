@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { cbteLetra, formatCbteNumero, formatCuit, isNotaCredito } from "@/lib/arca/amounts";
 import { nombreComprobante, prefijoArchivo } from "@/lib/comprobante-nombre";
 import { defaultStayDescription } from "@/lib/billing";
+import { formatAmount } from "@/lib/format";
 import { qrPngDataUrl } from "@/lib/arca/qr";
 import { getFiscalSettings, getHotelSettings, getInvoiceById, getInvoiceStays } from "@/lib/data";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
@@ -47,9 +48,6 @@ type PageProps = {
   searchParams: Promise<{ autoprint?: string }>;
 };
 
-function money(n: number) {
-  return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 /** "2026-07-16" (date de Postgres) → "16/07/2026". */
 function formatDateCol(value: string | null): string {
@@ -267,7 +265,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
               // que tiene que quedar entero (ver los estilos).
               <div className="item">
                 <span>{conceptoUnico}</span>
-                <span className="money">${money(invoice.imp_total)}</span>
+                <span className="money">{formatAmount(invoice.imp_total)}</span>
               </div>
             ) : (
               <>
@@ -276,7 +274,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
                     {/* Texto congelado al emitir (mig 93). Las facturas anteriores no
                         lo tienen y caen al automático, que es lo que mostraban. */}
                     <span>{s.descripcion ?? defaultStayDescription(s)}</span>
-                    <span className="money">${money(s.amount)}</span>
+                    <span className="money">{formatAmount(s.amount)}</span>
                   </div>
                 ))}
               </>
@@ -296,7 +294,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
             <p className="seccion">Detalle</p>
             <div className="item">
               <span>HOSPEDAJE</span>
-              <span className="money">${money(isA ? invoice.imp_neto : invoice.imp_total)}</span>
+              <span className="money">{formatAmount(isA ? invoice.imp_neto : invoice.imp_total)}</span>
             </div>
             <div className="row small">
               <span>Período:</span>
@@ -312,22 +310,22 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
             {/* Factura A: IVA discriminado (Neto + IVA + Total) */}
             <div className="row">
               <span>Neto Gravado:</span>
-              <span className="money">${money(invoice.imp_neto)}</span>
+              <span className="money">{formatAmount(invoice.imp_neto)}</span>
             </div>
             <div className="row">
               <span>IVA {ivaPctLabel}:</span>
-              <span className="money">${money(invoice.imp_iva)}</span>
+              <span className="money">{formatAmount(invoice.imp_iva)}</span>
             </div>
             <div className="total">
               <span>TOTAL:</span>
-              <span className="money">${money(invoice.imp_total)}</span>
+              <span className="money">{formatAmount(invoice.imp_total)}</span>
             </div>
           </>
         ) : (
           <>
             <div className="total">
               <span>TOTAL:</span>
-              <span className="money">${money(invoice.imp_total)}</span>
+              <span className="money">{formatAmount(invoice.imp_total)}</span>
             </div>
 
             {/* RG 5614 / Ley 27.743 — Transparencia Fiscal: solo a consumidor final. */}
@@ -338,7 +336,7 @@ export default async function FacturaPage({ params, searchParams }: PageProps) {
                 </p>
                 <div className="row small">
                   <span>IVA Contenido:</span>
-                  <span className="money">${money(invoice.imp_iva)}</span>
+                  <span className="money">{formatAmount(invoice.imp_iva)}</span>
                 </div>
                 {/* Etiqueta larguísima: acá el que envuelve tiene que ser el texto,
                     no el importe, así que va como `item`. */}

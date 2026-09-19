@@ -41,6 +41,15 @@ export function formatAmount(amount: number): string {
   return `${sign}$${LOCAL_AMOUNT_FORMATTER.format(Math.abs(amount))}`;
 }
 
+/**
+ * Igual que formatAmount pero sin el signo "$": para mostrar dentro de un <input>
+ * editable, donde el "$" solo molesta (parseArMoney no lo entiende de vuelta al
+ * parsear lo que el usuario dejó tipeado).
+ */
+export function formatAmountForInput(amount: number): string {
+  return LOCAL_AMOUNT_FORMATTER.format(amount);
+}
+
 export function formatSignedAmount(amount: number | null): string {
   if (amount === null) return "---";
 

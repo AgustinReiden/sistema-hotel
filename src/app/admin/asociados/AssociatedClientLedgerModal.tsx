@@ -8,11 +8,8 @@ import { loadCtaCteAccountAction } from "../cuentas/actions";
 import PaginationFooter from "../PaginationFooter";
 import { usePagination } from "../usePagination";
 import { formatHotelShortDate } from "@/lib/time";
+import { formatAmount } from "@/lib/format";
 import type { AssociatedClient, AssociatedClientLedger } from "@/lib/types";
-
-function money(n: number) {
-  return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   checked_in: { label: "Hospedado", cls: "bg-amber-100 text-amber-800 border-amber-200" },
@@ -108,11 +105,11 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
                 <div className="rounded-xl border border-slate-200 p-4">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Total facturado</p>
-                  <p className="text-2xl font-bold text-slate-900">${money(ledger.facturado)}</p>
+                  <p className="text-2xl font-bold text-slate-900">{formatAmount(ledger.facturado)}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 p-4">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Cobrado</p>
-                  <p className="text-2xl font-bold text-emerald-600">${money(ledger.cobrado)}</p>
+                  <p className="text-2xl font-bold text-emerald-600">{formatAmount(ledger.cobrado)}</p>
                 </div>
                 <div
                   className={`rounded-xl border p-4 ${
@@ -121,7 +118,7 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
                 >
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Saldo (deuda)</p>
                   <p className={`text-2xl font-bold ${ledger.saldo > 0 ? "text-red-600" : "text-slate-900"}`}>
-                    ${money(ledger.saldo)}
+                    {formatAmount(ledger.saldo)}
                   </p>
                 </div>
               </div>
@@ -137,9 +134,9 @@ export default function AssociatedClientLedgerModal({ client, onClose }: Props) 
                       {ctaCteBalance === null ? (
                         "…"
                       ) : ctaCteBalance > 0 ? (
-                        <span className="font-bold text-red-600">${money(ctaCteBalance)} debe</span>
+                        <span className="font-bold text-red-600">{formatAmount(ctaCteBalance)} debe</span>
                       ) : ctaCteBalance < 0 ? (
-                        <span className="font-bold text-emerald-600">${money(Math.abs(ctaCteBalance))} a favor</span>
+                        <span className="font-bold text-emerald-600">{formatAmount(Math.abs(ctaCteBalance))} a favor</span>
                       ) : (
                         <span className="font-semibold text-slate-500">$0,00</span>
                       )}
@@ -217,14 +214,14 @@ function HistorialEstadias({
                   <td className="px-3 py-2 text-xs text-slate-600 max-w-[200px] truncate">
                     {r.passenger ?? "—"}
                   </td>
-                  <td className="px-3 py-2 text-right">${money(r.total_price)}</td>
-                  <td className="px-3 py-2 text-right text-emerald-600">${money(r.paid_amount)}</td>
+                  <td className="px-3 py-2 text-right">{formatAmount(r.total_price)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-600">{formatAmount(r.paid_amount)}</td>
                   <td
                     className={`px-3 py-2 text-right font-semibold ${
                       saldo > 0 ? "text-red-600" : "text-slate-500"
                     }`}
                   >
-                    ${money(saldo)}
+                    {formatAmount(saldo)}
                   </td>
                   <td className="px-3 py-2">
                     <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold border ${st.cls}`}>

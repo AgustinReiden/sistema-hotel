@@ -23,9 +23,6 @@ const METHOD_LABEL: Record<string, string> = {
   other: "Otro",
 };
 
-function money(n: number) {
-  return formatAmount(n);
-}
 
 type ReceiptCopyProps = {
   title: string;
@@ -112,19 +109,19 @@ function ReceiptCopy(props: ReceiptCopyProps) {
       </p>
       <p className="total">
         <span>TOTAL PAGADO</span>
-        <span className="money">{money(amount)}</span>
+        <span className="money">{formatAmount(amount)}</span>
       </p>
       <p className="row small">
         <span>Total estadia:</span>
-        <span className="money">{money(totalPrice)}</span>
+        <span className="money">{formatAmount(totalPrice)}</span>
       </p>
       <p className="row small">
         <span>Pagado acumulado:</span>
-        <span className="money">{money(paidAmount)}</span>
+        <span className="money">{formatAmount(paidAmount)}</span>
       </p>
       <p className="row small">
         <span>Saldo restante:</span>
-        <span className="money">{money(saldo)}</span>
+        <span className="money">{formatAmount(saldo)}</span>
       </p>
       {notes && (
         <>

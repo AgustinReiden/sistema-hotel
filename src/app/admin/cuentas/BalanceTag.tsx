@@ -8,17 +8,14 @@
  * ellas, la otra tendría que importarla y quedarían atadas sin motivo.
  */
 
-/** Valor absoluto: el "debe"/"a favor" ya dice de qué lado está. */
-export function money(n: number) {
-  return `$${Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
-}
+import { formatAmount } from "@/lib/format";
 
 export default function BalanceTag({ balance }: { balance: number }) {
   if (balance > 0) {
-    return <span className="font-bold text-red-600">{money(balance)} debe</span>;
+    return <span className="font-bold text-red-600">{formatAmount(balance)} debe</span>;
   }
   if (balance < 0) {
-    return <span className="font-bold text-emerald-600">{money(balance)} a favor</span>;
+    return <span className="font-bold text-emerald-600">{formatAmount(Math.abs(balance))} a favor</span>;
   }
   return <span className="font-semibold text-slate-400">$0,00</span>;
 }

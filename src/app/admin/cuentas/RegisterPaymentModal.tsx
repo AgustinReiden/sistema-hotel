@@ -29,7 +29,7 @@ import {
   type DeudaAImputar,
   type ImputacionEnPantalla,
 } from "@/lib/cc-pagos";
-import { formatAmount, formatShiftCode } from "@/lib/format";
+import { formatAmount, formatAmountForInput, formatShiftCode, parseArMoney } from "@/lib/format";
 import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types";
 
 /**
@@ -142,13 +142,19 @@ function fechaCorta(value: string | null): string {
 }
 
 /**
- * Un <input type="number"> vacío o a medio tipear ("1.") es "" o NaN: acá cualquiera
- * de los dos vale cero, para que el resumen en vivo no parpadee en NaN mientras se
- * escribe.
+ * Un campo de importe vacío o a medio tipear ("1.500," sin nada después de la coma)
+ * no es un número válido para parseArMoney: acá cualquiera de los dos vale cero,
+ * para que el resumen en vivo no parpadee en NaN mientras se escribe.
  */
 function monto(value: string): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+  return parseArMoney(value) ?? 0;
+}
+
+/** Formatea con separador de miles al salir del campo; si no es un número válido
+ *  (vacío, a medio tipear), deja lo que el usuario tenía escrito. */
+function alSalirDelCampo(value: string, setValue: (v: string) => void) {
+  const parsed = parseArMoney(value);
+  if (parsed !== null) setValue(formatAmountForInput(parsed));
 }
 
 /**
@@ -177,7 +183,9 @@ export default function RegisterPaymentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [amount, setAmount] = useState(account.balance > 0 ? account.balance.toString() : "");
+  const [amount, setAmount] = useState(
+    account.balance > 0 ? formatAmountForInput(account.balance) : ""
+  );
   const [method, setMethod] = useState("cash");
   const [notes, setNotes] = useState("");
   const [retGanancias, setRetGanancias] = useState("");
@@ -272,7 +280,9 @@ export default function RegisterPaymentModal({
   const repartirSolo = () => {
     const reparto = repartirMasViejoPrimero(monto(amount), deudas);
     setImputado(
-      Object.fromEntries(reparto.map((i) => [claveDeuda(i.destino, i.id), String(i.amount)]))
+      Object.fromEntries(
+        reparto.map((i) => [claveDeuda(i.destino, i.id), formatAmountForInput(i.amount)])
+      )
     );
     if (reparto.length === 0) {
       toast.info("No hay facturas ni estadías con saldo para aplicar este pago.");
@@ -292,7 +302,7 @@ export default function RegisterPaymentModal({
       const yaImputado = Object.entries(prev).reduce((sum, [, v]) => sum + monto(v), 0);
       const libre = Math.max(0, monto(amount) - yaImputado);
       const propuesto = Math.round((Math.min(d.saldo, libre) + Number.EPSILON) * 100) / 100;
-      next[d.clave] = String(propuesto > 0 ? propuesto : d.saldo);
+      next[d.clave] = formatAmountForInput(propuesto > 0 ? propuesto : d.saldo);
       return next;
     });
   };
@@ -372,11 +382,11 @@ export default function RegisterPaymentModal({
               </label>
               <input
                 id="pago-monto"
-                type="number"
-                step="0.01"
-                min="0.01"
+                type="text"
+                inputMode="decimal"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                onBlur={() => alSalirDelCampo(amount, setAmount)}
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-bold"
                 required
                 autoFocus
@@ -617,11 +627,14 @@ function GrupoDeDeudas({
                 </span>
               </label>
               <input
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 value={imputado[d.clave] ?? ""}
                 onChange={(e) => onImporte(d.clave, e.target.value)}
+                onBlur={(e) => {
+                  const parsed = parseArMoney(e.target.value);
+                  if (parsed !== null) onImporte(d.clave, formatAmountForInput(parsed));
+                }}
                 disabled={!tildada}
                 aria-label={`Importe imputado a ${d.etiqueta}`}
                 placeholder="0,00"
@@ -671,11 +684,11 @@ function Retenciones({
           </label>
           <input
             id="ret-ganancias"
-            type="number"
-            step="0.01"
-            min="0"
+            type="text"
+            inputMode="decimal"
             value={ganancias}
             onChange={(e) => onGanancias(e.target.value)}
+            onBlur={() => alSalirDelCampo(ganancias, onGanancias)}
             placeholder="0,00"
             className={inputClass}
           />
@@ -686,11 +699,11 @@ function Retenciones({
           </label>
           <input
             id="ret-iibb"
-            type="number"
-            step="0.01"
-            min="0"
+            type="text"
+            inputMode="decimal"
             value={iibb}
             onChange={(e) => onIibb(e.target.value)}
+            onBlur={() => alSalirDelCampo(iibb, onIibb)}
             placeholder="0,00"
             className={inputClass}
           />

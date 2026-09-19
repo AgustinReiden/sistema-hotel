@@ -10,6 +10,7 @@ import StickyActionBar from "@/app/admin/StickyActionBar";
 import { usePagination } from "@/app/admin/usePagination";
 import { cbteLetra, formatCbteNumero, isValidCuit } from "@/lib/arca/amounts";
 import { buildBillingPresets } from "@/lib/date-range";
+import { formatAmount } from "@/lib/format";
 import {
   DETALLE_LINEA_MAX,
   DETALLE_NOTA_MAX,
@@ -37,9 +38,6 @@ type Props = {
   todayKey: string;
 };
 
-function money(n: number) {
-  return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function shortDate(iso: string) {
   const [y, m, d] = iso.split("-");
@@ -520,7 +518,7 @@ export default function ConsolidadaClient({
           <option value="">Elegí un cliente…</option>
           {accounts.map((a) => (
             <option key={`${a.kind}:${a.id}`} value={`${a.kind}:${a.id}`}>
-              {a.name} {a.kind === "company" ? "(empresa)" : "(huésped)"} — saldo ${money(a.balance)}
+              {a.name} {a.kind === "company" ? "(empresa)" : "(huésped)"} — saldo {formatAmount(a.balance)}
             </option>
           ))}
         </select>
@@ -671,15 +669,15 @@ export default function ConsolidadaClient({
                           {r.facturable && r.mixed_payment && (
                             <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
                               <AlertTriangle size={11} className="shrink-0" />
-                              Pago mixto: se factura sólo el cargo a cuenta (${money(r.amount)} de $
-                              {money(r.total_price)}).
+                              Pago mixto: se factura sólo el cargo a cuenta ({formatAmount(r.amount)} de{" "}
+                              {formatAmount(r.total_price)}).
                             </p>
                           )}
                           {cobertura && (
                             <p className="text-[11px] text-slate-500 mt-0.5 truncate">{cobertura}</p>
                           )}
                         </div>
-                        <span className="text-sm font-bold text-slate-700 shrink-0">${money(r.amount)}</span>
+                        <span className="text-sm font-bold text-slate-700 shrink-0">{formatAmount(r.amount)}</span>
                       </li>
                     );
                   })}
@@ -758,7 +756,7 @@ export default function ConsolidadaClient({
                 aria-label="Texto del concepto único"
               />
               <span className="text-sm font-bold text-slate-700 shrink-0 w-28 text-right">
-                ${money(total)}
+                {formatAmount(total)}
               </span>
             </div>
           ) : (
@@ -780,7 +778,7 @@ export default function ConsolidadaClient({
                     aria-label={`Descripción de la estadía de habitación ${r.room_number ?? "?"}`}
                   />
                   <span className="text-sm font-bold text-slate-700 shrink-0 w-28 text-right">
-                    ${money(r.amount)}
+                    {formatAmount(r.amount)}
                   </span>
                 </li>
               ))}
@@ -920,7 +918,7 @@ export default function ConsolidadaClient({
         >
           <div className="min-w-0">
             <p className="text-sm font-bold text-slate-800">
-              {selectedRows.length} estadía{selectedRows.length === 1 ? "" : "s"} · Total ${money(total)}
+              {selectedRows.length} estadía{selectedRows.length === 1 ? "" : "s"} · Total {formatAmount(total)}
             </p>
             <p className="text-xs text-slate-400">
               Factura {letra} · período{" "}

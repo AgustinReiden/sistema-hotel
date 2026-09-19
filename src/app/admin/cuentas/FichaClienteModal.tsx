@@ -23,7 +23,7 @@ import {
   loadCtaCteAccountAction,
   revertPaymentImputacionAction,
 } from "./actions";
-import BalanceTag, { money } from "./BalanceTag";
+import BalanceTag from "./BalanceTag";
 import DateRangeFilter from "../DateRangeFilter";
 import DownloadCsvButton from "../DownloadCsvButton";
 import EstadoPagoTag from "../EstadoPagoTag";
@@ -286,7 +286,7 @@ function SolapaMovimientos({
               deuda real de la cuenta (esa sigue arriba, en BalanceTag). */}
           <p className="text-xs font-semibold text-slate-500">
             En el período: {periodStats.count} movimiento{periodStats.count === 1 ? "" : "s"} · cargos{" "}
-            {money(periodStats.cargos)} · pagos {money(periodStats.pagos)}
+            {formatAmount(Math.abs(periodStats.cargos))} · pagos {formatAmount(Math.abs(periodStats.pagos))}
           </p>
           {hasExcluded && (
             <p className="text-xs font-semibold text-amber-600">
@@ -335,7 +335,7 @@ function SolapaMovimientos({
                     className={`font-bold ${m.tipo === "cargo" ? "text-red-600" : "text-emerald-600"}`}
                   >
                     {m.tipo === "cargo" ? "+" : "−"}
-                    {money(m.amount)}
+                    {formatAmount(Math.abs(m.amount))}
                   </span>
                   {/* El comprobante que firma el cliente ya existía, pero sólo se
                       abría solo al cerrar el check-out: sin esto no había forma de
@@ -535,7 +535,7 @@ function SolapaFacturas({ account }: { account: CtaCteAccount }) {
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">{invoiceFecha(f)}</td>
                 <td className="px-4 py-3 text-right font-semibold text-slate-800 whitespace-nowrap">
-                  {money(f.imp_total)}
+                  {formatAmount(Math.abs(f.imp_total))}
                 </td>
                 <td className="px-4 py-3">
                   {f.anulada_at ? (

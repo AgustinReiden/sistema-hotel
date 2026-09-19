@@ -12,9 +12,6 @@ import ThermalStyles from "@/app/admin/components/ThermalStyles";
 
 export const dynamic = "force-dynamic";
 
-function money(n: number) {
-  return formatAmount(n);
-}
 
 type RelationOne<T> = T | T[] | null;
 function one<T>(rel: RelationOne<T>): T | null {
@@ -159,7 +156,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
         <hr />
         <p className="total">
           <span>CARGADO A CUENTA</span>
-          <span className="money">{money(amount)}</span>
+          <span className="money">{formatAmount(amount)}</span>
         </p>
         <hr />
         <p className="note">
