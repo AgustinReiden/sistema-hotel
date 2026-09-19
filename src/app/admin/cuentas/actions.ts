@@ -8,6 +8,7 @@ import {
   listCcAccountStays,
   listClientInvoices,
   listClientOpenInvoices,
+  listClientOpenStays,
   listClientPayments,
   registerAccountPayment,
   revertPaymentImputacion,
@@ -21,9 +22,11 @@ import type {
   CcAccountStayRow,
   CcClientPaymentRow,
   CcOpenInvoiceRow,
+  CcOpenStayRow,
   ClientInvoiceRow,
   CtaCteClientKind,
   CtaCteMovimiento,
+  ImputacionDestino,
 } from "@/lib/types";
 
 // El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
@@ -129,6 +132,31 @@ export async function loadClientOpenInvoicesAction(
 }
 
 /**
+ * Estadías sin facturar con saldo: el otro destino que el modal de cobro ofrece
+ * (mig 114). El cliente que paga antes de que salga la factura es el caso que la
+ * mig 109 no podía registrar.
+ *
+ * Igual que arriba, el saldo es una FOTO: el techo lo valida la RPC con el cargo de
+ * la estadía lockeado (P0043).
+ */
+export async function loadClientOpenStaysAction(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<ActionResult<CcOpenStayRow[]>> {
+  try {
+    await assertCuentasAdmin();
+    if (!clientId) {
+      return { success: false, error: "Falta el cliente." };
+    }
+    const data = await listClientOpenStays(kind, clientId);
+    return { success: true, data };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudieron cargar las estadías sin facturar.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
  * Registra un cobro a cuenta corriente, con retenciones e imputación a facturas.
  *
  * `amount` es lo que CANCELA de deuda: efectivo más retenciones (mig 109). Devuelve
@@ -141,6 +169,32 @@ export async function loadClientOpenInvoicesAction(
  * lo único que puede cerrar una carrera entre dos cobros simultáneos: no borrar esas
  * guardas creyendo que esto las reemplaza.
  */
+/**
+ * Lo que está mal en la LISTA de destinos, o null si está bien.
+ *
+ * Vive acá y no en cada action porque las dos escriben imputaciones y las dos tienen
+ * que rechazar lo mismo. La RPC valida todo esto de nuevo con las filas lockeadas —es
+ * la autoridad—; esto existe para que el admin lea el problema en castellano en vez
+ * de comerse un round-trip, y para que un importe NaN no llegue al jsonb como null.
+ */
+function problemaEnDestinos(imputaciones: readonly ImputacionDestino[]): string | null {
+  for (const i of imputaciones) {
+    const tieneFactura = Boolean(i.invoiceId);
+    const tieneEstadia = Boolean(i.cargoMovimientoId);
+    if (tieneFactura === tieneEstadia) {
+      return "Cada imputación tiene que apuntar a una factura o a una estadía, no a las dos.";
+    }
+    if (!Number.isFinite(i.amount) || i.amount <= 0) {
+      return "El importe imputado a cada factura o estadía tiene que ser mayor a 0.";
+    }
+  }
+  const ids = imputaciones.map((i) => i.invoiceId ?? i.cargoMovimientoId);
+  if (new Set(ids).size !== ids.length) {
+    return "La misma factura o estadía aparece dos veces en la imputación.";
+  }
+  return null;
+}
+
 export async function registerAccountPaymentAction(input: {
   kind: CtaCteClientKind;
   clientId: string;
@@ -150,7 +204,7 @@ export async function registerAccountPaymentAction(input: {
   retencionGanancias?: number;
   retencionIibb?: number;
   retencionCertificado?: string;
-  imputaciones?: { invoiceId: string; amount: number }[];
+  imputaciones?: ImputacionDestino[];
 }): Promise<ActionResult<{ movementId: string; reciboCcNumero: number | null }>> {
   try {
     await assertCuentasAdmin();
@@ -179,19 +233,12 @@ export async function registerAccountPaymentAction(input: {
       };
     }
 
-    const imputaciones = (input.imputaciones ?? []).map((i) => ({
-      invoiceId: i.invoiceId,
-      amount: Number(i.amount),
-    }));
-    if (imputaciones.some((i) => !i.invoiceId)) {
-      return { success: false, error: "Hay una imputación sin factura." };
-    }
-    if (imputaciones.some((i) => !Number.isFinite(i.amount) || i.amount <= 0)) {
-      return { success: false, error: "El importe imputado a cada factura tiene que ser mayor a 0." };
-    }
-    const ids = imputaciones.map((i) => i.invoiceId);
-    if (new Set(ids).size !== ids.length) {
-      return { success: false, error: "Una misma factura aparece dos veces en la imputación." };
+    const imputaciones = (input.imputaciones ?? []).map(
+      (i) => ({ ...i, amount: Number(i.amount) }) as ImputacionDestino
+    );
+    const problemaDeDestinos = problemaEnDestinos(imputaciones);
+    if (problemaDeDestinos) {
+      return { success: false, error: problemaDeDestinos };
     }
     // Contra el monto que cancela, no contra el neto: la retención cancela factura
     // igual que el efectivo.
@@ -253,40 +300,32 @@ export async function revertPaymentImputacionAction(input: {
 }
 
 /**
- * Aplica un pago ya registrado a una o más facturas (mig 111): lo que se hace con la
- * plata que quedó libre después de desimputar, o con un adelanto que se cobró antes
- * de que existiera la factura.
+ * Aplica un pago ya registrado a una o más facturas o estadías (mig 111 y 114): lo
+ * que se hace con la plata que quedó libre después de desimputar, o con un adelanto
+ * que se cobró antes de que existiera la factura.
  */
 export async function addPaymentImputacionesAction(input: {
   movementId: string;
-  imputaciones: Array<{ invoiceId: string; amount: number }>;
+  imputaciones: ImputacionDestino[];
 }): Promise<ActionResult<{ imputado: number; sinImputar: number }>> {
   try {
     await assertCuentasAdmin();
     if (!input.movementId) {
       return { success: false, error: "Falta el pago a imputar." };
     }
-    const imputaciones = input.imputaciones ?? [];
+    const imputaciones = (input.imputaciones ?? []).map(
+      (i) => ({ ...i, amount: Number(i.amount) }) as ImputacionDestino
+    );
     if (imputaciones.length === 0) {
-      return { success: false, error: "Elegí al menos una factura." };
+      return { success: false, error: "Elegí al menos una factura o estadía." };
     }
-    // Se valida acá además de en la RPC porque un importe NaN o negativo llegaría al
-    // jsonb como null y el error de la base no diría cuál de las líneas está mal.
-    for (const linea of imputaciones) {
-      if (!linea.invoiceId) {
-        return { success: false, error: "Falta la factura en una de las líneas." };
-      }
-      const amount = Number(linea.amount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        return { success: false, error: "Cada importe imputado debe ser mayor a 0." };
-      }
+    const problemaDeDestinos = problemaEnDestinos(imputaciones);
+    if (problemaDeDestinos) {
+      return { success: false, error: problemaDeDestinos };
     }
     const data = await addPaymentImputaciones({
       movementId: input.movementId,
-      imputaciones: imputaciones.map((i) => ({
-        invoiceId: i.invoiceId,
-        amount: Number(i.amount),
-      })),
+      imputaciones,
     });
     revalidatePath("/admin/cuentas");
     return { success: true, data };

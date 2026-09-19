@@ -5,6 +5,7 @@ import CuentasClient from "./CuentasClient";
 import type {
   CcAccountStayRow,
   CcClientPaymentRow,
+  CcPagoImputacion,
   ClientInvoiceRow,
   CtaCteAccount,
   CtaCteMovimiento,
@@ -29,6 +30,7 @@ vi.mock("./actions", () => ({
   loadClientPaymentsAction: (...args: unknown[]) => loadClientPaymentsAction(...args),
   loadCcAccountStaysAction: (...args: unknown[]) => loadCcAccountStaysAction(...args),
   loadClientOpenInvoicesAction: vi.fn().mockResolvedValue({ success: true, data: [] }),
+  loadClientOpenStaysAction: vi.fn().mockResolvedValue({ success: true, data: [] }),
   registerAccountPaymentAction: vi.fn(),
   revertPaymentImputacionAction: (...args: unknown[]) =>
     revertPaymentImputacionAction(...args),
@@ -190,6 +192,64 @@ describe("CuentasClient — FichaClienteModal", () => {
   });
 });
 
+/**
+ * Una línea de imputación a una FACTURA. Los campos de estadía van en null: desde la
+ * mig 114 una línea apunta a una cosa o a la otra, nunca a las dos.
+ */
+function imputacionAFactura(
+  campos: Partial<CcPagoImputacion> & { imputacion_id: string; imputado: number }
+): CcPagoImputacion {
+  return {
+    destino: "factura",
+    invoice_id: "f1",
+    cbte_tipo: 6,
+    pto_vta: 8,
+    cbte_nro: 1,
+    cbte_fch: "2026-09-17",
+    kind: "checkout",
+    anulada: false,
+    imp_total: 100000,
+    cargo_movimiento_id: null,
+    reservation_id: null,
+    estadia_habitacion: null,
+    estadia_pasajero: null,
+    estadia_desde: null,
+    estadia_hasta: null,
+    estadia_total: null,
+    estadia_remito_numero: null,
+    revertida: false,
+    revertida_at: null,
+    revertida_motivo: null,
+    mudada: false,
+    ...campos,
+  };
+}
+
+/** Ídem, pero a una ESTADÍA que todavía no tiene factura (mig 114). */
+function imputacionAEstadia(
+  campos: Partial<CcPagoImputacion> & { imputacion_id: string; imputado: number }
+): CcPagoImputacion {
+  return {
+    ...imputacionAFactura(campos),
+    destino: "estadia",
+    invoice_id: null,
+    cbte_tipo: null,
+    pto_vta: null,
+    cbte_nro: null,
+    cbte_fch: null,
+    kind: null,
+    imp_total: null,
+    cargo_movimiento_id: "cargo-1",
+    reservation_id: "r9",
+    estadia_habitacion: "3",
+    estadia_pasajero: "Ana Gómez",
+    estadia_desde: "2026-07-10",
+    estadia_hasta: "2026-07-12",
+    estadia_total: 30000,
+    ...campos,
+  };
+}
+
 /** Un cobro con las dos retenciones, imputado a la consolidada y con vuelto a cuenta. */
 const pagos: CcClientPaymentRow[] = [
   {
@@ -205,38 +265,31 @@ const pagos: CcClientPaymentRow[] = [
     recibo_cc_numero: 7,
     notes: null,
     imputaciones: [
-      {
+      imputacionAFactura({
         imputacion_id: "i1",
         invoice_id: "f1",
         cbte_tipo: 1,
-        pto_vta: 8,
         cbte_nro: 1,
         cbte_fch: "2026-09-17",
         kind: "consolidada",
-        anulada: false,
         imp_total: 1480000,
         imputado: 60000,
-        revertida: false,
-        revertida_at: null,
-        revertida_motivo: null,
-      },
-      {
+      }),
+      imputacionAFactura({
         // Desimputada (mig 111): se sigue mostrando, tachada, y su plata ya no
         // cancela nada — por eso los $40.000 figuran a cuenta.
         imputacion_id: "i2",
         invoice_id: "f2",
         cbte_tipo: 6,
-        pto_vta: 8,
         cbte_nro: 42,
         cbte_fch: "2026-08-01",
         kind: "checkout",
-        anulada: false,
         imp_total: 50000,
         imputado: 40000,
         revertida: true,
         revertida_at: "2026-09-16T10:00:00.000Z",
         revertida_motivo: "Se imputó a la factura equivocada",
-      },
+      }),
     ],
   },
 ];
@@ -267,6 +320,9 @@ const estadias: CcAccountStayRow[] = [
     imp_total: 100000,
     imputado: 60000,
     cobro_estado: "facturada_impaga",
+    // Ya facturada: no tiene plata apuntada a la estadía ni saldo propio (mig 114).
+    imputado_estadia: 0,
+    saldo_estadia: null,
   },
 ];
 
@@ -348,6 +404,68 @@ describe("CuentasClient — solapa Pagos", () => {
     // que es la unidad de cobro.
     expect(pastillas.getByText("Pago parcial")).toBeTruthy();
     expect(pastillas.getByText("· $60.000,00 de $100.000,00")).toBeTruthy();
+  });
+});
+
+/**
+ * Lo que un pago canceló puede ser una factura o una ESTADÍA que todavía no tenía
+ * factura cuando entró la plata (mig 114). Y cuando esa estadía se factura, la línea
+ * no queda "desimputada": se mudó al comprobante, que no es lo mismo y no se puede
+ * decir igual.
+ */
+describe("CuentasClient — pagos aplicados a una estadía", () => {
+  const pagoConEstadia: CcClientPaymentRow[] = [
+    {
+      ...pagos[0],
+      sin_imputar: 0,
+      imputaciones: [
+        imputacionAEstadia({ imputacion_id: "i3", imputado: 30000 }),
+        imputacionAEstadia({
+          // La misma estadía, ya facturada: la plata se mudó sola a su factura.
+          imputacion_id: "i4",
+          imputado: 20000,
+          revertida: true,
+          revertida_at: "2026-09-18T12:00:00.000Z",
+          revertida_motivo: "Mudada a la factura de la estadía",
+          mudada: true,
+        }),
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    loadCtaCteAccountAction.mockReset();
+    loadCtaCteAccountAction.mockResolvedValue({
+      success: true,
+      data: { movements, balance: 15000 },
+    });
+    loadClientInvoicesAction.mockReset();
+    loadClientInvoicesAction.mockResolvedValue({ success: true, data: [] });
+    loadClientPaymentsAction.mockReset();
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: pagoConEstadia });
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: estadias });
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  it("nombra la estadía por habitación y fechas, no como una factura", async () => {
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getAllByText(/Estadía Hab. 3/).length).toBeGreaterThan(0);
+    // Lo que NO puede aparecer: una factura sin número inventada para una línea que
+    // no tiene comprobante.
+    expect(fila.queryByText(/Factura\s+s\/nro/)).toBeNull();
+  });
+
+  it("distingue la que se mudó a su factura de la que alguien desimputó", async () => {
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getByText(/pasó a su factura/)).toBeTruthy();
+    expect(fila.queryByText(/desimputada/)).toBeNull();
+    // Y a la mudada no se le ofrece desimputar: ya está revertida.
+    expect(fila.getAllByRole("button", { name: "Desimputar" })).toHaveLength(1);
   });
 });
 

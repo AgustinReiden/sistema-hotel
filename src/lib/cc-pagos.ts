@@ -1,5 +1,9 @@
 /**
- * Aritmética de un pago de cuenta corriente: retenciones e imputación a facturas.
+ * Aritmética de un pago de cuenta corriente: retenciones e imputación.
+ *
+ * Un pago se aplica a DOS clases de cosas (mig 114): facturas emitidas y estadías que
+ * todavía no se facturaron. Para las cuentas de acá abajo son lo mismo —una fecha y
+ * un saldo—, y ésa es la idea: dos aritméticas distintas se separan con el tiempo.
  *
  * ESPEJO DECLARADO DEL SQL. La autoridad son los CHECK de
  * `cuenta_corriente_movimientos` y las guardas de `rpc_register_account_payment`
@@ -21,6 +25,7 @@
  */
 
 import { formatAmount } from "./format";
+import type { ImputacionDestino } from "./types";
 
 /** El redondeo de dinero del repo (mismo que `roundCurrency` en pricing.ts). */
 function round2(n: number): number {
@@ -144,60 +149,97 @@ export function estaPagada(factura: { impTotal: number; imputado: number }): boo
 // justo los números que la gente se equivoca. La autoridad sigue siendo la RPC.
 // ───────────────────────────────────────────────────────────────────────────────
 
-/** Una factura del cliente con saldo pendiente, como la ve el modal de cobro. */
-export type FacturaAImputar = {
-  invoiceId: string;
-  /** Fecha del comprobante (YYYY-MM-DD). Es la que ordena el reparto automático. */
+/** A qué se le puede aplicar plata: una factura, o una estadía sin facturar. */
+export type DestinoImputacion = "factura" | "estadia";
+
+/**
+ * Una deuda del cliente con saldo pendiente, como la ve el modal de cobro. Puede ser
+ * una factura emitida o una estadía que todavía no se facturó (mig 114): para
+ * repartir plata las dos son lo mismo —una fecha y un saldo—, y tratarlas distinto
+ * sería tener dos repartos que se pueden separar.
+ */
+export type DeudaAImputar = {
+  destino: DestinoImputacion;
+  /** `invoice_id` si es una factura, `cargo_movimiento_id` si es una estadía. */
+  id: string;
+  /**
+   * La fecha con la que entra en la fila de antigüedad (YYYY-MM-DD): la del
+   * comprobante, o la de salida de la estadía, que es cuando nació esa deuda.
+   */
   fecha: string | null;
-  /** Número del comprobante, para desempatar dos del mismo día. */
+  /** Número de comprobante, para desempatar dos del mismo día. La estadía no tiene. */
   numero: number | null;
-  /** Lo que falta cobrarle: `imp_total` menos lo ya imputado por otros pagos. */
+  /** Lo que falta cobrarle: el total menos lo ya imputado por otros pagos. */
   saldo: number;
 };
 
-/** Una imputación tal como viaja al server action. */
-export type ImputacionElegida = { invoiceId: string; amount: number };
+/** Una imputación elegida, antes de convertirla en lo que viaja al server action. */
+export type ImputacionElegida = {
+  destino: DestinoImputacion;
+  id: string;
+  amount: number;
+};
 
 /**
- * De la más vieja a la más nueva. Las que no tienen fecha van al final: una factura
- * sin CAE no tiene lugar en la fila de antigüedad, y ponerla primera haría que el
- * reparto automático empiece por lo que todavía no es exigible.
+ * La clave con la que la pantalla identifica una deuda tildada.
+ *
+ * Lleva el destino adentro y no sólo el id: si algún día un id de factura y uno de
+ * cargo coincidieran, dos filas distintas compartirían estado de tildado. Es barato
+ * y saca el "no puede pasar" de la lista de cosas en las que confiar.
  */
-function masViejaPrimero(a: FacturaAImputar, b: FacturaAImputar): number {
+export function claveDeuda(destino: DestinoImputacion, id: string): string {
+  return `${destino}:${id}`;
+}
+
+/**
+ * De la más vieja a la más nueva, sin mirar si es factura o estadía: decisión de
+ * Agustín. "Lo más viejo primero" quiere decir eso, y una estadía de julio sin
+ * facturar es más vieja que una factura de agosto aunque todavía no tenga papel.
+ *
+ * Las que no tienen fecha van al final: una factura sin CAE no tiene lugar en la fila
+ * de antigüedad, y ponerla primera haría que el reparto empiece por lo que todavía no
+ * es exigible. Dentro del mismo día va primero la que tiene número de comprobante —
+ * ya está emitida — y el id desempata al final para que el orden sea estable.
+ */
+function masViejaPrimero(a: DeudaAImputar, b: DeudaAImputar): number {
   if (a.fecha !== b.fecha) {
     if (!a.fecha) return 1;
     if (!b.fecha) return -1;
     return a.fecha < b.fecha ? -1 : 1;
   }
-  return (a.numero ?? 0) - (b.numero ?? 0);
+  if ((a.numero === null) !== (b.numero === null)) return a.numero === null ? 1 : -1;
+  if (a.numero !== null && b.numero !== null && a.numero !== b.numero) {
+    return a.numero - b.numero;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
- * Reparte `monto` entre las facturas, saldando la más vieja antes de tocar la
+ * Reparte `monto` entre las deudas, saldando la más vieja antes de tocar la
  * siguiente. Es lo que hace cualquiera a mano con una transferencia grande, y el
  * caso normal: nadie quiere cargar seis renglones para decir "pagá lo que debe".
  *
  * El orden lo decide ESTA función y no el que le pasen: que el reparto sea por
  * antigüedad no puede depender de cómo vino ordenada una lista.
  *
- * Nunca imputa más que el saldo de cada factura ni más que el monto, así que lo que
- * devuelve pasa las dos guardas de la RPC (P0035 y P0038) por construcción. Si el
+ * Nunca imputa más que el saldo de cada deuda ni más que el monto, así que lo que
+ * devuelve pasa las guardas de la RPC (P0035, P0038 y P0043) por construcción. Si el
  * monto sobra, el resto queda sin imputar — que es un pago a cuenta legítimo.
  */
 export function repartirMasViejoPrimero(
   monto: number,
-  facturas: readonly FacturaAImputar[]
+  deudas: readonly DeudaAImputar[]
 ): ImputacionElegida[] {
   let restante = round2(num(monto));
   if (restante <= 0) return [];
 
   const imputaciones: ImputacionElegida[] = [];
-  for (const factura of [...facturas].sort(masViejaPrimero)) {
+  for (const deuda of [...deudas].sort(masViejaPrimero)) {
     if (restante <= 0) break;
-    const saldo = round2(num(factura.saldo));
+    const saldo = round2(num(deuda.saldo));
     if (saldo <= 0) continue;
     const aplica = round2(Math.min(saldo, restante));
-    imputaciones.push({ invoiceId: factura.invoiceId, amount: aplica });
+    imputaciones.push({ destino: deuda.destino, id: deuda.id, amount: aplica });
     restante = round2(restante - aplica);
   }
   return imputaciones;
@@ -269,13 +311,30 @@ export function estadoPago(row: {
 
 /** Una imputación como la está armando el modal, con lo que hace falta para explicarla. */
 export type ImputacionEnPantalla = {
-  invoiceId: string;
-  /** Cómo se llama la factura en la pantalla: "Factura B 0008-00000123". */
+  destino: DestinoImputacion;
+  /** `invoice_id` o `cargo_movimiento_id`, según el destino. */
+  id: string;
+  /**
+   * Cómo se llama en la pantalla: "Factura B 0008-00000123", o "Estadía Hab. 2 ·
+   * 12/08". Los avisos de abajo la usan tal cual, así que lo que dice la pantalla y
+   * lo que dice el error son siempre la misma frase.
+   */
   etiqueta: string;
   /** Lo que le faltaba cobrar ANTES de este pago. */
   saldo: number;
   amount: number;
 };
+
+/**
+ * De lo que elige la pantalla a lo que entiende la RPC: una clave u otra, nunca las
+ * dos. La forma excluyente la valida también el servidor (`app_validar_forma_
+ * imputaciones`, mig 114); esto es para que el tipo lo impida antes de salir.
+ */
+export function aImputacionDestino(i: ImputacionElegida): ImputacionDestino {
+  return i.destino === "factura"
+    ? { invoiceId: i.id, amount: i.amount }
+    : { cargoMovimientoId: i.id, amount: i.amount };
+}
 
 /**
  * Todo lo que está mal en el pago que se está cargando, dicho como una instrucción.

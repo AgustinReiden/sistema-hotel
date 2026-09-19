@@ -597,6 +597,32 @@ const METODO_LABEL: Record<string, string> = {
   other: "Otro",
 };
 
+/**
+ * Cómo se nombra en pantalla lo que un pago canceló: la factura, o la estadía que
+ * todavía no tenía factura cuando se cobró (mig 114).
+ *
+ * La estadía se nombra por habitación y fechas, igual que en la solapa de estadías:
+ * el mismo hecho tiene que leerse igual en las dos pantallas.
+ */
+function nombreDeImputacion(imp: CcPagoImputacion): string {
+  if (imp.destino === "estadia") {
+    const hab = imp.estadia_habitacion ? `Hab. ${imp.estadia_habitacion}` : "Sin habitación";
+    const desde = imp.estadia_desde ? formatKey(imp.estadia_desde) : "";
+    const hasta = imp.estadia_hasta ? formatKey(imp.estadia_hasta) : "";
+    const fechas = desde && hasta ? ` · ${desde} al ${hasta}` : "";
+    return `Estadía ${hab}${fechas}`;
+  }
+  const numero =
+    imp.cbte_nro !== null && imp.pto_vta !== null
+      ? formatCbteNumero(imp.pto_vta, imp.cbte_nro)
+      : "s/nro";
+  const letra = imp.cbte_tipo !== null ? cbteLetra(imp.cbte_tipo) : "";
+  return `Factura ${letra} ${numero}${imp.cbte_fch ? ` · ${formatKey(imp.cbte_fch)}` : ""}`.replace(
+    "  ",
+    " "
+  );
+}
+
 function metodoLabel(method: string | null): string {
   if (!method) return "Sin método";
   return METODO_LABEL[method] ?? method;
@@ -803,7 +829,9 @@ function FilaPago({
           // Un pago sin imputar no es un error: el cliente adelantó plata y la factura
           // sale después. Decirlo evita que alguien lo "arregle" imputándolo a
           // cualquier cosa.
-          <p className="text-xs text-slate-500 mt-0.5">A cuenta, sin factura asignada.</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            A cuenta, sin factura ni estadía asignada.
+          </p>
         ) : (
           <ul className="mt-1 space-y-1">
             {pago.imputaciones.map((imp) => (
@@ -817,18 +845,20 @@ function FilaPago({
                       salió—, pero su importe ya NO cancela esta factura: esa plata
                       volvió a quedar disponible en el pago. */}
                   <span className={imp.revertida ? "line-through text-slate-400" : ""}>
-                    Factura {cbteLetra(imp.cbte_tipo)}{" "}
-                    {imp.cbte_nro !== null ? formatCbteNumero(imp.pto_vta, imp.cbte_nro) : "s/nro"}
-                    {imp.cbte_fch ? ` · ${formatKey(imp.cbte_fch)}` : ""}
+                    {nombreDeImputacion(imp)}
                   </span>
                   {/* La factura se anuló DESPUÉS del cobro: se informa, no se
                       esconde. El recibo impreso sigue diciendo lo mismo. */}
                   {imp.anulada && (
                     <span className="ml-1.5 text-[11px] font-bold text-red-600">(anulada)</span>
                   )}
+                  {/* Mudada y desimputada se dicen distinto a propósito: las dos están
+                      revertidas, pero a la mudada no la soltó nadie — se la llevó la
+                      factura de esa estadía (mig 114). */}
                   {imp.revertida && (
                     <span className="ml-1.5 text-[11px] font-bold text-slate-500">
-                      desimputada{imp.revertida_motivo ? `: ${imp.revertida_motivo}` : ""}
+                      {imp.mudada ? "pasó a su factura" : "desimputada"}
+                      {imp.revertida_motivo ? `: ${imp.revertida_motivo}` : ""}
                     </span>
                   )}
                 </span>
@@ -852,7 +882,7 @@ function FilaPago({
                         setMotivo("");
                       }}
                       className="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors"
-                      title="Desimputar: esta plata deja de cancelar esta factura y vuelve a quedar a cuenta"
+                      title="Desimputar: esta plata deja de cancelar eso y vuelve a quedar a cuenta"
                       aria-label="Desimputar"
                     >
                       <RotateCcw size={14} />
@@ -862,7 +892,8 @@ function FilaPago({
                 {confirmando === imp.imputacion_id && (
                   <div className="w-full mt-1 p-3 rounded-lg border border-amber-200 bg-amber-50">
                     <p className="text-xs font-semibold text-amber-900">
-                      Se van a soltar {formatAmount(imp.imputado)}: esta factura deja de
+                      Se van a soltar {formatAmount(imp.imputado)}:{" "}
+                      {imp.destino === "factura" ? "esta factura" : "esta estadía"} deja de
                       estar cobrada por este pago y ese importe vuelve a quedar a cuenta.
                     </p>
                     <input
@@ -902,7 +933,7 @@ function FilaPago({
         )}
         {pago.sin_imputar > 0 && pago.imputaciones.length > 0 && (
           <p className="text-xs font-semibold text-amber-600 mt-1">
-            {formatAmount(pago.sin_imputar)} quedaron a cuenta, sin factura.
+            {formatAmount(pago.sin_imputar)} quedaron a cuenta, sin aplicar.
           </p>
         )}
       </div>

@@ -344,37 +344,87 @@ export type RegisterAccountPaymentPayload = {
   retencionGanancias?: number;
   retencionIibb?: number;
   retencionCertificado?: string;
-  /** A qué facturas se imputa el pago. Puede ir vacío: un pago a cuenta sin imputar. */
-  imputaciones?: { invoiceId: string; amount: number }[];
+  /**
+   * A qué se imputa el pago. Puede ir vacío: un pago a cuenta sin imputar.
+   * Cada línea lleva UN destino: una factura, o una estadía que todavía no tiene
+   * factura (mig 114). Mandar los dos, o ninguno, lo rechaza la RPC.
+   */
+  imputaciones?: ImputacionDestino[];
 };
 
-/** Una factura a la que se imputó un pago, tal como la devuelve el jsonb del RPC. */
+/**
+ * A qué se le aplica un peso de un pago: a una factura, o a una estadía sin facturar.
+ *
+ * Son excluyentes a propósito y así lo fija un CHECK en la base (mig 114). La estadía
+ * viaja como el id de su CARGO de cuenta corriente, que es la fila que representa esa
+ * deuda: trae el importe y trae el cliente, así que el techo y la pertenencia se
+ * validan sin ir a buscarlos a otra tabla.
+ */
+export type ImputacionDestino =
+  | { invoiceId: string; cargoMovimientoId?: never; amount: number }
+  | { cargoMovimientoId: string; invoiceId?: never; amount: number };
+
+/**
+ * Una línea de imputación de un pago, tal como la devuelve el jsonb del RPC.
+ *
+ * `destino` dice cuál de los dos bloques de campos viene lleno. Mirar cuál de los dos
+ * ids vino en null también funcionaría, pero obliga a cada pantalla a deducir lo que
+ * la base ya sabe.
+ */
 export type CcPagoImputacion = {
   /** Id de la fila de imputación: es lo que recibe `revertPaymentImputacion` (mig 111). */
   imputacion_id: string;
-  invoice_id: string;
-  cbte_tipo: number;
-  pto_vta: number;
+  destino: "factura" | "estadia";
+  /** Lo que este pago le imputó a esta factura o estadía. */
+  imputado: number;
+
+  // ── destino = "factura" ─────────────────────────────────────────────────────
+  invoice_id: string | null;
+  cbte_tipo: number | null;
+  pto_vta: number | null;
   cbte_nro: number | null;
   cbte_fch: string | null; // date
-  kind: InvoiceKind;
+  kind: InvoiceKind | null;
   /**
    * La factura se anuló DESPUÉS de este pago. Se informa, no se esconde: el recibo
    * tiene que seguir mostrando lo mismo que el día que se imprimió.
    */
   anulada: boolean;
-  imp_total: number;
-  /** Lo que este pago le imputó a esta factura. */
-  imputado: number;
+  imp_total: number | null;
+
+  // ── destino = "estadia" (mig 114) ───────────────────────────────────────────
+  /** El cargo de cuenta corriente de esa estadía: es el id que viaja a la RPC. */
+  cargo_movimiento_id: string | null;
+  reservation_id: string | null;
+  estadia_habitacion: string | null;
+  estadia_pasajero: string | null;
+  estadia_desde: string | null; // date
+  estadia_hasta: string | null; // date
+  /** Lo que debe esa estadía: el importe del cargo. */
+  estadia_total: number | null;
+  /**
+   * N° del remito que el cliente firmó al hacer el check-out (mig 106). Lo llena sólo
+   * el recibo impreso, que identifica la estadía por el papel que ya tiene el cliente
+   * en la mano en vez de por habitación y fechas.
+   */
+  estadia_remito_numero: number | null;
+
   /**
    * La imputación se soltó (mig 111): esta plata volvió a quedar disponible en el
-   * pago y ya no cancela esta factura. Se muestra marcada, no se esconde — mismo
+   * pago y ya no cancela ese destino. Se muestra marcada, no se esconde — mismo
    * criterio que `anulada`: un recibo reimpreso tiene que decir lo mismo que el día
    * que salió. Lo que NO tiene que hacer es seguir sumando.
    */
   revertida: boolean;
   revertida_at: string | null;
   revertida_motivo: string | null;
+  /**
+   * La línea está revertida porque la estadía se facturó y la plata se mudó sola a la
+   * factura (mig 114) — no porque alguien la haya desimputado. La diferencia importa:
+   * decirle "desimputada" al que lee el recibo sería mentirle sobre quién movió la
+   * plata.
+   */
+  mudada: boolean;
 };
 
 /** Un pago a cuenta de un cliente, con su desglose y su imputación (mig 109). */
@@ -1015,6 +1065,27 @@ export type ClientInvoiceRow = {
  * una foto: entre que la pantalla lo lee y el admin guarda, otro pago pudo haber
  * entrado. Sirve para no ofrecer un imposible, no para garantizarlo.
  */
+/**
+ * Una estadía sin facturar con saldo, como la ofrece el modal de cobro (mig 114).
+ *
+ * La estadía viaja identificada por su CARGO de cuenta corriente, que es el id que
+ * entiende la RPC: es la fila que representa esa deuda.
+ */
+export type CcOpenStayRow = {
+  cargo_movimiento_id: string;
+  reservation_id: string;
+  room_number: string | null;
+  passenger: string | null;
+  fch_desde: string; // date
+  fch_hasta: string; // date
+  /** Lo que debe la estadía: el importe del cargo, no `total_price`. */
+  amount: number;
+  /** Σ ya apuntado a esta estadía por otros pagos. */
+  imputado: number;
+  /** `amount` − `imputado`: lo que todavía se le puede imputar. */
+  saldo: number;
+};
+
 export type CcOpenInvoiceRow = {
   invoice_id: string;
   kind: InvoiceKind;
@@ -1077,6 +1148,17 @@ export type CcAccountStayRow = {
   /** Σ imputado a esa factura. Null cuando `imp_total` es null. */
   imputado: number | null;
   cobro_estado: CcCobroEstado;
+  /**
+   * Σ de la plata apuntada a la ESTADÍA misma, mientras no tiene factura (mig 114).
+   * Después de facturarla da 0, porque la mudanza la pasó al comprobante.
+   */
+  imputado_estadia: number;
+  /**
+   * Lo que todavía se le puede imputar a la estadía: el cargo menos lo de arriba.
+   * Null si ya está facturada — ahí el saldo es el de la factura, y devolver el del
+   * cargo invitaría a cobrar dos veces la misma noche.
+   */
+  saldo_estadia: number | null;
 };
 
 /**

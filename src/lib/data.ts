@@ -64,11 +64,13 @@ import type {
   CcAccountStayRow,
   CcClientPaymentRow,
   CcOpenInvoiceRow,
+  CcOpenStayRow,
   CcPagoImputacion,
   CcPaymentReceipt,
   ClientInvoiceRow,
   ConsolidatedInvoicePayload,
   FacturacionModo,
+  ImputacionDestino,
   InvoiceKind,
   InvoiceRecord,
   InvoiceReceptorInput,
@@ -497,10 +499,22 @@ export async function getCtaCteMovements(
 }
 
 /**
+ * Una imputación, como la espera el jsonb de las RPC: la clave del destino que
+ * corresponda y nada más. Mandar las dos claves —o ninguna— lo rechaza la RPC con un
+ * mensaje propio, y el CHECK de la tabla queda de backstop (mig 114).
+ */
+function imputacionRpc(i: ImputacionDestino): Record<string, string | number> {
+  return i.invoiceId !== undefined
+    ? { invoice_id: i.invoiceId, amount: i.amount }
+    : { cargo_movimiento_id: i.cargoMovimientoId, amount: i.amount };
+}
+
+/**
  * Registra un pago a cuenta (vía RPC admin-only). No toca la caja.
  *
  * `amount` es lo que CANCELA de deuda: efectivo más retenciones. Las imputaciones se
- * miden contra ese total, no contra el neto recibido (mig 109).
+ * miden contra ese total, no contra el neto recibido (mig 109), y pueden apuntar a
+ * una factura o a una estadía todavía sin facturar (mig 114).
  */
 export async function registerAccountPayment(
   input: RegisterAccountPaymentPayload
@@ -517,7 +531,7 @@ export async function registerAccountPayment(
     p_retencion_certificado: input.retencionCertificado ?? null,
     p_imputaciones:
       input.imputaciones && input.imputaciones.length > 0
-        ? input.imputaciones.map((i) => ({ invoice_id: i.invoiceId, amount: i.amount }))
+        ? input.imputaciones.map(imputacionRpc)
         : null,
   });
   if (error) throw error;
@@ -571,15 +585,12 @@ export async function revertPaymentImputacion(input: {
  */
 export async function addPaymentImputaciones(input: {
   movementId: string;
-  imputaciones: ReadonlyArray<{ invoiceId: string; amount: number }>;
+  imputaciones: ReadonlyArray<ImputacionDestino>;
 }): Promise<{ imputado: number; sinImputar: number }> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_add_payment_imputaciones", {
     p_movimiento_id: input.movementId,
-    p_imputaciones: input.imputaciones.map((i) => ({
-      invoice_id: i.invoiceId,
-      amount: i.amount,
-    })),
+    p_imputaciones: input.imputaciones.map(imputacionRpc),
   });
   if (error) throw error;
   const result = (data ?? {}) as { imputado?: number | string; sin_imputar?: number | string };
@@ -589,22 +600,48 @@ export async function addPaymentImputaciones(input: {
   };
 }
 
-/** Normaliza el jsonb de imputaciones que devuelven los RPC de cuenta corriente. */
+/**
+ * Normaliza el jsonb de imputaciones que devuelven los RPC de cuenta corriente.
+ *
+ * Los campos de factura y los de estadía son excluyentes (mig 114), así que se
+ * normaliza a null lo que no vino en vez de a 0: un `imp_total` de 0 en una línea que
+ * apunta a una estadía se leería como "una factura de cero pesos".
+ */
+function numeroONull(value: unknown): number | null {
+  return value === null || value === undefined ? null : Number(value);
+}
+
 function mapCcImputaciones(raw: unknown): CcPagoImputacion[] {
   return ((raw ?? []) as Array<Record<string, unknown>>).map((i) => ({
-    invoice_id: String(i.invoice_id),
-    cbte_tipo: Number(i.cbte_tipo) || 0,
-    pto_vta: Number(i.pto_vta) || 0,
-    cbte_nro: i.cbte_nro === null || i.cbte_nro === undefined ? null : Number(i.cbte_nro),
-    cbte_fch: (i.cbte_fch as string | null) ?? null,
-    kind: (i.kind as InvoiceKind | undefined) ?? "checkout",
-    anulada: Boolean(i.anulada),
-    imp_total: Number(i.imp_total) || 0,
-    imputado: Number(i.imputado) || 0,
     imputacion_id: String(i.imputacion_id),
+    // El destino lo decide la base, no el front mirando cuál id vino vacío. El
+    // fallback a "factura" es para una fila vieja de antes de la mig 114, que por
+    // construcción apuntaba a una factura.
+    destino: i.destino === "estadia" ? "estadia" : "factura",
+    imputado: Number(i.imputado) || 0,
+
+    invoice_id: (i.invoice_id as string | null) ?? null,
+    cbte_tipo: numeroONull(i.cbte_tipo),
+    pto_vta: numeroONull(i.pto_vta),
+    cbte_nro: numeroONull(i.cbte_nro),
+    cbte_fch: (i.cbte_fch as string | null) ?? null,
+    kind: (i.kind as InvoiceKind | null) ?? null,
+    anulada: Boolean(i.anulada),
+    imp_total: numeroONull(i.imp_total),
+
+    cargo_movimiento_id: (i.cargo_movimiento_id as string | null) ?? null,
+    reservation_id: (i.reservation_id as string | null) ?? null,
+    estadia_habitacion: (i.estadia_habitacion as string | null) ?? null,
+    estadia_pasajero: (i.estadia_pasajero as string | null) ?? null,
+    estadia_desde: (i.estadia_desde as string | null) ?? null,
+    estadia_hasta: (i.estadia_hasta as string | null) ?? null,
+    estadia_total: numeroONull(i.estadia_total),
+    estadia_remito_numero: numeroONull(i.estadia_remito_numero),
+
     revertida: Boolean(i.revertida),
     revertida_at: (i.revertida_at as string | null) ?? null,
     revertida_motivo: (i.revertida_motivo as string | null) ?? null,
+    mudada: Boolean(i.mudada),
   }));
 }
 
@@ -709,7 +746,15 @@ export async function getCcPaymentReceipt(movementId: string): Promise<CcPayment
     supabase
       .from("cc_pago_imputaciones")
       .select(
-        "id, amount, revertida_at, revertida_motivo, invoice:invoices ( id, cbte_tipo, pto_vta, cbte_nro, cbte_fch, kind, anulada_at, imp_total )"
+        // El cargo se pide por el NOMBRE de la clave foránea: la tabla tiene dos
+        // hacia cuenta_corriente_movimientos (el pago y el cargo) y sin nombrarla
+        // PostgREST no sabe por cuál viajar. Del cargo alcanza con su remito: el
+        // recibo identifica la estadía por el papel que el cliente ya firmó en el
+        // check-out (mig 106), que es mejor referencia en un ticket que la
+        // habitación y las fechas.
+        `id, amount, revertida_at, revertida_motivo, mudada_a_imputacion_id,
+         invoice:invoices ( id, cbte_tipo, pto_vta, cbte_nro, cbte_fch, kind, anulada_at, imp_total ),
+         cargo:cuenta_corriente_movimientos!cc_pago_imputaciones_cargo_movimiento_id_fkey ( id, amount, remito_numero, created_at, reservation_id )`
       )
       // Sin filtrar por revertida_at: la línea desimputada se imprime marcada, no se
       // borra. Un recibo tiene que seguir diciendo lo mismo que el día que salió —
@@ -731,6 +776,7 @@ export async function getCcPaymentReceipt(movementId: string): Promise<CcPayment
     amount: number | string;
     revertida_at: string | null;
     revertida_motivo: string | null;
+    mudada_a_imputacion_id: string | null;
     invoice: RelationOne<{
       id: string;
       cbte_tipo: number;
@@ -741,37 +787,94 @@ export async function getCcPaymentReceipt(movementId: string): Promise<CcPayment
       anulada_at: string | null;
       imp_total: number | string;
     }>;
+    cargo: RelationOne<{
+      id: string;
+      amount: number | string;
+      remito_numero: number | null;
+      created_at: string;
+      reservation_id: string | null;
+    }>;
   };
+  // El renglón y la fecha con la que se ordena, juntos: la línea de una factura
+  // ordena por la fecha del comprobante y la de una estadía por la del cargo (el
+  // check-out), y esa segunda fecha no tiene dónde vivir dentro del renglón sin
+  // hacerle decir a `cbte_fch` algo que no es.
   const imputaciones: CcPagoImputacion[] = ((impRes.data ?? []) as RawImputacion[])
-    .map((row) => {
+    .map((row): { imp: CcPagoImputacion; fecha: string } | null => {
       const inv = one(row.invoice);
-      if (!inv) return null;
-      return {
-        invoice_id: String(inv.id),
-        cbte_tipo: Number(inv.cbte_tipo) || 0,
-        pto_vta: Number(inv.pto_vta) || 0,
-        cbte_nro: inv.cbte_nro === null ? null : Number(inv.cbte_nro),
-        cbte_fch: inv.cbte_fch ?? null,
-        kind: inv.kind ?? "checkout",
-        anulada: inv.anulada_at !== null,
-        imp_total: Number(inv.imp_total) || 0,
-        imputado: Number(row.amount) || 0,
+      const cargo = one(row.cargo);
+      // Una fila sin ninguno de los dos destinos no existe (lo impide un CHECK desde
+      // la mig 114), pero si apareciera se saltea: imprimir un renglón que no dice a
+      // qué se aplicó la plata es peor que no imprimirlo.
+      if (!inv && !cargo) return null;
+      const comun = {
         imputacion_id: String(row.id),
+        imputado: Number(row.amount) || 0,
         revertida: row.revertida_at !== null,
         revertida_at: row.revertida_at,
         revertida_motivo: row.revertida_motivo,
+        mudada: row.mudada_a_imputacion_id !== null,
+      };
+      if (inv) {
+        return {
+          fecha: inv.cbte_fch ?? "",
+          imp: {
+          ...comun,
+          destino: "factura" as const,
+          invoice_id: String(inv.id),
+          cbte_tipo: Number(inv.cbte_tipo) || 0,
+          pto_vta: Number(inv.pto_vta) || 0,
+          cbte_nro: inv.cbte_nro === null ? null : Number(inv.cbte_nro),
+          cbte_fch: inv.cbte_fch ?? null,
+          kind: inv.kind ?? "checkout",
+          anulada: inv.anulada_at !== null,
+          imp_total: Number(inv.imp_total) || 0,
+          cargo_movimiento_id: null,
+          reservation_id: null,
+          estadia_habitacion: null,
+          estadia_pasajero: null,
+          estadia_desde: null,
+          estadia_hasta: null,
+          estadia_total: null,
+          estadia_remito_numero: null,
+          },
+        };
+      }
+      return {
+        fecha: cargo!.created_at.slice(0, 10),
+        imp: {
+        ...comun,
+        destino: "estadia" as const,
+        invoice_id: null,
+        cbte_tipo: null,
+        pto_vta: null,
+        cbte_nro: null,
+        cbte_fch: null,
+        kind: null,
+        anulada: false,
+        imp_total: null,
+        cargo_movimiento_id: String(cargo!.id),
+        reservation_id: cargo!.reservation_id,
+        estadia_habitacion: null,
+        estadia_pasajero: null,
+        estadia_desde: null,
+        estadia_hasta: null,
+        estadia_total: Number(cargo!.amount) || 0,
+        estadia_remito_numero: cargo!.remito_numero,
+        },
       };
     })
-    .filter((i): i is CcPagoImputacion => i !== null)
-    // Las vivas primero y las desimputadas al final, igual que ordena
+    .filter((i): i is { imp: CcPagoImputacion; fecha: string } => i !== null)
+    // Las vivas primero y las revertidas al final, igual que ordena
     // rpc_list_client_payments: el recibo muestra lo que cancela y deja la historia
     // abajo.
     .sort(
       (a, b) =>
-        Number(a.revertida) - Number(b.revertida) ||
-        (a.cbte_fch ?? "").localeCompare(b.cbte_fch ?? "") ||
-        (a.cbte_nro ?? 0) - (b.cbte_nro ?? 0)
-    );
+        Number(a.imp.revertida) - Number(b.imp.revertida) ||
+        a.fecha.localeCompare(b.fecha) ||
+        (a.imp.cbte_nro ?? 0) - (b.imp.cbte_nro ?? 0)
+    )
+    .map((i) => i.imp);
 
   // `lte` sobre created_at puede traer otro movimiento del mismo instante: se
   // desempata por id, el mismo criterio con el que la migración numeró el backfill.
@@ -4323,7 +4426,50 @@ export async function listCcAccountStays(
     imp_total: r.imp_total === null || r.imp_total === undefined ? null : Number(r.imp_total),
     imputado: r.imputado === null || r.imputado === undefined ? null : Number(r.imputado),
     cobro_estado: (r.cobro_estado as CcAccountStayRow["cobro_estado"]) ?? "sin_facturar",
+    // Lo que el pago puede apuntarle a la estadía misma, mientras no tenga factura
+    // (mig 114). `saldo_estadia` viene null justamente cuando ya la tiene.
+    imputado_estadia: Number(r.imputado_estadia) || 0,
+    saldo_estadia:
+      r.saldo_estadia === null || r.saldo_estadia === undefined
+        ? null
+        : Number(r.saldo_estadia),
   }));
+}
+
+/**
+ * Estadías del cliente que todavía no tienen factura y a las que les falta cobrar:
+ * el segundo bloque que el modal de cobro ofrece para imputar (mig 114).
+ *
+ * Reusa `listCcAccountStays` en vez de una consulta propia porque la parte difícil no
+ * es el saldo sino resolver QUÉ estadía está sin facturar —vínculo vivo, marca de
+ * facturación externa, factura colgada de la reserva—, y ese predicado ya vive en la
+ * RPC, que es la misma que usa la guarda del servidor para rechazar con P0042. Dos
+ * consultas distintas para la misma pregunta es exactamente la deriva que ya mordió a
+ * este repo.
+ *
+ * El saldo que devuelve es una FOTO, igual que el de las facturas: el techo real lo
+ * valida la RPC con el cargo lockeado (P0043).
+ */
+export async function listClientOpenStays(
+  kind: CtaCteClientKind,
+  clientId: string
+): Promise<CcOpenStayRow[]> {
+  const stays = await listCcAccountStays(kind, clientId);
+  return stays
+    .filter((s) => s.facturable && (s.saldo_estadia ?? 0) > 0)
+    .map((s) => ({
+      cargo_movimiento_id: s.movimiento_id,
+      reservation_id: s.reservation_id,
+      room_number: s.room_number,
+      passenger: s.passenger,
+      fch_desde: s.fch_desde,
+      fch_hasta: s.fch_hasta,
+      amount: s.amount,
+      imputado: s.imputado_estadia,
+      saldo: s.saldo_estadia ?? 0,
+    }))
+    // De la más vieja a la más nueva, que es el orden en que se cobran.
+    .sort((a, b) => a.fch_hasta.localeCompare(b.fch_hasta));
 }
 
 /**
