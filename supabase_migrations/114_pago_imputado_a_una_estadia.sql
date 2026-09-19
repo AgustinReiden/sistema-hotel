@@ -151,7 +151,7 @@ CREATE INDEX IF NOT EXISTS cc_pago_imputaciones_cargo_viva_idx
   WHERE revertida_at IS NULL AND cargo_movimiento_id IS NOT NULL;
 
 COMMENT ON TABLE public.cc_pago_imputaciones IS
-  'A que factura -- o a que estadia todavia sin facturar -- se imputo un pago de cuenta corriente. Se escribe solo por RPC (registrar, imputar, revertir) y por la mudanza del trigger de facturacion. Una fila revertida queda como historia: ver revertida_at y mudada_a_imputacion_id.';
+  'A que factura (o a que estadia todavia sin facturar) se imputo un pago de cuenta corriente. Se escribe solo por RPC (registrar, imputar, revertir) y por la mudanza del trigger de facturacion. Una fila revertida queda como historia: ver revertida_at y mudada_a_imputacion_id.';
 
 -- ===========================================================================
 -- Seccion 2: la guarda de una imputacion a una ESTADIA
