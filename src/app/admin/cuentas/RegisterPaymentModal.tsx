@@ -13,18 +13,24 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { loadClientOpenInvoicesAction, registerAccountPaymentAction } from "./actions";
+import {
+  loadClientOpenInvoicesAction,
+  loadClientOpenStaysAction,
+  registerAccountPaymentAction,
+} from "./actions";
 import BalanceTag from "./BalanceTag";
 import { cbteLetra, formatCbteNumero } from "@/lib/arca/amounts";
 import {
+  aImputacionDestino,
+  claveDeuda,
   problemasDelPago,
   repartirMasViejoPrimero,
   resumenPago,
-  type FacturaAImputar,
+  type DeudaAImputar,
   type ImputacionEnPantalla,
 } from "@/lib/cc-pagos";
 import { formatAmount, formatShiftCode } from "@/lib/format";
-import type { CcOpenInvoiceRow, CtaCteAccount } from "@/lib/types";
+import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types";
 
 /**
  * Cobro de cuenta corriente: monto, retenciones y a qué facturas se aplica.
@@ -42,9 +48,15 @@ import type { CcOpenInvoiceRow, CtaCteAccount } from "@/lib/types";
  * que entra a la cuenta bancaria son números distintos, y hasta ahora la diferencia
  * recién se veía en el recibo, cuando el asiento ya estaba hecho.
  *
- * Imputar es OPCIONAL. Un pago a cuenta sin factura asignada —el cliente adelanta
- * plata, la factura sale el mes que viene— es el flujo que existía antes de todo
- * esto y tiene que seguir andando sin tocar nada de la parte nueva.
+ * Imputar es OPCIONAL. Un pago a cuenta sin nada asignado —el cliente adelanta plata
+ * y no dice por qué— es el flujo que existía antes de todo esto y tiene que seguir
+ * andando sin tocar nada de la parte nueva.
+ *
+ * SE PUEDE APLICAR A DOS COSAS (mig 114): a una factura emitida, o a una ESTADÍA que
+ * todavía no se facturó. Lo segundo es lo que faltaba: el cliente que transfiere en
+ * agosto por las noches de julio, cuya factura sale recién a fin de mes. Cuando esa
+ * estadía se factura, la plata se muda sola al comprobante — acá no hay que hacer
+ * nada, y por eso la pantalla no ofrece ningún botón para moverla.
  */
 
 const METHODS = [
@@ -61,6 +73,65 @@ const inputClass =
 function etiquetaFactura(f: CcOpenInvoiceRow): string {
   const numero = f.cbte_nro !== null ? formatCbteNumero(f.pto_vta, f.cbte_nro) : "s/nro";
   return `Factura ${cbteLetra(f.cbte_tipo)} ${numero}`;
+}
+
+/** Ídem para una estadía sin facturar: habitación y fechas, que es como se la nombra. */
+function etiquetaEstadia(e: CcOpenStayRow): string {
+  const hab = e.room_number ? `Hab. ${e.room_number}` : "Sin habitación";
+  return `Estadía ${hab} · ${fechaCorta(e.fch_desde)} al ${fechaCorta(e.fch_hasta)}`;
+}
+
+/**
+ * Una deuda tildable en la pantalla, venga de una factura o de una estadía.
+ *
+ * Las dos se reparten y se validan igual, así que abajo de este tipo el resto del
+ * modal no vuelve a preguntar de cuál se trata: sólo la etiqueta y el renglón de
+ * detalle saben la diferencia.
+ */
+type DeudaEnPantalla = DeudaAImputar & {
+  /** Clave de la fila para el estado de tildado y para React. */
+  clave: string;
+  etiqueta: string;
+  /** El total de la deuda (la factura o el cargo de la estadía). */
+  total: number;
+  /** Lo que ya le habían imputado otros pagos. */
+  yaImputado: number;
+  /** El renglón chico de abajo: quién y qué, además de los números. */
+  detalle: string;
+};
+
+function deudaDeFactura(f: CcOpenInvoiceRow): DeudaEnPantalla {
+  return {
+    destino: "factura",
+    id: f.invoice_id,
+    clave: claveDeuda("factura", f.invoice_id),
+    etiqueta: etiquetaFactura(f),
+    fecha: f.cbte_fch,
+    numero: f.cbte_nro,
+    saldo: f.saldo,
+    total: f.imp_total,
+    yaImputado: f.imputado,
+    detalle: fechaCorta(f.cbte_fch),
+  };
+}
+
+function deudaDeEstadia(e: CcOpenStayRow): DeudaEnPantalla {
+  return {
+    destino: "estadia",
+    // El id que entiende la RPC es el del CARGO, no el de la reserva: es la fila que
+    // representa esa deuda en la cuenta corriente.
+    id: e.cargo_movimiento_id,
+    clave: claveDeuda("estadia", e.cargo_movimiento_id),
+    etiqueta: etiquetaEstadia(e),
+    // La fecha con la que entra en la fila de antigüedad es la de salida: es cuando
+    // nació el cargo. Sin número de comprobante, porque todavía no hay comprobante.
+    fecha: e.fch_hasta,
+    numero: null,
+    saldo: e.saldo,
+    total: e.amount,
+    yaImputado: e.imputado,
+    detalle: e.passenger ? `${e.passenger} · sin facturar` : "Sin facturar",
+  };
 }
 
 /** "2026-08-12" (columna date) → "12/08/2026", sin pasar por una zona horaria. */
@@ -116,40 +187,53 @@ export default function RegisterPaymentModal({
   const [guardado, setGuardado] = useState<Guardado | null>(null);
 
   const [facturas, setFacturas] = useState<CcOpenInvoiceRow[]>([]);
-  const [loadingFacturas, setLoadingFacturas] = useState(true);
-  /** invoice_id → importe tipeado. Una factura está tildada si tiene entrada acá. */
+  const [estadias, setEstadias] = useState<CcOpenStayRow[]>([]);
+  const [loadingDeudas, setLoadingDeudas] = useState(true);
+  /** clave de la deuda → importe tipeado. Está tildada si tiene entrada acá. */
   const [imputado, setImputado] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
     (async () => {
-      const result = await loadClientOpenInvoicesAction(account.kind, account.id);
+      // Las dos juntas: son dos lecturas independientes y esperar una atrás de la
+      // otra sólo haría más largo el "Buscando…".
+      const [resFacturas, resEstadias] = await Promise.all([
+        loadClientOpenInvoicesAction(account.kind, account.id),
+        loadClientOpenStaysAction(account.kind, account.id),
+      ]);
       if (!active) return;
-      if (result.success) {
-        setFacturas(result.data ?? []);
-      } else {
-        // El listado de facturas es una ayuda: si falla, el pago a cuenta sin imputar
-        // tiene que seguir cargándose igual, así que no bloquea el modal.
-        toast.error(result.error);
-      }
-      setLoadingFacturas(false);
+      // Los listados son una ayuda: si fallan, el pago a cuenta sin imputar tiene que
+      // seguir cargándose igual, así que no bloquean el modal.
+      if (resFacturas.success) setFacturas(resFacturas.data ?? []);
+      else toast.error(resFacturas.error);
+      if (resEstadias.success) setEstadias(resEstadias.data ?? []);
+      else toast.error(resEstadias.error);
+      setLoadingDeudas(false);
     })();
     return () => {
       active = false;
     };
   }, [account.kind, account.id]);
 
+  const deudasFacturas = useMemo(() => facturas.map(deudaDeFactura), [facturas]);
+  const deudasEstadias = useMemo(() => estadias.map(deudaDeEstadia), [estadias]);
+  const deudas = useMemo(
+    () => [...deudasFacturas, ...deudasEstadias],
+    [deudasFacturas, deudasEstadias]
+  );
+
   const imputaciones: ImputacionEnPantalla[] = useMemo(
     () =>
-      facturas
-        .filter((f) => imputado[f.invoice_id] !== undefined)
-        .map((f) => ({
-          invoiceId: f.invoice_id,
-          etiqueta: etiquetaFactura(f),
-          saldo: f.saldo,
-          amount: monto(imputado[f.invoice_id]),
+      deudas
+        .filter((d) => imputado[d.clave] !== undefined)
+        .map((d) => ({
+          destino: d.destino,
+          id: d.id,
+          etiqueta: d.etiqueta,
+          saldo: d.saldo,
+          amount: monto(imputado[d.clave]),
         })),
-    [facturas, imputado]
+    [deudas, imputado]
   );
 
   const resumen = useMemo(
@@ -179,40 +263,36 @@ export default function RegisterPaymentModal({
   /** Retener sin anotar el certificado no rompe nada, pero deja el papel inútil. */
   const faltaCertificado = resumen.retenciones > 0 && certificado.trim() === "";
 
-  const paraRepartir: FacturaAImputar[] = useMemo(
-    () =>
-      facturas.map((f) => ({
-        invoiceId: f.invoice_id,
-        fecha: f.cbte_fch,
-        numero: f.cbte_nro,
-        saldo: f.saldo,
-      })),
-    [facturas]
-  );
-
-  /** El caso normal: "pagá lo que debe, empezando por lo más viejo". */
+  /**
+   * El caso normal: "pagá lo que debe, empezando por lo más viejo". Facturas y
+   * estadías entran en la MISMA fila de antigüedad (decisión de Agustín): una estadía
+   * de julio sin facturar es más vieja que una factura de agosto, aunque todavía no
+   * tenga papel.
+   */
   const repartirSolo = () => {
-    const reparto = repartirMasViejoPrimero(monto(amount), paraRepartir);
-    setImputado(Object.fromEntries(reparto.map((i) => [i.invoiceId, String(i.amount)])));
+    const reparto = repartirMasViejoPrimero(monto(amount), deudas);
+    setImputado(
+      Object.fromEntries(reparto.map((i) => [claveDeuda(i.destino, i.id), String(i.amount)]))
+    );
     if (reparto.length === 0) {
-      toast.info("No hay facturas con saldo para aplicar este pago.");
+      toast.info("No hay facturas ni estadías con saldo para aplicar este pago.");
     }
   };
 
-  const toggleFactura = (f: CcOpenInvoiceRow) => {
+  const toggleDeuda = (d: DeudaEnPantalla) => {
     setImputado((prev) => {
       const next = { ...prev };
-      if (next[f.invoice_id] !== undefined) {
-        delete next[f.invoice_id];
+      if (next[d.clave] !== undefined) {
+        delete next[d.clave];
         return next;
       }
-      // Al tildar se propone lo que entra: el saldo de la factura, o lo que quede
-      // libre del pago si es menos. Tildar y que aparezca un 0 obliga a hacer a mano
-      // la cuenta que la pantalla ya tiene hecha.
+      // Al tildar se propone lo que entra: el saldo de la deuda, o lo que quede libre
+      // del pago si es menos. Tildar y que aparezca un 0 obliga a hacer a mano la
+      // cuenta que la pantalla ya tiene hecha.
       const yaImputado = Object.entries(prev).reduce((sum, [, v]) => sum + monto(v), 0);
       const libre = Math.max(0, monto(amount) - yaImputado);
-      const propuesto = Math.round((Math.min(f.saldo, libre) + Number.EPSILON) * 100) / 100;
-      next[f.invoice_id] = String(propuesto > 0 ? propuesto : f.saldo);
+      const propuesto = Math.round((Math.min(d.saldo, libre) + Number.EPSILON) * 100) / 100;
+      next[d.clave] = String(propuesto > 0 ? propuesto : d.saldo);
       return next;
     });
   };
@@ -231,7 +311,7 @@ export default function RegisterPaymentModal({
       retencionGanancias: monto(retGanancias),
       retencionIibb: monto(retIibb),
       retencionCertificado: certificado.trim() || undefined,
-      imputaciones: imputaciones.map((i) => ({ invoiceId: i.invoiceId, amount: i.amount })),
+      imputaciones: imputaciones.map(aImputacionDestino),
     });
     setSaving(false);
 
@@ -327,12 +407,13 @@ export default function RegisterPaymentModal({
             </div>
           </div>
 
-          <FacturasImputables
-            facturas={facturas}
-            loading={loadingFacturas}
+          <DeudasImputables
+            facturas={deudasFacturas}
+            estadias={deudasEstadias}
+            loading={loadingDeudas}
             imputado={imputado}
-            onToggle={toggleFactura}
-            onImporte={(id, value) => setImputado((prev) => ({ ...prev, [id]: value }))}
+            onToggle={toggleDeuda}
+            onImporte={(clave, value) => setImputado((prev) => ({ ...prev, [clave]: value }))}
             onRepartir={repartirSolo}
             puedeRepartir={monto(amount) > 0}
           />
@@ -364,7 +445,7 @@ export default function RegisterPaymentModal({
           {/* El resumen va ARRIBA del botón y en letra grande: es el número que la
               gente se equivoca, así que tiene que leerse antes de apretar y no
               después, en el recibo. */}
-          <ResumenEnVivo resumen={resumen} imputando={imputaciones.length} />
+          <ResumenEnVivo resumen={resumen} imputaciones={imputaciones} />
 
           {problemas.length > 0 && (
             <ul
@@ -403,9 +484,18 @@ export default function RegisterPaymentModal({
   );
 }
 
-/** Las facturas con saldo del cliente, para tildar cuáles se están pagando. */
-function FacturasImputables({
+/**
+ * Lo que el cliente debe y se puede tildar: las facturas con saldo y las estadías que
+ * todavía no se facturaron (mig 114).
+ *
+ * Van en dos bloques con título y no en una lista sola aunque el reparto automático
+ * las mezcle: "Factura B 0008-00000123" y "Estadía Hab. 2" son dos cosas distintas
+ * para el que cobra, y la estadía necesita además la advertencia de que su factura
+ * todavía no salió.
+ */
+function DeudasImputables({
   facturas,
+  estadias,
   loading,
   imputado,
   onToggle,
@@ -413,19 +503,21 @@ function FacturasImputables({
   onRepartir,
   puedeRepartir,
 }: {
-  facturas: CcOpenInvoiceRow[];
+  facturas: DeudaEnPantalla[];
+  estadias: DeudaEnPantalla[];
   loading: boolean;
   imputado: Record<string, string>;
-  onToggle: (f: CcOpenInvoiceRow) => void;
-  onImporte: (invoiceId: string, value: string) => void;
+  onToggle: (d: DeudaEnPantalla) => void;
+  onImporte: (clave: string, value: string) => void;
   onRepartir: () => void;
   puedeRepartir: boolean;
 }) {
+  const hayDeudas = facturas.length + estadias.length > 0;
   return (
     <div className="rounded-xl border border-slate-200">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-100 bg-slate-50/70">
         <div>
-          <p className="text-sm font-bold text-slate-700">Aplicar a facturas</p>
+          <p className="text-sm font-bold text-slate-700">Aplicar a lo que debe</p>
           <p className="text-[11px] text-slate-500">
             Opcional: sin tildar nada, el pago queda a cuenta.
           </p>
@@ -433,8 +525,8 @@ function FacturasImputables({
         <button
           type="button"
           onClick={onRepartir}
-          disabled={!puedeRepartir || facturas.length === 0}
-          title="Reparte el monto empezando por la factura más vieja"
+          disabled={!puedeRepartir || !hayDeudas}
+          title="Reparte el monto empezando por lo más viejo, sea factura o estadía"
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
         >
           <Wand2 size={14} /> Aplicar a lo más viejo primero
@@ -443,54 +535,103 @@ function FacturasImputables({
 
       {loading ? (
         <p className="flex items-center gap-2 px-4 py-4 text-sm text-slate-500">
-          <Loader2 size={16} className="animate-spin" /> Buscando facturas impagas…
+          <Loader2 size={16} className="animate-spin" /> Buscando lo que falta cobrar…
         </p>
-      ) : facturas.length === 0 ? (
+      ) : !hayDeudas ? (
         <p className="px-4 py-4 text-sm text-slate-500">
-          Este cliente no tiene facturas con saldo. El pago se registra a cuenta.
+          Este cliente no tiene facturas ni estadías con saldo. El pago se registra a
+          cuenta.
         </p>
       ) : (
-        <ul className="divide-y divide-slate-100">
-          {facturas.map((f) => {
-            const tildada = imputado[f.invoice_id] !== undefined;
-            return (
-              <li key={f.invoice_id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                <label className="flex items-center gap-3 flex-1 min-w-[200px] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={tildada}
-                    onChange={() => onToggle(f)}
-                    className="h-4 w-4 accent-emerald-600 shrink-0"
-                    aria-label={`Aplicar a ${etiquetaFactura(f)}`}
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-slate-800">
-                      {etiquetaFactura(f)}
-                    </span>
-                    <span className="block text-xs text-slate-500">
-                      {fechaCorta(f.cbte_fch)} · total {formatAmount(f.imp_total)} · falta{" "}
-                      <span className="font-bold text-slate-700">{formatAmount(f.saldo)}</span>
-                      {f.imputado > 0 ? ` (ya cobró ${formatAmount(f.imputado)})` : ""}
-                    </span>
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={imputado[f.invoice_id] ?? ""}
-                  onChange={(e) => onImporte(f.invoice_id, e.target.value)}
-                  disabled={!tildada}
-                  aria-label={`Importe imputado a ${etiquetaFactura(f)}`}
-                  placeholder="0,00"
-                  className="w-32 px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-right font-semibold outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {facturas.length > 0 && (
+            <GrupoDeDeudas
+              titulo="Facturas"
+              deudas={facturas}
+              imputado={imputado}
+              onToggle={onToggle}
+              onImporte={onImporte}
+            />
+          )}
+          {estadias.length > 0 && (
+            <GrupoDeDeudas
+              titulo="Estadías sin facturar"
+              ayuda="Cuando salga la factura, esta plata se pasa sola al comprobante."
+              deudas={estadias}
+              imputado={imputado}
+              onToggle={onToggle}
+              onImporte={onImporte}
+            />
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+function GrupoDeDeudas({
+  titulo,
+  ayuda,
+  deudas,
+  imputado,
+  onToggle,
+  onImporte,
+}: {
+  titulo: string;
+  ayuda?: string;
+  deudas: DeudaEnPantalla[];
+  imputado: Record<string, string>;
+  onToggle: (d: DeudaEnPantalla) => void;
+  onImporte: (clave: string, value: string) => void;
+}) {
+  return (
+    <>
+      <p className="px-4 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        {titulo}
+        {ayuda && (
+          <span className="block normal-case tracking-normal font-semibold text-slate-500">
+            {ayuda}
+          </span>
+        )}
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {deudas.map((d) => {
+          const tildada = imputado[d.clave] !== undefined;
+          return (
+            <li key={d.clave} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+              <label className="flex items-center gap-3 flex-1 min-w-[200px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={tildada}
+                  onChange={() => onToggle(d)}
+                  className="h-4 w-4 accent-emerald-600 shrink-0"
+                  aria-label={`Aplicar a ${d.etiqueta}`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-slate-800">{d.etiqueta}</span>
+                  <span className="block text-xs text-slate-500">
+                    {d.detalle} · total {formatAmount(d.total)} · falta{" "}
+                    <span className="font-bold text-slate-700">{formatAmount(d.saldo)}</span>
+                    {d.yaImputado > 0 ? ` (ya cobró ${formatAmount(d.yaImputado)})` : ""}
+                  </span>
+                </span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={imputado[d.clave] ?? ""}
+                onChange={(e) => onImporte(d.clave, e.target.value)}
+                disabled={!tildada}
+                aria-label={`Importe imputado a ${d.etiqueta}`}
+                placeholder="0,00"
+                className="w-32 px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-right font-semibold outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
@@ -580,14 +721,28 @@ function Retenciones({
   );
 }
 
+/** "1 factura", "2 estadías", "1 factura y 2 estadías": lo que se está pagando. */
+function detalleDeLoAplicado(imputaciones: readonly ImputacionEnPantalla[]): string {
+  const cuenta = (n: number, singular: string, plural: string) =>
+    `${n} ${n === 1 ? singular : plural}`;
+  const f = imputaciones.filter((i) => i.destino === "factura").length;
+  const e = imputaciones.length - f;
+  const partes = [
+    ...(f > 0 ? [cuenta(f, "factura", "facturas")] : []),
+    ...(e > 0 ? [cuenta(e, "estadía", "estadías")] : []),
+  ];
+  return partes.join(" y ");
+}
+
 /** Las tres cifras del pago, en grande, antes de apretar el botón. */
 function ResumenEnVivo({
   resumen,
-  imputando,
+  imputaciones,
 }: {
   resumen: ReturnType<typeof resumenPago>;
-  imputando: number;
+  imputaciones: ImputacionEnPantalla[];
 }) {
+  const imputando = imputaciones.length;
   return (
     <div
       data-testid="pago-resumen"
@@ -599,8 +754,8 @@ function ResumenEnVivo({
       </p>
       <p className="text-xs font-semibold text-emerald-800/80 mt-1">
         {imputando === 0
-          ? "Sin aplicar a facturas: queda como pago a cuenta."
-          : `Aplicado a ${imputando} factura${imputando === 1 ? "" : "s"}: ${formatAmount(resumen.imputado)}${
+          ? "Sin aplicar a nada: queda como pago a cuenta."
+          : `Aplicado a ${detalleDeLoAplicado(imputaciones)}: ${formatAmount(resumen.imputado)}${
               resumen.sinImputar > 0 ? ` · ${formatAmount(resumen.sinImputar)} quedan a cuenta` : ""
             }`}
       </p>

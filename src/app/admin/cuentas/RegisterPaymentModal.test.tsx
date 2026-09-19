@@ -2,16 +2,18 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import RegisterPaymentModal from "./RegisterPaymentModal";
-import type { CcOpenInvoiceRow, CtaCteAccount } from "@/lib/types";
+import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
 
 const loadClientOpenInvoicesAction = vi.fn();
+const loadClientOpenStaysAction = vi.fn();
 const registerAccountPaymentAction = vi.fn();
 vi.mock("./actions", () => ({
   loadClientOpenInvoicesAction: (...args: unknown[]) => loadClientOpenInvoicesAction(...args),
+  loadClientOpenStaysAction: (...args: unknown[]) => loadClientOpenStaysAction(...args),
   registerAccountPaymentAction: (...args: unknown[]) => registerAccountPaymentAction(...args),
 }));
 
@@ -52,8 +54,27 @@ const facturas: CcOpenInvoiceRow[] = [
   },
 ];
 
+/**
+ * Una estadia cerrada en JUNIO y todavia sin facturar (mig 114): mas vieja que las
+ * dos facturas, que es lo que hace visible el orden del reparto automatico.
+ */
+const estadias: CcOpenStayRow[] = [
+  {
+    cargo_movimiento_id: "cargo-junio",
+    reservation_id: "r-junio",
+    room_number: "3",
+    passenger: "Ana Gomez",
+    fch_desde: "2026-06-10",
+    fch_hasta: "2026-06-12",
+    amount: 30000,
+    imputado: 0,
+    saldo: 30000,
+  },
+];
+
 const etiquetaVieja = "Factura B 00008-00000010";
 const etiquetaNueva = "Factura B 00008-00000030";
+const etiquetaEstadia = "Estadía Hab. 3 · 10/06/2026 al 12/06/2026";
 
 function montoDe(etiqueta: string): HTMLInputElement {
   return screen.getByLabelText(`Importe imputado a ${etiqueta}`) as HTMLInputElement;
@@ -74,6 +95,10 @@ describe("RegisterPaymentModal", () => {
   beforeEach(() => {
     loadClientOpenInvoicesAction.mockReset();
     loadClientOpenInvoicesAction.mockResolvedValue({ success: true, data: facturas });
+    loadClientOpenStaysAction.mockReset();
+    // Por defecto no hay estadias sin facturar: los tests de siempre miran las
+    // facturas y no tienen por que cambiar de resultado por la mig 114.
+    loadClientOpenStaysAction.mockResolvedValue({ success: true, data: [] });
     registerAccountPaymentAction.mockReset();
     registerAccountPaymentAction.mockResolvedValue({
       success: true,
@@ -186,13 +211,78 @@ describe("RegisterPaymentModal", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it("sin facturas con saldo, el cobro se carga igual y lo dice", async () => {
+  it("sin nada con saldo, el cobro se carga igual y lo dice", async () => {
     loadClientOpenInvoicesAction.mockResolvedValue({ success: true, data: [] });
     render(<RegisterPaymentModal account={account} onClose={vi.fn()} onSaved={vi.fn()} />);
 
     await waitFor(() =>
-      expect(screen.getByText(/no tiene facturas con saldo/)).toBeTruthy()
+      expect(screen.getByText(/no tiene facturas ni estadías con saldo/)).toBeTruthy()
     );
     expect(botonGuardar().disabled).toBe(false);
+  });
+});
+
+describe("RegisterPaymentModal — imputar a una estadía sin facturar (mig 114)", () => {
+  beforeEach(() => {
+    loadClientOpenInvoicesAction.mockReset();
+    loadClientOpenInvoicesAction.mockResolvedValue({ success: true, data: facturas });
+    loadClientOpenStaysAction.mockReset();
+    loadClientOpenStaysAction.mockResolvedValue({ success: true, data: estadias });
+    registerAccountPaymentAction.mockReset();
+    registerAccountPaymentAction.mockResolvedValue({
+      success: true,
+      data: { movementId: "mov-1", reciboCcNumero: 7 },
+    });
+    vi.stubGlobal("open", vi.fn().mockReturnValue({} as Window));
+  });
+
+  it("ofrece las estadías sin facturar además de las facturas", async () => {
+    await abrir();
+
+    expect(screen.getByText("Estadías sin facturar")).toBeTruthy();
+    expect(screen.getByLabelText(`Aplicar a ${etiquetaEstadia}`)).toBeTruthy();
+    // Y dice que no hay que hacer nada cuando salga la factura: la plata se muda sola.
+    expect(screen.getByText(/se pasa sola al comprobante/)).toBeTruthy();
+  });
+
+  it("la estadía viaja como el id de su CARGO, no como el de la reserva", async () => {
+    // Es lo que entiende la RPC: el cargo es la fila que representa esa deuda.
+    const onSaved = await abrir();
+
+    fireEvent.change(screen.getByLabelText("Monto que cancela"), { target: { value: "30000" } });
+    fireEvent.click(screen.getByLabelText(`Aplicar a ${etiquetaEstadia}`));
+    fireEvent.click(botonGuardar());
+
+    await waitFor(() => expect(registerAccountPaymentAction).toHaveBeenCalledTimes(1));
+    expect(registerAccountPaymentAction.mock.calls[0][0].imputaciones).toEqual([
+      { cargoMovimientoId: "cargo-junio", amount: 30000 },
+    ]);
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+
+  it("lo más viejo primero mezcla estadías y facturas por fecha", async () => {
+    // Decisión de Agustín: una sola fila de antigüedad. La estadía de junio se salda
+    // antes que la factura de julio.
+    await abrir();
+
+    fireEvent.click(screen.getByRole("button", { name: /Aplicar a lo más viejo primero/ }));
+
+    expect(montoDe(etiquetaEstadia).value).toBe("30000");
+    expect(montoDe(etiquetaVieja).value).toBe("40000");
+    expect(montoDe(etiquetaNueva).value).toBe("30000"); // lo que quedó de los $100.000
+    expect(resumen()).toContain("Aplicado a 2 facturas y 1 estadía");
+    expect(problemas()).toBe("");
+  });
+
+  it("no deja imputarle a la estadía más de lo que debe", async () => {
+    // El techo por estadía (P0043), avisado antes de mandar.
+    await abrir();
+
+    fireEvent.click(screen.getByLabelText(`Aplicar a ${etiquetaEstadia}`));
+    fireEvent.change(montoDe(etiquetaEstadia), { target: { value: "45000" } });
+
+    await waitFor(() => expect(problemas()).toContain("Estadía Hab. 3"));
+    expect(problemas()).toContain("$15.000,00 de más");
+    expect(botonGuardar().disabled).toBe(true);
   });
 });

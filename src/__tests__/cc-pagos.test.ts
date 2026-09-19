@@ -13,7 +13,9 @@ import {
   retencionExcedente,
   retencionesTotal,
   sinImputar,
-  type FacturaAImputar,
+  aImputacionDestino,
+  claveDeuda,
+  type DeudaAImputar,
   type ImputacionEnPantalla,
 } from "@/lib/cc-pagos";
 
@@ -214,19 +216,19 @@ describe("el resumen en vivo del modal de cobro", () => {
 describe("aplicar a lo más viejo primero", () => {
   // El caso normal de una empresa que transfiere: paga lo que debe y nadie quiere
   // cargar seis renglones a mano.
-  const facturas: FacturaAImputar[] = [
-    { invoiceId: "nueva", fecha: "2026-09-01", numero: 30, saldo: 50000 },
-    { invoiceId: "vieja", fecha: "2026-07-01", numero: 10, saldo: 40000 },
-    { invoiceId: "media", fecha: "2026-08-01", numero: 20, saldo: 30000 },
+  const facturas: DeudaAImputar[] = [
+    { destino: "factura", id: "nueva", fecha: "2026-09-01", numero: 30, saldo: 50000 },
+    { destino: "factura", id: "vieja", fecha: "2026-07-01", numero: 10, saldo: 40000 },
+    { destino: "factura", id: "media", fecha: "2026-08-01", numero: 20, saldo: 30000 },
   ];
 
   it("salda la más vieja antes de tocar la siguiente", () => {
     const reparto = repartirMasViejoPrimero(100000, facturas);
 
     expect(reparto).toEqual([
-      { invoiceId: "vieja", amount: 40000 },
-      { invoiceId: "media", amount: 30000 },
-      { invoiceId: "nueva", amount: 30000 },
+      { destino: "factura", id: "vieja", amount: 40000 },
+      { destino: "factura", id: "media", amount: 30000 },
+      { destino: "factura", id: "nueva", amount: 30000 },
     ]);
   });
 
@@ -244,7 +246,7 @@ describe("aplicar a lo más viejo primero", () => {
     // tiene que pasarlo por construcción.
     const reparto = repartirMasViejoPrimero(1000000, facturas);
     for (const imputacion of reparto) {
-      const factura = facturas.find((f) => f.invoiceId === imputacion.invoiceId);
+      const factura = facturas.find((f) => f.id === imputacion.id);
       expect(imputacion.amount).toBeLessThanOrEqual(factura!.saldo);
     }
     // Y el sobrante NO se fuerza a ninguna: queda a cuenta.
@@ -254,8 +256,8 @@ describe("aplicar a lo más viejo primero", () => {
   it("un monto que no alcanza deja la última factura a medias y no toca las de atrás", () => {
     const reparto = repartirMasViejoPrimero(55000, facturas);
     expect(reparto).toEqual([
-      { invoiceId: "vieja", amount: 40000 },
-      { invoiceId: "media", amount: 15000 },
+      { destino: "factura", id: "vieja", amount: 40000 },
+      { destino: "factura", id: "media", amount: 15000 },
     ]);
     expect(imputacionExcedente({ amount: 55000 }, reparto)).toBe(0);
   });
@@ -263,11 +265,11 @@ describe("aplicar a lo más viejo primero", () => {
   it("las facturas sin fecha van al final, no primero", () => {
     // Una factura sin CAE no tiene lugar en la fila de antigüedad: ponerla primera
     // haría que el reparto empiece por lo que todavía no es exigible.
-    const conHuerfana: FacturaAImputar[] = [
-      { invoiceId: "sin-fecha", fecha: null, numero: null, saldo: 10000 },
-      { invoiceId: "vieja", fecha: "2026-07-01", numero: 10, saldo: 10000 },
+    const conHuerfana: DeudaAImputar[] = [
+      { destino: "factura", id: "sin-fecha", fecha: null, numero: null, saldo: 10000 },
+      { destino: "factura", id: "vieja", fecha: "2026-07-01", numero: 10, saldo: 10000 },
     ];
-    expect(repartirMasViejoPrimero(15000, conHuerfana)[0].invoiceId).toBe("vieja");
+    expect(repartirMasViejoPrimero(15000, conHuerfana)[0].id).toBe("vieja");
   });
 
   it("no reparte nada con monto cero, y no revienta", () => {
@@ -276,12 +278,12 @@ describe("aplicar a lo más viejo primero", () => {
   });
 
   it("saltea las facturas ya saldadas en vez de imputarles cero", () => {
-    const conSaldada: FacturaAImputar[] = [
-      { invoiceId: "saldada", fecha: "2026-06-01", numero: 5, saldo: 0 },
-      { invoiceId: "vieja", fecha: "2026-07-01", numero: 10, saldo: 40000 },
+    const conSaldada: DeudaAImputar[] = [
+      { destino: "factura", id: "saldada", fecha: "2026-06-01", numero: 5, saldo: 0 },
+      { destino: "factura", id: "vieja", fecha: "2026-07-01", numero: 10, saldo: 40000 },
     ];
     expect(repartirMasViejoPrimero(40000, conSaldada)).toEqual([
-      { invoiceId: "vieja", amount: 40000 },
+      { destino: "factura", id: "vieja", amount: 40000 },
     ]);
   });
 });
@@ -290,7 +292,8 @@ describe("lo que la pantalla NO deja mandar", () => {
   // Los mensajes dicen qué corregir y con cuánto: el que carga el pago tiene la
   // transferencia a la vista y necesita saber qué número mover.
   const factura = (amount: number, saldo = 30000): ImputacionEnPantalla => ({
-    invoiceId: "f1",
+    destino: "factura",
+    id: "f1",
     etiqueta: "Factura B 00008-00000042",
     saldo,
     amount,
@@ -317,8 +320,8 @@ describe("lo que la pantalla NO deja mandar", () => {
     const problemas = problemasDelPago({
       amount: 50000,
       imputaciones: [
-        { invoiceId: "a", etiqueta: "Factura B 1", saldo: 40000, amount: 40000 },
-        { invoiceId: "b", etiqueta: "Factura B 2", saldo: 40000, amount: 20000 },
+        { destino: "factura", id: "a", etiqueta: "Factura B 1", saldo: 40000, amount: 40000 },
+        { destino: "factura", id: "b", etiqueta: "Factura B 2", saldo: 40000, amount: 20000 },
       ],
     });
 
@@ -448,5 +451,132 @@ describe("una imputación desimputada deja de contar (mig 111)", () => {
   it("revertida ausente o false significa viva", () => {
     // La pantalla arma las líneas nuevas sin el campo: no puede cambiar el resultado.
     expect(imputadoTotal([{ amount: 500 }, { amount: 500, revertida: false }])).toBe(1000);
+  });
+});
+
+describe("la plata también se puede apuntar a una estadía sin facturar (mig 114)", () => {
+  // Lo que la mig 109 no podía registrar: el cliente que transfiere en agosto por las
+  // noches de julio, cuya factura sale recién a fin de mes.
+
+  it("una estadía se reparte igual que una factura: es una fecha y un saldo", () => {
+    const deudas: DeudaAImputar[] = [
+      { destino: "factura", id: "f-agosto", fecha: "2026-08-10", numero: 20, saldo: 30000 },
+      { destino: "estadia", id: "cargo-julio", fecha: "2026-07-15", numero: null, saldo: 50000 },
+    ];
+
+    // Decisión de Agustín: una sola fila de antigüedad. La estadía de julio es más
+    // vieja que la factura de agosto, aunque todavía no tenga papel.
+    expect(repartirMasViejoPrimero(60000, deudas)).toEqual([
+      { destino: "estadia", id: "cargo-julio", amount: 50000 },
+      { destino: "factura", id: "f-agosto", amount: 10000 },
+    ]);
+  });
+
+  it("dentro del mismo día va primero la que ya tiene comprobante", () => {
+    // Empate de fechas: la emitida es exigible hoy, la estadía todavía no.
+    const mismoDia: DeudaAImputar[] = [
+      { destino: "estadia", id: "cargo", fecha: "2026-07-15", numero: null, saldo: 10000 },
+      { destino: "factura", id: "f", fecha: "2026-07-15", numero: 7, saldo: 10000 },
+    ];
+    expect(repartirMasViejoPrimero(10000, mismoDia)[0].id).toBe("f");
+  });
+
+  it("el orden no depende de cómo venía la lista, tampoco mezclando los dos tipos", () => {
+    const deudas: DeudaAImputar[] = [
+      { destino: "estadia", id: "e1", fecha: "2026-07-01", numero: null, saldo: 10000 },
+      { destino: "factura", id: "f1", fecha: "2026-08-01", numero: 3, saldo: 10000 },
+      { destino: "estadia", id: "e2", fecha: "2026-06-01", numero: null, saldo: 10000 },
+    ];
+    expect(repartirMasViejoPrimero(25000, [...deudas].reverse())).toEqual(
+      repartirMasViejoPrimero(25000, deudas)
+    );
+  });
+
+  it("nunca le imputa a una estadía más que su saldo: es el techo P0043", () => {
+    // El equivalente del techo por factura (P0038), medido contra el cargo.
+    const deudas: DeudaAImputar[] = [
+      { destino: "estadia", id: "cargo", fecha: "2026-07-01", numero: null, saldo: 20000 },
+    ];
+    const reparto = repartirMasViejoPrimero(500000, deudas);
+    expect(reparto).toEqual([{ destino: "estadia", id: "cargo", amount: 20000 }]);
+    // El sobrante NO se le fuerza: queda a cuenta, que es un pago legítimo.
+    expect(sinImputar({ amount: 500000 }, reparto)).toBe(480000);
+  });
+
+  it("el techo de una estadía ya cobrada a medias cuenta lo que otros pagos le pusieron", () => {
+    // Mismo cálculo que el de una factura: la estadía debe 30.000 y ya tiene 12.000.
+    expect(facturaExcedente({ impTotal: 30000, imputado: 12000 }, 18000)).toBe(0);
+    expect(facturaExcedente({ impTotal: 30000, imputado: 12000 }, 18001)).toBe(1);
+  });
+
+  it("los avisos de la pantalla nombran la estadía, no 'la factura'", () => {
+    const problemas = problemasDelPago({
+      amount: 100000,
+      imputaciones: [
+        {
+          destino: "estadia",
+          id: "cargo",
+          etiqueta: "Estadía Hab. 3 · 10/07 al 12/07",
+          saldo: 30000,
+          amount: 45000,
+        },
+      ],
+    });
+
+    expect(problemas).toHaveLength(1);
+    expect(problemas[0]).toContain("Estadía Hab. 3");
+    expect(problemas[0]).toContain("$15.000,00");
+  });
+
+  it("cada destino viaja con su clave y nunca con las dos", () => {
+    // Es la forma que valida `app_validar_forma_imputaciones`: una factura O una
+    // estadía. Mandar las dos, o ninguna, lo rechaza la RPC.
+    expect(aImputacionDestino({ destino: "factura", id: "f1", amount: 100 })).toEqual({
+      invoiceId: "f1",
+      amount: 100,
+    });
+    expect(aImputacionDestino({ destino: "estadia", id: "c1", amount: 100 })).toEqual({
+      cargoMovimientoId: "c1",
+      amount: 100,
+    });
+  });
+
+  it("la clave de pantalla lleva el destino adentro", () => {
+    // Si fuera sólo el id, una factura y un cargo con el mismo id compartirían el
+    // estado de tildado.
+    expect(claveDeuda("factura", "x")).not.toBe(claveDeuda("estadia", "x"));
+  });
+});
+
+describe("cuando la estadía se factura, la plata se muda sola (mig 114)", () => {
+  // La mudanza la hace el trigger, no esto. Lo que se fija acá es que la aritmética
+  // de TypeScript lea el resultado igual que la base: la línea vieja queda revertida
+  // y por eso deja de sumar, y la nueva ocupa su lugar.
+
+  it("mudar no cambia cuánto tiene imputado el pago", () => {
+    const antes = [{ amount: 30000 }];
+    const despues = [{ amount: 30000, revertida: true }, { amount: 30000 }];
+    expect(imputadoTotal(despues)).toBe(imputadoTotal(antes));
+    expect(sinImputar({ amount: 50000 }, despues)).toBe(20000);
+  });
+
+  it("la estadía deja de tener plata y la factura pasa a tenerla", () => {
+    // Las dos mitades del mismo movimiento: si sólo se escribiera una, el mismo peso
+    // aparecería dos veces (o ninguna).
+    const enLaEstadia = [{ amount: 30000, revertida: true }];
+    const enLaFactura = [{ amount: 30000 }];
+    expect(imputadoTotal(enLaEstadia)).toBe(0);
+    expect(estaPagada({ impTotal: 30000, imputado: imputadoTotal(enLaFactura) })).toBe(true);
+  });
+
+  it("si no entraba todo, lo que sobró vuelve a quedar a cuenta", () => {
+    // El caso raro que el trigger resuelve recortando en vez de abortar: la factura
+    // salió por menos de lo que la estadía tenía apuntado. Una emisión no se cae por
+    // una cuestión de imputación.
+    const pago = { amount: 30000 };
+    const despues = [{ amount: 30000, revertida: true }, { amount: 25000 }];
+    expect(imputadoTotal(despues)).toBe(25000);
+    expect(sinImputar(pago, despues)).toBe(5000);
+    expect(imputacionExcedente(pago, despues)).toBe(0);
   });
 });

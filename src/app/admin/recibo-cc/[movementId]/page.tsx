@@ -44,6 +44,30 @@ function formatDateCol(value: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
+/**
+ * Qué canceló cada línea del recibo: un comprobante, o una estadía que todavía no
+ * tenía factura cuando se cobró (mig 114).
+ *
+ * La estadía se identifica por el N° de remito que el cliente firmó en el check-out
+ * (mig 106): en un ticket es mejor referencia que la habitación y las fechas, porque
+ * es un papel que el cliente ya tiene. Si por lo que fuera no tuviera número, cae en
+ * el importe del cargo, que sigue alcanzando para reconocerla.
+ */
+function nombreImputado(imp: CcPaymentReceipt["imputaciones"][number]): string {
+  if (imp.destino === "estadia") {
+    return imp.estadia_remito_numero !== null
+      ? `Estadia - Remito ${formatShiftCode(imp.estadia_remito_numero)}`
+      : `Estadia sin facturar ${money(imp.estadia_total ?? 0)}`;
+  }
+  const numero =
+    imp.cbte_nro !== null && imp.pto_vta !== null
+      ? formatCbteNumero(imp.pto_vta, imp.cbte_nro)
+      : "s/nro";
+  return `${cbteNombre(imp.cbte_tipo ?? 0)} ${numero}${
+    imp.cbte_fch ? ` - ${formatDateCol(imp.cbte_fch)}` : ""
+  }`;
+}
+
 type PageProps = {
   params: Promise<{ movementId: string }>;
   searchParams: Promise<{ autoprint?: string; copy?: string }>;
@@ -184,11 +208,13 @@ function ReceiptCopy({
           {receipt.imputaciones.map((imp) => (
             <p className="item small" key={imp.imputacion_id}>
               <span>
-                {cbteNombre(imp.cbte_tipo)}{" "}
-                {imp.cbte_nro !== null ? formatCbteNumero(imp.pto_vta, imp.cbte_nro) : "s/nro"}
-                {imp.cbte_fch ? ` - ${formatDateCol(imp.cbte_fch)}` : ""}
+                {nombreImputado(imp)}
                 {imp.anulada ? " (anulada)" : ""}
-                {imp.revertida ? " (desimputada)" : ""}
+                {/* Mudada y desimputada no son lo mismo: a la mudada no la soltó
+                    nadie, se la llevó la factura de esa estadía (mig 114). Decirle
+                    "desimputada" en el papel sería decirle al cliente que esa plata
+                    volvió a quedar suelta. */}
+                {imp.revertida ? (imp.mudada ? " (pasó a su factura)" : " (desimputada)") : ""}
               </span>
               <span className="money">{money(imp.imputado)}</span>
             </p>
@@ -198,10 +224,16 @@ function ReceiptCopy({
             importes que ya no cancelan nada y quedaría sin explicar por qué la suma de
             "Imputado a" no coincide con lo que la factura tiene aplicado hoy.
           */}
-          {receipt.imputaciones.some((imp) => imp.revertida) && (
+          {receipt.imputaciones.some((imp) => imp.revertida && !imp.mudada) && (
             <p className="note">
-              Las líneas marcadas como desimputadas ya no cancelan esa factura: ese
-              importe volvió a quedar disponible en este pago.
+              Las líneas marcadas como desimputadas ya no cancelan eso: ese importe
+              volvió a quedar disponible en este pago.
+            </p>
+          )}
+          {receipt.imputaciones.some((imp) => imp.mudada) && (
+            <p className="note">
+              Las líneas que pasaron a su factura siguen cobradas: esa estadía se
+              facturó después y el importe quedó aplicado a su comprobante.
             </p>
           )}
         </>

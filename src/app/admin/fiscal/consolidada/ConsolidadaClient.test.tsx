@@ -47,6 +47,10 @@ function makeRow(
     imp_total: null,
     imputado: null,
     cobro_estado: facturable ? "sin_facturar" : "facturado_externo",
+    // Plata apuntada a la estadía misma (mig 114): ninguna en este fixture. El saldo
+    // sólo existe mientras la estadía sea facturable.
+    imputado_estadia: 0,
+    saldo_estadia: facturable ? (opts.amount ?? 10000) : null,
   };
 }
 
