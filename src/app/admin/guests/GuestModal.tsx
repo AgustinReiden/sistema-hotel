@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Loader2, Percent, Receipt, UserRound, Wallet, X } from "lucide-react";
+import { CreditCard, Hash, Loader2, Percent, Receipt, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { loadGuestRecordAction, updateGuestAction, type GuestRecordPayload } from "./actions";
@@ -31,6 +31,7 @@ const emptyForm: GuestRecordPayload = {
   cuit: null,
   razonSocial: null,
   domicilioFiscal: null,
+  robinetId: null,
 };
 
 export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProps) {
@@ -63,6 +64,7 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
           cuit: g.cuit ?? null,
           razonSocial: g.razon_social ?? null,
           domicilioFiscal: g.domicilio_fiscal ?? null,
+          robinetId: g.robinet_id ?? null,
         });
       } else {
         toast.error(result.success ? "No se encontró el huésped." : result.error);
@@ -264,6 +266,23 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                   type="text"
                   value={form.address ?? ""}
                   onChange={(e) => set({ address: e.target.value })}
+                  className={inputClass}
+                  placeholder="Opcional"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Hash size={14} />
+                    N° de cliente en Robinet
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.robinetId ?? ""}
+                  onChange={(e) => set({ robinetId: e.target.value ? Number(e.target.value) : null })}
                   className={inputClass}
                   placeholder="Opcional"
                 />

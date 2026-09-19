@@ -290,6 +290,8 @@ export type GuestRecord = {
   razon_social: string | null;
   /** Domicilio fiscal (RG 1415). Puede diferir de `address`, el particular. */
   domicilio_fiscal: string | null;
+  /** Id de este cliente en Robinet (otro sistema del hotel). No es un dato de ARCA. */
+  robinet_id: number | null;
 };
 
 /** Tipo de cliente con cuenta corriente: empresa (associated_clients) o huésped (guests). */
@@ -516,6 +518,8 @@ export type AssociatedClient = {
   domicilio: string | null;
   /** Cuándo se le factura: al cerrar cada estadía, consolidado, o nunca (mig 79). */
   facturacion_modo: FacturacionModo;
+  /** Id de esta empresa en Robinet (otro sistema del hotel). No es un dato de ARCA. */
+  robinet_id: number | null;
   created_at: string;
   updated_at: string;
 };

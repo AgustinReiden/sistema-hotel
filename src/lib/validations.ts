@@ -307,6 +307,22 @@ export const associatedClientSchema = z.object({
       },
       z.string().max(500, "Las notas no pueden superar los 500 caracteres.").optional()
     ),
+  // Id de este cliente en Robinet (otro sistema del hotel). Vacio -> undefined (NULL), no 0.
+  robinetId: z.preprocess(
+    (value) => {
+      if (value === null || value === undefined) return undefined;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed === "" ? undefined : Number(trimmed);
+      }
+      return value;
+    },
+    z
+      .number()
+      .int("El numero de cliente en Robinet debe ser un entero.")
+      .positive("El numero de cliente en Robinet debe ser positivo.")
+      .optional()
+  ),
 });
 
 const currencyAmount = z.preprocess(

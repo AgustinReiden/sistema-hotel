@@ -24,6 +24,8 @@ export type GuestRecordPayload = {
   cuit?: string | null;
   razonSocial?: string | null;
   domicilioFiscal?: string | null;
+  // Id de este huesped en Robinet (otro sistema del hotel). No es un dato de ARCA.
+  robinetId?: number | null;
 };
 
 // El chequeo de rol vive en @/lib/server-auth; aca solo se fija el mensaje de la seccion.
@@ -43,7 +45,7 @@ export async function loadGuestRecordAction(id: string): Promise<ActionResult<Gu
     const { data, error } = await supabase
       .from("guests")
       .select(
-        "id, full_name, document_type, document_id, phone, address, locality, nationality, profession, discount_percent, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, cuit, razon_social, domicilio_fiscal"
+        "id, full_name, document_type, document_id, phone, address, locality, nationality, profession, discount_percent, cuenta_corriente_habilitada, facturacion_modo, condicion_iva, cuit, razon_social, domicilio_fiscal, robinet_id"
       )
       .eq("id", id)
       .maybeSingle();
@@ -89,6 +91,15 @@ export async function updateGuestAction(
       return { success: false, error: "El descuento debe estar entre 0 y 100." };
     }
 
+    // Vacio (null/undefined) -> NULL en la base, no 0: un 0 se confundiria con un cliente real.
+    let robinetId: number | null = null;
+    if (payload.robinetId !== null && payload.robinetId !== undefined) {
+      robinetId = Number(payload.robinetId);
+      if (!Number.isInteger(robinetId) || robinetId <= 0) {
+        return { success: false, error: "El N° de cliente en Robinet debe ser un entero positivo." };
+      }
+    }
+
     const { error } = await supabase
       .from("guests")
       .update({
@@ -107,6 +118,7 @@ export async function updateGuestAction(
         cuit: cuitDigits || null,
         razon_social: clean(payload.razonSocial),
         domicilio_fiscal: clean(payload.domicilioFiscal),
+        robinet_id: robinetId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

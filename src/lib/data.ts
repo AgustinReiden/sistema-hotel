@@ -201,6 +201,7 @@ type AssociatedClientRow = {
   razon_social?: string | null;
   domicilio?: string | null;
   facturacion_modo?: string | null;
+  robinet_id?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -226,6 +227,7 @@ function toAssociatedClient(row: AssociatedClientRow): AssociatedClient {
     razon_social: row.razon_social ?? null,
     domicilio: row.domicilio ?? null,
     facturacion_modo: (row.facturacion_modo as FacturacionModo | undefined) ?? "por_checkout",
+    robinet_id: row.robinet_id ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
