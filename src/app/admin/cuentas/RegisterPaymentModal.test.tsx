@@ -132,8 +132,8 @@ describe("RegisterPaymentModal", () => {
     // $100.000 contra $90.000 de saldo: $40.000 a la vieja y $50.000 a la nueva, que
     // son sus saldos enteros. Los $10.000 que sobran quedan a cuenta, sin forzarlos
     // a ninguna factura.
-    expect(montoDe(etiquetaVieja).value).toBe("40000");
-    expect(montoDe(etiquetaNueva).value).toBe("50000");
+    expect(montoDe(etiquetaVieja).value).toBe("40.000,00");
+    expect(montoDe(etiquetaNueva).value).toBe("50.000,00");
     expect(resumen()).toContain("Aplicado a 2 facturas");
     expect(resumen()).toContain("$10.000,00 quedan a cuenta");
     expect(problemas()).toBe("");
@@ -267,9 +267,9 @@ describe("RegisterPaymentModal — imputar a una estadía sin facturar (mig 114)
 
     fireEvent.click(screen.getByRole("button", { name: /Aplicar a lo más viejo primero/ }));
 
-    expect(montoDe(etiquetaEstadia).value).toBe("30000");
-    expect(montoDe(etiquetaVieja).value).toBe("40000");
-    expect(montoDe(etiquetaNueva).value).toBe("30000"); // lo que quedó de los $100.000
+    expect(montoDe(etiquetaEstadia).value).toBe("30.000,00");
+    expect(montoDe(etiquetaVieja).value).toBe("40.000,00");
+    expect(montoDe(etiquetaNueva).value).toBe("30.000,00"); // lo que quedó de los $100.000
     expect(resumen()).toContain("Aplicado a 2 facturas y 1 estadía");
     expect(problemas()).toBe("");
   });

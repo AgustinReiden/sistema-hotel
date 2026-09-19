@@ -2,9 +2,7 @@
 
 import { BedDouble, DoorOpen, TriangleAlert, X } from "lucide-react";
 
-function money(n: number) {
-  return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
-}
+import { formatAmount } from "@/lib/format";
 
 type Props = {
   clientName: string;
@@ -77,7 +75,7 @@ export default function EarlyCheckoutModal({
               <p className="text-lg font-bold text-slate-800">
                 {chargedNights} noche{chargedNights === 1 ? "" : "s"}
               </p>
-              <p className="text-sm font-bold text-emerald-700">{money(newTotal)}</p>
+              <p className="text-sm font-bold text-emerald-700">{formatAmount(newTotal)}</p>
             </div>
             <div className="rounded-xl border border-slate-200 p-4">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -86,7 +84,7 @@ export default function EarlyCheckoutModal({
               <p className="text-lg font-bold text-slate-500">
                 {originalNights} noche{originalNights === 1 ? "" : "s"}
               </p>
-              <p className="text-sm font-bold text-slate-500">{money(originalTotal)}</p>
+              <p className="text-sm font-bold text-slate-500">{formatAmount(originalTotal)}</p>
             </div>
           </div>
 
@@ -94,15 +92,15 @@ export default function EarlyCheckoutModal({
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
               <TriangleAlert size={18} className="text-red-500 shrink-0 mt-0.5" />
               <div className="text-sm text-red-800">
-                El huésped ya pagó <strong>{money(paidAmount)}</strong> y por {chargedNights} noche
-                {chargedNights === 1 ? "" : "s"} le corresponde <strong>{money(newTotal)}</strong>:
+                El huésped ya pagó <strong>{formatAmount(paidAmount)}</strong> y por {chargedNights} noche
+                {chargedNights === 1 ? "" : "s"} le corresponde <strong>{formatAmount(newTotal)}</strong>:
                 queda un saldo a favor. Esta salida anticipada la tiene que cerrar un administrador.
               </div>
             </div>
           ) : (
             <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-center justify-between">
               <span className="text-sm font-bold text-slate-600">Saldo a cobrar ahora</span>
-              <span className="text-xl font-bold text-amber-600">{money(newBalance)}</span>
+              <span className="text-xl font-bold text-amber-600">{formatAmount(newBalance)}</span>
             </div>
           )}
         </div>

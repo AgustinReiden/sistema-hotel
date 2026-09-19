@@ -28,9 +28,6 @@ const METHOD_LABEL: Record<string, string> = {
   other: "Otro",
 };
 
-function money(n: number) {
-  return formatAmount(n);
-}
 
 /**
  * Fecha de comprobante (columna `date`, sin hora ni zona). Se parte el string en vez
@@ -57,7 +54,7 @@ function nombreImputado(imp: CcPaymentReceipt["imputaciones"][number]): string {
   if (imp.destino === "estadia") {
     return imp.estadia_remito_numero !== null
       ? `Estadia - Remito ${formatShiftCode(imp.estadia_remito_numero)}`
-      : `Estadia sin facturar ${money(imp.estadia_total ?? 0)}`;
+      : `Estadia sin facturar ${formatAmount(imp.estadia_total ?? 0)}`;
   }
   const numero =
     imp.cbte_nro !== null && imp.pto_vta !== null
@@ -164,20 +161,20 @@ function ReceiptCopy({
       {/* El total del recibo es lo que CANCELA de deuda: efectivo mas retenciones. */}
       <p className="total">
         <span>TOTAL CANCELADO</span>
-        <span className="money">{money(receipt.amount)}</span>
+        <span className="money">{formatAmount(receipt.amount)}</span>
       </p>
       {retenciones > 0 && (
         <>
           {receipt.retencion_ganancias > 0 && (
             <p className="row small">
               <span>Ret. Ganancias:</span>
-              <span className="money">-{money(receipt.retencion_ganancias)}</span>
+              <span className="money">-{formatAmount(receipt.retencion_ganancias)}</span>
             </p>
           )}
           {receipt.retencion_iibb > 0 && (
             <p className="row small">
               <span>Ret. Ing. Brutos:</span>
-              <span className="money">-{money(receipt.retencion_iibb)}</span>
+              <span className="money">-{formatAmount(receipt.retencion_iibb)}</span>
             </p>
           )}
           {receipt.retencion_certificado && (
@@ -188,7 +185,7 @@ function ReceiptCopy({
           )}
           <p className="total">
             <span>NETO RECIBIDO</span>
-            <span className="money">{money(receipt.neto_recibido)}</span>
+            <span className="money">{formatAmount(receipt.neto_recibido)}</span>
           </p>
           <p className="nota">
             Las retenciones las ingresa el cliente a ARCA por cuenta del hotel: cancelan
@@ -216,7 +213,7 @@ function ReceiptCopy({
                     volvió a quedar suelta. */}
                 {imp.revertida ? (imp.mudada ? " (pasó a su factura)" : " (desimputada)") : ""}
               </span>
-              <span className="money">{money(imp.imputado)}</span>
+              <span className="money">{formatAmount(imp.imputado)}</span>
             </p>
           ))}
           {/*
@@ -241,7 +238,7 @@ function ReceiptCopy({
       <hr />
       <p className="row">
         <span>Saldo de la cuenta:</span>
-        <span className="money">{money(receipt.saldo_despues)}</span>
+        <span className="money">{formatAmount(receipt.saldo_despues)}</span>
       </p>
       {receipt.notes && (
         <>

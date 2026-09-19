@@ -5,7 +5,7 @@ import { Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { handleAddExtraCharge } from "./actions";
-import { parseArMoney } from "@/lib/format";
+import { formatAmountForInput, parseArMoney } from "@/lib/format";
 
 type ChargeType = "minibar" | "damage" | "service" | "other";
 
@@ -124,12 +124,15 @@ export default function ExtraChargesModal({
             </label>
             <input
               id="extra-amount"
-              type="number"
-              step="0.01"
-              min="0.01"
+              type="text"
+              inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
+              onBlur={() => {
+                const parsed = parseArMoney(amount);
+                if (parsed !== null) setAmount(formatAmountForInput(parsed));
+              }}
+              placeholder="0,00"
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring focus:ring-indigo-200 outline-none text-xl font-bold text-slate-800"
               required
               autoFocus

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Loader2, Save } from "lucide-react";
 import type { Room, RoomCategory } from "@/lib/types";
 import { getRoomCapacity } from "@/lib/rooms";
+import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import { updateRoomAction } from "./actions";
 import RoomTypeSelector from "./RoomTypeSelector";
 
@@ -59,7 +60,7 @@ export default function EditRoomModal({
     const [bedsConfiguration, setBedsConfiguration] = useState(room.beds_configuration);
     const [description, setDescription] = useState(room.description || "");
     const [imageUrl, setImageUrl] = useState(room.image_url || "");
-    const [basePrice, setBasePrice] = useState(room.base_price ? room.base_price.toString() : "50");
+    const [basePrice, setBasePrice] = useState(formatAmountForInput(room.base_price || 50));
     const [amenities, setAmenities] = useState(room.amenities.join(", "));
 
     if (!isOpen) return null;
@@ -77,7 +78,7 @@ export default function EditRoomModal({
         setDescription(selectedCategory.description || "");
         setImageUrl(selectedCategory.image_url || "");
         setAmenities(selectedCategory.amenities.join(", ") || "");
-        setBasePrice(String(selectedCategory.base_price || 0));
+        setBasePrice(formatAmountForInput(selectedCategory.base_price || 0));
     };
 
     const handleAddCategory = (categoryName: string) => {
@@ -93,8 +94,8 @@ export default function EditRoomModal({
                     .split(",")
                     .map((amenity) => amenity.trim())
                     .filter(Boolean),
-                base_price: parseFloat(basePrice) || 50,
-                half_day_price: parseFloat(basePrice) || 50,
+                base_price: parseArMoney(basePrice) ?? 50,
+                half_day_price: parseArMoney(basePrice) ?? 50,
             },
         ]);
     };
@@ -125,8 +126,8 @@ export default function EditRoomModal({
             return;
         }
 
-        const parsedPrice = parseFloat(basePrice);
-        if (isNaN(parsedPrice) || parsedPrice < 0) {
+        const parsedPrice = parseArMoney(basePrice);
+        if (parsedPrice === null) {
             setError("El precio base debe ser un numero positivo.");
             setLoading(false);
             return;
@@ -221,11 +222,14 @@ export default function EditRoomModal({
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Precio x Noche (Base $)</label>
                                 <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
+                                    type="text"
+                                    inputMode="decimal"
                                     value={basePrice}
                                     onChange={(e) => setBasePrice(e.target.value)}
+                                    onBlur={(e) => {
+                                        const parsed = parseArMoney(e.target.value);
+                                        if (parsed !== null) setBasePrice(formatAmountForInput(parsed));
+                                    }}
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />

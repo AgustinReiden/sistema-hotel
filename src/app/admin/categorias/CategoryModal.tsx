@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Save, X } from "lucide-react";
 import { toast } from "sonner";
+import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import type { RoomCategory } from "@/lib/types";
 
 type CategoryModalProps = {
@@ -37,8 +38,8 @@ function buildFormState(category?: RoomCategory | null): CategoryFormState {
         description: category?.description ?? "",
         amenities: category?.amenities.join(", ") ?? "wifi, tv",
         imageUrl: category?.image_url ?? "",
-        basePrice: String(category?.base_price ?? 50),
-        halfDayPrice: String(category?.half_day_price ?? category?.base_price ?? 50),
+        basePrice: formatAmountForInput(category?.base_price ?? 50),
+        halfDayPrice: formatAmountForInput(category?.half_day_price ?? category?.base_price ?? 50),
         isActive: category?.is_active ?? true,
     };
 }
@@ -71,15 +72,15 @@ export default function CategoryModal({
         const capacity = parseInt(form.capacity, 10);
         const capacityAdults = parseInt(form.capacityAdults, 10);
         const capacityChildren = parseInt(form.capacityChildren, 10);
-        const basePrice = parseFloat(form.basePrice);
-        const halfDayPrice = parseFloat(form.halfDayPrice);
+        const basePrice = parseArMoney(form.basePrice);
+        const halfDayPrice = parseArMoney(form.halfDayPrice);
 
         if ([capacity, capacityAdults, capacityChildren].some((value) => Number.isNaN(value))) {
             toast.error("Las capacidades deben ser numeros validos.");
             return;
         }
 
-        if ([basePrice, halfDayPrice].some((value) => Number.isNaN(value) || value < 0)) {
+        if (basePrice === null || halfDayPrice === null) {
             toast.error("Los precios deben ser numeros positivos.");
             return;
         }
@@ -159,11 +160,16 @@ export default function CategoryModal({
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Precio x Noche</label>
                                 <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
+                                    type="text"
+                                    inputMode="decimal"
                                     value={form.basePrice}
                                     onChange={(e) => setForm((current) => ({ ...current, basePrice: e.target.value }))}
+                                    onBlur={(e) => {
+                                        const parsed = parseArMoney(e.target.value);
+                                        if (parsed !== null) {
+                                            setForm((current) => ({ ...current, basePrice: formatAmountForInput(parsed) }));
+                                        }
+                                    }}
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />
@@ -171,11 +177,16 @@ export default function CategoryModal({
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Precio Medio Dia</label>
                                 <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
+                                    type="text"
+                                    inputMode="decimal"
                                     value={form.halfDayPrice}
                                     onChange={(e) => setForm((current) => ({ ...current, halfDayPrice: e.target.value }))}
+                                    onBlur={(e) => {
+                                        const parsed = parseArMoney(e.target.value);
+                                        if (parsed !== null) {
+                                            setForm((current) => ({ ...current, halfDayPrice: formatAmountForInput(parsed) }));
+                                        }
+                                    }}
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />

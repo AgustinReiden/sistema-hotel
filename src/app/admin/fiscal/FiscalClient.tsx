@@ -32,6 +32,7 @@ import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito, isValidCuit } f
 import { AUTHORIZED_INVOICES_LIMIT } from "@/lib/billing";
 import { buildCsv, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
+import { formatAmount } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
 import { FISCAL_VIEWS, type FiscalView } from "./views";
 import type {
@@ -64,9 +65,6 @@ type Props = {
   q: string;
 };
 
-function money(n: number) {
-  return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 // Los cuatro comprobantes que emite el sistema. El nombre y la letra de cada uno
 // salen de cbteNombre/cbteLetra (src/lib/arca/amounts.ts): no se repite ese mapeo acá.
@@ -378,7 +376,7 @@ export default function FiscalClient({
                         <div className="min-w-0">
                           <p className="font-bold text-slate-800 truncate">
                             {isConsolidada ? "Consolidada" : `Hab. ${p.room_number}`} —{" "}
-                            {p.receptor_nombre ?? "Sin nombre"} — ${money(p.imp_total)}
+                            {p.receptor_nombre ?? "Sin nombre"} — {formatAmount(p.imp_total)}
                           </p>
                           <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
                             <AlertTriangle size={12} className="text-amber-500 shrink-0" />
@@ -519,7 +517,7 @@ export default function FiscalClient({
                   <li key={c.reservation_id} className="py-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-bold text-slate-800 truncate">
-                        Hab. {c.room_number} — {c.client_name} — ${money(c.total_price)}
+                        Hab. {c.room_number} — {c.client_name} — {formatAmount(c.total_price)}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
                         Check-out: {formatHotelShortDateTime(c.actual_check_out)}
@@ -638,7 +636,7 @@ export default function FiscalClient({
                         <p className="font-bold text-slate-800 truncate">
                           {cbteNombre(a.cbte_tipo)} {cbteLetra(a.cbte_tipo)}{" "}
                           {formatCbteNumero(a.pto_vta, a.cbte_nro)} —{" "}
-                          {a.receptor_nombre ?? "Sin nombre"} — ${money(a.imp_total)}
+                          {a.receptor_nombre ?? "Sin nombre"} — {formatAmount(a.imp_total)}
                         </p>
                         {anulada && (
                           <p className="text-[11px] font-bold text-rose-600 mt-0.5">
@@ -701,7 +699,7 @@ export default function FiscalClient({
               <strong>
                 {cbteLetra(ncTarget.cbte_tipo)} {formatCbteNumero(ncTarget.pto_vta, ncTarget.cbte_nro)}
               </strong>{" "}
-              de ${money(ncTarget.imp_total)}.
+              de {formatAmount(ncTarget.imp_total)}.
             </p>
             <ul className="text-xs text-slate-500 mt-3 space-y-1 list-disc pl-4">
               <li>La factura original NO se borra: AFIP conserva las dos.</li>

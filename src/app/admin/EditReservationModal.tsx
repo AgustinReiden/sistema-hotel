@@ -10,7 +10,7 @@ import {
 } from "./actions";
 import DateTimePickerField from "./DateTimePickerField";
 import type { ReservationEditableRow } from "@/lib/data";
-import { parseArMoney } from "@/lib/format";
+import { formatAmountForInput, parseArMoney } from "@/lib/format";
 
 type Props = {
   isOpen: boolean;
@@ -291,11 +291,14 @@ export default function EditReservationModal({
                   {overrideEnabled && (
                     <div>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         value={overrideValue}
                         onChange={(e) => setOverrideValue(e.target.value)}
+                        onBlur={() => {
+                          const parsed = parseArMoney(overrideValue);
+                          if (parsed !== null) setOverrideValue(formatAmountForInput(parsed));
+                        }}
                         className="w-full px-3 py-2 rounded-lg border border-amber-300 focus:border-amber-500 focus:ring outline-none"
                       />
                       <p className="text-[11px] text-amber-700 mt-1">

@@ -32,7 +32,7 @@ import {
 import { handleExtendReservation } from "@/app/admin/actions";
 import { logout } from "@/app/login/actions";
 import ExportCsvButton from "./ExportCsvButton";
-import { parseArMoney } from "@/lib/format";
+import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { CloseShiftBlocker, PaymentMethod, ShiftCreditChargeRow } from "@/lib/types";
 
@@ -754,11 +754,14 @@ export default function CloseShiftModal({
             <div className="relative">
               <input
                 id="actual-cash"
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 value={actualCash}
                 onChange={(e) => setActualCash(e.target.value)}
+                onBlur={() => {
+                  const parsed = parseArMoney(actualCash);
+                  if (parsed !== null) setActualCash(formatAmountForInput(parsed));
+                }}
                 readOnly={cashLocked}
                 className={`w-full px-4 py-3 rounded-xl border outline-none text-xl font-bold ${
                   cashLocked
