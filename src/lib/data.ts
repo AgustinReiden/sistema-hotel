@@ -1278,7 +1278,7 @@ function mapGuestReservationRow(reservation: GuestReservationRow): Guest {
 }
 
 // Clave de deduplicación: DNI normalizado (sin puntos/guiones, mayúsculas) si existe;
-// si no, el nombre normalizado. Resuelve "Jose Boeris" vs "JOSÉ BOERIS" cuando comparten DNI.
+// si no, el nombre normalizado. Resuelve "Jose Perez" vs "JOSÉ PÉREZ" cuando comparten DNI.
 function guestDedupKey(dni: string | null | undefined, name: string): string {
   const normalizedDni = (dni ?? "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
   if (normalizedDni) return `dni:${normalizedDni}`;
@@ -1568,7 +1568,7 @@ const normalizeDni = (dni: string | null | undefined) =>
 
 /**
  * Busca un huésped ya cargado con el mismo DNI (normalizado, sin puntos/guiones).
- * Sirve para evitar duplicados ("Jose Boeris" vs "JOSÉ BOERIS"): si existe, la UI
+ * Sirve para evitar duplicados ("Jose Perez" vs "JOSÉ PÉREZ"): si existe, la UI
  * ofrece reutilizar los datos canónicos. Devuelve la coincidencia más reciente.
  */
 export async function findGuestByDni(dni: string): Promise<GuestDniMatch | null> {

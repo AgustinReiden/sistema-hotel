@@ -1,6 +1,6 @@
 -- Migration 88: la reserva de empresa NO pide el pasajero; se carga en el check-in
 --
--- Contexto real del hotel: una empresa (ej. JUFEC) reserva para dentro de dos semanas
+-- Contexto real del hotel: una empresa (ej. EMPRESA A) reserva para dentro de dos semanas
 -- y todavia no sabe a que preventista manda, porque rotan. Hasta ahora el alta exigia
 -- nombre + DNI del pasajero, asi que recepcion inventaba un nombre o cargaba el de otro
 -- empleado, y ese dato quedaba pegado a la estadia (libro de pasajeros, comprobantes).

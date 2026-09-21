@@ -31,7 +31,7 @@ leer el certificado ni de escribir en las tablas fiscales desde la app.
 | Prueba | Método | Resultado |
 |---|---|---|
 | Camino de escritura completo de la consolidada | Ejecutado de verdad contra PROD, dentro de una transacción que **siempre aborta** (`exec_ddl` es atómico; lo verifiqué antes con un probe que escribió y se revirtió) | Encontró C-01 |
-| Consolidación de las 70 estadías reales de JUFEC PERFUMERIA | Dry run abortado | Cuadra al centavo |
+| Consolidación de las 70 estadías reales de EMPRESA A PERFUMERIA | Dry run abortado | Cuadra al centavo |
 | Rechazos del detalle editable | Dry run abortado, 5 ataques | Los 5 rechazados |
 | Invariante de doble facturación y numeración | Definiciones de índices únicos parciales | Estructuralmente imposible |
 | Permisos de escritura desde la app | Matriz completa de policies RLS por tabla y comando | Sin policies de escritura |
@@ -78,18 +78,18 @@ un comprobante con datos inválidos, que es lo correcto. Pero hay que cargarlos.
 
 | Cliente | Estadías | Monto | Problema |
 |---|---:|---:|---|
-| JUFEC SA - PERFUMERIA | 70 | $3.960.000 | Sin condición IVA |
-| JUFEC - DROGUERIA | 34 | $1.870.000 | Sin condición IVA. Su CUIT inválido **ya se corrigió** (mig 94) |
-| MUNIC TACO POZO | 9 | $1.710.000 | Cargado como huésped con un **CUIT en el campo del DNI** |
-| H CLINICAL ARGENTINA S.A | 8 | $360.000 | Sin condición IVA |
-| COMISARIA TACO POZO | 1 | $70.000 | Exento, pero **CUIT inválido** (`30999175707`) |
-| COMPAÑÍA LA LEGUA SA | 1 | $70.000 | **CUIT de 12 dígitos** (`30-7070916787-8`) |
-| EL HORNERO SA - Nico Rivas | 1 | $50.000 | CUIT en el campo del DNI, sin condición IVA |
-| *GANANOR PUJOL SA, LUCAS COATTO, LEON MARCELO TOMAS, FRANCO FAVA* | 11 | $1.240.000 | **Facturables hoy** |
+| EMPRESA A - PERFUMERIA | 70 | $3.960.000 | Sin condición IVA |
+| EMPRESA A - DROGUERIA | 34 | $1.870.000 | Sin condición IVA. Su CUIT inválido **ya se corrigió** (mig 94) |
+| ORGANISMO PÚBLICO B | 9 | $1.710.000 | Cargado como huésped con un **CUIT en el campo del DNI** |
+| EMPRESA C S.A. | 8 | $360.000 | Sin condición IVA |
+| ORGANISMO PÚBLICO D | 1 | $70.000 | Exento, pero **CUIT inválido** (`30000000000`) |
+| EMPRESA E SA | 1 | $70.000 | **CUIT de 12 dígitos** (`30-0000000000-0`) |
+| EMPRESA F SA - (contacto) | 1 | $50.000 | CUIT en el campo del DNI, sin condición IVA |
+| *EMPRESA G SA y tres particulares* | 11 | $1.240.000 | **Facturables hoy** |
 
 Dos cosas que valen la pena mirar:
 
-- El CUIT de **JUFEC DROGUERIA** no era un typo: era la única forma de cargar la segunda
+- El CUIT de **EMPRESA A DROGUERIA** no era un typo: era la única forma de cargar la segunda
   área, porque `document_id` tenía un índice **único** y las dos áreas comparten CUIT. El
   modelo estaba mal, no el dato — ver C-03. Corregido en la migración 94.
 - **Qué condición IVA le corresponde a cada uno lo decidís vos o el contador.** No lo adivino:
@@ -100,7 +100,7 @@ Dos cosas que valen la pena mirar:
 ### 🔴 C-03 — El CUIT era clave única de cliente, y eso obligaba a inventar números.
 
 **Qué pasaba.** `associated_clients.document_id` tenía un índice **único** y se usaba a la
-vez como identificador del cliente y como CUIT del receptor. JUFEC opera como dos áreas
+vez como identificador del cliente y como CUIT del receptor. EMPRESA A opera como dos áreas
 (Droguería y Perfumería) que fiscalmente son la misma empresa: el hotel las necesita como dos
 cuentas corrientes, pero la segunda no entraba. Se la cargó con el CUIT de la primera
 cambiándole el último dígito, y ese número no pasa el módulo 11 → esa cuenta ($1.870.000 en
@@ -115,14 +115,14 @@ de 13 dígitos y otro con el verificador mal.
 **Estado: CORREGIDO** en la migración 94. El índice pasa a no-único (se conserva para buscar
 por CUIT), el aviso de duplicado se mueve al alta como confirmación visible ("ya existe X con
 este CUIT, ¿es otra área de la misma empresa?"), y el alta ahora valida de verdad: DNI de 7-8
-dígitos o CUIT de 11 con verificador. Las dos JUFEC quedaron con el CUIT real.
+dígitos o CUIT de 11 con verificador. Las dos áreas de EMPRESA A quedaron con el CUIT real.
 
 **De paso, un defecto que iba a salir en la primera factura:** `associated_clients` no tenía
 **razón social**. El receptor salía de `display_name`, que es el nombre operativo con el que
-recepción llama al cliente — la Factura A de la droguería habría salido a nombre de "JUFEC -
+recepción llama al cliente — la Factura A de la droguería habría salido a nombre de "EMPRESA A -
 DROGUERIA" en vez del nombre legal, y RG 1415 pide la razón social. Ahora es un campo propio
 que cae a `display_name` cuando está vacío, así que para los clientes donde son lo mismo no
-cambia nada. **Hay que cargarla en las dos JUFEC antes de facturar.**
+cambia nada. **Hay que cargarla en las dos áreas de EMPRESA A antes de facturar.**
 
 ---
 
@@ -194,7 +194,7 @@ más de N minutos); medio si se quiere un barrido de verdad.
 | M-02 | **Nunca se registró un pago a cuenta corriente** | 135 cargos, **0 pagos**. El "saldo" que muestra `/admin/cuentas` es el total histórico acumulado, no la deuda real. O no se está usando el registro de pagos, o hay $9.330.000 realmente impagos. Conviene definir cuál de las dos. |
 | M-03 | **`updateFiscalSettings` escribe directo a la tabla** | `src/lib/data.ts:3236` es el único punto del dominio fiscal que no pasa por un RPC `SECURITY DEFINER`. Su única defensa es la policy `Admin update fiscal_settings`, que verifiqué y está bien puesta. Es una asimetría, no un agujero. |
 | M-04 | **Leyenda Ley 27.618 sin confirmar** | El impreso todavía dice *"Texto a confirmar por el contador antes de producción"*. Bloquea cualquier Factura A a un monotributista. |
-| M-05 | **Clientes de cuenta corriente en modo `por_checkout`** | MUNIC TACO POZO ($1.710.000), GANANOR PUJOL SA ($860.000) y cinco más acumulan cargos con el modo por defecto. Se pueden consolidar igual (la pantalla no filtra por modo), pero en el check-out el sistema les ofreció factura individual. Hay que definir el modo de cada uno. |
+| M-05 | **Clientes de cuenta corriente en modo `por_checkout`** | ORGANISMO PÚBLICO B ($1.710.000), EMPRESA G SA ($860.000) y cinco más acumulan cargos con el modo por defecto. Se pueden consolidar igual (la pantalla no filtra por modo), pero en el check-out el sistema les ofreció factura individual. Hay que definir el modo de cada uno. |
 | M-06 | **`docs/facturacion-arca.md` tiene secciones vencidas** | La sección de la migración 79 sigue diciendo que `guests` no tiene campos fiscales y que la app no emite notas de crédito. Las migraciones 80 y 81 cambiaron ambas cosas. |
 
 ### 🔵 Bajos
@@ -220,7 +220,7 @@ En una auditoría los resultados negativos valen tanto como los hallazgos:
   carrera entre dos admins. El draft además lockea con `FOR UPDATE` ordenado por id.
 - **Numeración: imposible duplicar.** `invoices_number_uq` sobre
   `(environment, pto_vta, cbte_tipo, cbte_nro)` para `processing`/`authorized`.
-- **Importes: cuadran.** Consolidé las 70 estadías reales de JUFEC PERFUMERIA:
+- **Importes: cuadran.** Consolidé las 70 estadías reales de EMPRESA A PERFUMERIA:
   `$3.960.000 = $3.272.727,27 + $687.272,73`, y la suma de las 70 líneas del detalle da
   exactamente el total. El redondeo va sobre el total, nunca por fila.
 - **Secretos: inalcanzables.** `fiscal_private` y `arca_ta` tienen RLS activo y **cero
@@ -246,14 +246,14 @@ En una auditoría los resultados negativos valen tanto como los hallazgos:
 
 ## Antes de prender la facturación
 
-1. **Cargar la condición IVA** de JUFEC PERFUMERIA, JUFEC DROGUERIA y H CLINICAL. Se hace
+1. **Cargar la condición IVA** de EMPRESA A PERFUMERIA, EMPRESA A DROGUERIA y EMPRESA C. Se hace
    desde el formulario de `/admin/fiscal/consolidada` y queda guardado en la ficha.
-2. **Corregir los CUIT inválidos** que quedan: COMISARIA TACO POZO (`30999175707`) y
-   COMPAÑÍA LA LEGUA (`30-7070916787-8`, 13 dígitos). El de JUFEC DROGUERIA ya se arregló.
+2. **Corregir los CUIT inválidos** que quedan: ORGANISMO PÚBLICO D (`30000000000`) y
+   EMPRESA E (`30-0000000000-0`, 13 dígitos). El de EMPRESA A DROGUERIA ya se arregló.
    No los deduje yo: adivinar un CUIT en un comprobante fiscal no es una opción.
-3. **Cargar la razón social** de las dos JUFEC (el nombre legal, que es el mismo para las
+3. **Cargar la razón social** de las dos áreas de EMPRESA A (el nombre legal, que es el mismo para las
    dos áreas).
-4. **Arreglar MUNIC TACO POZO y EL HORNERO**: tienen un CUIT metido en el campo del DNI. El
+4. **Arreglar ORGANISMO PÚBLICO B y EMPRESA F**: tienen un CUIT metido en el campo del DNI. El
    CUIT va en su propio campo (`cuit`), y hay que elegirles condición IVA.
 5. **Definir el modo de facturación** de los clientes de cuenta corriente que quedaron en
    `por_checkout`.

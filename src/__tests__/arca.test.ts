@@ -91,8 +91,8 @@ describe("formatos", () => {
     expect(formatCuit("30123456789")).toBe("30-12345678-9");
   });
   it("isValidCuit: verifica dígito verificador", () => {
-    expect(isValidCuit("20329642330")).toBe(true); // CUIT válido conocido
-    expect(isValidCuit("20329642331")).toBe(false);
+    expect(isValidCuit("20123456786")).toBe(true); // CUIT válido conocido
+    expect(isValidCuit("20123456787")).toBe(false);
     expect(isValidCuit("123")).toBe(false);
   });
 });

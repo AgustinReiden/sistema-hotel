@@ -325,7 +325,7 @@ export default function AssociatedClientModal({
                 value={form.razonSocial}
                 onChange={(e) => setForm((current) => ({ ...current, razonSocial: e.target.value }))}
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                placeholder={form.displayName.trim() || "Ej. JUFEC S.A."}
+                placeholder={form.displayName.trim() || "Ej. Transportes del Norte S.A."}
               />
               <p className="text-[11px] text-slate-500 mt-1">
                 El nombre legal, que puede ser distinto del de arriba. Dos áreas de la misma
