@@ -3,7 +3,7 @@
 import { AlertTriangle } from "lucide-react";
 
 // Aviso anti-duplicados: si ya hay un huésped con el DNI tipeado, ofrece reutilizar sus datos
-// para no generar variantes ("Jose Boeris" vs "JOSÉ BOERIS"). El padre resuelve qué cargar.
+// para no generar variantes ("Jose Perez" vs "JOSÉ PÉREZ"). El padre resuelve qué cargar.
 export default function GuestDniHint({
   name,
   onUse,

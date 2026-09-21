@@ -1,11 +1,11 @@
 -- Migration 94: el CUIT deja de ser clave unica de cliente, y las empresas ganan
 -- razon social.
 --
--- EL CASO REAL: JUFEC opera como dos areas separadas (Drogueria y Perfumeria) que
+-- EL CASO REAL: EMPRESA A opera como dos areas separadas (Drogueria y Perfumeria) que
 -- fiscalmente son la MISMA empresa, con un solo CUIT. El hotel las necesita como dos
 -- clientes distintos, cada una con su cuenta corriente. Pero `document_id` tenia un
 -- indice UNICO, asi que la segunda no entraba: alguien la cargo con el CUIT de la
--- primera cambiandole el ultimo digito (30629421463 -> 30629421462). Ese numero no
+-- primera cambiandole el ultimo digito (30500000003 -> 30500000004). Ese numero no
 -- pasa el modulo 11, o sea que esa cuenta ($1.870.000 en 34 estadias) no se podia
 -- facturar.
 --
@@ -18,7 +18,7 @@
 --
 -- RAZON SOCIAL: `associated_clients` no la tenia. El receptor de la factura salia de
 -- `display_name`, que es el nombre operativo con el que recepcion llama al cliente
--- ("JUFEC - DROGUERIA"), no el nombre legal. RG 1415 pide la razon social del
+-- ("EMPRESA A - DROGUERIA"), no el nombre legal. RG 1415 pide la razon social del
 -- receptor. Ahora es un campo propio, opcional, que cae a `display_name` cuando esta
 -- vacio: para los clientes donde el nombre operativo y el legal son el mismo no
 -- cambia nada. Misma separacion que ya tienen los huespedes desde la mig 81.
@@ -48,18 +48,22 @@ ALTER TABLE public.associated_clients
   ADD COLUMN IF NOT EXISTS razon_social TEXT;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 3) Correccion del CUIT inventado de JUFEC - DROGUERIA.
+-- 3) Correccion del CUIT inventado de EMPRESA A - DROGUERIA.
 --    Acotada por id y por el valor viejo: si ya se corrigio, no hace nada. El CUIT
---    correcto es el de JUFEC SA - PERFUMERIA, que si pasa el modulo 11.
---    Los otros dos CUIT invalidos (COMISARIA TACO POZO, COMPANIA LA LEGUA) NO se
+--    correcto es el de EMPRESA A - PERFUMERIA, que si pasa el modulo 11.
+--    Los otros dos CUIT invalidos (ORGANISMO PÚBLICO D, EMPRESA E) NO se
 --    tocan: no se puede deducir cual es el numero bueno y adivinar un CUIT en un
 --    comprobante fiscal no es una opcion. Se corrigen a mano en la ficha.
+--    ANONIMIZADO (2026-09-21): el repo es publico. Los CUIT y nombres de este archivo
+--    se reemplazaron por ficticios DESPUES de aplicarlo en PROD, donde el UPDATE ya
+--    corrio con los valores reales. Re-ejecutarlo no toca nada (acotado por id y
+--    por un valor viejo que no existe).
 -- ─────────────────────────────────────────────────────────────────────────────
 UPDATE public.associated_clients
-SET document_id = '30629421463',
+SET document_id = '30500000003',
     updated_at = NOW()
 WHERE id = '0de1bcbc-7b98-4ac6-b382-3f806d70e762'
-  AND regexp_replace(document_id, '\D', '', 'g') = '30629421462';
+  AND regexp_replace(document_id, '\D', '', 'g') = '30500000004';
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4) El lookup por CUIT devuelve la razon social cuando esta cargada.

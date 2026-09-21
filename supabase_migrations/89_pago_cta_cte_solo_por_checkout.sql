@@ -11,8 +11,8 @@
 --   puede salir del check-out (rpc_staff_checkout_reservation /
 --   rpc_staff_early_checkout), que si crea el cargo y deja la reserva saldada.
 --
--- En produccion quedaron 2 filas asi (JUFEC SA - PERFUMERIA, 03/07/2026, $50.000
--- c/u): $100.000 figuraban como cobrados sin haber entrado, y la deuda de JUFEC
+-- En produccion quedaron 2 filas asi (EMPRESA A - PERFUMERIA, 03/07/2026, $50.000
+-- c/u): $100.000 figuraban como cobrados sin haber entrado, y la deuda de EMPRESA A
 -- estaba $100.000 por debajo de la real.
 --
 -- Que hace esta migracion:

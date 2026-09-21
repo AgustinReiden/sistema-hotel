@@ -1,6 +1,6 @@
 -- Migration 100: ampliar una noche deja de cobrar dos veces la misma tarde.
 --
--- SINTOMA (hab. 15, JOSE BORJA, 09-09 al 11-09): la habitacion vale 50.000 la noche, se
+-- SINTOMA (hab. 15, HUÉSPED X, 09-09 al 11-09): la habitacion vale 50.000 la noche, se
 -- cobraron 2 noches y el ticket dio 130.000 en vez de 100.000.
 --
 -- QUE PASABA. Recepcion tiene dos botones para el huesped que se queda de mas:
@@ -45,7 +45,7 @@
 --     listan en el PR para que las resuelva Agustin; una migracion no devuelve plata.
 --   * La salida anticipada (rpc_staff_early_checkout, mig 71). Ahi el medio dia SI
 --     corresponde: se cobran las noches dormidas y el medio dia cubre las horas pasadas
---     del check-out del ultimo dia. Es el caso de la reserva de GUSTAVO KRNACS, que quedo
+--     del check-out del ultimo dia. Es el caso de la reserva de HUÉSPED Y, que quedo
 --     bien cobrada.
 --
 -- Aplicar a PROD via select public.exec_ddl($mig100$ ... $mig100$) SIN ; final y SIN

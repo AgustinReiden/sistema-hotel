@@ -33,7 +33,7 @@ function claveDe(a: CtaCteAccount): string {
  * scrollear a ojo hasta dar con el nombre.
  *
  * Busca por nombre y por documento (CUIT/DNI), sin tildes y sin importar dónde cae
- * el texto dentro del nombre: "perfum" encuentra "JUFEC SA - PERFUMERIA". Filtrar
+ * el texto dentro del nombre: "perfum" encuentra "EMPRESA A - PERFUMERIA". Filtrar
  * en el navegador y no contra la base es a propósito — las cuentas ya vienen
  * cargadas en la página, así que el resultado aparece mientras se tipea y sin
  * depender de la conexión.

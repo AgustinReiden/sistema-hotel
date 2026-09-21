@@ -1,7 +1,7 @@
 -- Migration 95: las noches se cuentan por calendario, no por horas.
 --
 -- EL CASO REAL: la habitacion 15 sale 50.000 la noche. El 09/09 se cargo un walk-in de
--- UNA noche (JOSE BORJA) y quedo con 100.000 pendientes. La habitacion estaba bien
+-- UNA noche (HUÉSPED X) y quedo con 100.000 pendientes. La habitacion estaba bien
 -- cargada y la pantalla de walk-in mostro 50.000; la base guardo 100.000.
 --
 -- LA CAUSA: app_calculate_reservation_pricing contaba las noches dividiendo la duracion
@@ -136,7 +136,7 @@ GRANT EXECUTE ON FUNCTION public.app_calculate_reservation_pricing(int, timestam
 --         reserva en sobrepago silencioso.
 --    Los recargos que no son base (minibar, danos, medio dia) se preservan.
 --
---    Al aplicarse alcanzo a UNA reserva: la 15, JOSE BORJA (100.000 -> 50.000).
+--    Al aplicarse alcanzo a UNA reserva: la 15, HUÉSPED X (100.000 -> 50.000).
 -- ─────────────────────────────────────────────────────────────────────────────
 WITH cfg AS (
   SELECT COALESCE(timezone, 'UTC') AS tz FROM public.hotel_settings ORDER BY id LIMIT 1

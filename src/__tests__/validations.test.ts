@@ -327,8 +327,8 @@ describe("associatedClientSchema", () => {
   it("rechaza un CUIT con el digito verificador mal", () => {
     expect(() =>
       associatedClientSchema.parse({
-        displayName: "JUFEC - DROGUERIA",
-        documentId: "30629421462", // el de PERFUMERIA con el ultimo digito cambiado
+        displayName: "EMPRESA A - DROGUERIA",
+        documentId: "30500000004", // el de PERFUMERIA con el ultimo digito cambiado
         discountPercent: 0,
       })
     ).toThrow();
@@ -337,8 +337,8 @@ describe("associatedClientSchema", () => {
   it("rechaza un CUIT de 12 o 13 digitos", () => {
     expect(() =>
       associatedClientSchema.parse({
-        displayName: "COMPANIA LA LEGUA SA",
-        documentId: "30-7070916787-8",
+        displayName: "EMPRESA E SA",
+        documentId: "30-0000000000-0",
         discountPercent: 0,
       })
     ).toThrow();
@@ -365,12 +365,12 @@ describe("associatedClientSchema", () => {
     expect(vacia.razonSocial).toBeUndefined();
 
     const cargada = associatedClientSchema.parse({
-      displayName: "JUFEC - DROGUERIA",
+      displayName: "EMPRESA A - DROGUERIA",
       documentId: CUIT_VALIDO,
       discountPercent: 0,
-      razonSocial: "  JUFEC S.A.  ",
+      razonSocial: "  EMPRESA A S.A.  ",
     });
-    expect(cargada.razonSocial).toBe("JUFEC S.A.");
+    expect(cargada.razonSocial).toBe("EMPRESA A S.A.");
   });
 });
 
