@@ -60,10 +60,39 @@ export function armarManifiesto(movimientos, { zona, desde = 1 }) {
       periodo: periodo(m.created_at, zona),
       monto: m.monto,
       verdad_firmado: "",
-      // Solo para imprimir, no va al CSV.
+      // Solo para imprimir, no van al CSV.
       numero_visible: numeroVisible(PREFIJO_PRUEBA, numero),
+      nro: numero,
     };
   });
+}
+
+/**
+ * "7-20" o "1,3,7-9" -> los numeros pedidos, en orden. Sirve para imprimir parte
+ * de un lote: la numeracion sale del orden de TODO el lote y no cambia.
+ */
+export function parsearSeleccion(texto) {
+  const numeros = new Set();
+  for (const parte of String(texto ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
+    const m = /^(\d+)(?:-(\d+))?$/.exec(parte);
+    if (!m) throw new Error(`Seleccion invalida: "${parte}". Ejemplos: "7-20", "1,3,7-9".`);
+    const desde = Number(m[1]);
+    const hasta = m[2] === undefined ? desde : Number(m[2]);
+    if (hasta < desde) throw new Error(`Rango al reves: "${parte}".`);
+    for (let n = desde; n <= hasta; n++) numeros.add(n);
+  }
+  if (numeros.size === 0) throw new Error("Seleccion vacia.");
+  return [...numeros].sort((a, b) => a - b);
+}
+
+/** Las filas del manifiesto con esos numeros. Pedir uno que no existe es un error, no un faltante mudo. */
+export function seleccionar(manifiesto, numeros) {
+  const porNro = new Map(manifiesto.map((c) => [c.nro, c]));
+  const faltan = numeros.filter((n) => !porNro.has(n));
+  if (faltan.length) {
+    throw new Error(`No existen en el lote: ${faltan.map((n) => numeroVisible(PREFIJO_PRUEBA, n)).join(", ")}.`);
+  }
+  return numeros.map((n) => porNro.get(n));
 }
 
 function celdaCsv(v) {
