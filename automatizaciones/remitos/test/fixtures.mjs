@@ -21,12 +21,15 @@ const MM = 72 / 25.4;
  * cxMm/cyMm: centro del ticket medido desde arriba a la izquierda de la hoja.
  * Sin `codigo`, el ticket va en blanco (simula un codigo ilegible).
  */
-export async function hojaCartulina(tickets, { fondo = "negro" } = {}) {
+export async function hojaCartulina(tickets, { fondo = "negro", anchoHojaMm = 210, cartulinaAnchoMm } = {}) {
   const pdf = await PDFDocument.create();
-  const [anchoHoja, altoHoja] = [210 * MM, 297 * MM];
+  const [anchoHoja, altoHoja] = [anchoHojaMm * MM, 297 * MM];
   const hoja = pdf.addPage([anchoHoja, altoHoja]);
   const colorFondo = fondo === "negro" ? rgb(0.05, 0.05, 0.05) : rgb(0.97, 0.97, 0.97);
-  hoja.drawRectangle({ x: 0, y: 0, width: anchoHoja, height: altoHoja, color: colorFondo });
+  // Vidrio sin tapar (tapa blanca) y encima la cartulina, que puede ser mas angosta
+  // que la hoja: un escaner que lee Carta (216 mm) con una cartulina A4 (210 mm).
+  hoja.drawRectangle({ x: 0, y: 0, width: anchoHoja, height: altoHoja, color: rgb(0.97, 0.97, 0.97) });
+  hoja.drawRectangle({ x: 0, y: 0, width: (cartulinaAnchoMm ?? anchoHojaMm) * MM, height: altoHoja, color: colorFondo });
 
   for (const t of tickets) {
     const w = (t.anchoMm ?? 72) * MM, h = (t.largoMm ?? 110) * MM;
