@@ -25,6 +25,9 @@ const AREA_MINIMA_MM2 = 600;
 const MARGEN_MM = 3;
 // Franja clara pegada al borde cuando la cartulina es mas chica que el vidrio.
 const FRANJA_MAX_MM = 25;
+// Fraccion de la hoja que tiene que ser oscura para decir que hay cartulina. Un
+// escaneo real con cartulina y 3 tickets dio 34%; una hoja blanca con texto, <10%.
+const FRACCION_OSCURA_CARTULINA = 0.2;
 
 const mmAPx = (mm, dpi) => (mm / MM_POR_PULGADA) * dpi;
 const pxAMm = (px, dpi) => (px / dpi) * MM_POR_PULGADA;
@@ -65,21 +68,34 @@ export function umbralOtsu(px) {
 }
 
 /**
- * ¿La hoja se escaneo sobre cartulina? Mira un anillo en el borde de la imagen:
- * con cartulina es casi todo oscuro; con la tapa blanca, casi todo claro.
+ * ¿La hoja se escaneo sobre cartulina? Con cartulina, buena parte de la hoja es
+ * oscura (entre los tickets); con la tapa blanca, lo oscuro es solo el texto impreso.
+ *
+ * No se mira solo el borde: el escaner puede leer Carta (216 mm) con una cartulina A4
+ * (210 mm) encima, y queda una franja blanca en un costado. Con tickets tocando ese
+ * costado, el borde de un escaneo real con cartulina daba 49% oscuro.
  */
-export function hayCartulina({ w, h, px }) {
-  const borde = Math.max(2, Math.round(Math.min(w, h) * 0.04));
-  let oscuros = 0, total = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (x >= borde && x < w - borde && y >= borde && y < h - borde) continue;
-      total++;
-      if (px[y * w + x] < 90) oscuros++;
-    }
-  }
-  // Casi todo el borde oscuro: un ticket puede tocar el borde, pero no mucho mas.
-  return oscuros / total > 0.75;
+export function hayCartulina({ px }) {
+  let oscuros = 0;
+  for (const v of px) if (v < 90) oscuros++;
+  return oscuros / px.length > FRACCION_OSCURA_CARTULINA;
+}
+
+/**
+ * Borra de la mascara las franjas claras pegadas a los bordes: vidrio que la
+ * cartulina no alcanzo a tapar. Una columna (o fila) de borde que es clara casi
+ * de punta a punta no puede ser un ticket: un ticket mide mucho menos que la hoja.
+ * Sin esto, un ticket que toca la franja se funde con ella y no tiene forma de ticket.
+ */
+function quitarFranjas(m, w, h) {
+  const claraCol = (x) => { let c = 0; for (let y = 0; y < h; y++) c += m[y * w + x]; return c / h > 0.85; };
+  const claraFila = (y) => { let c = 0; for (let x = 0; x < w; x++) c += m[y * w + x]; return c / w > 0.85; };
+  const borrarCol = (x) => { for (let y = 0; y < h; y++) m[y * w + x] = 0; };
+  const borrarFila = (y) => { for (let x = 0; x < w; x++) m[y * w + x] = 0; };
+  for (let x = 0; x < w && claraCol(x); x++) borrarCol(x);
+  for (let x = w - 1; x >= 0 && claraCol(x); x--) borrarCol(x);
+  for (let y = 0; y < h && claraFila(y); y++) borrarFila(y);
+  for (let y = h - 1; y >= 0 && claraFila(y); y--) borrarFila(y);
 }
 
 /** Componentes conexas de la mascara (4-vecindad). Devuelve listas de indices. */
@@ -168,6 +184,7 @@ export function buscarTickets(pagina) {
   const umbral = Math.max(90, umbralOtsu(px)); // nunca tomar la cartulina como papel
   let mascara = new Uint8Array(w * h);
   for (let i = 0; i < px.length; i++) mascara[i] = px[i] > umbral ? 1 : 0;
+  quitarFranjas(mascara, w, h);
   mascara = dilatar(mascara, w, h);
 
   const aMm = (v) => pxAMm(v, DPI_ANALISIS);

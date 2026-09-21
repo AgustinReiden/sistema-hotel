@@ -157,6 +157,11 @@ function fijarMetadatos(doc) {
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 
+/** Angulo -> 0, 90, 180 o 270, el cuarto de vuelta mas cercano. */
+export function cuartoDeVuelta(grados) {
+  return (((Math.round(grados / 90) * 90) % 360) + 360) % 360;
+}
+
 /** Una hoja sin cartulina: la hoja entera es una pieza (un remito por hoja). */
 async function piezaPagina(pagina, i, origen, formato) {
   const pixmap = renderizar(pagina, DPI_LECTURA);
@@ -197,8 +202,10 @@ async function piezaTicket(pagina, i, n, rect) {
 
   // Si el codigo dice que el ticket quedo girado, se vuelve a recortar derecho:
   // el archivo y la imagen para la firma quedan siempre al derecho. Se gira en
-  // sentido contrario al que marca el codigo (el lector puede dar -90 o -180).
-  const giro = clasificacion.estado === "identificado" ? (((-clasificacion.rotacion) % 360) + 360) % 360 : 0;
+  // sentido contrario al que marca el codigo, redondeado al cuarto de vuelta: en un
+  // escaneo real el lector da 1 o 359 grados (el torcimiento fino ya lo corrigio el
+  // enderezado por forma), y tomar eso literal dejaba el recorte acostado y cortado.
+  const giro = clasificacion.estado === "identificado" ? cuartoDeVuelta(-clasificacion.rotacion) : 0;
   if (giro) pix = recortar(pagina, rect, DPI_LECTURA, giro);
 
   const png = pix.asPNG();
@@ -272,15 +279,24 @@ export async function procesarEscaneo(bytes) {
       continue;
     }
 
+    // Parecia cartulina pero no aparecio ningun ticket (una foto de un solo ticket,
+    // una imagen suelta de un codigo): se lee la hoja entera, como sin cartulina. Si
+    // tiene un solo remito, es ese; si no, lo que haya va a revision.
+    if (seg.tickets.length === 0) {
+      const entera = await piezaPagina(pagina, i, origen, formato);
+      if (entera.estado === "identificado") {
+        piezas.push(entera);
+        continue;
+      }
+      if (seg.descartes.length === 0) {
+        piezas.push({ ...entera, motivo: "sin_tickets" });
+        continue;
+      }
+    }
+
     let n = 0;
     for (const rect of seg.tickets) piezas.push(await piezaTicket(pagina, i, ++n, rect));
     for (const rect of seg.descartes) piezas.push(await piezaDescarte(pagina, i, ++n, rect));
-    // Parecia cartulina pero no aparecio ningun ticket: se lee la hoja entera como
-    // siempre. Si tampoco hay codigo, va a revision; nunca se descarta en silencio.
-    if (n === 0) {
-      const pieza = await piezaPagina(pagina, i, origen, formato);
-      piezas.push(pieza.estado === "identificado" ? pieza : { ...pieza, motivo: "sin_tickets" });
-    }
   }
 
   return {

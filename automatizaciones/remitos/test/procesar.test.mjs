@@ -222,3 +222,25 @@ test("cartulina: en cualquier angulo, la imagen archivada queda derecha", async 
     }
   }
 });
+
+// --- Casos que salieron del primer escaneo real ---------------------------------
+
+import { cuartoDeVuelta } from "../worker/procesar.mjs";
+
+test("escaner Carta con cartulina A4: la franja blanca del costado no confunde", async () => {
+  // Tickets acostados, como en el escaneo real, y el de la derecha tocando la franja.
+  const r = await procesarEscaneo(await hojaCartulina([
+    { codigo: A, cxMm: 60, cyMm: 70, anguloGrados: 90 },
+    { codigo: B, cxMm: 150, cyMm: 150, anguloGrados: 91, largoMm: 125 },
+    { codigo: C, cxMm: 60, cyMm: 230, anguloGrados: 89 },
+  ], { anchoHojaMm: 216, cartulinaAnchoMm: 210 }));
+  assert.deepEqual(r.piezas.map((p) => [p.modo, p.codigo]).sort(), [
+    ["cartulina", A], ["cartulina", B], ["cartulina", C],
+  ].sort());
+  for (const p of r.piezas) assert.equal(await orientacionArchivada(p), 0, p.codigo);
+});
+
+test("el lector da angulos casi derechos en papel real: se redondea al cuarto de vuelta", () => {
+  assert.deepEqual([1, 359, -1, 44, 46, 89, 91, 179, -179, 181, 269, -91].map(cuartoDeVuelta),
+    [0, 0, 0, 0, 90, 90, 90, 180, 180, 180, 270, 270]);
+});
