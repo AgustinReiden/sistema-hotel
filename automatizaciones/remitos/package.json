@@ -1,0 +1,22 @@
+{
+  "name": "remitos-automatizacion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ingesta de remitos firmados: partir PDF, leer codigo, archivar. Independiente del sistema del hotel.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "worker": "node worker/servidor.mjs",
+    "procesar": "node worker/cli.mjs",
+    "generar": "node generador/cli.mjs"
+  },
+  "dependencies": {
+    "bwip-js": "^4.11.4",
+    "mupdf": "^1.28.1",
+    "pdf-lib": "^1.17.1",
+    "zxing-wasm": "^3.1.4"
+  }
+}
