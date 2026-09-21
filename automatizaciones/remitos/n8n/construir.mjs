@@ -24,14 +24,14 @@ const opcion = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
 
 // --- Configuracion --------------------------------------------------------------
 
+// Ajustes fijos. Los ids de carpetas y planilla NO van aca: el sub-workflow
+// "Remitos - Config" los busca por nombre en cada corrida (sobrevive a reinstalar).
 const CONFIG_BASE = {
-  raiz_id: "COMPLETAR",
-  entrada_id: "COMPLETAR",
-  revisar_id: "COMPLETAR",
-  procesados_id: "COMPLETAR",
-  planilla_id: "COMPLETAR",
   worker_url: "http://remitos-worker:8787",
   modelo: "gemini-3.8-flash",
+  // Si el principal no responde al reintentar una firma, se prueba este.
+  modelo_respaldo: "gemini-3.5-flash",
+  max_reintentos_firma: 5,
   razonamiento: "low",
   unidad: "Hotel",
   minutos_bloqueo: 30,
@@ -49,6 +49,7 @@ const CONFIG = { ...CONFIG_BASE, ...(local.config ?? {}) };
 const CREDENCIALES = local.credenciales ?? {};
 const ID_ASEGURAR = opcion("--asegurar-id", local.asegurar_carpeta_id ?? "COMPLETAR_ID_SUBWORKFLOW");
 const ID_ERRORES = local.errores_id ?? null;
+const ID_CONFIG = opcion("--config-id", local.config_id ?? "COMPLETAR_ID_CONFIG");
 
 // La logica partida en bloques de nivel superior (const/function). Cada nodo Code
 // lleva solo los bloques que menciona, mas sus dependencias.
@@ -173,13 +174,52 @@ const OP = {
   vacio: { type: "string", operation: "empty", singleValue: true },
 };
 
+// El nodo "Config" de cada workflow llama al sub-workflow "Remitos - Config". Se
+// llama igual que antes, asi todas las referencias $('Config') siguen valiendo.
 function configNodo(pos) {
-  const cuerpo = `
-// Configuracion de la ingesta de remitos. Los ids salen del workflow
-// "Remitos - Instalacion". Si cambias algo aca, cambialo en los cuatro workflows
-// (o pedile a Claude que los reconstruya).
+  return nodo("Config", "n8n-nodes-base.executeWorkflow", 1.2, {
+    workflowId: { __rl: true, value: ID_CONFIG, mode: "id" },
+    mode: "once",
+    options: { waitForSubWorkflow: true },
+  }, pos);
+}
+
+// ================================================================================
+// 0) Sub-workflow: configuracion. Ajustes fijos + ids buscados por nombre.
+// ================================================================================
+
+function wfConfig() {
+  contador = 0;
+  const cuerpoAjustes = `
+// Ajustes de la ingesta de remitos. Los ids de carpetas y planilla se buscan por
+// nombre en los nodos siguientes: no hace falta tocarlos al reinstalar.
 return [{ json: ${JSON.stringify(CONFIG, null, 2)} }];`;
-  return codigo("Config", cuerpo, pos, { conLogica: false });
+  return {
+    name: "Remitos - Config",
+    nodes: [
+      nodo("Entrada", "n8n-nodes-base.executeWorkflowTrigger", 1.1, { inputSource: "passthrough" }, [x(0), 300]),
+      codigo("Ajustes", cuerpoAjustes, [x(1), 300], { conLogica: false }),
+      http("Buscar Remitos", [x(2), 300], {
+        url: `=${DRIVE}`, auth: "google",
+        query: { q: "name='Remitos' and 'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false", fields: "files(id,name)" },
+      }),
+      http("Contenido", [x(3), 300], {
+        url: `=${DRIVE}`, auth: "google",
+        query: {
+          q: `={{ "'" + ((($json.files || [])[0] || {}).id || 'sin-carpeta-remitos') + "' in parents and trashed=false" }}`,
+          fields: "files(id,name,mimeType)", pageSize: "200",
+        },
+      }),
+      codigo("Config lista", `
+return [{ json: armarConfig($('Ajustes').first().json, $('Buscar Remitos').first().json.files || [], $input.first().json.files || []) }];`, [x(4), 300]),
+    ],
+    connections: conexiones([
+      ["Entrada", "Ajustes"],
+      ["Ajustes", "Buscar Remitos"],
+      ["Buscar Remitos", "Contenido"],
+      ["Contenido", "Config lista"],
+    ]),
+  };
 }
 
 // Conexiones: [origen, destino] o [origen, destino, salida]
@@ -584,6 +624,92 @@ return [{ json: {
 }
 
 // ================================================================================
+// 4b) Reintento de firmas: cuando Gemini fallo, el remito se archivo igual con la
+//     firma en "error". Cada 10 minutos se toma UNO de esos y se vuelve a preguntar
+//     con el PDF archivado; si el modelo principal falla, se prueba el de respaldo.
+//     Antes de escribir se confirma que la fila sigue siendo la misma (por huella).
+// ================================================================================
+
+function wfReintentarFirmas() {
+  contador = 0;
+  const F = 300;
+  const gemini = (name, pos, campoModelo, cuerpoExpr) => http(name, pos, {
+    method: "POST",
+    url: `=https://generativelanguage.googleapis.com/v1beta/models/{{ ${CFG(campoModelo)} }}:generateContent`,
+    json: cuerpoExpr, auth: "gemini", timeout: 90000,
+    retryOnFail: true, maxTries: 2, waitBetweenTries: 5000,
+    onError: "continueRegularOutput",
+  });
+  return {
+    name: "Remitos - Reintentar firmas",
+    nodes: [
+      nodo("Cada 10 minutos", "n8n-nodes-base.scheduleTrigger", 1.2,
+        { rule: { interval: [{ field: "minutes", minutesInterval: 10 }] } }, [x(0), F]),
+      configNodo([x(1), F]),
+      http("Leer Resultados", [x(2), F], leerPestana("Resultados")),
+      codigo("Elegir pendiente", `
+// Una firma en "error" por corrida. Si no hay ninguna, la corrida termina aca.
+const p = elegirFirmaPendiente($input.first().json.values, $('Config').first().json.max_reintentos_firma);
+return p ? [{ json: p }] : [];`, [x(3), F]),
+      http("Descargar PDF", [x(4), F], {
+        url: `=${DRIVE}/{{ $json.archivo_id }}`, query: { alt: "media" }, archivo: true, auth: "google",
+        onError: "continueErrorOutput",
+      }),
+      codigo("Preparar pedido", `
+const buf = await this.helpers.getBinaryDataBuffer(0, 'data');
+return [{ json: {
+  ...$('Elegir pendiente').first().json,
+  gemini_body: cuerpoGeminiArchivo(buf.toString('base64'), 'application/pdf', $('Config').first().json.razonamiento),
+} }];`, [x(5), F]),
+      gemini("Gemini", [x(6), F], "modelo", "={{ JSON.stringify($json.gemini_body) }}"),
+      codigo("Interpretar", `return [{ json: { firma: interpretarFirma($json), modelo_usado: $('Config').first().json.modelo } }];`, [x(7), F]),
+      si("¿Anduvo?", [x(8), F], "={{ $json.firma.firma }}", OP.distinto, "error"),
+      gemini("Gemini respaldo", [x(9), F + 180], "modelo_respaldo", "={{ JSON.stringify($('Preparar pedido').first().json.gemini_body) }}"),
+      codigo("Interpretar respaldo", `return [{ json: { firma: interpretarFirma($json), modelo_usado: $('Config').first().json.modelo_respaldo } }];`, [x(10), F + 180]),
+      codigo("Sin archivo", `
+// No se pudo bajar el PDF archivado (lo movieron o borraron): cuenta como intento.
+const detalle = ($json.error && ($json.error.message || JSON.stringify($json.error))) || 'error desconocido';
+return [{ json: { firma: { firma: 'error', confianza: '', observacion: 'no se pudo bajar el PDF archivado: ' + String(detalle).slice(0, 200) }, modelo_usado: '' } }];`, [x(5), F + 360], { conLogica: false }),
+      http("Leer fila", [x(11), F], {
+        url: `=${SHEETS}/values/Resultados!A{{ $('Elegir pendiente').first().json.fila }}:T{{ $('Elegir pendiente').first().json.fila }}`,
+        auth: "google",
+      }),
+      codigo("Armar actualización", `
+const p = $('Elegir pendiente').first().json;
+// Si alguien borro o movio filas entre la lectura y ahora, no se toca nada.
+if (!mismaFila(($input.first().json.values || [])[0], p.hash_sha256)) return [];
+const origen = $('Interpretar respaldo').isExecuted ? 'Interpretar respaldo'
+  : $('Interpretar').isExecuted ? 'Interpretar' : 'Sin archivo';
+const r = $(origen).first().json;
+return [{ json: { rango: rangoFirma(p.fila), values: [firmaReintentada(r.firma, r.modelo_usado, p.reintentos + 1)] } }];`, [x(12), F]),
+      http("Actualizar firma", [x(13), F], {
+        method: "PUT", url: `=${SHEETS}/values/{{ $json.rango }}`, auth: "google",
+        query: { valueInputOption: "RAW" },
+        json: "={{ JSON.stringify({ values: $json.values }) }}",
+      }),
+    ],
+    connections: conexiones([
+      ["Cada 10 minutos", "Config"],
+      ["Config", "Leer Resultados"],
+      ["Leer Resultados", "Elegir pendiente"],
+      ["Elegir pendiente", "Descargar PDF"],
+      ["Descargar PDF", "Preparar pedido", 0],
+      ["Descargar PDF", "Sin archivo", 1],
+      ["Preparar pedido", "Gemini"],
+      ["Gemini", "Interpretar"],
+      ["Interpretar", "¿Anduvo?"],
+      ["¿Anduvo?", "Leer fila", 0],
+      ["¿Anduvo?", "Gemini respaldo", 1],
+      ["Gemini respaldo", "Interpretar respaldo"],
+      ["Interpretar respaldo", "Leer fila"],
+      ["Sin archivo", "Leer fila"],
+      ["Leer fila", "Armar actualización"],
+      ["Armar actualización", "Actualizar firma"],
+    ]),
+  };
+}
+
+// ================================================================================
 // 5) Instalacion: crea Remitos/{_Entrada,_Revisar,_Procesados} y la planilla con
 //    sus pestanas. Se corre UNA vez a mano. Si ya existe "Remitos", no hace nada.
 // ================================================================================
@@ -714,16 +840,17 @@ function parsearCsv(linea) {
 const destino = opcion("--salida", join(RAIZ, "salida", "n8n"));
 await mkdir(destino, { recursive: true });
 const workflows = {
+  config: wfConfig(),
   "asegurar-carpeta": wfAsegurarCarpeta(),
   ingesta: wfIngesta(),
   errores: wfErrores(),
   vigilancia: wfVigilancia(),
+  "reintentar-firmas": wfReintentarFirmas(),
   instalacion: await wfInstalacion(),
 };
 for (const [archivo, wf] of Object.entries(workflows)) {
   await writeFile(join(destino, `${archivo}.json`), JSON.stringify(wf, null, 2));
   console.log(`  ${wf.name.padEnd(30)} ${String(wf.nodes.length).padStart(3)} nodos -> salida/n8n/${archivo}.json`);
 }
-const pendientes = Object.entries(CONFIG).filter(([, v]) => v === "COMPLETAR").map(([k]) => k);
-if (pendientes.length) console.log(`\n  Config pendiente: ${pendientes.join(", ")} (sale de correr la Instalacion)`);
+if (ID_CONFIG.startsWith("COMPLETAR")) console.log("\n  Falta el id de 'Remitos - Config' (config_id en config.local.json)");
 if (!CREDENCIALES.google) console.log("  Credenciales sin asignar: se eligen en n8n o se pasan en config.local.json");

@@ -16,7 +16,7 @@ Diseño: [`docs/plans/2026-09-17-remitos-firmados-design.md`](../../docs/plans/2
 | `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código. Sin estado, sin Google. |
 | `n8n/logica.mjs` | Reglas de negocio (qué archivar, qué mandar a revisar, versiones, firma). Puras y testeadas. |
 | `n8n/construir.mjs` | Arma los workflows de n8n incrustando `logica.mjs` en los nodos Code. |
-| `test/` | `npm test` — 68 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
+| `test/` | `npm test` — 84 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
 
 `salida/` queda fuera de git: ahí van los datos reales, los PDF generados y los workflows
 armados (llevan ids y datos de clientes).
@@ -126,7 +126,8 @@ En *Settings* de cada workflow: **Execution order: v1** y, en `Remitos - Ingesta
 | El flujo se cae a mitad de lote | El original queda en `_Entrada` y se reintenta; lo ya guardado se saltea por hash. |
 | Archivo que no es PDF/imagen, o documento de Google | Se aparta a `_Revisar` y se anota en `Errores`. No se reintenta. |
 | Worker caído | Se anota en `Errores`; el archivo queda en `_Entrada` y se reintenta cada 5 minutos. |
-| Gemini falla | La página **igual se archiva**; la firma queda como `error`, nunca como "no firmado". |
+| Gemini falla | La página **igual se archiva**; la firma queda como `error`, nunca como "no firmado". `Remitos - Reintentar firmas` vuelve a preguntar cada 10 minutos con el PDF archivado (modelo principal y, si falla, el de respaldo), hasta 5 intentos. |
+| Se reinstala (carpetas y planilla nuevas) | Nada que tocar: `Remitos - Config` busca carpetas y planilla por nombre en cada corrida. Si falta algo o está repetido, la corrida falla con un mensaje claro. |
 | Dos corridas a la vez | Un turno en `Estado` lo impide; si una corrida muere, el turno vence a los 30 min. |
 | La ingesta deja de correr o `_Entrada` no se vacía | `Remitos - Vigilancia` avisa por WhatsApp (webhook del hotel), como máximo cada 6 h. |
 
