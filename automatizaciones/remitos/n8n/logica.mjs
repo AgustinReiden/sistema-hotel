@@ -335,7 +335,132 @@ function evaluarVigilancia({ ultimaCorrida, archivosEntrada, ahora, horasSinCorr
   return problemas;
 }
 
+// --- Configuracion -------------------------------------------------------------
+
+const NOMBRES = {
+  raiz: "Remitos",
+  entrada: "_Entrada",
+  revisar: "_Revisar",
+  procesados: "_Procesados",
+  planilla: "Remitos - Control",
+};
+const MIME_CARPETA = "application/vnd.google-apps.folder";
+const MIME_PLANILLA = "application/vnd.google-apps.spreadsheet";
+
+/**
+ * Arma la configuracion buscando las carpetas y la planilla POR NOMBRE, no por id.
+ * Asi reinstalar (que crea todo de nuevo, con ids nuevos) no deja a los workflows
+ * mirando carpetas viejas en la papelera. Si algo falta o esta repetido, tira un
+ * error claro: nunca "no hay nada que procesar" en silencio.
+ *
+ * @param {object} ajustes     configuracion fija (modelo, worker, tiempos...)
+ * @param {object[]} raices    carpetas llamadas "Remitos" en Mi unidad
+ * @param {object[]} contenido lo que hay adentro de "Remitos" {id, name, mimeType}
+ */
+function armarConfig(ajustes, raices, contenido) {
+  if (raices.length === 0) {
+    throw new Error(`No encuentro la carpeta "${NOMBRES.raiz}" en Mi unidad. Correr "Remitos - Instalacion".`);
+  }
+  if (raices.length > 1) {
+    throw new Error(`Hay ${raices.length} carpetas "${NOMBRES.raiz}" en Mi unidad: dejar una sola (renombrar o borrar las otras).`);
+  }
+  const unico = (nombre, mime) => {
+    const encontrados = contenido.filter((f) => f.name === nombre && f.mimeType === mime);
+    if (encontrados.length === 0) throw new Error(`Falta "${nombre}" dentro de "${NOMBRES.raiz}". Correr "Remitos - Instalacion" o recrearla.`);
+    if (encontrados.length > 1) throw new Error(`Hay ${encontrados.length} "${nombre}" dentro de "${NOMBRES.raiz}": dejar uno solo.`);
+    return encontrados[0].id;
+  };
+  return {
+    ...ajustes,
+    raiz_id: raices[0].id,
+    entrada_id: unico(NOMBRES.entrada, MIME_CARPETA),
+    revisar_id: unico(NOMBRES.revisar, MIME_CARPETA),
+    procesados_id: unico(NOMBRES.procesados, MIME_CARPETA),
+    planilla_id: unico(NOMBRES.planilla, MIME_PLANILLA),
+  };
+}
+
+// --- Reintento de firmas ----------------------------------------------------------
+//
+// Cuando Gemini falla (sobrecarga, cuota), el remito se archiva igual y la firma
+// queda "error". Un workflow aparte vuelve a preguntar mas tarde, con el PDF ya
+// archivado, de a un remito por corrida. Los intentos se cuentan en la observacion
+// para no insistir para siempre con uno que nunca va a andar.
+
+const MARCA_REINTENTOS = /\[reintentos: (\d+)\]/;
+
+/** Cuantos reintentos lleva una firma, segun su observacion. */
+function reintentosDe(observacion) {
+  const m = MARCA_REINTENTOS.exec(String(observacion ?? ""));
+  return m ? Number(m[1]) : 0;
+}
+
+/** Letra de columna de Sheets (0 -> A, 25 -> Z, 26 -> AA). */
+function letraColumna(i) {
+  let s = "";
+  for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
+}
+
+/** Rango de las celdas de firma de una fila de Resultados: firma, confianza, observacion, modelo. */
+function rangoFirma(fila) {
+  const c = COLUMNAS.Resultados;
+  return `Resultados!${letraColumna(c.indexOf("firma"))}${fila}:${letraColumna(c.indexOf("modelo"))}${fila}`;
+}
+
+/**
+ * La firma pendiente con menos intentos (y, a igualdad, la mas vieja).
+ * Trabaja sobre los valores crudos de la API para conocer el numero de fila real.
+ * Devuelve null si no hay nada pendiente.
+ */
+function elegirFirmaPendiente(values, maxReintentos) {
+  if (!Array.isArray(values) || values.length < 2) return null;
+  const col = Object.fromEntries(values[0].map((h, i) => [String(h).trim(), i]));
+  let elegida = null;
+  for (let i = 1; i < values.length; i++) {
+    const f = values[i];
+    if (String(f[col.firma] ?? "").trim() !== "error") continue;
+    const archivo_id = String(f[col.archivo_id] ?? "").trim();
+    if (!archivo_id) continue;
+    const reintentos = reintentosDe(f[col.observacion]);
+    if (reintentos >= maxReintentos) continue;
+    if (!elegida || reintentos < elegida.reintentos) {
+      elegida = {
+        fila: i + 1, // la fila 1 es el encabezado
+        archivo_id,
+        numero: f[col.numero] ?? "",
+        hash_sha256: f[col.hash_sha256] ?? "",
+        reintentos,
+      };
+    }
+  }
+  return elegida;
+}
+
+/** ¿La fila de la planilla sigue siendo la misma que se eligio? (alguien pudo borrar filas) */
+function mismaFila(valoresFila, hashEsperado) {
+  const i = COLUMNAS.Resultados.indexOf("hash_sha256");
+  return Boolean(hashEsperado) && String((valoresFila || [])[i] ?? "").trim() === String(hashEsperado).trim();
+}
+
+/** Valores nuevos para firma, confianza, observacion y modelo. Si sigue en error, cuenta el intento. */
+function firmaReintentada(firma, modelo, reintentos) {
+  const observacion = firma.firma === "error"
+    ? `${String(firma.observacion ?? "").replace(MARCA_REINTENTOS, "").trim()} [reintentos: ${reintentos}]`.trim()
+    : firma.observacion;
+  return [firma.firma, firma.confianza, observacion, modelo];
+}
+
+/** Como cuerpoGemini, pero para un archivo cualquiera (el PDF archivado del remito). */
+function cuerpoGeminiArchivo(b64, mimeType, nivelRazonamiento) {
+  const cuerpo = cuerpoGemini(b64, nivelRazonamiento);
+  cuerpo.contents[0].parts[1].inlineData.mimeType = mimeType;
+  return cuerpo;
+}
+
 export {
+  reintentosDe, letraColumna, rangoFirma, elegirFirmaPendiente, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
+  NOMBRES, armarConfig,
   COLUMNAS, filasAObjetos, objetoAFila, limpiarNombre, planificarLote, PROMPT_FIRMA, cuerpoGemini,
   interpretarFirma, filaResultado, filaLote, filaError, evaluarRespuestaWorker, evaluarVigilancia,
 };

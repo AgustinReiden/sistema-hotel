@@ -225,3 +225,108 @@ test("lote duplicado: las saltadas cuentan piezas, no hojas", () => {
   const r = plan(worker([ticket(1, 1, 1, "a"), ticket(1, 2, 2, "b")], "lotehash123456", 1), { lotes });
   assert.deepEqual(r.resumen, { paginas: 1, archivadas: 0, revisar: 0, saltadas: 2 });
 });
+
+// --- Configuracion por nombre (sobrevive a reinstalar) ---
+
+import { armarConfig } from "../n8n/logica.mjs";
+
+const CARPETA = "application/vnd.google-apps.folder";
+const PLANILLA = "application/vnd.google-apps.spreadsheet";
+const contenidoOk = [
+  { id: "E", name: "_Entrada", mimeType: CARPETA },
+  { id: "R", name: "_Revisar", mimeType: CARPETA },
+  { id: "P", name: "_Procesados", mimeType: CARPETA },
+  { id: "S", name: "Remitos - Control", mimeType: PLANILLA },
+  { id: "X", name: "ACME SA - PERFUMERIA", mimeType: CARPETA },
+];
+
+test("config: arma los ids buscando por nombre", () => {
+  const c = armarConfig({ modelo: "m" }, [{ id: "RAIZ" }], contenidoOk);
+  assert.deepEqual(c, { modelo: "m", raiz_id: "RAIZ", entrada_id: "E", revisar_id: "R", procesados_id: "P", planilla_id: "S" });
+});
+
+test("config: sin carpeta Remitos, error claro (nunca 'no hay nada')", () => {
+  assert.throws(() => armarConfig({}, [], contenidoOk), /No encuentro la carpeta "Remitos"/);
+});
+
+test("config: dos carpetas Remitos, error claro", () => {
+  assert.throws(() => armarConfig({}, [{ id: "a" }, { id: "b" }], contenidoOk), /Hay 2 carpetas "Remitos"/);
+});
+
+test("config: falta una subcarpeta o la planilla, error claro", () => {
+  assert.throws(() => armarConfig({}, [{ id: "r" }], contenidoOk.filter((f) => f.name !== "_Entrada")), /Falta "_Entrada"/);
+  assert.throws(() => armarConfig({}, [{ id: "r" }], contenidoOk.filter((f) => f.id !== "S")), /Falta "Remitos - Control"/);
+});
+
+test("config: una carpeta con el nombre de la planilla no cuenta como planilla", () => {
+  const raro = [...contenidoOk.filter((f) => f.id !== "S"), { id: "Z", name: "Remitos - Control", mimeType: CARPETA }];
+  assert.throws(() => armarConfig({}, [{ id: "r" }], raro), /Falta "Remitos - Control"/);
+});
+
+test("config: subcarpeta repetida, error claro", () => {
+  assert.throws(() => armarConfig({}, [{ id: "r" }], [...contenidoOk, { id: "E2", name: "_Entrada", mimeType: CARPETA }]), /Hay 2 "_Entrada"/);
+});
+
+// --- Reintento de firmas ---
+
+import {
+  reintentosDe, letraColumna, rangoFirma, elegirFirmaPendiente, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
+} from "../n8n/logica.mjs";
+
+const encabezado = COLUMNAS.Resultados;
+const filaRes = (o) => encabezado.map((c) => o[c] ?? "");
+
+test("reintentos: se leen de la observacion", () => {
+  assert.equal(reintentosDe("gemini: 503"), 0);
+  assert.equal(reintentosDe("gemini: 503 [reintentos: 3]"), 3);
+  assert.equal(reintentosDe(undefined), 0);
+});
+
+test("letras de columna y rango de firma en Resultados", () => {
+  assert.deepEqual([0, 12, 15, 25, 26, 27].map(letraColumna), ["A", "M", "P", "Z", "AA", "AB"]);
+  assert.equal(rangoFirma(6), "Resultados!M6:P6");
+});
+
+test("elige la firma en error con menos intentos y su fila real", () => {
+  const values = [
+    encabezado,
+    filaRes({ numero: "T-000001", firma: "si", archivo_id: "a", hash_sha256: "h1" }),
+    filaRes({ numero: "T-000002", firma: "error", observacion: "x [reintentos: 2]", archivo_id: "b", hash_sha256: "h2" }),
+    [],
+    filaRes({ numero: "T-000005", firma: "error", observacion: "gemini: 503", archivo_id: "c", hash_sha256: "h5" }),
+  ];
+  assert.deepEqual(elegirFirmaPendiente(values, 5), { fila: 5, archivo_id: "c", numero: "T-000005", hash_sha256: "h5", reintentos: 0 });
+});
+
+test("no elige las que agotaron los intentos ni las que no tienen archivo", () => {
+  const values = [
+    encabezado,
+    filaRes({ firma: "error", observacion: "[reintentos: 5]", archivo_id: "a", hash_sha256: "h" }),
+    filaRes({ firma: "error", observacion: "", archivo_id: "", hash_sha256: "h" }),
+    filaRes({ firma: "no", archivo_id: "b", hash_sha256: "h" }),
+  ];
+  assert.equal(elegirFirmaPendiente(values, 5), null);
+  assert.equal(elegirFirmaPendiente([encabezado], 5), null);
+});
+
+test("misma fila: se compara la huella, nunca se pisa otra fila", () => {
+  const fila = filaRes({ hash_sha256: "h5" });
+  assert.equal(mismaFila(fila, "h5"), true);
+  assert.equal(mismaFila(fila, "otro"), false);
+  assert.equal(mismaFila([], "h5"), false);
+  assert.equal(mismaFila(fila, ""), false);
+});
+
+test("firma reintentada: si anduvo, limpia; si sigue en error, cuenta el intento", () => {
+  assert.deepEqual(firmaReintentada({ firma: "no", confianza: 0.97, observacion: "renglon vacio" }, "gemini-3.8-flash", 1),
+    ["no", 0.97, "renglon vacio", "gemini-3.8-flash"]);
+  assert.deepEqual(firmaReintentada({ firma: "error", confianza: "", observacion: "gemini: 503 [reintentos: 1]" }, "gemini-3.5-flash", 2),
+    ["error", "", "gemini: 503 [reintentos: 2]", "gemini-3.5-flash"]);
+});
+
+test("el pedido a Gemini con el PDF archivado usa el mismo prompt", () => {
+  const c = cuerpoGeminiArchivo("UERG", "application/pdf", "low");
+  assert.equal(c.contents[0].parts[1].inlineData.mimeType, "application/pdf");
+  assert.equal(c.contents[0].parts[1].inlineData.data, "UERG");
+  assert.equal(c.contents[0].parts[0].text, cuerpoGemini("x", "low").contents[0].parts[0].text);
+});
