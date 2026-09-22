@@ -62,8 +62,10 @@ export function MobileTopBar({ role, userEmail, hasOpenShift, unbilledCount }: M
     <>
       {/* Ni sticky ni fixed: es un hijo flex del shell de alto fijo, así que no se mueve
           nunca. Con position fija y scroll de ventana, en iOS saltaba cada vez que la
-          barra de URL se contraía. */}
-      <header className="md:hidden shrink-0 flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900 px-4 shadow-lg">
+          barra de URL se contraía.
+          print:hidden porque los comprobantes térmicos se abren en una ventana angosta
+          (versión celular) y la barra salía impresa arriba de cada ticket. */}
+      <header className="md:hidden shrink-0 flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900 px-4 shadow-lg print:hidden">
         <Link href="/admin" className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 shadow-lg shadow-emerald-500/20">
             <BedDouble size={18} className="text-white" />
