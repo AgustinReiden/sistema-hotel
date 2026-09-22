@@ -47,8 +47,6 @@ async function imagenQr(texto, lado) {
 export async function htmlTicket(c, hotel, { qrMm = QR_MM, leyenda = "" } = {}) {
   return `
   <section class="thermal-page compacto">
-    <h1>${esc(hotel.nombre)}</h1>
-    ${hotel.direccion ? `<p class="addr">${esc(hotel.direccion)}</p>` : ""}
     <p class="tipo">COMPROBANTE CTA. CTE.${leyenda ? ` · ${esc(leyenda)}` : ""}</p>
     <hr />
     <div class="ident">
