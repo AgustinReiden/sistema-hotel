@@ -130,7 +130,7 @@ chico y sigue habiendo dos renglones, Firma y Aclaración.
    Si tiene varios (`forma_no_reconocida`, `varios_codigos`), solo se resuelve
    re-escaneando: una imagen con varios tickets nunca queda como respaldo de uno.
 
-### 4.3 Tablas nuevas (migración 115)
+### 4.3 Tablas nuevas (migración 116; la 115 ya la usó otra rama)
 
 No se modifica ninguna tabla que ya existe.
 
@@ -262,7 +262,7 @@ Cada paso deja algo andando.
    para elegir tamaños.
 3. **B1:** comprobante compacto con QR. Es un PR sin migración. Desde el despliegue, los
    remitos nuevos salen con QR.
-4. **Migración 115 en PROD,** con el OK de Agustín antes de aplicarla. `controlar_desde`
+4. **Migración 116 en PROD,** con el OK de Agustín antes de aplicarla. `controlar_desde`
    queda en el primer remito posterior a B1.
 5. **B2:** el panel, la clave (huella en la base, credencial en n8n) y los workflows nuevos
    (se reimportan la Ingesta y *Evaluar firmas*).
