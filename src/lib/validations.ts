@@ -165,6 +165,9 @@ const walkInBaseSchema = {
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha de entrada retroactiva es invalida.")
     .optional(),
+  // Walk-in de madrugada vendido como la noche de anoche (mig 115). Mismo cuidado
+  // que checkInDate: si no se declara acá, zod lo descarta y la estadía sale mañana.
+  lastNight: z.boolean().optional(),
   ...guestRegistrySchemaFields,
 };
 

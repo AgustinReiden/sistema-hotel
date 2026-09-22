@@ -139,6 +139,30 @@ describe("assignWalkInSchema", () => {
     expect(result.passengerName).toBe("Maria Lopez");
     expect(result.passengerDni).toBe("30123456");
   });
+
+  // zod descarta en silencio lo que no declara: si lastNight se perdiera acá, el
+  // walk-in de madrugada volvería a salir mañana y a chocar con la reserva de esta noche.
+  it("keeps lastNight (madrugada walk-in sold as last night)", () => {
+    const person = assignWalkInSchema.parse({ ...validPersonWalkIn, nights: 1, lastNight: true });
+    const company = assignWalkInSchema.parse({
+      mode: "company",
+      roomId: 1,
+      nights: 1,
+      associatedClientId: "550e8400-e29b-41d4-a716-446655440000",
+      passengerName: "Juan Carlos Rios",
+      passengerDni: "33683344",
+      lastNight: true,
+    });
+
+    expect(person.lastNight).toBe(true);
+    expect(company.lastNight).toBe(true);
+  });
+
+  it("rejects a non-boolean lastNight", () => {
+    expect(() =>
+      assignWalkInSchema.parse({ ...validPersonWalkIn, nights: 1, lastNight: "si" })
+    ).toThrow();
+  });
 });
 
 describe("createReservationSchema", () => {

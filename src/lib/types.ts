@@ -692,8 +692,12 @@ export type DiscountedClient = {
  * usó anoche. Es una fecha y no un timestamp porque la hora de entrada y la zona
  * las resuelve la base (mig 104), que también lo acota a 7 días y lo rechaza en el
  * medio día.
+ *
+ * `lastNight` es otra cosa: el pasajero está en el mostrador de madrugada y se le
+ * vende la noche de ayer, que todavía corre hasta la hora de salida (mig 115). La
+ * fecha la pone la base con su reloj; el ingreso real es ahora.
  */
-type WalkInBackdate = { checkInDate?: string };
+type WalkInBackdate = { checkInDate?: string; lastNight?: boolean };
 
 export type AssignWalkInPayload =
   | ({

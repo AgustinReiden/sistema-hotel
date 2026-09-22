@@ -9,11 +9,13 @@ import CompanyPassengerSelector from "./CompanyPassengerSelector";
 import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
 import { searchGuestsAction } from "./actions";
+import { isEarlyMorning } from "@/lib/arrivals";
 import {
   calculateHalfDayPriceBreakdown,
   calculateWalkInPriceBreakdown,
   resolveEffectiveDiscountPercent,
 } from "@/lib/pricing";
+import { addDaysToDateKey, hotelDateKey } from "@/lib/time";
 import type {
   AssignWalkInPayload,
   AssociatedClient,
@@ -31,9 +33,22 @@ type WalkInModalProps = {
   basePrice?: number;
   halfDayPrice?: number;
   associatedClients: AssociatedClient[];
+  /**
+   * Zona y hora de salida estándar del hotel. Con las dos, el modal muestra el día de
+   * salida y, de madrugada, pregunta qué noche se vende. Sin ellas no pregunta: el
+   * aviso de pieza usada ya fija desde cuándo se cobra.
+   */
+  timezone?: string;
+  standardCheckOutTime?: string;
 };
 
 type ReservationMode = "person" | "company";
+
+// "2026-09-21" → "21/09".
+function dayLabel(dateKey: string): string {
+  const [, month, day] = dateKey.split("-");
+  return `${day}/${month}`;
+}
 
 const inputClass =
   "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
@@ -56,9 +71,14 @@ export default function WalkInModal({
   basePrice = 0,
   halfDayPrice = 0,
   associatedClients,
+  timezone,
+  standardCheckOutTime,
 }: WalkInModalProps) {
   const [mode, setMode] = useState<ReservationMode>("person");
   const [stayType, setStayType] = useState<WalkInStayType>("night");
+  // De madrugada viene marcada la noche de anoche: medido en PROD, casi todos los que
+  // entran después de medianoche se van esa misma mañana.
+  const [lastNight, setLastNight] = useState(true);
   // Persona
   const [guestId, setGuestId] = useState<string | null>(null);
   const [clientFirstName, setClientFirstName] = useState("");
@@ -81,6 +101,7 @@ export default function WalkInModal({
     if (!isOpen) return;
     setMode("person");
     setStayType("night");
+    setLastNight(true);
     setGuestId(null);
     setClientFirstName("");
     setClientLastName("");
@@ -188,6 +209,22 @@ export default function WalkInModal({
       ? calculateWalkInPriceBreakdown({ basePrice, nights, discountPercent })
       : null;
 
+  // Qué noche se vende y cuándo sale. De madrugada la noche de ayer sigue corriendo
+  // hasta la hora de salida; la base vuelve a controlar la hora con su reloj (mig 115).
+  const now = new Date();
+  const knowsHotelClock = Boolean(timezone && standardCheckOutTime);
+  const checkOutLabel = standardCheckOutTime?.slice(0, 5) ?? "";
+  const offersLastNight =
+    !isHalfDay && knowsHotelClock && isEarlyMorning(now, standardCheckOutTime!, timezone!);
+  const sellsLastNight = offersLastNight && lastNight;
+  const todayKey = knowsHotelClock ? hotelDateKey(now, timezone) : "";
+  const departureKeyFor = (fromLastNight: boolean) =>
+    addDaysToDateKey(todayKey, fromLastNight ? nights - 1 : nights);
+  const departureText = (departureKey: string) =>
+    departureKey === todayKey
+      ? `Sale hoy a las ${checkOutLabel}`
+      : `Sale el ${dayLabel(departureKey)} a las ${checkOutLabel}`;
+
   const personComplete =
     Boolean(clientFirstName.trim()) && Boolean(clientLastName.trim()) && Boolean(clientDni.trim());
   const companyComplete =
@@ -226,6 +263,7 @@ export default function WalkInModal({
               nights: isHalfDay ? 1 : nights,
               guestCount,
               stayType,
+              ...(sellsLastNight ? { lastNight: true } : {}),
               ...registry,
             }
           : {
@@ -238,6 +276,7 @@ export default function WalkInModal({
               nights: isHalfDay ? 1 : nights,
               guestCount,
               stayType,
+              ...(sellsLastNight ? { lastNight: true } : {}),
               ...registry,
             };
 
@@ -296,6 +335,41 @@ export default function WalkInModal({
               </span>
             </button>
           </div>
+
+          {/* De madrugada hay dos noches posibles. Sin esta pregunta el sistema vendía
+              siempre la de hoy: la salida quedaba mañana y chocaba con la reserva de
+              esta noche (hab. 6, 21/09). */}
+          {offersLastNight && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 space-y-3">
+              <p className="text-sm font-bold text-indigo-900">Es de madrugada: ¿qué noche se le vende?</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setLastNight(true)}
+                  aria-pressed={lastNight}
+                  className={`rounded-xl border px-4 py-3 text-left transition-colors bg-white ${
+                    lastNight ? "border-indigo-500 ring-2 ring-indigo-100" : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <span className="block font-semibold text-slate-800">
+                    La de anoche ({dayLabel(addDaysToDateKey(todayKey, -1))})
+                  </span>
+                  <span className="block text-sm text-slate-500">{departureText(departureKeyFor(true))}.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLastNight(false)}
+                  aria-pressed={!lastNight}
+                  className={`rounded-xl border px-4 py-3 text-left transition-colors bg-white ${
+                    !lastNight ? "border-indigo-500 ring-2 ring-indigo-100" : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <span className="block font-semibold text-slate-800">La de hoy ({dayLabel(todayKey)})</span>
+                  <span className="block text-sm text-slate-500">{departureText(departureKeyFor(false))}.</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Buscador único: huésped o empresa. Lo que se elige define el modo. */}
           <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
@@ -530,6 +604,11 @@ export default function WalkInModal({
                       ? `Media estadía (12 a 17 hs) · $${halfDayPrice.toLocaleString("es-AR")}`
                       : `${nights} noche${nights !== 1 ? "s" : ""} × $${basePrice.toLocaleString("es-AR")}`}
                   </p>
+                  {!isHalfDay && knowsHotelClock && (
+                    <p className="text-xs font-semibold text-slate-600 mt-0.5">
+                      {departureText(departureKeyFor(sellsLastNight))}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right">
                   {discountPercent > 0 && (
