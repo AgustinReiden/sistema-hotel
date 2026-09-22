@@ -5,7 +5,8 @@
 //   node herramientas/comparar-workflow.mjs <desplegado.txt|json> <salida/n8n/build.json>
 //
 // Ignora ids y posiciones de nodos, CRLF contra LF, y los valores por defecto que
-// n8n borra al guardar (GET, runOnceForAllItems, batchSize 1, mode once).
+// n8n borra al guardar (GET, runOnceForAllItems, batchSize 1, mode once, cada 5
+// minutos, y la unidad "seconds" del nodo Wait 1.1).
 import { readFileSync } from "node:fs";
 
 const [rutaDesplegado, rutaBuild] = process.argv.slice(2);
@@ -26,6 +27,7 @@ const PREDETERMINADOS = [
   ["batchSize", 1],
   ["mode", "once"],
   ["minutesInterval", 5],
+  ["unit", "seconds"],
 ];
 
 function normalizar(v) {
