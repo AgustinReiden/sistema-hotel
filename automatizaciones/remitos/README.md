@@ -10,6 +10,9 @@ Aparte, evalúa la firma con Gemini. El estado de cada remito se ve en el panel
 la clave de la integración en el encabezado `x-remitos-clave`; en la base queda solo su
 huella. La regla de la IA (umbral, intentos) vive en la base, no en n8n.
 
+**En marcha desde el 2026-09-22.** Se controlan los remitos del `R-000161` en adelante
+(`controlar_desde`) y cualquier remito anterior que se escanee.
+
 Diseños: [general](../../docs/plans/2026-09-17-remitos-firmados-design.md) e
 [integración con el sistema](../../docs/plans/2026-09-22-remitos-integracion-design.md).
 
@@ -165,8 +168,37 @@ vuelven a coincidir.
 |---|---|---|
 | `Remitos - Ingesta` | Cada 5 min | Late en la base, toma el archivo más viejo de `_Entrada`, lo separa en tickets, le pregunta a la base qué remitos existen y de quién son, archiva cada uno en su carpeta y lo registra: lo archivado como escaneo del remito (queda "evaluando"), lo que va a revisar como pieza con su motivo. **No llama a Gemini**: una caída de Google nunca frena ni alarga el archivo. |
 | `Remitos - Evaluar firmas` | Cada 5 min | Late en la base, le pide hasta 5 escaneos pendientes y los evalúa de a una, con una pausa, mandándole a Gemini el PDF archivado. Lo que dice Gemini vuelve a la base, que decide el estado: firmado o sin firma si la IA está segura (umbral 95 %, se cambia desde el panel), y "a revisar" si no. |
-| `Remitos - Vigilancia` | Cada hora | Avisa por WhatsApp si la ingesta no corre o si `_Entrada` no se vacía. |
+| `Remitos - Vigilancia` | Cada hora | Anota una alerta en `Errores` si la ingesta no corre o si `_Entrada` no se vacía, y la manda por WhatsApp si `aviso_numero` tiene un número (hoy está vacío). |
 | `Remitos - Config`, `Asegurar carpeta`, `Errores` | Los llaman los demás | Ajustes y carpetas por nombre; registro de ejecuciones caídas. |
+
+**Activos:** la Ingesta, *Evaluar firmas* y Vigilancia. `Config`, `Asegurar carpeta` y
+`Errores` quedan apagados: los llaman los demás y funcionan igual. `Instalación` queda
+apagado y no hace falta volver a correrlo.
+
+### 10. El panel
+
+- **Filtra por la fecha del cargo**, no por la del escaneo. Un remito de julio escaneado
+  hoy aparece en julio. Los anteriores a `controlar_desde` aparecen solo si tienen un escaneo.
+- **Las piezas a revisar se ven siempre**, sin importar el mes elegido.
+- **Re-escanear no cierra la pieza vieja.** El remito escaneado de nuevo se registra y se
+  evalúa solo; la pieza se cierra con **Resuelta → "Ya se volvió a escanear bien"**. La nota
+  solo es obligatoria para descartar ("No era un remito").
+
+### 11. Limpiar Drive y la planilla
+
+- **La planilla `Remitos - Control` no se borra ni se renombra:** `Config` la busca por
+  ese nombre y sin ella se cae todo. Lo mismo vale para `Remitos`, `_Entrada`, `_Revisar`
+  y `_Procesados`.
+- **La pestaña *Estado* no se toca.** Guarda la última corrida y el turno que impide dos
+  ingestas a la vez, cada dato en un renglón fijo.
+- **En *Lotes* y *Errores* se pueden borrar los renglones**, dejando el primero (los
+  títulos). Sin *Lotes*, un PDF ya procesado se vuelve a procesar, pero la base reconoce
+  cada pieza por su huella y no la registra dos veces.
+- **Los archivos que la base conoce no se borran:** los escaneos de cada remito y las
+  piezas de `_Revisar`. Son los que abre "Ver" en el panel; si se borran, el botón queda
+  apuntando a nada. Los originales de `_Procesados` no los usa el panel, pero son el
+  respaldo del escaneo completo. Lo que se archivó antes de la mig 116 (pruebas `T-`,
+  pruebas viejas en carpetas de clientes) sí se puede borrar.
 
 ## Qué pasa cuando algo falla
 
