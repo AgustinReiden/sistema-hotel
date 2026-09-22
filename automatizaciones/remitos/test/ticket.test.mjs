@@ -25,6 +25,10 @@ test("ticket compacto: QR al costado del numero, sin titulos ni textos de mas", 
   assert.doesNotMatch(h, /CARGO A CUENTA CORRIENTE/);
   assert.doesNotMatch(h, /reconoce adeudar/);
   assert.doesNotMatch(h, /Conserve este comprobante/);
+  // Ni nombre ni direccion del hotel: solo gastaban papel.
+  assert.doesNotMatch(h, /Hotel de Prueba/);
+  assert.doesNotMatch(h, /Ruta 1 km 1/);
+  assert.match(h, /^\s*<section class="thermal-page compacto">\s*<p class="tipo">/);
 });
 
 test("ticket compacto: el tamaño del QR y la leyenda de muestra se pueden cambiar", async () => {

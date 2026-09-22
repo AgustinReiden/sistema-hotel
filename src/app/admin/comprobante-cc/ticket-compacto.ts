@@ -15,9 +15,7 @@ export const REMITO_QR_MM = 16;
  */
 export const CSS_TICKET_COMPACTO = `
 .compacto { font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; background: white; color: #000; width: 72mm; max-width: 72mm; margin: 0 auto; padding: 0 3mm; box-sizing: border-box; line-height: 1.25; }
-.compacto h1 { font-size: 12pt; font-weight: 900; margin: 0 0 1px; padding-top: 1mm; text-align: center; line-height: 1.15; }
-.compacto .addr { font-size: 8pt; font-weight: 600; text-align: center; margin: 0 0 2px; }
-.compacto .tipo { font-size: 7.5pt; font-weight: 800; text-align: center; letter-spacing: 1px; margin: 0 0 2px; }
+.compacto .tipo { font-size: 7.5pt; font-weight: 800; text-align: center; letter-spacing: 1px; margin: 0 0 2px; padding-top: 1mm; }
 .compacto hr { border: none; border-top: 1px solid #000; margin: 3px 0; }
 .compacto .ident { display: flex; align-items: center; gap: 3mm; margin: 3px 0; }
 .compacto .ident .qr { display: block; flex: 0 0 auto; image-rendering: pixelated; image-rendering: crisp-edges; }
