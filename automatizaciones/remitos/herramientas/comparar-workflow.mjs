@@ -49,7 +49,9 @@ function normalizar(v) {
 const nodos = (wf) =>
   new Map(
     wf.nodes.map((n) => {
-      const { id, position, webhookId, ...resto } = n;
+      // Lo que n8n cambia al importar: no dice nada de si el nodo quedo igual.
+      const resto = { ...n };
+      for (const k of ["id", "position", "webhookId"]) delete resto[k];
       return [n.name, normalizar(resto)];
     })
   );
