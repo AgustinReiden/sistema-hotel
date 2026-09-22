@@ -16,7 +16,7 @@ Diseño: [`docs/plans/2026-09-17-remitos-firmados-design.md`](../../docs/plans/2
 | `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código. Sin estado, sin Google. |
 | `n8n/logica.mjs` | Reglas de negocio (qué archivar, qué mandar a revisar, versiones, firma). Puras y testeadas. |
 | `n8n/construir.mjs` | Arma los workflows de n8n incrustando `logica.mjs` en los nodos Code. |
-| `test/` | `npm test` — 97 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
+| `test/` | `npm test` — 98 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
 
 `salida/` queda fuera de git: ahí van los datos reales, los PDF generados y los workflows
 armados (llevan ids y datos de clientes).
