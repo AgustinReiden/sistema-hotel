@@ -101,6 +101,11 @@ import type {
   ShiftSummary,
   UpcomingGuest,
   UserRole,
+  RemitoEstadoPersona,
+  RemitoLookup,
+  RemitoPanelRow,
+  RemitoPieza,
+  RemitosSalud,
 } from "./types";
 
 const ACTIVE_RESERVATION_STATUSES: ReservationStatus[] = [
@@ -4753,4 +4758,152 @@ export async function countBillingPending(days = 60): Promise<BillingPendingCoun
     pendiente_consolidada: Number(r.pendiente_consolidada) || 0,
     dias: Number(r.dias) || days,
   };
+}
+
+// ─── Remitos firmados (mig 116) ─────────────────────────────────────────────
+
+function numOrNull(v: unknown): number | null {
+  return v === null || v === undefined || v === "" ? null : Number(v);
+}
+function strOrNull(v: unknown): string | null {
+  return v === null || v === undefined ? null : String(v);
+}
+
+function toRemitoRow(r: Record<string, unknown>): RemitoPanelRow {
+  return {
+    movimiento_id: String(r.movimiento_id),
+    remito_numero: Number(r.remito_numero),
+    created_at: String(r.created_at),
+    amount: Number(r.amount) || 0,
+    client_kind: r.client_kind === "guest" ? "guest" : "company",
+    client_id: String(r.client_id),
+    cliente: String(r.cliente ?? "—"),
+    room_number: strOrNull(r.room_number),
+    pasajero: strOrNull(r.pasajero),
+    estado: r.estado as RemitoPanelRow["estado"],
+    decidido_por: (r.decidido_por as RemitoPanelRow["decidido_por"]) ?? null,
+    decidido_por_nombre: strOrNull(r.decidido_por_nombre),
+    estado_at: strOrNull(r.estado_at),
+    nota: strOrNull(r.nota),
+    escaneo_version: numOrNull(r.escaneo_version),
+    escaneo_link: strOrNull(r.escaneo_link),
+    escaneo_origen: (r.escaneo_origen as RemitoPanelRow["escaneo_origen"]) ?? null,
+    firma_ia: (r.firma_ia as RemitoPanelRow["firma_ia"]) ?? null,
+    firma_ia_confianza: numOrNull(r.firma_ia_confianza),
+    firma_ia_observacion: strOrNull(r.firma_ia_observacion),
+  };
+}
+
+/** Remitos del período (y del cliente, si se elige) con su estado de firma. */
+export async function listRemitos(
+  desde: string,
+  hasta: string,
+  clientKind?: CtaCteClientKind,
+  clientId?: string
+): Promise<RemitoPanelRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_remitos_listar", {
+    p_client_kind: clientKind ?? null,
+    p_client_id: clientId ?? null,
+    p_desde: desde,
+    p_hasta: hasta,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map(toRemitoRow);
+}
+
+/** Latidos de n8n, contadores del badge y ajustes. */
+export async function getRemitosSalud(): Promise<RemitosSalud> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_remitos_salud");
+  if (error) throw error;
+  const r = (data ?? {}) as Record<string, unknown>;
+  return {
+    ultima_ingesta_at: strOrNull(r.ultima_ingesta_at),
+    ultima_evaluacion_at: strOrNull(r.ultima_evaluacion_at),
+    evaluando_viejos: Number(r.evaluando_viejos) || 0,
+    a_revisar: Number(r.a_revisar) || 0,
+    piezas_abiertas: Number(r.piezas_abiertas) || 0,
+    umbral_confianza: Number(r.umbral_confianza) || 0.95,
+    controlar_desde: Number(r.controlar_desde) || 1,
+    max_intentos_firma: Number(r.max_intentos_firma) || 5,
+  };
+}
+
+export async function markRemito(movimientoId: string, estado: RemitoEstadoPersona, nota?: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_remitos_marcar", {
+    p_movimiento_id: movimientoId,
+    p_estado: estado,
+    p_nota: nota ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function listRemitoPiezas(incluirResueltas = false): Promise<RemitoPieza[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_remitos_piezas", { p_incluir_resueltas: incluirResueltas });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((p) => ({
+    id: String(p.id),
+    created_at: String(p.created_at),
+    motivo: String(p.motivo),
+    numeros_leidos: Array.isArray(p.numeros_leidos) ? p.numeros_leidos.map(String) : [],
+    drive_link: strOrNull(p.drive_link),
+    lote_archivo: strOrNull(p.lote_archivo),
+    ubicacion: strOrNull(p.ubicacion),
+    resuelta_at: strOrNull(p.resuelta_at),
+    resuelta_como: (p.resuelta_como as RemitoPieza["resuelta_como"]) ?? null,
+    resuelta_nota: strOrNull(p.resuelta_nota),
+    remito_numero: numOrNull(p.remito_numero),
+  }));
+}
+
+export async function lookupRemito(numero: number): Promise<RemitoLookup> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_remitos_buscar", { p_numero: numero });
+  if (error) throw error;
+  const r = (data ?? {}) as Record<string, unknown>;
+  if (!r.existe) return { existe: false };
+  return {
+    existe: true,
+    movimiento_id: String(r.movimiento_id),
+    remito_numero: Number(r.remito_numero),
+    cliente: String(r.cliente ?? "—"),
+    created_at: String(r.created_at),
+    amount: Number(r.amount) || 0,
+    room_number: strOrNull(r.room_number),
+    pasajero: strOrNull(r.pasajero),
+    estado: r.estado as RemitoPanelRow["estado"],
+    escaneos: Number(r.escaneos) || 0,
+  };
+}
+
+export async function assignRemitoPieza(piezaId: string, numero: number): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_remitos_asignar_pieza", { p_pieza_id: piezaId, p_numero: numero });
+  if (error) throw error;
+}
+
+export async function resolveRemitoPieza(
+  piezaId: string,
+  como: "reescaneada" | "descartada",
+  nota?: string
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_remitos_resolver_pieza", {
+    p_pieza_id: piezaId,
+    p_como: como,
+    p_nota: nota ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function saveRemitosAjustes(umbral: number, controlarDesde: number): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_remitos_guardar_ajustes", {
+    p_umbral: umbral,
+    p_controlar_desde: controlarDesde,
+  });
+  if (error) throw error;
 }

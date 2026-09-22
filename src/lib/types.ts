@@ -1279,3 +1279,73 @@ export type EmitInvoiceOutcome = {
   numero?: string;
   userMessage: string;
 };
+
+/** Estado del remito firmado de un cargo de cuenta corriente (mig 116). */
+export type RemitoEstado = "sin_escanear" | "evaluando" | "a_revisar" | "firmado" | "sin_firma" | "sin_remito";
+/** Lo que una persona puede decidir desde el panel. */
+export type RemitoEstadoPersona = "firmado" | "sin_firma" | "sin_remito" | "a_revisar";
+export type RemitoDecididoPor = "sistema" | "ia" | "persona";
+export type RemitoFirmaIa = "si" | "no" | "error";
+
+export type RemitoPanelRow = {
+  movimiento_id: string;
+  remito_numero: number;
+  created_at: string;
+  amount: number;
+  client_kind: CtaCteClientKind;
+  client_id: string;
+  cliente: string;
+  room_number: string | null;
+  pasajero: string | null;
+  estado: RemitoEstado;
+  decidido_por: RemitoDecididoPor | null;
+  decidido_por_nombre: string | null;
+  estado_at: string | null;
+  nota: string | null;
+  escaneo_version: number | null;
+  escaneo_link: string | null;
+  escaneo_origen: "qr" | "tipeado" | null;
+  firma_ia: RemitoFirmaIa | null;
+  firma_ia_confianza: number | null;
+  firma_ia_observacion: string | null;
+};
+
+export type RemitoPieza = {
+  id: string;
+  created_at: string;
+  motivo: string;
+  numeros_leidos: string[];
+  drive_link: string | null;
+  lote_archivo: string | null;
+  ubicacion: string | null;
+  resuelta_at: string | null;
+  resuelta_como: "asignada" | "reescaneada" | "descartada" | null;
+  resuelta_nota: string | null;
+  remito_numero: number | null;
+};
+
+export type RemitosSalud = {
+  ultima_ingesta_at: string | null;
+  ultima_evaluacion_at: string | null;
+  evaluando_viejos: number;
+  a_revisar: number;
+  piezas_abiertas: number;
+  umbral_confianza: number;
+  controlar_desde: number;
+  max_intentos_firma: number;
+};
+
+export type RemitoLookup =
+  | { existe: false }
+  | {
+      existe: true;
+      movimiento_id: string;
+      remito_numero: number;
+      cliente: string;
+      created_at: string;
+      amount: number;
+      room_number: string | null;
+      pasajero: string | null;
+      estado: RemitoEstado;
+      escaneos: number;
+    };

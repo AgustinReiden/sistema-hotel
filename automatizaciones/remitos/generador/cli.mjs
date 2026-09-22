@@ -7,11 +7,11 @@
 //   Lote de prueba:
 //     node generador/cli.mjs --datos salida/datos.local.json [--qr-mm 16] [--desde 1] [--solo 7-20]
 //       -> salida/comprobantes.html  (imprimir en la comandera desde Chrome)
-//       -> salida/comprobantes.csv   (importar en la pestana "Comprobantes" de la Sheet)
 //
+//   Los T- de prueba sirven para probar el worker sin n8n: la ingesta busca los
+//   remitos en la base, y un T- escaneado va a _Revisar como codigo_inexistente.
 //   --qr-mm cambia el lado del QR; por defecto, el del sistema (comun/ticket-compacto.mjs).
 //   --solo imprime parte del lote ("7-20", "1,3,7-9") sin cambiar la numeracion.
-//   El CSV sale siempre completo: es la pestana Comprobantes entera.
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { formatearCodigo, numeroVisible } from "../comun/codigo.mjs";
 import { QR_MM } from "../comun/ticket-compacto.mjs";
 import { documento, htmlTicket } from "./ticket.mjs";
-import { PREFIJO_PRUEBA, aCsv, armarManifiesto, parsearSeleccion, seleccionar } from "./manifiesto.mjs";
+import { PREFIJO_PRUEBA, armarManifiesto, parsearSeleccion, seleccionar } from "./manifiesto.mjs";
 
 const args = process.argv.slice(2);
 const opcion = (nombre, porDefecto) => {
@@ -89,11 +89,9 @@ const secciones = [];
 for (const c of aImprimir) secciones.push(await htmlTicket(c, hotel, { qrMm }));
 
 await writeFile(join(SALIDA, "comprobantes.html"), documento("Comprobantes de prueba", secciones));
-await writeFile(join(SALIDA, "comprobantes.csv"), aCsv(manifiesto));
 
 const porCliente = Object.groupBy(manifiesto, (c) => `${c.carpeta_cliente} / ${c.periodo}`);
 console.log(`\n${manifiesto.length} comprobantes (${manifiesto[0].numero} a ${manifiesto.at(-1).numero}), QR de ${qrMm} mm\n`);
 for (const [k, v] of Object.entries(porCliente)) console.log(`  ${String(v.length).padStart(3)}  ${k}`);
 if (solo) console.log(`\n  Para imprimir: ${aImprimir.length} (${aImprimir.map((c) => c.numero).join(", ")})`);
-console.log(`\n  ${join(SALIDA, "comprobantes.html")}  -> imprimir`);
-console.log(`  ${join(SALIDA, "comprobantes.csv")}   -> importar en la Sheet, pestana "Comprobantes"\n`);
+console.log(`\n  ${join(SALIDA, "comprobantes.html")}  -> imprimir\n`);

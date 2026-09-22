@@ -1,15 +1,11 @@
-// Manifiesto de comprobantes de prueba: la tabla "numero -> cliente, periodo"
-// que en esta etapa reemplaza a la base de datos. Se importa a la pestana
-// "Comprobantes" de la Google Sheet y n8n la consulta para saber donde archivar.
+// Manifiesto de comprobantes de prueba (T-): la numeracion y los datos de cada
+// ticket que imprime el generador. Sirven para probar el worker sin n8n: los
+// remitos reales (R-) salen del sistema y n8n los busca en la base (mig 116). Un
+// T- escaneado con la ingesta va a _Revisar como codigo_inexistente.
 
 import { formatearCodigo, numeroVisible } from "../comun/codigo.mjs";
 
 export const PREFIJO_PRUEBA = "T";
-
-export const COLUMNAS = [
-  "numero", "codigo", "movimiento_id", "cliente", "carpeta_cliente", "documento",
-  "habitacion", "check_in", "check_out", "created_at", "periodo", "monto", "verdad_firmado",
-];
 
 /** "AAAA-MM" del momento del cargo, en la zona del hotel. */
 export function periodo(iso, zona) {
@@ -93,15 +89,4 @@ export function seleccionar(manifiesto, numeros) {
     throw new Error(`No existen en el lote: ${faltan.map((n) => numeroVisible(PREFIJO_PRUEBA, n)).join(", ")}.`);
   }
   return numeros.map((n) => porNro.get(n));
-}
-
-function celdaCsv(v) {
-  const s = String(v ?? "");
-  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-export function aCsv(filas) {
-  const lineas = [COLUMNAS.join(",")];
-  for (const f of filas) lineas.push(COLUMNAS.map((c) => celdaCsv(f[c])).join(","));
-  return lineas.join("\n") + "\n";
 }

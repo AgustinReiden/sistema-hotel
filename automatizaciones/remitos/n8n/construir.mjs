@@ -2,20 +2,25 @@
 //
 //   node n8n/construir.mjs [--config n8n/config.local.json] [--asegurar-id <id>] [--salida dir]
 //
-// Escribe salida/n8n/*.json (fuera de git: llevan ids de Drive y, la instalacion,
-// los comprobantes de prueba). Se suben a n8n con la herramienta MCP de n8n.
+// Escribe salida/n8n/*.json (fuera de git: llevan ids de n8n y de credenciales, y la
+// config, la URL de la base). Se suben a n8n con la herramienta MCP de n8n.
 //
 // Todas las llamadas a Google van por la API REST desde nodos HTTP, con UNA
 // credencial "Google Drive OAuth2" (su alcance "drive" tambien habilita la API de
 // Sheets). La logica de negocio vive en n8n/logica.mjs y se incrusta en los
 // nodos Code, asi lo que se testea es exactamente lo que corre.
+//
+// Los remitos, sus escaneos y sus firmas viven en la base del sistema (mig 116):
+// n8n llama a funciones de Supabase con la clave de la integracion (credencial
+// "Supabase - Remitos"). La planilla queda como bitacora tecnica: Lotes, Errores
+// y Estado (turno, ultima corrida, ultima alerta).
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { COLUMNAS, letraColumna } from "./logica.mjs";
+import { COLUMNAS } from "./logica.mjs";
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const RAIZ = join(AQUI, "..");
@@ -31,8 +36,8 @@ const CONFIG_BASE = {
   modelo: "gemini-3.8-flash",
   // Si el principal no responde al evaluar una firma, se prueba este.
   modelo_respaldo: "gemini-3.5-flash",
-  // Intentos por firma antes de dejarla en "error" para que la mire una persona.
-  max_reintentos_firma: 5,
+  // Los intentos por firma y el umbral de la IA viven en la base (remitos_ajustes):
+  // los cambia el admin desde el panel, sin tocar n8n.
   // "Evaluar firmas": cuantas mira por corrida (cada 5 min) y la pausa entre una y otra.
   firmas_por_corrida: 5,
   segundos_entre_firmas: 3,
@@ -44,12 +49,16 @@ const CONFIG_BASE = {
   horas_entre_alertas: 6,
   aviso_webhook: "http://localhost:5678/webhook/hotel-reserva-notificacion",
   aviso_numero: "",
+  // La base del sistema. Llegan desde config.local.json (fuera de git): la URL del
+  // proyecto y la anon key, que no es secreta (viaja en el navegador del panel).
+  supabase_url: "",
+  supabase_anon_key: "",
 };
 
 const rutaConfig = opcion("--config", join(AQUI, "config.local.json"));
 const local = existsSync(rutaConfig) ? JSON.parse(await readFile(rutaConfig, "utf8")) : {};
 const CONFIG = { ...CONFIG_BASE, ...(local.config ?? {}) };
-// { google: {id, name}, gemini: {id, name}, worker: {id, name} }
+// { google: {id, name}, gemini: {id, name}, worker: {id, name}, supabase: {id, name} }
 const CREDENCIALES = local.credenciales ?? {};
 const ID_ASEGURAR = opcion("--asegurar-id", local.asegurar_carpeta_id ?? "COMPLETAR_ID_SUBWORKFLOW");
 const ID_ERRORES = local.errores_id ?? null;
@@ -139,7 +148,7 @@ function credencial(tipo) {
 
 /**
  * Nodo HTTP.
- * auth: "google" | "gemini" | "worker"
+ * auth: "google" | "gemini" | "worker" | "supabase"
  */
 function http(name, pos, { method = "GET", url, query, json, binario, auth, archivo, completa, timeout, ...extra }) {
   const p = { method, url, options: {} };
@@ -286,6 +295,23 @@ const mover = (idExpr, destinoCampo) => ({
 
 const x = (col) => 200 + col * 220;
 
+// Llamada a una funcion de la base (mig 116). La clave de la integracion la pone
+// la credencial Header Auth ("supabase"); la anon key de Supabase no es secreta
+// (viaja en el navegador) y va como encabezado. `funcion` puede ser un nombre fijo
+// o una expresion ("{{ $json.funcion }}").
+function supa(name, pos, funcion, jsonExpr, extra = {}) {
+  const url = `={{ ${CFG("supabase_url")} }}/rest/v1/rpc/${funcion}`;
+  const n = http(name, pos, { method: "POST", url, json: jsonExpr, auth: "supabase", timeout: 30000, ...extra });
+  n.parameters.sendHeaders = true;
+  n.parameters.headerParameters = {
+    parameters: [
+      { name: "apikey", value: `={{ ${CFG("supabase_anon_key")} }}` },
+      { name: "Authorization", value: `=Bearer {{ ${CFG("supabase_anon_key")} }}` },
+    ],
+  };
+  return n;
+}
+
 // ================================================================================
 // 1) Sub-workflow: asegurar carpeta (buscar por nombre dentro de un padre; si no
 //    esta, crearla). Devuelve el item que recibio + { id }.
@@ -345,6 +371,9 @@ function wfIngesta() {
       { rule: { interval: [{ field: "minutes", minutesInterval: 5 }] } }, [x(0), F]),
     configNodo([x(1), F]),
     http("Latido", [x(2), F], { ...estado(2, "ultima_corrida", "$now.toISO()"), executeOnce: true }),
+    // El panel del sistema avisa si la ingesta deja de latir. Si la base no contesta,
+    // la corrida se cae aca, antes de tocar ningun archivo: se reintenta en 5 minutos.
+    supa("Latido (base)", [x(2), F - 150], "rpc_remitos_latido", "={{ JSON.stringify({ p_que: 'ingesta' }) }}", { executeOnce: true }),
     http("Listar _Entrada", [x(3), F], {
       url: `=${DRIVE}`, auth: "google", executeOnce: true,
       query: {
@@ -383,9 +412,11 @@ return [{ json: $('Tomar archivo').first().json }];`, [x(6), F]),
     }),
     codigo("Evaluar worker", `return [{ json: evaluarRespuestaWorker($input.first().json) }];`, [x(11), F]),
     si("¿Worker OK?", [x(12), F], "={{ $json.decision }}", OP.igual, "ok"),
-    http("Leer Comprobantes", [x(13), F], { ...leerPestana("Comprobantes"), executeOnce: true }),
-    http("Leer Resultados", [x(14), F], { ...leerPestana("Resultados"), executeOnce: true }),
-    http("Leer Lotes", [x(15), F], { ...leerPestana("Lotes"), executeOnce: true }),
+    http("Leer Lotes", [x(13), F], { ...leerPestana("Lotes"), executeOnce: true }),
+    // Que remitos existen, de que cliente y periodo, cuantos escaneos tienen, y que
+    // piezas ya estan registradas (para no subir dos veces lo mismo).
+    codigo("Pedido a la base", `return [{ json: pedidoPlanificacion($('Worker').first().json.body) }];`, [x(14), F]),
+    supa("Planificar (base)", [x(15), F], "rpc_remitos_planificar", "={{ JSON.stringify($json) }}"),
     codigo("Planificar", `
 const cfg = $('Config').first().json;
 const archivo = $('Tomar archivo').first().json;
@@ -393,8 +424,7 @@ const worker = $('Worker').first().json.body;
 const plan = planificarLote({
   archivo,
   worker,
-  comprobantes: filasAObjetos($('Leer Comprobantes').first().json.values),
-  resultados: filasAObjetos($('Leer Resultados').first().json.values),
+  planificacion: $('Planificar (base)').first().json,
   lotes: filasAObjetos($('Leer Lotes').first().json.values),
   unidad: cfg.unidad,
   ahora: new Date().toISOString(),
@@ -427,14 +457,12 @@ return piezas.length ? piezas : [{ json: { accion: 'nada' } }];`, [x(23), F]),
     nodo("Una página por vez", "n8n-nodes-base.splitInBatches", 3, { batchSize: 1, options: {} }, [x(24), F]),
     si("¿Es página?", [x(25), F - 150], "={{ $json.accion }}", OP.distinto, "nada"),
     codigo("Preparar subida", `
-// La firma queda "pendiente": la evalua "Remitos - Evaluar firmas", aparte, para que
-// una caida o una saturacion de Gemini nunca frene ni alargue el archivo.
 const pag = $json;
 const { pdf_pagina_b64, ...resto } = pag;
 return {
-  json: { ...resto, firma: firmaInicial(pag.accion) },
+  json: resto,
   binary: { data: { data: pdf_pagina_b64, mimeType: 'application/pdf', fileName: pag.archivo_nombre, fileExtension: 'pdf' } },
-};`, [x(26), F - 150], { cadaItem: true }),
+};`, [x(26), F - 150], { cadaItem: true, conLogica: false }),
     http("Crear archivo", [x(27), F - 150], {
       method: "POST", url: `=${DRIVE}`, query: { fields: "id" }, auth: "google",
       json: "={{ JSON.stringify({ name: $json.archivo_nombre, parents: [$json.destino_id], mimeType: 'application/pdf', description: 'Lote ' + $json.lote_archivo + ', pieza ' + $json.pagina + ($json.motivo ? ' — ' + $json.motivo : '') }) }}",
@@ -444,10 +472,11 @@ return {
       method: "PATCH", url: "=https://www.googleapis.com/upload/drive/v3/files/{{ $json.id }}",
       query: { uploadType: "media", fields: "id,name,webViewLink" }, binario: true, auth: "google",
     }),
-    codigo("Fila resultado", `
-const pag = $('Preparar subida').item.json;
-return { json: { values: [filaResultado(pag, pag.firma, $json, '', new Date().toISOString())] } };`, [x(30), F - 150], { cadaItem: true }),
-    http("Anotar resultado", [x(31), F - 150], { ...appendA("Resultados"), json: "={{ JSON.stringify({ values: $json.values }) }}" }),
+    // Lo archivado queda registrado como escaneo del remito ("evaluando": la firma la
+    // mira "Remitos - Evaluar firmas", aparte, para que Gemini nunca frene el archivo);
+    // lo que va a revisar, como pieza suelta con su motivo.
+    codigo("Armar registro", `return { json: registroDePieza($('Preparar subida').item.json, $json) };`, [x(30), F - 150], { cadaItem: true }),
+    supa("Registrar (base)", [x(31), F - 150], "{{ $json.funcion }}", "={{ JSON.stringify($json.body) }}"),
     codigo("Cierre", `
 const plan = $('Planificar').first().json;
 const ahora = new Date().toISOString();
@@ -498,7 +527,8 @@ return [{ json: { values: [filaError('ingesta', archivo, ev.tipo, ev.detalle + '
     connections: conexiones([
       ["Cada 5 minutos", "Config"],
       ["Config", "Latido"],
-      ["Latido", "Listar _Entrada"],
+      ["Latido", "Latido (base)"],
+      ["Latido (base)", "Listar _Entrada"],
       ["Listar _Entrada", "Tomar archivo"],
       ["Tomar archivo", "Leer Estado"],
       ["Leer Estado", "¿Turno libre?"],
@@ -510,13 +540,13 @@ return [{ json: { values: [filaError('ingesta', archivo, ev.tipo, ev.detalle + '
       ["Worker", "Evaluar worker", 0],
       ["Worker", "Preparar reintento", 1],
       ["Evaluar worker", "¿Worker OK?"],
-      ["¿Worker OK?", "Leer Comprobantes", 0],
+      ["¿Worker OK?", "Leer Lotes", 0],
       ["¿Worker OK?", "¿Rechazar?", 1],
       ["¿Rechazar?", "Preparar rechazo", 0],
       ["¿Rechazar?", "Preparar reintento", 1],
-      ["Leer Comprobantes", "Leer Resultados"],
-      ["Leer Resultados", "Leer Lotes"],
-      ["Leer Lotes", "Planificar"],
+      ["Leer Lotes", "Pedido a la base"],
+      ["Pedido a la base", "Planificar (base)"],
+      ["Planificar (base)", "Planificar"],
       ["Planificar", "Rutas"],
       ["Rutas", "Carpeta cliente"],
       ["Carpeta cliente", "→ unidad"],
@@ -532,9 +562,9 @@ return [{ json: { values: [filaError('ingesta', archivo, ev.tipo, ev.detalle + '
       ["Preparar subida", "Crear archivo"],
       ["Crear archivo", "Recuperar PDF"],
       ["Recuperar PDF", "Subir contenido"],
-      ["Subir contenido", "Fila resultado"],
-      ["Fila resultado", "Anotar resultado"],
-      ["Anotar resultado", "Una página por vez"],
+      ["Subir contenido", "Armar registro"],
+      ["Armar registro", "Registrar (base)"],
+      ["Registrar (base)", "Una página por vez"],
       ["Cierre", "Mover a _Procesados"],
       ["Mover a _Procesados", "Anotar lote"],
       ["Anotar lote", "Liberar turno"],
@@ -642,20 +672,19 @@ return [{ json: {
 }
 
 // ================================================================================
-// 4b) Evaluar firmas: la ingesta archiva y deja la firma "pendiente". Cada 5
-//     minutos se toman unas pocas pendientes (o en "error" con intentos libres) y,
-//     DE A UNA y con una pausa, se le pregunta a Gemini con el PDF archivado. Si
-//     el modelo principal falla se prueba el de respaldo; si fallan los dos por
-//     cuota, saturacion o red, la corrida se corta y sigue en la proxima.
+// 4b) Evaluar firmas: la ingesta archiva y registra el escaneo en la base, y el
+//     remito queda "evaluando". Cada 5 minutos se le piden a la base unas pocas
+//     pendientes y, DE A UNA y con una pausa, se le pregunta a Gemini con el PDF
+//     archivado. Lo que dijo Gemini vuelve a la base, que cuenta el intento y
+//     decide el estado con su umbral (mig 116): n8n no decide nada. Si el modelo
+//     principal falla se prueba el de respaldo; si fallan los dos por cuota,
+//     saturacion o red, la corrida se corta y sigue en la proxima.
 //
 //     Adentro del bucle cada nodo lee el remito de ESA vuelta ($('X').itemMatching,
 //     por item emparejado), nunca $('X').first() de un nodo del bucle ni
 //     .isExecuted: esos miran la ultima vez que corrio el nodo, que puede ser la
-//     vuelta anterior, y escribirian la firma de un remito en la fila de otro.
-//     Antes de escribir se confirma que la fila sigue siendo la misma (por huella).
+//     vuelta anterior, y guardarian la firma de un remito en el escaneo de otro.
 // ================================================================================
-
-const ULTIMA_COLUMNA_RESULTADOS = letraColumna(COLUMNAS.Resultados.length - 1);
 
 function wfEvaluarFirmas() {
   contador = 0;
@@ -670,56 +699,34 @@ function wfEvaluarFirmas() {
     completa: true,
     onError: "continueRegularOutput",
   });
-  // Resultado de una evaluacion, con lo que hace falta para escribir la fila.
+  // Resultado de una evaluacion, con lo que hace falta para guardarla en la base.
   const resultado = (origenDatos, firmaExpr, modeloExpr) => `
 const cfg = $('Config').first().json;
 return $input.all().map((item, i) => {
   const p = $('${origenDatos}').itemMatching(i).json;
+  const firma = ${firmaExpr};
   return {
-    json: { fila: p.fila, hash_sha256: p.hash_sha256, reintentos: p.reintentos, numero: p.numero,
-      firma: ${firmaExpr}, modelo_usado: ${modeloExpr} },
+    json: { escaneo_id: p.escaneo_id, numero: p.numero, firma, modelo_usado: ${modeloExpr}, seguir: !cortarCorrida(firma) },
     pairedItem: { item: i },
   };
 });`;
-  // Escribir la firma: se relee la fila y solo se escribe si sigue siendo la misma.
-  const escribir = (sufijo, origen, y) => [
-    http(`Leer fila (${sufijo})`, [x(11), y], {
-      url: `=${SHEETS}/values/Resultados!A{{ $json.fila }}:${ULTIMA_COLUMNA_RESULTADOS}{{ $json.fila }}`,
-      auth: "google",
-    }),
-    codigo(`Armar actualización (${sufijo})`, `
-const out = [];
-for (const [i, item] of $input.all().entries()) {
-  const r = $('${origen}').itemMatching(i).json;
-  // Si alguien borro o movio filas entre la lectura y ahora, no se toca nada
-  // (y la corrida termina aca: la proxima vuelve a leer la planilla).
-  if (!mismaFila((item.json.values || [])[0], r.hash_sha256)) continue;
-  out.push({
-    json: { rango: rangoFirma(r.fila), values: [firmaReintentada(r.firma, r.modelo_usado, r.reintentos + 1)], seguir: !cortarCorrida(r.firma) },
-    pairedItem: { item: i },
-  });
-}
-return out;`, [x(12), y]),
-    http(`Actualizar firma (${sufijo})`, [x(13), y], {
-      method: "PUT", url: `=${SHEETS}/values/{{ $json.rango }}`, auth: "google",
-      query: { valueInputOption: "RAW" },
-      json: "={{ JSON.stringify({ values: $json.values }) }}",
-    }),
-  ];
+  // La base guarda lo que dijo Gemini, cuenta el intento y decide el estado.
+  const guardar = (sufijo, pos) => supa(`Guardar firma (${sufijo})`, pos, "rpc_remitos_guardar_firma",
+    "={{ JSON.stringify({ p_escaneo_id: $json.escaneo_id, p_firma: $json.firma.firma, p_confianza: $json.firma.firma === 'error' ? null : $json.firma.confianza, p_observacion: $json.firma.observacion, p_modelo: $json.modelo_usado }) }}");
   return {
     name: "Remitos - Evaluar firmas",
     nodes: [
       nodo("Cada 5 minutos", "n8n-nodes-base.scheduleTrigger", 1.2,
         { rule: { interval: [{ field: "minutes", minutesInterval: 5 }] } }, [x(0), F]),
       configNodo([x(1), F]),
-      http("Leer Resultados", [x(2), F], leerPestana("Resultados")),
+      supa("Latido (base)", [x(2), F], "rpc_remitos_latido", "={{ JSON.stringify({ p_que: 'evaluacion' }) }}"),
+      supa("Pendientes (base)", [x(3), F], "rpc_remitos_firmas_pendientes", `={{ JSON.stringify({ p_limite: ${CFG("firmas_por_corrida")} }) }}`),
       codigo("Elegir pendientes", `
-// Unas pocas por corrida. Si no hay ninguna, la corrida termina aca.
-const cfg = $('Config').first().json;
-return elegirFirmasPendientes($input.first().json.values, cfg.max_reintentos_firma, cfg.firmas_por_corrida).map(json => ({ json }));`, [x(3), F]),
-      nodo("Una por vez", "n8n-nodes-base.splitInBatches", 3, { batchSize: 1, options: {} }, [x(4), F]),
-      http("Descargar PDF", [x(5), F], {
-        url: `=${DRIVE}/{{ $json.archivo_id }}`, query: { alt: "media" }, archivo: true, auth: "google",
+// La base ya eligio cuales y en que orden. Si no hay ninguna, la corrida termina aca.
+return $input.all().map(i => i.json).filter(p => p && p.escaneo_id && p.drive_file_id).map(json => ({ json }));`, [x(4), F], { conLogica: false }),
+      nodo("Una por vez", "n8n-nodes-base.splitInBatches", 3, { batchSize: 1, options: {} }, [x(5), F]),
+      http("Descargar PDF", [x(6), F], {
+        url: `=${DRIVE}/{{ $json.drive_file_id }}`, query: { alt: "media" }, archivo: true, auth: "google",
         onError: "continueErrorOutput",
       }),
       codigo("Preparar pedido", `
@@ -733,28 +740,29 @@ for (const [i] of $input.all().entries()) {
     pairedItem: { item: i },
   });
 }
-return out;`, [x(6), F]),
-      gemini("Gemini", [x(7), F], "modelo", "={{ JSON.stringify($json.gemini_body) }}"),
-      codigo("Interpretar", resultado("Preparar pedido", "interpretarFirma(item.json)", "cfg.modelo"), [x(8), F]),
-      si("¿Anduvo?", [x(9), F], "={{ $json.firma.firma }}", OP.distinto, "error"),
-      gemini("Gemini respaldo", [x(9), F + 200], "modelo_respaldo", "={{ JSON.stringify($('Preparar pedido').item.json.gemini_body) }}"),
-      codigo("Interpretar respaldo", resultado("Preparar pedido", "interpretarFirma(item.json)", "cfg.modelo_respaldo"), [x(10), F + 200]),
+return out;`, [x(7), F]),
+      gemini("Gemini", [x(8), F], "modelo", "={{ JSON.stringify($json.gemini_body) }}"),
+      codigo("Interpretar", resultado("Preparar pedido", "interpretarFirma(item.json)", "cfg.modelo"), [x(9), F]),
+      si("¿Anduvo?", [x(10), F], "={{ $json.firma.firma }}", OP.distinto, "error"),
+      gemini("Gemini respaldo", [x(10), F + 200], "modelo_respaldo", "={{ JSON.stringify($('Preparar pedido').item.json.gemini_body) }}"),
+      codigo("Interpretar respaldo", resultado("Preparar pedido", "interpretarFirma(item.json)", "cfg.modelo_respaldo"), [x(11), F + 200]),
       codigo("Sin archivo", resultado(
         "Una por vez",
         "{ firma: 'error', confianza: '', tipo_error: 'otro', observacion: 'no se pudo bajar el PDF archivado: ' + String((item.json.error && (item.json.error.message || JSON.stringify(item.json.error))) || 'error desconocido').slice(0, 200) }",
         "''",
-      ), [x(6), F + 400]),
-      ...escribir("principal", "Interpretar", F),
-      ...escribir("respaldo", "Interpretar respaldo", F + 200),
-      ...escribir("sin archivo", "Sin archivo", F + 400),
-      si("¿Seguir?", [x(14), F + 200], "={{ $('Armar actualización (respaldo)').item.json.seguir }}", OP.verdadero),
+      ), [x(7), F + 400]),
+      guardar("principal", [x(12), F]),
+      guardar("respaldo", [x(12), F + 200]),
+      guardar("sin archivo", [x(12), F + 400]),
+      si("¿Seguir?", [x(13), F + 200], "={{ $('Interpretar respaldo').item.json.seguir }}", OP.verdadero),
       nodo("Pausa", "n8n-nodes-base.wait", 1.1,
-        { amount: `={{ ${CFG("segundos_entre_firmas")} || 3 }}`, unit: "seconds" }, [x(15), F]),
+        { amount: `={{ ${CFG("segundos_entre_firmas")} || 3 }}`, unit: "seconds" }, [x(14), F]),
     ],
     connections: conexiones([
       ["Cada 5 minutos", "Config"],
-      ["Config", "Leer Resultados"],
-      ["Leer Resultados", "Elegir pendientes"],
+      ["Config", "Latido (base)"],
+      ["Latido (base)", "Pendientes (base)"],
+      ["Pendientes (base)", "Elegir pendientes"],
       ["Elegir pendientes", "Una por vez"],
       // La salida 0 de "Una por vez" es "termine": no hay nada mas que hacer.
       ["Una por vez", "Descargar PDF", 1],
@@ -763,22 +771,16 @@ return out;`, [x(6), F]),
       ["Preparar pedido", "Gemini"],
       ["Gemini", "Interpretar"],
       ["Interpretar", "¿Anduvo?"],
-      ["¿Anduvo?", "Leer fila (principal)", 0],
+      ["¿Anduvo?", "Guardar firma (principal)", 0],
       ["¿Anduvo?", "Gemini respaldo", 1],
       ["Gemini respaldo", "Interpretar respaldo"],
-      ["Interpretar respaldo", "Leer fila (respaldo)"],
-      ["Sin archivo", "Leer fila (sin archivo)"],
-      ["Leer fila (principal)", "Armar actualización (principal)"],
-      ["Armar actualización (principal)", "Actualizar firma (principal)"],
-      ["Actualizar firma (principal)", "Pausa"],
-      ["Leer fila (respaldo)", "Armar actualización (respaldo)"],
-      ["Armar actualización (respaldo)", "Actualizar firma (respaldo)"],
-      ["Actualizar firma (respaldo)", "¿Seguir?"],
+      ["Interpretar respaldo", "Guardar firma (respaldo)"],
+      ["Sin archivo", "Guardar firma (sin archivo)"],
+      ["Guardar firma (principal)", "Pausa"],
+      ["Guardar firma (respaldo)", "¿Seguir?"],
       // Si fallaron los dos modelos por cuota o saturacion, se corta aca.
       ["¿Seguir?", "Pausa", 0],
-      ["Leer fila (sin archivo)", "Armar actualización (sin archivo)"],
-      ["Armar actualización (sin archivo)", "Actualizar firma (sin archivo)"],
-      ["Actualizar firma (sin archivo)", "Pausa"],
+      ["Guardar firma (sin archivo)", "Pausa"],
       ["Pausa", "Una por vez"],
     ]),
   };
@@ -789,19 +791,11 @@ return out;`, [x(6), F]),
 //    sus pestanas. Se corre UNA vez a mano. Si ya existe "Remitos", no hace nada.
 // ================================================================================
 
-async function wfInstalacion() {
+function wfInstalacion() {
   contador = 0;
 
-  // Comprobantes de prueba, si ya se generaron: la planilla nace cargada.
-  const rutaCsv = join(RAIZ, "salida", "comprobantes.csv");
-  let filasComprobantes = [];
-  if (existsSync(rutaCsv)) {
-    const lineas = (await readFile(rutaCsv, "utf8")).trim().split("\n").slice(1);
-    filasComprobantes = lineas.map(parsearCsv);
-  }
-
-  // La planilla nace con las pestanas vacias; encabezados, filas de Estado y
-  // comprobantes se escriben despues en UNA llamada de valores (mucho mas compacta).
+  // La planilla nace con las pestanas vacias; encabezados y filas de Estado se
+  // escriben despues en UNA llamada de valores (mucho mas compacta).
   const cuerpoPlanilla = {
     properties: { title: "Remitos - Control", locale: "es_AR", timeZone: "America/Argentina/Tucuman" },
     sheets: Object.keys(COLUMNAS).map((title) => ({ properties: { title, gridProperties: { frozenRowCount: 1 } } })),
@@ -811,7 +805,6 @@ async function wfInstalacion() {
     data: Object.keys(COLUMNAS).map((pestana) => {
       const values = [COLUMNAS[pestana]];
       if (pestana === "Estado") for (const k of ["ultima_corrida", "ultimo_lote", "ultima_alerta", "en_proceso"]) values.push([k, ""]);
-      if (pestana === "Comprobantes") values.push(...filasComprobantes);
       return { range: `${pestana}!A1`, values };
     }),
   };
@@ -843,7 +836,7 @@ return [{ json: {} }];`, [x(2), 300], { conLogica: false }),
         json: `=${JSON.stringify(cuerpoPlanilla)}`,
       }),
       codigo("Datos iniciales", `
-// Encabezados de cada pestana, filas de Estado y los comprobantes de prueba.
+// Encabezados de cada pestana y filas de Estado.
 return [{ json: ${JSON.stringify(valoresIniciales)} }];`, [x(7), 300], { conLogica: false }),
       http("Cargar datos iniciales", [x(8), 300], {
         method: "POST", auth: "google",
@@ -891,25 +884,6 @@ return [{ json: {
   };
 }
 
-// Parser CSV minimo (comillas dobles), suficiente para el CSV que escribe el generador.
-function parsearCsv(linea) {
-  const celdas = [];
-  let actual = "";
-  let entreComillas = false;
-  for (let i = 0; i < linea.length; i++) {
-    const ch = linea[i];
-    if (entreComillas) {
-      if (ch === '"' && linea[i + 1] === '"') { actual += '"'; i++; }
-      else if (ch === '"') entreComillas = false;
-      else actual += ch;
-    } else if (ch === '"') entreComillas = true;
-    else if (ch === ",") { celdas.push(actual); actual = ""; }
-    else actual += ch;
-  }
-  celdas.push(actual);
-  return celdas;
-}
-
 // --- Escribir ---------------------------------------------------------------------
 
 const destino = opcion("--salida", join(RAIZ, "salida", "n8n"));
@@ -921,7 +895,7 @@ const workflows = {
   errores: wfErrores(),
   vigilancia: wfVigilancia(),
   "evaluar-firmas": wfEvaluarFirmas(),
-  instalacion: await wfInstalacion(),
+  instalacion: wfInstalacion(),
 };
 for (const [archivo, wf] of Object.entries(workflows)) {
   await writeFile(join(destino, `${archivo}.json`), JSON.stringify(wf, null, 2));
@@ -929,3 +903,5 @@ for (const [archivo, wf] of Object.entries(workflows)) {
 }
 if (ID_CONFIG.startsWith("COMPLETAR")) console.log("\n  Falta el id de 'Remitos - Config' (config_id en config.local.json)");
 if (!CREDENCIALES.google) console.log("  Credenciales sin asignar: se eligen en n8n o se pasan en config.local.json");
+if (!CONFIG.supabase_url || !CONFIG.supabase_anon_key) console.log("  Falta supabase_url o supabase_anon_key en config.local.json (config)");
+if (!CREDENCIALES.supabase) console.log("  Falta la credencial 'supabase' (Header Auth x-remitos-clave) en config.local.json");

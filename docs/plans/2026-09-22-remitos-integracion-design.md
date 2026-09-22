@@ -1,7 +1,9 @@
 # Remitos firmados: integración con el sistema
 
 Fecha: 2026-09-22
-Estado: aprobado por Agustín (brainstorming del 2026-09-22)
+Estado: aprobado por Agustín (brainstorming del 2026-09-22) e implementado el mismo día.
+B1 salió en los PR #124, #125 y #126; la migración 116 está aplicada en PROD; B2 (panel y
+workflows) va en su PR. Lo que cambió al implementarlo está en la [sección 10](#10-lo-que-cambió-al-implementarlo).
 Antecedentes: [`2026-09-17-remitos-firmados-design.md`](2026-09-17-remitos-firmados-design.md)
 (diseño general) y [`automatizaciones/remitos/README.md`](../../automatizaciones/remitos/README.md)
 (etapa 1, aislada del sistema).
@@ -267,3 +269,41 @@ Cada paso deja algo andando.
 5. **B2:** el panel, la clave (huella en la base, credencial en n8n) y los workflows nuevos
    (se reimportan la Ingesta y *Evaluar firmas*).
 6. **Prueba real** y activación de Ingesta, *Evaluar firmas* y *Vigilancia*.
+
+## 10. Lo que cambió al implementarlo
+
+**El ticket (B1)**
+- **El QR de los tickets de prueba se dibuja con la librería `qrcode`**, con las mismas
+  opciones que el sistema (margen de 1 módulo, 8 px por módulo, corrección M). Con bwip-js el
+  margen era de 2 módulos, y la prueba de impresión habría medido otro dibujo.
+- **La prueba de impresión eligió 16 mm.** Con 14 mm, uno de los dos tickets no se leyó ni a
+  300 dpi porque la térmica dejó módulos huecos. Con 16 y 18 mm se leyeron todos, aun con la
+  imagen a 100 dpi.
+- **"CARGADO A CUENTA" va en 9 pt.** El sistema escribe los montos con centavos, y con
+  10,5 pt la etiqueta se partía en dos renglones hasta con el monto más chico.
+- **El ticket no lleva nombre ni dirección del hotel** (pedido de Agustín): arranca en
+  "COMPROBANTE CTA. CTE.". El contenido pasó de 93 mm a 74,5 mm.
+- **La barra del panel salía impresa arriba de todos los tickets térmicos.** Los tickets se
+  abren en una ventana angosta y se imprimían con la barra de la versión celular: se arregló
+  en #125 para todos los comprobantes.
+- **Los tres primeros remitos reales** (R-000159, R-000115 y R-000151) se leyeron en la
+  primera pasada del worker.
+
+**La base (migración 116)**
+- **En PROD, toda función nueva de `postgres` nace con EXECUTE para `authenticated`** (ACL
+  por defecto), y `REVOKE … FROM PUBLIC` no lo saca. Los tres ayudantes internos se cierran
+  también para `anon` y `authenticated`: abierta, `app_remitos_cambiar_estado` dejaba a
+  cualquier usuario logueado marcar remitos por la API. Cada grupo de funciones queda solo
+  para su rol: las de n8n para `anon`, las del panel para `authenticated`.
+- **`controlar_desde` quedó en 161**, el primer cargo posterior al despliegue de B1 (el
+  merge del #124 fue a las 18:41 UTC del 2026-09-22 y hasta la aplicación no hubo cargos).
+- **La prueba en seco contra PROD dio los 16 escenarios** y no dejó nada. Después de
+  aplicarla, las 17 funciones quedaron idénticas al archivo (misma huella del cuerpo).
+
+**El panel y n8n (B2)**
+- **Las acciones del panel exigen admin también en el servidor** (`assertAdmin`, como el
+  resto del panel), además de la base.
+- **El numerito del menú y el de "falta facturar" se calculan a la vez** en el layout,
+  porque corren en cada pantalla del admin.
+- **La planilla dejó de tener *Comprobantes* y *Resultados*.** La instalación crea solo
+  *Lotes*, *Errores* y *Estado*, y el generador ya no escribe el CSV.

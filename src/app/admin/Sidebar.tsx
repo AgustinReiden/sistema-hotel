@@ -9,9 +9,9 @@ const BADGE_TONE: Record<NavBadge['tone'], string> = {
     alert: 'text-rose-300 bg-rose-950/50',
 };
 
-export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount = 0 }: { role: string; userEmail: string; hasOpenShift?: boolean; unbilledCount?: number }) {
+export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount = 0, remitosPendientes = 0 }: { role: string; userEmail: string; hasOpenShift?: boolean; unbilledCount?: number; remitosPendientes?: number }) {
     const isAdmin = role === 'admin';
-    const sections = getNavSections(role, { hasOpenShift, unbilledCount });
+    const sections = getNavSections(role, { hasOpenShift, unbilledCount, remitosPendientes });
 
     // Sólo escritorio: abajo de 768px el menú lo manejan <MobileTopBar> y <MobileTabBar>.
     // Antes este mismo <aside> se estiraba a w-full y se apilaba arriba del contenido, así
