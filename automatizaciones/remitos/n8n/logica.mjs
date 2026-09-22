@@ -115,13 +115,17 @@ function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unid
     const revisar = (motivo, extra = {}) => {
       resumen.revisar++;
       const lugar = `hoja${String(pag.pagina).padStart(3, "0")}${pag.pieza > 1 || pag.modo === "cartulina" ? "-" + pag.pieza : ""}`;
+      // Si adentro se leyeron remitos (varios tickets pegados), van en el nombre:
+      // quien mira _Revisar sabe cuales volver a escanear. No se imputan.
+      const numeros = (Array.isArray(pag.numeros) ? pag.numeros : []).filter((n) => /^[A-Z]{1,3}-\d{6}$/.test(n));
+      const sufijo = numeros.length ? "_" + numeros.slice(0, 6).join("_") : "";
       piezas.push({
         ...base,
         ...extra,
         accion: "revisar",
         motivo,
         destino: "revisar",
-        archivo_nombre: `${fechaCorta}_${loteCorto}_${lugar}_${motivo}.pdf`,
+        archivo_nombre: `${fechaCorta}_${loteCorto}_${lugar}_${motivo}${sufijo}.pdf`,
       });
     };
 
@@ -211,19 +215,61 @@ function cuerpoGemini(imagenJpgB64, nivelRazonamiento) {
 }
 
 /**
+ * Que clase de falla de Gemini es, para decidir si seguir preguntando:
+ *   "cuota"      429 / RESOURCE_EXHAUSTED: Google pide que se espacien los pedidos
+ *   "sobrecarga" 5xx / UNAVAILABLE: el modelo esta saturado
+ *   "red"        timeout, conexion cortada
+ *   "otro"       algo propio de este pedido (respuesta rara, json invalido...)
+ */
+function tipoErrorGemini(codigo, texto) {
+  const c = String(codigo ?? "");
+  const t = String(texto ?? "");
+  if (c === "429" || /RESOURCE_EXHAUSTED|too many requests|Try spacing|quota/i.test(t)) return "cuota";
+  if (/^5\d\d$/.test(c) || /UNAVAILABLE|high demand|overloaded|INTERNAL/i.test(t)) return "sobrecarga";
+  if (/timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up/i.test(t)) return "red";
+  return "otro";
+}
+
+/**
  * Respuesta de Gemini -> { firma: "si"|"no"|"error", confianza, observacion }.
  * Cualquier cosa rara es "error", nunca "no": no se confunde "no pude mirar"
- * con "mire y no hay firma".
+ * con "mire y no hay firma". Los errores traen ademas `tipo_error` (no va a la
+ * planilla; decide si la corrida sigue preguntando).
+ *
+ * Acepta la respuesta completa del nodo HTTP ({ statusCode, body }, con "never
+ * error": asi se ve el codigo y el mensaje reales de Google), el error de n8n
+ * ({ error }) cuando ni siquiera hubo respuesta, o el cuerpo solo.
  */
 function interpretarFirma(respuesta) {
-  const error = (detalle) => ({ firma: "error", confianza: "", observacion: String(detalle).slice(0, 300) });
+  const error = (detalle, tipo = "otro") => ({
+    firma: "error", confianza: "", observacion: String(detalle).slice(0, 300), tipo_error: tipo,
+  });
   if (!respuesta || typeof respuesta !== "object") return error("sin respuesta");
-  if (respuesta.error) {
-    const e = respuesta.error;
-    return error(`gemini: ${e.message || e.status || JSON.stringify(e)}`);
+  let cuerpo = respuesta;
+  if (respuesta.statusCode !== undefined) {
+    cuerpo = respuesta.body;
+    if (typeof cuerpo === "string") {
+      try {
+        cuerpo = JSON.parse(cuerpo);
+      } catch {
+        // queda como texto
+      }
+    }
+    const codigo = Number(respuesta.statusCode);
+    if (codigo !== 200) {
+      const e = (cuerpo && typeof cuerpo === "object" && cuerpo.error) || {};
+      const detalle = [codigo, e.status, e.message || (typeof cuerpo === "string" ? cuerpo : "")].filter(Boolean).join(" ");
+      return error(`gemini ${detalle}`, tipoErrorGemini(codigo, detalle));
+    }
   }
-  const texto = respuesta.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
-  if (!texto) return error(`sin contenido (${respuesta.candidates?.[0]?.finishReason ?? "?"})`);
+  if (!cuerpo || typeof cuerpo !== "object") return error("sin respuesta");
+  if (cuerpo.error) {
+    const e = cuerpo.error;
+    const detalle = [e.httpCode || e.code, e.status, e.message, e.description].filter(Boolean).join(" ") || JSON.stringify(e);
+    return error(`gemini: ${detalle}`, tipoErrorGemini(e.httpCode || e.code, detalle));
+  }
+  const texto = cuerpo.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
+  if (!texto) return error(`sin contenido (${cuerpo.candidates?.[0]?.finishReason ?? "?"})`);
   let d;
   try {
     d = JSON.parse(texto.replace(/```json|```/g, "").trim());
@@ -380,12 +426,30 @@ function armarConfig(ajustes, raices, contenido) {
   };
 }
 
-// --- Reintento de firmas ----------------------------------------------------------
+// --- Evaluacion de firmas ----------------------------------------------------------
 //
-// Cuando Gemini falla (sobrecarga, cuota), el remito se archiva igual y la firma
-// queda "error". Un workflow aparte vuelve a preguntar mas tarde, con el PDF ya
-// archivado, de a un remito por corrida. Los intentos se cuentan en la observacion
-// para no insistir para siempre con uno que nunca va a andar.
+// La ingesta NO mira firmas: archiva y deja la firma "pendiente". Asi una caida o
+// una saturacion de Gemini nunca frena ni alarga el archivo de los remitos. Un
+// workflow aparte ("Remitos - Evaluar firmas") toma unas pocas pendientes por
+// corrida, de a una y con pausa, y le pregunta a Gemini con el PDF ya archivado.
+// Si falla, la firma queda "error" y se vuelve a intentar en otra corrida; los
+// intentos se cuentan en la observacion para no insistir para siempre.
+
+const FIRMA_PENDIENTE = "pendiente";
+
+/** Firma con la que la ingesta anota cada pieza: solo lo archivado se evalua. */
+function firmaInicial(accion) {
+  return { firma: accion === "archivar" ? FIRMA_PENDIENTE : "", confianza: "", observacion: "" };
+}
+
+/**
+ * ¿Hay que cortar la corrida despues de esta firma? Si fallaron los dos modelos
+ * por cuota, saturacion o red, el proximo pedido va a fallar igual: se corta y se
+ * sigue en la corrida siguiente, sin gastar intentos de las demas.
+ */
+function cortarCorrida(firma) {
+  return firma?.firma === "error" && ["cuota", "sobrecarga", "red"].includes(firma.tipo_error);
+}
 
 const MARCA_REINTENTOS = /\[reintentos: (\d+)\]/;
 
@@ -409,32 +473,35 @@ function rangoFirma(fila) {
 }
 
 /**
- * La firma pendiente con menos intentos (y, a igualdad, la mas vieja).
+ * Las firmas a evaluar en esta corrida: remitos ARCHIVADOS con la firma
+ * "pendiente" o en "error" (con intentos disponibles). Primero las que menos
+ * intentos llevan (las pendientes tienen cero) y, a igualdad, las mas viejas.
+ * Las piezas a revisar no se evaluan: pueden tener varios tickets adentro.
  * Trabaja sobre los valores crudos de la API para conocer el numero de fila real.
- * Devuelve null si no hay nada pendiente.
  */
-function elegirFirmaPendiente(values, maxReintentos) {
-  if (!Array.isArray(values) || values.length < 2) return null;
+function elegirFirmasPendientes(values, maxReintentos, cantidad) {
+  if (!Array.isArray(values) || values.length < 2) return [];
   const col = Object.fromEntries(values[0].map((h, i) => [String(h).trim(), i]));
-  let elegida = null;
+  const candidatas = [];
   for (let i = 1; i < values.length; i++) {
-    const f = values[i];
-    if (String(f[col.firma] ?? "").trim() !== "error") continue;
+    const f = values[i] || [];
+    const firma = String(f[col.firma] ?? "").trim();
+    if (firma !== FIRMA_PENDIENTE && firma !== "error") continue;
+    if (String(f[col.estado] ?? "").trim() !== "archivado") continue;
     const archivo_id = String(f[col.archivo_id] ?? "").trim();
     if (!archivo_id) continue;
     const reintentos = reintentosDe(f[col.observacion]);
     if (reintentos >= maxReintentos) continue;
-    if (!elegida || reintentos < elegida.reintentos) {
-      elegida = {
-        fila: i + 1, // la fila 1 es el encabezado
-        archivo_id,
-        numero: f[col.numero] ?? "",
-        hash_sha256: f[col.hash_sha256] ?? "",
-        reintentos,
-      };
-    }
+    candidatas.push({
+      fila: i + 1, // la fila 1 es el encabezado
+      archivo_id,
+      numero: f[col.numero] ?? "",
+      hash_sha256: f[col.hash_sha256] ?? "",
+      reintentos,
+    });
   }
-  return elegida;
+  candidatas.sort((a, b) => a.reintentos - b.reintentos || a.fila - b.fila);
+  return candidatas.slice(0, Math.max(1, Number(cantidad) || 1));
 }
 
 /** ¿La fila de la planilla sigue siendo la misma que se eligio? (alguien pudo borrar filas) */
@@ -459,7 +526,8 @@ function cuerpoGeminiArchivo(b64, mimeType, nivelRazonamiento) {
 }
 
 export {
-  reintentosDe, letraColumna, rangoFirma, elegirFirmaPendiente, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
+  FIRMA_PENDIENTE, firmaInicial, cortarCorrida, tipoErrorGemini,
+  reintentosDe, letraColumna, rangoFirma, elegirFirmasPendientes, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
   NOMBRES, armarConfig,
   COLUMNAS, filasAObjetos, objetoAFila, limpiarNombre, planificarLote, PROMPT_FIRMA, cuerpoGemini,
   interpretarFirma, filaResultado, filaLote, filaError, evaluarRespuestaWorker, evaluarVigilancia,
