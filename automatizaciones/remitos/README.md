@@ -60,7 +60,8 @@ node herramientas/analizar-escaneo.mjs --pdf escaneo.pdf --salida salida/diag-mu
 
 Gana el tamaño más chico en el que las dos copias salen identificadas con `dpi 200` (primera
 pasada del worker). Ese valor va en `QR_MM` de `comun/ticket-compacto.mjs` y en su copia del
-sistema.
+sistema. La prueba del 2026-09-22 eligió **16 mm**: con 14 mm uno de los dos tickets no se
+leyó; con 16 y 18 mm se leyeron todos. El ticket impreso mide unos 10 cm de largo.
 
 ### 2. Lote de prueba
 

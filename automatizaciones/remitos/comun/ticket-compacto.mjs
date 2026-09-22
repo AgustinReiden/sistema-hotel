@@ -6,7 +6,13 @@
 //
 // Sin dependencias a proposito: el test del sistema lo importa desde otra raiz.
 
-/** Lado del QR impreso, en mm. Sale de la prueba de impresion en la comandera. */
+/**
+ * Lado del QR impreso, en mm. Sale de la prueba de impresion en la comandera
+ * (2026-09-22, dos tickets por tamaño, escaneados con la cartulina): con 14 mm uno
+ * de los dos no se leyo ni a 300 dpi (modulos de 0,6 mm, la termica los dejo
+ * huecos); con 16 y 18 mm se leyeron todos en la primera pasada, y siguen
+ * leyendose aunque la imagen baje a 100 dpi.
+ */
 export const QR_MM = 16;
 
 /**
