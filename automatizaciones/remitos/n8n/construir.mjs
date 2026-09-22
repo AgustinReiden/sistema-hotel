@@ -564,13 +564,18 @@ const e = $('Error Trigger').first().json;
 const detalle = (e.workflow?.name || '') + ' · nodo "' + (e.execution?.lastNodeExecuted || '?') + '": ' + (e.execution?.error?.message || '') + ' · ' + (e.execution?.url || '');
 return [{ json: { values: [filaError('n8n', {}, 'ejecucion_fallida', detalle, new Date().toISOString())] } }];`, [x(2), 300]),
       http("Anotar error", [x(3), 300], { ...appendA("Errores"), json: "={{ JSON.stringify({ values: $json.values }) }}" }),
-      http("Liberar turno", [x(4), 300], estado(5, "en_proceso", "''")),
+      // El turno es de la ingesta: si se cayo otro workflow (Evaluar firmas,
+      // Vigilancia), liberarlo dejaria arrancar una segunda ingesta encima de una
+      // que sigue corriendo.
+      si("¿Era la ingesta?", [x(4), 300], "={{ $('Error Trigger').first().json.workflow.name }}", OP.igual, "Remitos - Ingesta"),
+      http("Liberar turno", [x(5), 300], estado(5, "en_proceso", "''")),
     ],
     connections: conexiones([
       ["Error Trigger", "Config"],
       ["Config", "Fila"],
       ["Fila", "Anotar error"],
-      ["Anotar error", "Liberar turno"],
+      ["Anotar error", "¿Era la ingesta?"],
+      ["¿Era la ingesta?", "Liberar turno", 0],
     ]),
   };
 }

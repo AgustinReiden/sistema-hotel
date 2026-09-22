@@ -145,6 +145,15 @@ test("evaluar firmas: adentro del bucle cada nodo lee el remito de su vuelta, nu
   }
 });
 
+test("errores: solo libera el turno de la ingesta si la que se cayo es la ingesta", () => {
+  const wf = workflows.find((w) => w.name === "Remitos - Errores");
+  assert.deepEqual(destino(wf, "Anotar error"), ["¿Era la ingesta?"]);
+  assert.deepEqual(destino(wf, "¿Era la ingesta?", 0), ["Liberar turno"]);
+  assert.deepEqual(destino(wf, "¿Era la ingesta?", 1), []);
+  const cond = wf.nodes.find((n) => n.name === "¿Era la ingesta?").parameters.conditions.conditions[0];
+  assert.equal(cond.rightValue, workflows.find((w) => w.name === "Remitos - Ingesta").name);
+});
+
 test("la ingesta no mira firmas y evaluar firmas no toca la ingesta", () => {
   const ing = workflows.find((w) => w.name === "Remitos - Ingesta");
   const paginas = ing.nodes.find((n) => n.name === "Páginas").parameters.jsCode;
