@@ -10,6 +10,7 @@ import {
   FileText,
   Percent,
   Settings,
+  Signature,
   Sparkles,
   Tags,
   Users,
@@ -48,6 +49,8 @@ export type NavSection = {
 export type NavState = {
   hasOpenShift?: boolean;
   unbilledCount?: number;
+  /** Remitos a revisar + piezas sin resolver (mig 116). */
+  remitosPendientes?: number;
 };
 
 /**
@@ -72,7 +75,7 @@ export function getReceptionItems({ hasOpenShift }: NavState = {}): NavItem[] {
   ];
 }
 
-function getAdminItems({ unbilledCount = 0 }: NavState = {}): NavItem[] {
+function getAdminItems({ unbilledCount = 0, remitosPendientes = 0 }: NavState = {}): NavItem[] {
   return [
     { href: "/admin/guests", label: "Huéspedes", icon: Users },
     { href: "/admin/finances", label: "Finanzas", icon: Wallet },
@@ -94,6 +97,20 @@ function getAdminItems({ unbilledCount = 0 }: NavState = {}): NavItem[] {
               // Sin ventana en el texto: el número es de todo el historial, y es el
               // mismo que muestra el control al abrir.
               title: `${unbilledCount} estadías sin facturar`,
+            }
+          : undefined,
+    },
+    {
+      href: "/admin/remitos",
+      label: "Remitos firmados",
+      icon: Signature,
+      highlighted: remitosPendientes > 0,
+      badge:
+        remitosPendientes > 0
+          ? {
+              text: String(remitosPendientes),
+              tone: "warn",
+              title: `${remitosPendientes} remitos o piezas para revisar`,
             }
           : undefined,
     },

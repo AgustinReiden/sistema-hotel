@@ -2,7 +2,7 @@ import Sidebar from './Sidebar';
 import { MobileTabBar, MobileTopBar } from './MobileNav';
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { countBillingPending, getActiveOpenShift, getShiftSummary } from "@/lib/data";
+import { countBillingPending, getActiveOpenShift, getRemitosSalud, getShiftSummary } from "@/lib/data";
 import { BILLING_PENDING_DAYS, totalPendingBilling } from "@/lib/billing";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 import IdleLogout from "./IdleLogout";
@@ -75,12 +75,21 @@ export default async function AdminLayout({
     // Misma ventana y misma suma que el control, que es la pantalla que este badge
     // abre. Antes el badge miraba 60 días y sólo `falta` mientras la pantalla sumaba
     // las dos mitades sobre todo el historial: 165 acá y 286 allá, para el mismo dato.
-    const unbilledCount =
+    //
+    // Remitos a revisar + piezas sin resolver (mig 116), para el numerito de "Remitos
+    // firmados". Si la consulta falla, el menú sigue igual: 0. Las dos cuentas corren a
+    // la vez: son una consulta más en cada pantalla del admin.
+    const [unbilledCount, remitosPendientes] =
         role === "admin"
-            ? await countBillingPending(BILLING_PENDING_DAYS)
-                  .then(totalPendingBilling)
-                  .catch(() => 0)
-            : 0;
+            ? await Promise.all([
+                  countBillingPending(BILLING_PENDING_DAYS)
+                      .then(totalPendingBilling)
+                      .catch(() => 0),
+                  getRemitosSalud()
+                      .then((s) => s.a_revisar + s.piezas_abiertas)
+                      .catch(() => 0),
+              ])
+            : [0, 0];
 
     return (
         // Shell de alto fijo: sin una altura definida en este ancestro, los h-full y los
@@ -96,12 +105,14 @@ export default async function AdminLayout({
                 userEmail={userEmail}
                 hasOpenShift={!!openShift}
                 unbilledCount={unbilledCount}
+                remitosPendientes={remitosPendientes}
             />
             <Sidebar
                 role={role}
                 userEmail={userEmail}
                 hasOpenShift={!!openShift}
                 unbilledCount={unbilledCount}
+                remitosPendientes={remitosPendientes}
             />
             <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
                 <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />

@@ -48,6 +48,8 @@ export async function updateSession(request: NextRequest) {
   const isAdminOnlyFiscalPath =
     pathname.startsWith("/admin/fiscal/consolidada") ||
     pathname.startsWith("/admin/fiscal/control");
+  // Panel de remitos firmados: sólo admin (mig 116). La página también redirige.
+  const isAdminOnlyRemitosPath = pathname.startsWith("/admin/remitos");
   const isForbiddenPath = pathname.startsWith("/forbidden");
   const isProtectedPath = isAdminPath || isMaintenancePath;
 
@@ -89,8 +91,8 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // /admin/settings y facturación consolidada/control — sólo admin
-  if ((isSettingsPath || isAdminOnlyFiscalPath) && role !== "admin") {
+  // /admin/settings, facturación consolidada/control y remitos — sólo admin
+  if ((isSettingsPath || isAdminOnlyFiscalPath || isAdminOnlyRemitosPath) && role !== "admin") {
     return NextResponse.redirect(new URL("/forbidden", request.url));
   }
 

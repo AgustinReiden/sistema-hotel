@@ -33,14 +33,14 @@ type MobileNavProps = NavState & {
   userEmail: string;
 };
 
-export function MobileTopBar({ role, userEmail, hasOpenShift, unbilledCount }: MobileNavProps) {
+export function MobileTopBar({ role, userEmail, hasOpenShift, unbilledCount, remitosPendientes }: MobileNavProps) {
   const pathname = usePathname();
   // El cajón se cierra solo al navegar: en vez de un efecto que lo sincronice, se guarda
   // desde qué pantalla se abrió y sólo sigue abierto mientras la ruta siga siendo esa.
   const [openedOn, setOpenedOn] = useState<string | null>(null);
   const isOpen = openedOn === pathname;
   const closeMenu = () => setOpenedOn(null);
-  const sections = getNavSections(role, { hasOpenShift, unbilledCount });
+  const sections = getNavSections(role, { hasOpenShift, unbilledCount, remitosPendientes });
   const isAdmin = role === "admin";
 
   useEffect(() => {
