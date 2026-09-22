@@ -74,8 +74,9 @@ test("la ingesta: el lote se cierra al terminar el loop, y no depende de Gemini"
   assert.equal(ing.nodes.find((n) => n.name === "Worker").onError, "continueErrorOutput");
   // La firma la evalua otro workflow: la ingesta nunca espera a Gemini.
   assert.doesNotMatch(JSON.stringify(ing.nodes), /generativelanguage|interpretarFirma|cuerpoGemini\(/);
+  // La pieza se sube sin firma: la firma la guarda Evaluar firmas en la base.
   const subida = ing.nodes.find((n) => n.name === "Preparar subida").parameters.jsCode;
-  assert.match(subida, /firmaInicial\(pag\.accion\)/);
+  assert.doesNotMatch(subida, /firma/);
 });
 
 test("ingesta, errores y vigilancia toman la config del sub-workflow, no de ids fijos", () => {
@@ -91,25 +92,66 @@ test("ingesta, errores y vigilancia toman la config del sub-workflow, no de ids 
 const evaluar = () => workflows.find((w) => w.name === "Remitos - Evaluar firmas");
 const destino = (wf, origen, salida = 0) => (wf.connections[origen]?.main[salida] ?? []).map((d) => d.node);
 
-test("evaluar firmas: de a una por vuelta, respaldo solo si el principal fallo, y verifica la fila antes de escribir", () => {
+test("evaluar firmas: la base elige las pendientes y guarda cada firma, de a una por vuelta", () => {
   const wf = evaluar();
+  assert.deepEqual(destino(wf, "Config"), ["Latido (base)"]);
+  assert.deepEqual(destino(wf, "Latido (base)"), ["Pendientes (base)"]);
+  assert.deepEqual(destino(wf, "Pendientes (base)"), ["Elegir pendientes"]);
+  assert.deepEqual(destino(wf, "Elegir pendientes"), ["Una por vez"]);
   assert.deepEqual(destino(wf, "Una por vez", 0), [], "la salida 'termine' no hace nada");
   assert.deepEqual(destino(wf, "Una por vez", 1), ["Descargar PDF"]);
   assert.equal(wf.nodes.find((n) => n.name === "Una por vez").parameters.batchSize, 1);
-  assert.deepEqual(destino(wf, "¿Anduvo?", 0), ["Leer fila (principal)"]);
+  assert.deepEqual(destino(wf, "¿Anduvo?", 0), ["Guardar firma (principal)"]);
   assert.deepEqual(destino(wf, "¿Anduvo?", 1), ["Gemini respaldo"]);
+  assert.deepEqual(destino(wf, "Interpretar respaldo"), ["Guardar firma (respaldo)"]);
   assert.deepEqual(destino(wf, "Descargar PDF", 1), ["Sin archivo"], "si no hay PDF, cuenta el intento");
-  for (const s of ["principal", "respaldo", "sin archivo"]) {
-    assert.deepEqual(destino(wf, `Leer fila (${s})`), [`Armar actualización (${s})`]);
-    assert.match(wf.nodes.find((n) => n.name === `Armar actualización (${s})`).parameters.jsCode, /mismaFila\(/);
-  }
+  assert.deepEqual(destino(wf, "Sin archivo"), ["Guardar firma (sin archivo)"]);
   // Vuelve al bucle con una pausa; si fallaron los dos modelos por cuota o saturacion, corta.
-  assert.deepEqual(destino(wf, "Actualizar firma (principal)"), ["Pausa"]);
-  assert.deepEqual(destino(wf, "Actualizar firma (sin archivo)"), ["Pausa"]);
-  assert.deepEqual(destino(wf, "Actualizar firma (respaldo)"), ["¿Seguir?"]);
+  assert.deepEqual(destino(wf, "Guardar firma (principal)"), ["Pausa"]);
+  assert.deepEqual(destino(wf, "Guardar firma (sin archivo)"), ["Pausa"]);
+  assert.deepEqual(destino(wf, "Guardar firma (respaldo)"), ["¿Seguir?"]);
   assert.deepEqual(destino(wf, "¿Seguir?", 0), ["Pausa"]);
   assert.deepEqual(destino(wf, "¿Seguir?", 1), []);
   assert.deepEqual(destino(wf, "Pausa"), ["Una por vez"]);
+  assert.doesNotMatch(JSON.stringify(wf.nodes), /values\/Resultados/);
+});
+
+test("base: toda llamada a Supabase lleva la clave por credencial y la anon key por encabezado", () => {
+  let llamadas = 0;
+  for (const wf of workflows) {
+    for (const n of wf.nodes.filter((x) => String(x.parameters?.url ?? "").includes("/rest/v1/rpc/"))) {
+      llamadas++;
+      assert.equal(n.parameters.genericAuthType, "httpHeaderAuth", `${wf.name} / ${n.name}`);
+      const headers = (n.parameters.headerParameters?.parameters ?? []).map((h) => h.name);
+      assert.deepEqual(headers.sort(), ["Authorization", "apikey"], `${wf.name} / ${n.name}`);
+    }
+  }
+  assert.ok(llamadas >= 7, `se esperaban las llamadas a la base de la ingesta y de evaluar firmas (${llamadas})`);
+  // La clave nunca viaja en un workflow: vive en la credencial de n8n.
+  assert.doesNotMatch(JSON.stringify(workflows), /x-remitos-clave/);
+});
+
+test("ingesta: pregunta a la base y registra cada pieza; ya no usa Comprobantes ni Resultados", () => {
+  const ing = workflows.find((w) => w.name === "Remitos - Ingesta");
+  const texto = JSON.stringify(ing.nodes);
+  assert.doesNotMatch(texto, /values\/Comprobantes|values\/Resultados|Resultados!A1:append/);
+  assert.deepEqual(destino(ing, "Latido"), ["Latido (base)"]);
+  assert.deepEqual(destino(ing, "Latido (base)"), ["Listar _Entrada"]);
+  assert.deepEqual(destino(ing, "¿Worker OK?", 0), ["Leer Lotes"]);
+  assert.deepEqual(destino(ing, "Leer Lotes"), ["Pedido a la base"]);
+  assert.deepEqual(destino(ing, "Pedido a la base"), ["Planificar (base)"]);
+  assert.deepEqual(destino(ing, "Planificar (base)"), ["Planificar"]);
+  assert.deepEqual(destino(ing, "Subir contenido"), ["Armar registro"]);
+  assert.deepEqual(destino(ing, "Armar registro"), ["Registrar (base)"]);
+  assert.deepEqual(destino(ing, "Registrar (base)"), ["Una página por vez"]);
+  assert.match(texto, /rpc_remitos_latido/);
+});
+
+test("la instalacion crea solo las pestañas de la bitacora", () => {
+  const inst = workflows.find((w) => w.name === "Remitos - Instalación");
+  const texto = JSON.stringify(inst.nodes);
+  assert.doesNotMatch(texto, /Comprobantes|Resultados/);
+  for (const p of ["Lotes", "Errores", "Estado"]) assert.match(texto, new RegExp(p));
 });
 
 test("evaluar firmas: Gemini devuelve el error real (codigo y mensaje) y no reintenta a ciegas", () => {

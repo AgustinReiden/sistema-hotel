@@ -5,17 +5,10 @@
 // APIs de Node, solo JavaScript plano. Los tests las importan como modulo normal.
 
 // Columnas de cada pestana de la planilla. El orden importa: se escribe por
-// posicion con la API de Sheets.
+// posicion con la API de Sheets. La planilla queda como bitacora tecnica de n8n
+// (turno, lotes, errores): los remitos, sus escaneos y sus firmas viven en la
+// base del sistema (mig 116).
 const COLUMNAS = {
-  Comprobantes: [
-    "numero", "codigo", "movimiento_id", "cliente", "carpeta_cliente", "documento",
-    "habitacion", "check_in", "check_out", "created_at", "periodo", "monto", "verdad_firmado",
-  ],
-  Resultados: [
-    "procesado_at", "lote_archivo", "lote_hash", "pagina", "estado", "motivo", "numero", "codigo",
-    "cliente", "periodo", "version", "reescaneo", "firma", "confianza", "observacion", "modelo",
-    "archivo_nombre", "archivo_id", "archivo_link", "hash_sha256",
-  ],
   Lotes: [
     "procesado_at", "archivo_nombre", "archivo_id", "hash_archivo", "estado",
     "paginas", "archivadas", "revisar", "saltadas",
@@ -54,8 +47,9 @@ function limpiarNombre(s) {
  * @param {object} p
  * @param {{id: string, name: string}} p.archivo   el lote que se esta procesando
  * @param {object} p.worker                         respuesta del worker
- * @param {object[]} p.comprobantes                 filas de la pestana Comprobantes
- * @param {object[]} p.resultados                   filas de la pestana Resultados
+ * @param {object} p.planificacion                  respuesta de rpc_remitos_planificar:
+ *                                                  { remitos: [{numero, existe, cliente, periodo, versiones}],
+ *                                                    hashes_registrados: [...] }
  * @param {object[]} p.lotes                        filas de la pestana Lotes
  * @param {string} p.unidad                         "Hotel"
  * @param {string} p.ahora                          ISO, para nombres de revision
@@ -64,7 +58,7 @@ function limpiarNombre(s) {
  * Cada pieza trae `accion`: "archivar" | "revisar" | "saltear".
  * En el resumen, `paginas` cuenta hojas escaneadas; el resto cuenta piezas.
  */
-function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unidad, ahora }) {
+function planificarLote({ archivo, worker, planificacion, lotes, unidad, ahora }) {
   const resumen = { paginas: worker.total_paginas, archivadas: 0, revisar: 0, saltadas: 0 };
 
   // El mismo archivo ya se proceso entero: no se toca nada, solo se aparta.
@@ -75,16 +69,13 @@ function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unid
     return { lote_duplicado: true, piezas: [], rutas: [], resumen: { ...resumen, saltadas: worker.piezas.length } };
   }
 
-  const porNumero = new Map(comprobantes.map((c) => [String(c.numero).trim(), c]));
-  // Piezas ya guardadas (en cualquier lote anterior): por hash.
-  const hashesGuardados = new Set(
-    resultados.filter((r) => r.estado === "archivado" || r.estado === "revisar").map((r) => r.hash_sha256)
-  );
-  // Cuantas versiones hay de cada remito, para nombrar los re-escaneos.
-  const versiones = new Map();
-  for (const r of resultados) {
-    if (r.estado === "archivado" && r.numero) versiones.set(r.numero, (versiones.get(r.numero) ?? 0) + 1);
-  }
+  const remitos = planificacion?.remitos ?? [];
+  // Los remitos que existen como cargo, por "R-000158".
+  const porNumero = new Map(remitos.filter((r) => r.existe).map((r) => [numeroVisibleR(r.numero), r]));
+  // Piezas ya registradas en la base (en cualquier lote anterior): por huella.
+  const hashesGuardados = new Set(planificacion?.hashes_registrados ?? []);
+  // Cuantos escaneos tiene ya cada remito, para nombrar los re-escaneos.
+  const versiones = new Map(remitos.map((r) => [numeroVisibleR(r.numero), Number(r.versiones) || 0]));
   const hashesDeEsteLote = new Set();
 
   const fechaCorta = String(ahora).slice(0, 10);
@@ -101,6 +92,8 @@ function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unid
       imagen_jpg_b64: pag.imagen_jpg_b64,
       lote_archivo: archivo.name,
       lote_hash: worker.hash_archivo,
+      // Lo que se alcanzo a leer adentro de una pieza con varios tickets.
+      numeros: pag.numeros ?? [],
     };
 
     // Idempotencia: si el flujo murio a mitad de lote, lo ya guardado no se repite.
@@ -134,18 +127,18 @@ function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unid
       continue;
     }
 
-    const comp = porNumero.get(pag.numero_visible);
-    // El DV ya garantiza que el codigo se leyo bien. Que no este en el manifiesto
-    // es otra cosa: un comprobante que no existe (o de otra tanda).
-    if (!comp || String(comp.codigo).trim() !== pag.codigo) {
+    // El DV ya garantiza que el codigo se leyo bien. Que no este en la base es otra
+    // cosa: un remito que no existe, o un T- de prueba. Nunca se imputa al parecido.
+    const rem = pag.prefijo === PREFIJO_REMITOS ? porNumero.get(pag.numero_visible) : undefined;
+    if (!rem) {
       revisar("codigo_inexistente", { numero: pag.numero_visible, codigo: pag.codigo });
       continue;
     }
 
     const version = (versiones.get(pag.numero_visible) ?? 0) + 1;
     versiones.set(pag.numero_visible, version);
-    const carpetaCliente = limpiarNombre(comp.carpeta_cliente || comp.cliente) || "SIN NOMBRE";
-    const periodo = String(comp.periodo).trim();
+    const carpetaCliente = limpiarNombre(rem.cliente) || "SIN NOMBRE";
+    const periodo = String(rem.periodo).trim();
     const rutaClave = [carpetaCliente, unidad, periodo].join("/");
     rutas.set(rutaClave, { ruta_clave: rutaClave, carpeta_cliente: carpetaCliente, unidad, periodo });
 
@@ -156,8 +149,9 @@ function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unid
       destino: "ruta",
       ruta_clave: rutaClave,
       numero: pag.numero_visible,
+      numero_int: pag.numero,
       codigo: pag.codigo,
-      cliente: comp.cliente,
+      cliente: rem.cliente,
       periodo,
       version,
       reescaneo: version > 1,
@@ -172,8 +166,8 @@ function planificarLote({ archivo, worker, comprobantes, resultados, lotes, unid
 
 const PROMPT_FIRMA = [
   "Sos un control de calidad de comprobantes de cuenta corriente de un hotel.",
-  "La imagen es un escaneo. En algun lugar hay un ticket termico angosto con el titulo",
-  "'COMPROBANTE CTA. CTE.' y, abajo, dos renglones impresos: 'Firma: ______' y 'Aclaración: ______'.",
+  "La imagen es un escaneo de un ticket termico angosto de un hotel que dice 'COMPROBANTE CTA. CTE.'",
+  "y, abajo, tiene dos renglones con una linea para completar a mano: 'Firma' y 'Aclaración'.",
   "",
   "Decidi si el comprobante esta FIRMADO:",
   "- firmado=true si sobre o junto al renglon 'Firma' hay un trazo manuscrito que funciona como firma o rubrica.",
@@ -284,32 +278,49 @@ function interpretarFirma(respuesta) {
   return { firma: d.firmado ? "si" : "no", confianza: Math.round(c * 100) / 100, observacion: String(d.observacion ?? "").slice(0, 300) };
 }
 
-// --- Filas -------------------------------------------------------------------
+// --- Base del sistema (mig 116) ---------------------------------------------------------
 
-function filaResultado(pagina, firma, subido, modelo, ahora) {
-  return objetoAFila("Resultados", {
-    procesado_at: ahora,
-    lote_archivo: pagina.lote_archivo,
-    lote_hash: pagina.lote_hash,
-    pagina: pagina.pagina,
-    estado: pagina.accion === "archivar" ? "archivado" : "revisar",
-    motivo: pagina.motivo ?? "",
-    numero: pagina.numero ?? "",
-    codigo: pagina.codigo ?? "",
-    cliente: pagina.cliente ?? "",
-    periodo: pagina.periodo ?? "",
-    version: pagina.version ?? "",
-    reescaneo: pagina.accion === "archivar" ? Boolean(pagina.reescaneo) : "",
-    firma: firma.firma,
-    confianza: firma.confianza,
-    observacion: firma.observacion,
-    modelo,
-    archivo_nombre: subido.name ?? pagina.archivo_nombre,
-    archivo_id: subido.id ?? "",
-    archivo_link: subido.webViewLink ?? "",
-    hash_sha256: pagina.hash_sha256,
-  });
+/** Prefijo de los remitos reales. Los T- de prueba no estan en la base. */
+const PREFIJO_REMITOS = "R";
+
+/** 158 -> "R-000158" */
+function numeroVisibleR(numero) {
+  return `${PREFIJO_REMITOS}-${String(numero).padStart(6, "0")}`;
 }
+
+/** Lo que se le pregunta a la base antes de planificar un lote (rpc_remitos_planificar). */
+function pedidoPlanificacion(worker) {
+  const numeros = new Set();
+  for (const p of worker.piezas) {
+    if (p.estado === "identificado" && p.prefijo === PREFIJO_REMITOS && Number.isInteger(p.numero)) numeros.add(p.numero);
+  }
+  return { p_numeros: [...numeros].sort((a, b) => a - b), p_hashes: worker.piezas.map((p) => p.hash_sha256) };
+}
+
+/**
+ * Que funcion de la base registra esta pieza ya subida a Drive, y con que datos:
+ * lo archivado es un escaneo del remito; lo que va a revisar, una pieza suelta con
+ * su motivo y lo que se alcanzo a leer adentro.
+ */
+function registroDePieza(pag, subido) {
+  const base = {
+    drive_file_id: subido.id ?? "",
+    drive_link: subido.webViewLink ?? "",
+    hash_sha256: pag.hash_sha256,
+    lote_archivo: pag.lote_archivo,
+    lote_hash: pag.lote_hash,
+    ubicacion: String(pag.pagina),
+  };
+  if (pag.accion === "archivar") {
+    return { funcion: "rpc_remitos_registrar_escaneo", body: { p: { numero: pag.numero_int, ...base } } };
+  }
+  return {
+    funcion: "rpc_remitos_registrar_pieza",
+    body: { p: { ...base, motivo: pag.motivo, numeros_leidos: pag.numeros ?? [] } },
+  };
+}
+
+// --- Filas -------------------------------------------------------------------
 
 function filaLote(archivo, worker, resumen, estado, ahora) {
   return objetoAFila("Lotes", {
@@ -428,19 +439,12 @@ function armarConfig(ajustes, raices, contenido) {
 
 // --- Evaluacion de firmas ----------------------------------------------------------
 //
-// La ingesta NO mira firmas: archiva y deja la firma "pendiente". Asi una caida o
-// una saturacion de Gemini nunca frena ni alarga el archivo de los remitos. Un
-// workflow aparte ("Remitos - Evaluar firmas") toma unas pocas pendientes por
-// corrida, de a una y con pausa, y le pregunta a Gemini con el PDF ya archivado.
-// Si falla, la firma queda "error" y se vuelve a intentar en otra corrida; los
-// intentos se cuentan en la observacion para no insistir para siempre.
-
-const FIRMA_PENDIENTE = "pendiente";
-
-/** Firma con la que la ingesta anota cada pieza: solo lo archivado se evalua. */
-function firmaInicial(accion) {
-  return { firma: accion === "archivar" ? FIRMA_PENDIENTE : "", confianza: "", observacion: "" };
-}
+// La ingesta NO mira firmas: archiva, registra el escaneo en la base y el remito queda
+// "evaluando". Asi una caida o una saturacion de Gemini nunca frena ni alarga el
+// archivo de los remitos. Un workflow aparte ("Remitos - Evaluar firmas") le pide a
+// la base unas pocas pendientes por corrida, las evalua de a una y con pausa con el
+// PDF ya archivado, y le devuelve a la base lo que dijo Gemini. La base cuenta los
+// intentos y decide el estado con su umbral (mig 116): n8n no decide nada.
 
 /**
  * ¿Hay que cortar la corrida despues de esta firma? Si fallaron los dos modelos
@@ -451,73 +455,6 @@ function cortarCorrida(firma) {
   return firma?.firma === "error" && ["cuota", "sobrecarga", "red"].includes(firma.tipo_error);
 }
 
-const MARCA_REINTENTOS = /\[reintentos: (\d+)\]/;
-
-/** Cuantos reintentos lleva una firma, segun su observacion. */
-function reintentosDe(observacion) {
-  const m = MARCA_REINTENTOS.exec(String(observacion ?? ""));
-  return m ? Number(m[1]) : 0;
-}
-
-/** Letra de columna de Sheets (0 -> A, 25 -> Z, 26 -> AA). */
-function letraColumna(i) {
-  let s = "";
-  for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
-  return s;
-}
-
-/** Rango de las celdas de firma de una fila de Resultados: firma, confianza, observacion, modelo. */
-function rangoFirma(fila) {
-  const c = COLUMNAS.Resultados;
-  return `Resultados!${letraColumna(c.indexOf("firma"))}${fila}:${letraColumna(c.indexOf("modelo"))}${fila}`;
-}
-
-/**
- * Las firmas a evaluar en esta corrida: remitos ARCHIVADOS con la firma
- * "pendiente" o en "error" (con intentos disponibles). Primero las que menos
- * intentos llevan (las pendientes tienen cero) y, a igualdad, las mas viejas.
- * Las piezas a revisar no se evaluan: pueden tener varios tickets adentro.
- * Trabaja sobre los valores crudos de la API para conocer el numero de fila real.
- */
-function elegirFirmasPendientes(values, maxReintentos, cantidad) {
-  if (!Array.isArray(values) || values.length < 2) return [];
-  const col = Object.fromEntries(values[0].map((h, i) => [String(h).trim(), i]));
-  const candidatas = [];
-  for (let i = 1; i < values.length; i++) {
-    const f = values[i] || [];
-    const firma = String(f[col.firma] ?? "").trim();
-    if (firma !== FIRMA_PENDIENTE && firma !== "error") continue;
-    if (String(f[col.estado] ?? "").trim() !== "archivado") continue;
-    const archivo_id = String(f[col.archivo_id] ?? "").trim();
-    if (!archivo_id) continue;
-    const reintentos = reintentosDe(f[col.observacion]);
-    if (reintentos >= maxReintentos) continue;
-    candidatas.push({
-      fila: i + 1, // la fila 1 es el encabezado
-      archivo_id,
-      numero: f[col.numero] ?? "",
-      hash_sha256: f[col.hash_sha256] ?? "",
-      reintentos,
-    });
-  }
-  candidatas.sort((a, b) => a.reintentos - b.reintentos || a.fila - b.fila);
-  return candidatas.slice(0, Math.max(1, Number(cantidad) || 1));
-}
-
-/** ¿La fila de la planilla sigue siendo la misma que se eligio? (alguien pudo borrar filas) */
-function mismaFila(valoresFila, hashEsperado) {
-  const i = COLUMNAS.Resultados.indexOf("hash_sha256");
-  return Boolean(hashEsperado) && String((valoresFila || [])[i] ?? "").trim() === String(hashEsperado).trim();
-}
-
-/** Valores nuevos para firma, confianza, observacion y modelo. Si sigue en error, cuenta el intento. */
-function firmaReintentada(firma, modelo, reintentos) {
-  const observacion = firma.firma === "error"
-    ? `${String(firma.observacion ?? "").replace(MARCA_REINTENTOS, "").trim()} [reintentos: ${reintentos}]`.trim()
-    : firma.observacion;
-  return [firma.firma, firma.confianza, observacion, modelo];
-}
-
 /** Como cuerpoGemini, pero para un archivo cualquiera (el PDF archivado del remito). */
 function cuerpoGeminiArchivo(b64, mimeType, nivelRazonamiento) {
   const cuerpo = cuerpoGemini(b64, nivelRazonamiento);
@@ -526,9 +463,9 @@ function cuerpoGeminiArchivo(b64, mimeType, nivelRazonamiento) {
 }
 
 export {
-  FIRMA_PENDIENTE, firmaInicial, cortarCorrida, tipoErrorGemini,
-  reintentosDe, letraColumna, rangoFirma, elegirFirmasPendientes, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
+  cortarCorrida, tipoErrorGemini, cuerpoGeminiArchivo,
   NOMBRES, armarConfig,
   COLUMNAS, filasAObjetos, objetoAFila, limpiarNombre, planificarLote, PROMPT_FIRMA, cuerpoGemini,
-  interpretarFirma, filaResultado, filaLote, filaError, evaluarRespuestaWorker, evaluarVigilancia,
+  interpretarFirma, filaLote, filaError, evaluarRespuestaWorker, evaluarVigilancia,
+  PREFIJO_REMITOS, numeroVisibleR, pedidoPlanificacion, registroDePieza,
 };
