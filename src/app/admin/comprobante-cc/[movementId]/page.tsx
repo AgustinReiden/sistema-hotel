@@ -7,8 +7,11 @@ import { getFiscalSettings, getHotelSettings } from "@/lib/data";
 import { nombreComprobante, prefijoArchivo } from "@/lib/comprobante-nombre";
 import { formatAmount, formatShiftCode } from "@/lib/format";
 import { formatHotelDateTime, formatHotelDate } from "@/lib/time";
+import { codigoRemito, numeroVisible } from "@/lib/remito-codigo";
+import { remitoQrDataUrl } from "@/lib/remito-qr";
 import ReceiptAutoPrint from "../../recibo/[paymentId]/ReceiptAutoPrint";
 import ThermalStyles from "@/app/admin/components/ThermalStyles";
+import { CSS_TICKET_COMPACTO, REMITO_QR_MM } from "../ticket-compacto";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +98,10 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
     }>;
   };
 
+  // Solo los cargos llevan remito. Un pago que llegara por esta URL se imprimía
+  // como "CARGO A CUENTA CORRIENTE" con un número que no es de ningún remito.
+  if (raw.tipo !== "cargo") notFound();
+
   const company = one(raw.associated_client);
   const guest = one(raw.guest);
   const reservation = one(raw.reservation);
@@ -107,28 +114,37 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
   const amount = Number(raw.amount) || 0;
 
+  // Correlativo del remito (mig 106). El fallback al pedazo de UUID existe por si se
+  // lee una fila sin numero, no como camino normal: sin numero no hay QR.
+  const codigo = raw.remito_numero !== null ? codigoRemito(raw.remito_numero) : null;
+  const visible = raw.remito_numero !== null ? numeroVisible(raw.remito_numero) : raw.id.slice(0, 8);
+  const qr = codigo ? await remitoQrDataUrl(codigo) : null;
+
   return (
     <div className="thermal">
-      <div className="thermal-page">
+      <div className="compacto">
         <h1>{hotelSettings?.name || "Hotel El Refugio"}</h1>
-        <p className="addr">{hotelSettings?.address ?? ""}</p>
+        {hotelSettings?.address ? <p className="addr">{hotelSettings.address}</p> : null}
+        <p className="tipo">COMPROBANTE CTA. CTE.</p>
         <hr />
-        <h2>COMPROBANTE CTA. CTE.</h2>
-        <p className="sub">CARGO A CUENTA CORRIENTE</p>
-        <p className="row">
-          <span>Nro:</span>
-          {/* Correlativo del comprobante (mig 106). El fallback al pedazo de UUID
-              existe por si se lee una fila sin numero, no como camino normal. */}
-          <span>
-            {raw.remito_numero !== null ? formatShiftCode(raw.remito_numero) : raw.id.slice(0, 8)}
-          </span>
-        </p>
-        <p className="row">
-          <span>Fecha:</span>
-          <span>{formatHotelDateTime(raw.created_at, tz)}</span>
-        </p>
+        {/* QR al costado del número, no arriba: el bloque ocupa lo que mide el QR
+            y el ticket sale más corto que el de antes sin QR (pedido de Agustín). */}
+        <div className="ident">
+          {qr ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              className="qr"
+              src={qr}
+              alt={codigo ?? ""}
+              style={{ width: `${REMITO_QR_MM}mm`, height: `${REMITO_QR_MM}mm` }}
+            />
+          ) : null}
+          <div>
+            <p className="nro">{visible}</p>
+            <p className="fecha">{formatHotelDateTime(raw.created_at, tz)}</p>
+          </div>
+        </div>
         <hr />
-        <p className="seccion">Cliente</p>
         <p className="row">
           <span>Cliente:</span>
           <span>{clientName}</span>
@@ -141,38 +157,37 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
         )}
         {room && (
           <p className="row">
-            <span>Habitacion:</span>
+            <span>Habitación:</span>
             <span>{room.room_number}</span>
           </p>
         )}
         {reservation && (
           <p className="row">
-            <span>Estadia:</span>
+            <span>Estadía:</span>
             <span>
               {formatHotelDate(reservation.check_in_target, tz)} → {formatHotelDate(reservation.check_out_target, tz)}
             </span>
           </p>
         )}
-        <hr />
         <p className="total">
           <span>CARGADO A CUENTA</span>
           <span className="money">{formatAmount(amount)}</span>
         </p>
-        <hr />
-        <p className="note">
-          El cliente reconoce adeudar el monto cargado a su cuenta corriente y se compromete a su pago.
-        </p>
-        <p className="footer">Firma: _____________________</p>
-        <p className="footer">Aclaración: _____________________</p>
-        <p className="footer muted">Conserve este comprobante.</p>
+        <div className="firma">
+          <span>Firma:</span>
+          <span className="linea" />
+        </div>
+        <div className="aclaracion">
+          <span>Aclaración:</span>
+          <span className="linea" />
+        </div>
       </div>
       <div className="thermal-feed" aria-hidden="true" />
       {autoPrint && <ReceiptAutoPrint closeOnDone />}
-
-      <style>{`
-        .thermal-feed { height: 2mm; }
-      `}</style>
       <ThermalStyles />
+      {/* Después de ThermalStyles a propósito: el diseño compacto manda sobre los
+          tamaños comunes de los papeles térmicos. */}
+      <style>{`.thermal-feed { height: 2mm; }\n${CSS_TICKET_COMPACTO}`}</style>
     </div>
   );
 }
