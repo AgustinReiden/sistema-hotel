@@ -27,6 +27,7 @@ export const CSS_TICKET_COMPACTO = `
 .compacto .row > span:first-child { flex: 0 0 auto; white-space: nowrap; font-weight: 700; }
 .compacto .row > span:last-child { flex: 1 1 auto; min-width: 0; text-align: right; font-weight: 600; overflow-wrap: break-word; }
 .compacto .total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 10.5pt; font-weight: 900; margin: 4px 0 2px; border-top: 1px solid #000; padding-top: 3px; }
+.compacto .total > span:first-child { font-size: 9pt; }
 .compacto .total > span:last-child { white-space: nowrap; }
 .compacto .firma, .compacto .aclaracion { display: flex; align-items: flex-end; gap: 2mm; font-size: 8.5pt; font-weight: 700; }
 .compacto .firma { height: 13mm; }

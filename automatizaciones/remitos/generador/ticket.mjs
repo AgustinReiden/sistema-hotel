@@ -12,8 +12,10 @@ import { CSS_TICKET_COMPACTO, OPCIONES_QR, QR_MM } from "../comun/ticket-compact
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+// Como formatAmount del sistema ("$50.000,00"): el monto ocupa en la muestra lo
+// mismo que en el ticket real.
 const pesos = (n) =>
-  new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
+  "$" + new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
 export function fechaHora(iso, zona) {
   return new Intl.DateTimeFormat("es-AR", {
