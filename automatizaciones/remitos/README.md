@@ -12,12 +12,13 @@ Diseño: [`docs/plans/2026-09-17-remitos-firmados-design.md`](../../docs/plans/2
 | Carpeta | Qué es |
 |---|---|
 | `comun/codigo.mjs` | Formato del código `T-000123-96` y su dígito verificador (MOD 97, público). |
-| `generador/` | Genera comprobantes de prueba imprimibles (80 mm) a partir de movimientos reales. |
+| `comun/ticket-compacto.mjs` | Diseño del comprobante compacto con QR: estilos, lado del QR y opciones del dibujo. El sistema tiene una copia y un test que compara las dos. |
+| `generador/` | Genera comprobantes de prueba imprimibles (80 mm) con el diseño compacto del sistema, a partir de movimientos reales. |
 | `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código. Sin estado, sin Google. |
 | `n8n/logica.mjs` | Reglas de negocio (qué archivar, qué mandar a revisar, versiones, firma). Puras y testeadas. |
 | `n8n/construir.mjs` | Arma los workflows de n8n incrustando `logica.mjs` en los nodos Code. |
 | `herramientas/` | `analizar-escaneo.mjs` corre el worker sobre un escaneo real y guarda cada recorte (diagnóstico de pruebas con papel). `comparar-workflow.mjs` confirma que un workflow importado a mano en n8n quedó igual al build. |
-| `test/` | `npm test` — 98 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
+| `test/` | `npm test` — 101 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
 
 `salida/` queda fuera de git: ahí van los datos reales, los PDF generados y los workflows
 armados (llevan ids y datos de clientes).
@@ -41,31 +42,35 @@ esa hoja tenía varios, va entera a `_Revisar` como `varios_codigos`.
 
 ## Paso a paso
 
-### 1. Prueba de humo del código (antes que nada)
+### 1. Hoja de muestras (antes que nada)
 
 ```bash
 npm install
 npm run generar -- --muestras
 ```
 
-Imprimí `salida/muestras.html` desde Chrome en la comandera (3 tickets: QR 15 mm, QR 25 mm,
-Code128). Cortalos, ponelos juntos en el vidrio **con la cartulina negra encima** y corré:
+Sale `salida/muestras.html`: el comprobante compacto, dos tickets por cada tamaño de QR
+(`T-000911` y `912` con 14 mm, `913` y `914` con 16 mm, `915` y `916` con 18 mm; se cambian con
+`--tamanos`). Imprimilos desde Chrome en la comandera con **Imprimir de a uno**, ponelos en el
+vidrio **con la cartulina negra encima** y corré:
 
 ```bash
-npm run procesar -- escaneo.pdf --salida salida/humo
+node herramientas/analizar-escaneo.mjs --pdf escaneo.pdf --salida salida/diag-muestras
 ```
 
-Tiene que mostrar tres piezas (`1.1`, `1.2`, `1.3`) con `T-000901`, `T-000902`, `T-000903`. El
-formato que se lea en todas las pruebas es el que se usa en el lote. Si no se lee ninguno,
-se frena acá.
+Gana el tamaño más chico en el que las dos copias salen identificadas con `dpi 200` (primera
+pasada del worker). Ese valor va en `QR_MM` de `comun/ticket-compacto.mjs` y en su copia del
+sistema.
 
 ### 2. Lote de prueba
 
 `salida/datos.local.json` tiene 20 movimientos reales (se sacaron con SELECT, solo lectura).
 
 ```bash
-npm run generar -- --datos salida/datos.local.json --formato qr-grande
+npm run generar -- --datos salida/datos.local.json
 ```
+
+Sale con el QR del sistema; `--qr-mm` lo cambia.
 
 - `salida/comprobantes.html` → imprimir en la comandera.
 - `salida/comprobantes.csv` → es la pestaña `Comprobantes` de la planilla (la instalación ya
