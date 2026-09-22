@@ -109,7 +109,12 @@ export function clasificarLecturas(lecturas) {
   if (distintos.length > 1) {
     // Dos remitos escaneados en la misma hoja: no sabemos partirlos, y adivinar
     // cual es cual es justo lo que no se hace.
-    return { estado: "revisar", motivo: "varios_codigos", codigos: distintos.map((d) => d.texto) };
+    return {
+      estado: "revisar",
+      motivo: "varios_codigos",
+      codigos: distintos.map((d) => d.texto),
+      numeros: distintos.map((d) => d.visible).sort(),
+    };
   }
   if (dvInvalido) return { estado: "revisar", motivo: "dv_invalido" };
   if (textos.length > 0) return { estado: "revisar", motivo: "codigo_ajeno", codigos: textos };
@@ -225,6 +230,22 @@ async function piezaTicket(pagina, i, n, rect) {
   };
 }
 
+/**
+ * Codigos de remito validos que se ven dentro de una pieza que NO se va a imputar
+ * (por ejemplo, varios tickets pegados). Es solo informativo: le dice a quien mira
+ * _Revisar que tickets hay que volver a escanear.
+ */
+async function codigosAdentro(pagina, rect) {
+  const lecturas = await leerCodigos(recortar(pagina, rect, DPI_LECTURA).asPNG());
+  const validos = new Map();
+  for (const l of lecturas) {
+    const r = interpretarCodigo(l.text.trim());
+    if (r.ok) validos.set(l.text.trim(), r.visible);
+  }
+  const orden = [...validos.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  return orden.length ? { codigos: orden.map(([texto]) => texto), numeros: orden.map(([, visible]) => visible) } : {};
+}
+
 /** Algo claro sobre la cartulina que no tiene forma de ticket: a revision, con su imagen. */
 async function piezaDescarte(pagina, i, n, rect) {
   const pix = recortar(pagina, rect, DPI_IMAGEN);
@@ -236,6 +257,8 @@ async function piezaDescarte(pagina, i, n, rect) {
     modo: "cartulina",
     estado: "revisar",
     motivo: rect.motivo,
+    // Nunca se imputan, aunque se lean: solo se anotan.
+    ...(await codigosAdentro(pagina, rect)),
     medidas_mm: [rect.anchoMm, rect.largoMm],
     hash_sha256: sha256(png),
     pdf_origen: "recorte",

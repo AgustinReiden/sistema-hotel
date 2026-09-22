@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   COLUMNAS, filasAObjetos, planificarLote, interpretarFirma, cuerpoGemini, filaResultado,
-  evaluarRespuestaWorker, evaluarVigilancia,
+  evaluarRespuestaWorker, evaluarVigilancia, FIRMA_PENDIENTE, firmaInicial, cortarCorrida,
 } from "../n8n/logica.mjs";
 import { COLUMNAS as COLUMNAS_GENERADOR } from "../generador/manifiesto.mjs";
 import { formatearCodigo } from "../comun/codigo.mjs";
@@ -61,6 +61,23 @@ test("lo que el worker no identifico va a revisar con su motivo", () => {
   ]);
   assert.match(r.piezas[0].archivo_nombre, /^2026-09-21_lotehash_hoja001_codigo_ilegible\.pdf$/);
   assert.equal(r.rutas.length, 0);
+});
+
+test("varios tickets pegados: a revisar, con los numeros que se leyeron en el nombre, sin imputar", () => {
+  const pegados = {
+    ...aRevisar(1, "forma_no_reconocida", "p"), pieza: 1, ubicacion: "1.1", modo: "cartulina",
+    codigos: [cod(3), cod(1)], numeros: [vis(1), vis(3)],
+  };
+  const r = plan(worker([pegados], "lotehash123456", 1));
+  assert.equal(r.piezas[0].accion, "revisar");
+  assert.equal(r.piezas[0].numero, undefined, "no se imputa a ninguno");
+  assert.equal(r.piezas[0].archivo_nombre, "2026-09-21_lotehash_hoja001-1_forma_no_reconocida_T-000001_T-000003.pdf");
+  assert.equal(r.resumen.archivadas, 0);
+});
+
+test("en el nombre del archivo solo entran numeros con forma de numero", () => {
+  const raro = { ...aRevisar(1, "forma_no_reconocida", "q"), pieza: 1, ubicacion: "1.1", modo: "cartulina", numeros: ["../x", vis(2)] };
+  assert.match(plan(worker([raro], "lotehash123456", 1)).piezas[0].archivo_nombre, /_forma_no_reconocida_T-000002\.pdf$/);
 });
 
 test("codigo valido que no esta en el manifiesto: revisar, codigo_inexistente", () => {
@@ -153,6 +170,47 @@ test("cualquier falla es 'error', nunca 'no firmado'", () => {
   ]) {
     assert.equal(interpretarFirma(r).firma, "error", JSON.stringify(r));
   }
+});
+
+test("respuesta completa del nodo HTTP (never error): 200 se interpreta, 429 y 503 se clasifican", () => {
+  const ok = interpretarFirma({ statusCode: 200, body: respuesta({ firmado: false, confianza: 0.99, observacion: "renglon vacio" }) });
+  assert.deepEqual(ok, { firma: "no", confianza: 0.99, observacion: "renglon vacio" });
+
+  const cuota = interpretarFirma({ statusCode: 429, body: { error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "Quota exceeded" } } });
+  assert.equal(cuota.firma, "error");
+  assert.equal(cuota.tipo_error, "cuota");
+  assert.match(cuota.observacion, /429 RESOURCE_EXHAUSTED Quota exceeded/);
+
+  const saturado = interpretarFirma({
+    statusCode: 503,
+    body: JSON.stringify({ error: { code: 503, status: "UNAVAILABLE", message: "This model is currently experiencing high demand." } }),
+  });
+  assert.equal(saturado.tipo_error, "sobrecarga");
+  assert.match(saturado.observacion, /503 UNAVAILABLE/);
+});
+
+test("errores de n8n: el aviso de 429 cuenta como cuota y un timeout como red", () => {
+  assert.equal(interpretarFirma({ error: { message: "Try spacing your requests out using the batching settings under 'Options'" } }).tipo_error, "cuota");
+  assert.equal(interpretarFirma({ error: { message: "timeout of 60000ms exceeded" } }).tipo_error, "red");
+  assert.equal(interpretarFirma({ statusCode: 200, body: { candidates: [] } }).tipo_error, "otro");
+});
+
+test("se corta la corrida solo si fallaron por cuota, saturacion o red", () => {
+  assert.equal(cortarCorrida({ firma: "error", tipo_error: "cuota" }), true);
+  assert.equal(cortarCorrida({ firma: "error", tipo_error: "sobrecarga" }), true);
+  assert.equal(cortarCorrida({ firma: "error", tipo_error: "red" }), true);
+  assert.equal(cortarCorrida({ firma: "error", tipo_error: "otro" }), false, "un json raro es de ese remito, no del servicio");
+  assert.equal(cortarCorrida({ firma: "si", confianza: 0.98 }), false);
+});
+
+test("la ingesta deja pendiente la firma de lo archivado; lo que va a revisar no se evalua", () => {
+  assert.deepEqual(firmaInicial("archivar"), { firma: FIRMA_PENDIENTE, confianza: "", observacion: "" });
+  assert.equal(firmaInicial("revisar").firma, "");
+  const [pag] = plan(worker([identificada(1, 1)])).piezas;
+  const fila = filaResultado(pag, firmaInicial(pag.accion), { id: "F1", name: "T-000001.pdf", webViewLink: "L" }, "", AHORA);
+  const obj = Object.fromEntries(COLUMNAS.Resultados.map((c, i) => [c, fila[i]]));
+  assert.equal(obj.firma, "pendiente");
+  assert.equal(obj.modelo, "");
 });
 
 test("el pedido a Gemini lleva la imagen y el esquema", () => {
@@ -267,10 +325,10 @@ test("config: subcarpeta repetida, error claro", () => {
   assert.throws(() => armarConfig({}, [{ id: "r" }], [...contenidoOk, { id: "E2", name: "_Entrada", mimeType: CARPETA }]), /Hay 2 "_Entrada"/);
 });
 
-// --- Reintento de firmas ---
+// --- Evaluacion de firmas ---
 
 import {
-  reintentosDe, letraColumna, rangoFirma, elegirFirmaPendiente, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
+  reintentosDe, letraColumna, rangoFirma, elegirFirmasPendientes, mismaFila, firmaReintentada, cuerpoGeminiArchivo,
 } from "../n8n/logica.mjs";
 
 const encabezado = COLUMNAS.Resultados;
@@ -287,26 +345,34 @@ test("letras de columna y rango de firma en Resultados", () => {
   assert.equal(rangoFirma(6), "Resultados!M6:P6");
 });
 
-test("elige la firma en error con menos intentos y su fila real", () => {
+test("elige pendientes y errores: primero las de menos intentos, a igualdad las mas viejas, con su fila real", () => {
   const values = [
     encabezado,
-    filaRes({ numero: "T-000001", firma: "si", archivo_id: "a", hash_sha256: "h1" }),
-    filaRes({ numero: "T-000002", firma: "error", observacion: "x [reintentos: 2]", archivo_id: "b", hash_sha256: "h2" }),
+    filaRes({ estado: "archivado", numero: "T-000001", firma: "si", archivo_id: "a", hash_sha256: "h1" }),
+    filaRes({ estado: "archivado", numero: "T-000002", firma: "error", observacion: "x [reintentos: 2]", archivo_id: "b", hash_sha256: "h2" }),
     [],
-    filaRes({ numero: "T-000005", firma: "error", observacion: "gemini: 503", archivo_id: "c", hash_sha256: "h5" }),
+    filaRes({ estado: "archivado", numero: "T-000005", firma: "error", observacion: "gemini 503", archivo_id: "c", hash_sha256: "h5" }),
+    filaRes({ estado: "archivado", numero: "T-000006", firma: "pendiente", archivo_id: "d", hash_sha256: "h6" }),
   ];
-  assert.deepEqual(elegirFirmaPendiente(values, 5), { fila: 5, archivo_id: "c", numero: "T-000005", hash_sha256: "h5", reintentos: 0 });
+  assert.deepEqual(elegirFirmasPendientes(values, 5, 5), [
+    { fila: 5, archivo_id: "c", numero: "T-000005", hash_sha256: "h5", reintentos: 0 },
+    { fila: 6, archivo_id: "d", numero: "T-000006", hash_sha256: "h6", reintentos: 0 },
+    { fila: 3, archivo_id: "b", numero: "T-000002", hash_sha256: "h2", reintentos: 2 },
+  ]);
+  assert.deepEqual(elegirFirmasPendientes(values, 5, 2).map((p) => p.numero), ["T-000005", "T-000006"], "respeta el tope por corrida");
 });
 
-test("no elige las que agotaron los intentos ni las que no tienen archivo", () => {
+test("no elige las que agotaron los intentos, las que no tienen archivo ni las piezas a revisar", () => {
   const values = [
     encabezado,
-    filaRes({ firma: "error", observacion: "[reintentos: 5]", archivo_id: "a", hash_sha256: "h" }),
-    filaRes({ firma: "error", observacion: "", archivo_id: "", hash_sha256: "h" }),
-    filaRes({ firma: "no", archivo_id: "b", hash_sha256: "h" }),
+    filaRes({ estado: "archivado", firma: "error", observacion: "[reintentos: 5]", archivo_id: "a", hash_sha256: "h" }),
+    filaRes({ estado: "archivado", firma: "error", observacion: "", archivo_id: "", hash_sha256: "h" }),
+    filaRes({ estado: "archivado", firma: "no", archivo_id: "b", hash_sha256: "h" }),
+    // Varios tickets pegados: mirar "la firma" de esa pieza no tiene sentido.
+    filaRes({ estado: "revisar", motivo: "forma_no_reconocida", firma: "error", archivo_id: "c", hash_sha256: "h" }),
   ];
-  assert.equal(elegirFirmaPendiente(values, 5), null);
-  assert.equal(elegirFirmaPendiente([encabezado], 5), null);
+  assert.deepEqual(elegirFirmasPendientes(values, 5, 5), []);
+  assert.deepEqual(elegirFirmasPendientes([encabezado], 5, 5), []);
 });
 
 test("misma fila: se compara la huella, nunca se pisa otra fila", () => {

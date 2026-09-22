@@ -22,7 +22,7 @@ before(() => {
 
 test("se arman los siete workflows", () => {
   assert.deepEqual(workflows.map((w) => w.name).sort(), [
-    "Remitos - Asegurar carpeta", "Remitos - Config", "Remitos - Errores", "Remitos - Ingesta", "Remitos - Instalación", "Remitos - Reintentar firmas", "Remitos - Vigilancia",
+    "Remitos - Asegurar carpeta", "Remitos - Config", "Remitos - Errores", "Remitos - Evaluar firmas", "Remitos - Ingesta", "Remitos - Instalación", "Remitos - Vigilancia",
   ]);
 });
 
@@ -60,22 +60,26 @@ test("el codigo de cada nodo Code compila", () => {
       // n8n corre el codigo de un nodo Code dentro de una funcion async (admite await).
       const AsyncFunction = (async () => {}).constructor;
       assert.doesNotThrow(() => new AsyncFunction("$input", "$", "$json", "$now", n.parameters.jsCode), `${wf.name} / ${n.name}`);
+      // Mismo build en Windows y en Linux: sin CRLF de un checkout de Windows.
+      assert.ok(!n.parameters.jsCode.includes("\r"), `${wf.name} / ${n.name}: tiene \\r`);
     }
   }
 });
 
-test("la ingesta: el lote se cierra al terminar el loop, y un error de Gemini no frena", () => {
+test("la ingesta: el lote se cierra al terminar el loop, y no depende de Gemini", () => {
   const ing = workflows.find((w) => w.name === "Remitos - Ingesta");
   const loop = ing.connections["Una página por vez"].main;
   assert.equal(loop[0][0].node, "Cierre", "la salida 'done' cierra el lote");
   assert.equal(loop[1][0].node, "¿Es página?");
-  const gemini = ing.nodes.find((n) => n.name === "Gemini");
-  assert.equal(gemini.onError, "continueRegularOutput");
   assert.equal(ing.nodes.find((n) => n.name === "Worker").onError, "continueErrorOutput");
+  // La firma la evalua otro workflow: la ingesta nunca espera a Gemini.
+  assert.doesNotMatch(JSON.stringify(ing.nodes), /generativelanguage|interpretarFirma|cuerpoGemini\(/);
+  const subida = ing.nodes.find((n) => n.name === "Preparar subida").parameters.jsCode;
+  assert.match(subida, /firmaInicial\(pag\.accion\)/);
 });
 
 test("ingesta, errores y vigilancia toman la config del sub-workflow, no de ids fijos", () => {
-  for (const nombre of ["Remitos - Ingesta", "Remitos - Errores", "Remitos - Vigilancia", "Remitos - Reintentar firmas"]) {
+  for (const nombre of ["Remitos - Ingesta", "Remitos - Errores", "Remitos - Vigilancia", "Remitos - Evaluar firmas"]) {
     const wf = workflows.find((w) => w.name === nombre);
     const cfg = wf.nodes.find((n) => n.name === "Config");
     assert.equal(cfg.type, "n8n-nodes-base.executeWorkflow", nombre);
@@ -84,20 +88,75 @@ test("ingesta, errores y vigilancia toman la config del sub-workflow, no de ids 
   assert.doesNotMatch(texto, /"(raiz|entrada|revisar|procesados|planilla)_id":\s*"[^"]/, "no quedan ids fijos");
 });
 
-test("reintentar firmas: prueba el respaldo solo si el principal fallo, y verifica la fila antes de escribir", () => {
-  const wf = workflows.find((w) => w.name === "Remitos - Reintentar firmas");
-  const c = wf.connections;
-  assert.equal(c["¿Anduvo?"].main[0][0].node, "Leer fila");
-  assert.equal(c["¿Anduvo?"].main[1][0].node, "Gemini respaldo");
-  assert.equal(c["Descargar PDF"].main[1][0].node, "Sin archivo", "si no hay PDF, cuenta el intento");
-  assert.equal(c["Leer fila"].main[0][0].node, "Armar actualización");
-  const armar = wf.nodes.find((n) => n.name === "Armar actualización").parameters.jsCode;
-  assert.match(armar, /mismaFila\(/);
-  for (const n of ["Gemini", "Gemini respaldo"]) assert.equal(wf.nodes.find((x) => x.name === n).onError, "continueRegularOutput");
+const evaluar = () => workflows.find((w) => w.name === "Remitos - Evaluar firmas");
+const destino = (wf, origen, salida = 0) => (wf.connections[origen]?.main[salida] ?? []).map((d) => d.node);
+
+test("evaluar firmas: de a una por vuelta, respaldo solo si el principal fallo, y verifica la fila antes de escribir", () => {
+  const wf = evaluar();
+  assert.deepEqual(destino(wf, "Una por vez", 0), [], "la salida 'termine' no hace nada");
+  assert.deepEqual(destino(wf, "Una por vez", 1), ["Descargar PDF"]);
+  assert.equal(wf.nodes.find((n) => n.name === "Una por vez").parameters.batchSize, 1);
+  assert.deepEqual(destino(wf, "¿Anduvo?", 0), ["Leer fila (principal)"]);
+  assert.deepEqual(destino(wf, "¿Anduvo?", 1), ["Gemini respaldo"]);
+  assert.deepEqual(destino(wf, "Descargar PDF", 1), ["Sin archivo"], "si no hay PDF, cuenta el intento");
+  for (const s of ["principal", "respaldo", "sin archivo"]) {
+    assert.deepEqual(destino(wf, `Leer fila (${s})`), [`Armar actualización (${s})`]);
+    assert.match(wf.nodes.find((n) => n.name === `Armar actualización (${s})`).parameters.jsCode, /mismaFila\(/);
+  }
+  // Vuelve al bucle con una pausa; si fallaron los dos modelos por cuota o saturacion, corta.
+  assert.deepEqual(destino(wf, "Actualizar firma (principal)"), ["Pausa"]);
+  assert.deepEqual(destino(wf, "Actualizar firma (sin archivo)"), ["Pausa"]);
+  assert.deepEqual(destino(wf, "Actualizar firma (respaldo)"), ["¿Seguir?"]);
+  assert.deepEqual(destino(wf, "¿Seguir?", 0), ["Pausa"]);
+  assert.deepEqual(destino(wf, "¿Seguir?", 1), []);
+  assert.deepEqual(destino(wf, "Pausa"), ["Una por vez"]);
 });
 
-test("la ingesta no cambio por el reintento de firmas (no hace falta reimportarla)", () => {
+test("evaluar firmas: Gemini devuelve el error real (codigo y mensaje) y no reintenta a ciegas", () => {
+  const wf = evaluar();
+  for (const n of ["Gemini", "Gemini respaldo"]) {
+    const g = wf.nodes.find((x) => x.name === n);
+    assert.equal(g.onError, "continueRegularOutput", n);
+    assert.equal(g.retryOnFail, undefined, `${n}: sin reintentos automaticos`);
+    assert.deepEqual(g.parameters.options.response.response, { fullResponse: true, neverError: true }, n);
+  }
+});
+
+test("evaluar firmas: adentro del bucle cada nodo lee el remito de su vuelta, nunca la de otra", () => {
+  // Nodos del bucle: todo lo que se alcanza desde la salida 1 de "Una por vez".
+  const wf = evaluar();
+  const enBucle = new Set();
+  const pendientes = destino(wf, "Una por vez", 1);
+  while (pendientes.length) {
+    const n = pendientes.pop();
+    if (n === "Una por vez" || enBucle.has(n)) continue;
+    enBucle.add(n);
+    for (const salida of wf.connections[n]?.main ?? []) pendientes.push(...salida.map((d) => d.node));
+  }
+  assert.ok(enBucle.has("Interpretar respaldo") && enBucle.has("Pausa"));
+  const prohibidos = [...enBucle, "Una por vez"];
+  for (const n of wf.nodes.filter((x) => enBucle.has(x.name))) {
+    const texto = JSON.stringify(n.parameters);
+    assert.doesNotMatch(texto, /\.isExecuted/, `${n.name}: .isExecuted mira cualquier vuelta`);
+    for (const otro of prohibidos) {
+      const ref = `$('${otro}').first()`;
+      assert.ok(!texto.includes(ref), `${n.name} usa ${ref}`);
+    }
+  }
+});
+
+test("errores: solo libera el turno de la ingesta si la que se cayo es la ingesta", () => {
+  const wf = workflows.find((w) => w.name === "Remitos - Errores");
+  assert.deepEqual(destino(wf, "Anotar error"), ["¿Era la ingesta?"]);
+  assert.deepEqual(destino(wf, "¿Era la ingesta?", 0), ["Liberar turno"]);
+  assert.deepEqual(destino(wf, "¿Era la ingesta?", 1), []);
+  const cond = wf.nodes.find((n) => n.name === "¿Era la ingesta?").parameters.conditions.conditions[0];
+  assert.equal(cond.rightValue, workflows.find((w) => w.name === "Remitos - Ingesta").name);
+});
+
+test("la ingesta no mira firmas y evaluar firmas no toca la ingesta", () => {
   const ing = workflows.find((w) => w.name === "Remitos - Ingesta");
   const paginas = ing.nodes.find((n) => n.name === "Páginas").parameters.jsCode;
-  assert.doesNotMatch(paginas, /cuerpoGeminiArchivo|elegirFirmaPendiente/);
+  assert.doesNotMatch(paginas, /cuerpoGemini|gemini_body/);
+  assert.doesNotMatch(JSON.stringify(evaluar().nodes), /appendA|:append/, "evaluar solo actualiza filas existentes");
 });

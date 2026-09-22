@@ -16,7 +16,7 @@ Diseño: [`docs/plans/2026-09-17-remitos-firmados-design.md`](../../docs/plans/2
 | `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código. Sin estado, sin Google. |
 | `n8n/logica.mjs` | Reglas de negocio (qué archivar, qué mandar a revisar, versiones, firma). Puras y testeadas. |
 | `n8n/construir.mjs` | Arma los workflows de n8n incrustando `logica.mjs` en los nodos Code. |
-| `test/` | `npm test` — 84 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
+| `test/` | `npm test` — 98 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
 
 `salida/` queda fuera de git: ahí van los datos reales, los PDF generados y los workflows
 armados (llevan ids y datos de clientes).
@@ -26,7 +26,8 @@ armados (llevan ids y datos de clientes).
 **Varios tickets por hoja, sobre cartulina negra:**
 
 1. Poner los tickets sueltos en el vidrio, **separados al menos 1 cm** entre sí y del borde.
-   Pueden quedar torcidos o al revés: se enderezan solos.
+   Pueden quedar torcidos o al revés: se enderezan solos. Lo que no puede pasar es que se
+   toquen o se monten: se ven como una sola forma y van todos juntos a `_Revisar`.
 2. **Taparlos con una cartulina negra** (A4 o más grande) y recién ahí cerrar la tapa.
 3. Escanear. Varias hojas pueden ir en un mismo PDF.
 
@@ -110,14 +111,23 @@ Si `Remitos` ya existe, no hace nada. El resultado trae los ids: con eso se comp
 ### 6. Configuración de cada workflow en n8n
 
 En *Settings* de cada workflow: **Execution order: v1** y, en `Remitos - Ingesta`,
-**Error workflow: Remitos - Errores**.
+`Remitos - Evaluar firmas` y `Remitos - Vigilancia`, **Error workflow: Remitos - Errores**.
+
+### 7. Qué hace cada workflow
+
+| Workflow | Cuándo | Qué hace |
+|---|---|---|
+| `Remitos - Ingesta` | Cada 5 min | Toma el archivo más viejo de `_Entrada`, lo separa en tickets, archiva cada uno y anota la fila en `Resultados` con la firma `pendiente`. **No llama a Gemini**: una caída de Google nunca frena ni alarga el archivo. |
+| `Remitos - Evaluar firmas` | Cada 5 min | Toma hasta 5 firmas `pendiente` (o `error` con intentos libres) y las evalúa de a una, con una pausa, mandándole a Gemini el PDF archivado. |
+| `Remitos - Vigilancia` | Cada hora | Avisa si la ingesta no corre o si `_Entrada` no se vacía. |
+| `Remitos - Config`, `Asegurar carpeta`, `Errores` | Los llaman los demás | Ajustes y carpetas por nombre; registro de ejecuciones caídas. |
 
 ## Qué pasa cuando algo falla
 
 | Falla | Qué hace |
 |---|---|
 | Código ilegible, DV que no cierra, código ajeno | El ticket va a `_Revisar` con el motivo en el nombre y en `Resultados`. Nunca se imputa "al más parecido". |
-| Dos tickets pegados sobre la cartulina | Se ven como una sola forma: van a `_Revisar` como `forma_no_reconocida`. |
+| Dos tickets pegados sobre la cartulina | Se ven como una sola forma: van a `_Revisar` como `forma_no_reconocida`, con los números que se alcanzan a leer en el nombre del archivo (`..._forma_no_reconocida_T-000007_T-000013.pdf`) para saber cuáles re-escanear. Nunca se imputan. |
 | Cartulina escaneada sin tickets | La hoja va a `_Revisar` como `sin_tickets`. |
 | Sin cartulina y varios tickets en la hoja | La hoja entera va a `_Revisar` como `varios_codigos`. |
 | Código válido que no está en `Comprobantes` | `_Revisar`, motivo `codigo_inexistente`. |
@@ -126,7 +136,7 @@ En *Settings* de cada workflow: **Execution order: v1** y, en `Remitos - Ingesta
 | El flujo se cae a mitad de lote | El original queda en `_Entrada` y se reintenta; lo ya guardado se saltea por hash. |
 | Archivo que no es PDF/imagen, o documento de Google | Se aparta a `_Revisar` y se anota en `Errores`. No se reintenta. |
 | Worker caído | Se anota en `Errores`; el archivo queda en `_Entrada` y se reintenta cada 5 minutos. |
-| Gemini falla | La página **igual se archiva**; la firma queda como `error`, nunca como "no firmado". `Remitos - Reintentar firmas` vuelve a preguntar cada 10 minutos con el PDF archivado (modelo principal y, si falla, el de respaldo), hasta 5 intentos. |
+| Gemini falla o está saturado | La ingesta no se entera: archiva igual y la firma queda `pendiente`. `Remitos - Evaluar firmas` prueba el modelo principal y, si falla, el de respaldo. Si fallan los dos por cuota (429), saturación (503) o red, la firma queda `error` (nunca "no firmado"), la corrida se corta y se sigue 5 minutos después. Cada firma tiene hasta 5 intentos; en la observación queda el código y el mensaje real de Google. |
 | Se reinstala (carpetas y planilla nuevas) | Nada que tocar: `Remitos - Config` busca carpetas y planilla por nombre en cada corrida. Si falta algo o está repetido, la corrida falla con un mensaje claro. |
 | Dos corridas a la vez | Un turno en `Estado` lo impide; si una corrida muere, el turno vence a los 30 min. |
 | La ingesta deja de correr o `_Entrada` no se vacía | `Remitos - Vigilancia` avisa por WhatsApp (webhook del hotel), como máximo cada 6 h. |

@@ -61,6 +61,7 @@ test("dos remitos en la misma hoja: varios_codigos", async () => {
   );
   assert.equal(r.piezas[0].motivo, "varios_codigos");
   assert.deepEqual(r.piezas[0].codigos.sort(), [A, B].sort());
+  assert.deepEqual(r.piezas[0].numeros, ["T-000001", "T-000002"]);
 });
 
 test("el mismo codigo en QR y Code128 en la misma hoja es UN remito", async () => {
@@ -179,6 +180,21 @@ test("cartulina: dos tickets pegados no se imputan, van a revision", async () =>
   assert.equal(r.piezas.length, 1);
   assert.equal(r.piezas[0].estado, "revisar");
   assert.equal(r.piezas[0].motivo, "forma_no_reconocida");
+  // Se anota que tickets hay adentro, para saber cuales re-escanear...
+  assert.deepEqual(r.piezas[0].numeros, ["T-000001", "T-000002"]);
+  assert.deepEqual(r.piezas[0].codigos, [A, B]);
+  // ...pero la pieza no queda identificada como ninguno de los dos.
+  assert.equal(r.piezas[0].codigo, undefined);
+  assert.equal(r.piezas[0].numero_visible, undefined);
+});
+
+test("cartulina: una mancha sin codigos legibles va a revision sin lista de numeros", async () => {
+  const r = await procesarEscaneo(await hojaCartulina([
+    { cxMm: 70, cyMm: 100 },
+    { cxMm: 140, cyMm: 100 },
+  ]));
+  assert.equal(r.piezas[0].motivo, "forma_no_reconocida");
+  assert.equal(r.piezas[0].numeros, undefined);
 });
 
 test("cartulina vacia: la hoja va a revision como sin_tickets", async () => {

@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { COLUMNAS } from "./logica.mjs";
+import { COLUMNAS, letraColumna } from "./logica.mjs";
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const RAIZ = join(AQUI, "..");
@@ -29,9 +29,13 @@ const opcion = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
 const CONFIG_BASE = {
   worker_url: "http://remitos-worker:8787",
   modelo: "gemini-3.8-flash",
-  // Si el principal no responde al reintentar una firma, se prueba este.
+  // Si el principal no responde al evaluar una firma, se prueba este.
   modelo_respaldo: "gemini-3.5-flash",
+  // Intentos por firma antes de dejarla en "error" para que la mire una persona.
   max_reintentos_firma: 5,
+  // "Evaluar firmas": cuantas mira por corrida (cada 5 min) y la pausa entre una y otra.
+  firmas_por_corrida: 5,
+  segundos_entre_firmas: 3,
   razonamiento: "low",
   unidad: "Hotel",
   minutos_bloqueo: 30,
@@ -53,7 +57,11 @@ const ID_CONFIG = opcion("--config-id", local.config_id ?? "COMPLETAR_ID_CONFIG"
 
 // La logica partida en bloques de nivel superior (const/function). Cada nodo Code
 // lleva solo los bloques que menciona, mas sus dependencias.
-const FUENTE = (await readFile(join(AQUI, "logica.mjs"), "utf8")).replace(/^export \{[\s\S]*?\};\s*$/m, "");
+// Saltos de linea normalizados: un checkout de Windows (CRLF) tiene que armar
+// exactamente los mismos workflows que uno de Linux.
+const FUENTE = (await readFile(join(AQUI, "logica.mjs"), "utf8"))
+  .replace(/\r\n/g, "\n")
+  .replace(/^export \{[\s\S]*?\};\s*$/m, "");
 const BLOQUES = (() => {
   // Cada bloque arranca en su declaracion o en el comentario pegado arriba de ella.
   const lineas = FUENTE.split("\n");
@@ -65,10 +73,23 @@ const BLOQUES = (() => {
     while (desde > 0 && /^\s*(\/\/|\/\*\*|\*|\*\/)/.test(lineas[desde - 1])) desde--;
     inicios.push({ nombre: m[1], desde });
   });
+  // Un encabezado de seccion ("// --- Firma ---" y su parrafo) separado por una
+  // linea en blanco de lo que sigue no es de ningun bloque: si quedara al final
+  // del bloque anterior, apareceria en nodos que no tienen nada que ver.
+  const sinEncabezadoFinal = (ls) => {
+    let fin = ls.length;
+    for (;;) {
+      while (fin > 0 && ls[fin - 1].trim() === "") fin--;
+      let ini = fin;
+      while (ini > 0 && /^\s*\/\//.test(ls[ini - 1])) ini--;
+      if (ini === fin || ini === 0 || ls[ini - 1].trim() !== "") return ls.slice(0, fin);
+      fin = ini;
+    }
+  };
   const b = new Map();
   inicios.forEach((ini, k) => {
     const hasta = inicios[k + 1]?.desde ?? lineas.length;
-    b.set(ini.nombre, lineas.slice(ini.desde, hasta).join("\n").trim());
+    b.set(ini.nombre, sinEncabezadoFinal(lineas.slice(ini.desde, hasta)).join("\n").trim());
   });
   return b;
 })();
@@ -397,43 +418,36 @@ const carpetas = Object.fromEntries($input.all().filter(i => i.json.ruta_clave).
 const piezas = plan.piezas.filter(p => p.accion !== 'saltear').map(p => {
   const destino_id = p.accion === 'archivar' ? carpetas[p.ruta_clave] : cfg.revisar_id;
   if (!destino_id) throw new Error('Sin carpeta destino para ' + (p.ruta_clave || p.archivo_nombre));
+  // La firma no se mira aca (ver "Remitos - Evaluar firmas"): la imagen no hace falta.
   const { imagen_jpg_b64, ...resto } = p;
-  return { json: { ...resto, destino_id, gemini_body: cuerpoGemini(imagen_jpg_b64, cfg.razonamiento) } };
+  return { json: { ...resto, destino_id } };
 });
 // Un item centinela si no hay nada que subir, para que el lote igual se cierre.
 return piezas.length ? piezas : [{ json: { accion: 'nada' } }];`, [x(23), F]),
     nodo("Una página por vez", "n8n-nodes-base.splitInBatches", 3, { batchSize: 1, options: {} }, [x(24), F]),
     si("¿Es página?", [x(25), F - 150], "={{ $json.accion }}", OP.distinto, "nada"),
-    http("Gemini", [x(26), F - 150], {
-      method: "POST",
-      url: `=https://generativelanguage.googleapis.com/v1beta/models/{{ ${CFG("modelo")} }}:generateContent`,
-      json: "={{ JSON.stringify($json.gemini_body) }}",
-      auth: "gemini", timeout: 90000,
-      retryOnFail: true, maxTries: 3, waitBetweenTries: 5000,
-      // Si Gemini falla, la pagina IGUAL se archiva: la firma queda como "error".
-      onError: "continueRegularOutput",
-    }),
     codigo("Preparar subida", `
-const pag = $('¿Es página?').item.json;
-const firma = interpretarFirma($json);
-const { gemini_body, pdf_pagina_b64, ...resto } = pag;
+// La firma queda "pendiente": la evalua "Remitos - Evaluar firmas", aparte, para que
+// una caida o una saturacion de Gemini nunca frene ni alargue el archivo.
+const pag = $json;
+const { pdf_pagina_b64, ...resto } = pag;
 return {
-  json: { ...resto, firma },
+  json: { ...resto, firma: firmaInicial(pag.accion) },
   binary: { data: { data: pdf_pagina_b64, mimeType: 'application/pdf', fileName: pag.archivo_nombre, fileExtension: 'pdf' } },
-};`, [x(27), F - 150], { cadaItem: true }),
-    http("Crear archivo", [x(28), F - 150], {
+};`, [x(26), F - 150], { cadaItem: true }),
+    http("Crear archivo", [x(27), F - 150], {
       method: "POST", url: `=${DRIVE}`, query: { fields: "id" }, auth: "google",
       json: "={{ JSON.stringify({ name: $json.archivo_nombre, parents: [$json.destino_id], mimeType: 'application/pdf', description: 'Lote ' + $json.lote_archivo + ', pieza ' + $json.pagina + ($json.motivo ? ' — ' + $json.motivo : '') }) }}",
     }),
-    codigo("Recuperar PDF", `return { json: $json, binary: $('Preparar subida').item.binary };`, [x(29), F - 150], { cadaItem: true, conLogica: false }),
-    http("Subir contenido", [x(30), F - 150], {
+    codigo("Recuperar PDF", `return { json: $json, binary: $('Preparar subida').item.binary };`, [x(28), F - 150], { cadaItem: true, conLogica: false }),
+    http("Subir contenido", [x(29), F - 150], {
       method: "PATCH", url: "=https://www.googleapis.com/upload/drive/v3/files/{{ $json.id }}",
       query: { uploadType: "media", fields: "id,name,webViewLink" }, binario: true, auth: "google",
     }),
     codigo("Fila resultado", `
 const pag = $('Preparar subida').item.json;
-return { json: { values: [filaResultado(pag, pag.firma, $json, $('Config').first().json.modelo, new Date().toISOString())] } };`, [x(31), F - 150], { cadaItem: true }),
-    http("Anotar resultado", [x(32), F - 150], { ...appendA("Resultados"), json: "={{ JSON.stringify({ values: $json.values }) }}" }),
+return { json: { values: [filaResultado(pag, pag.firma, $json, '', new Date().toISOString())] } };`, [x(30), F - 150], { cadaItem: true }),
+    http("Anotar resultado", [x(31), F - 150], { ...appendA("Resultados"), json: "={{ JSON.stringify({ values: $json.values }) }}" }),
     codigo("Cierre", `
 const plan = $('Planificar').first().json;
 const ahora = new Date().toISOString();
@@ -513,9 +527,8 @@ return [{ json: { values: [filaError('ingesta', archivo, ev.tipo, ev.detalle + '
       ["Páginas", "Una página por vez"],
       ["Una página por vez", "Cierre", 0], // done
       ["Una página por vez", "¿Es página?", 1], // loop
-      ["¿Es página?", "Gemini", 0],
+      ["¿Es página?", "Preparar subida", 0],
       ["¿Es página?", "Una página por vez", 1],
-      ["Gemini", "Preparar subida"],
       ["Preparar subida", "Crear archivo"],
       ["Crear archivo", "Recuperar PDF"],
       ["Recuperar PDF", "Subir contenido"],
@@ -551,13 +564,18 @@ const e = $('Error Trigger').first().json;
 const detalle = (e.workflow?.name || '') + ' · nodo "' + (e.execution?.lastNodeExecuted || '?') + '": ' + (e.execution?.error?.message || '') + ' · ' + (e.execution?.url || '');
 return [{ json: { values: [filaError('n8n', {}, 'ejecucion_fallida', detalle, new Date().toISOString())] } }];`, [x(2), 300]),
       http("Anotar error", [x(3), 300], { ...appendA("Errores"), json: "={{ JSON.stringify({ values: $json.values }) }}" }),
-      http("Liberar turno", [x(4), 300], estado(5, "en_proceso", "''")),
+      // El turno es de la ingesta: si se cayo otro workflow (Evaluar firmas,
+      // Vigilancia), liberarlo dejaria arrancar una segunda ingesta encima de una
+      // que sigue corriendo.
+      si("¿Era la ingesta?", [x(4), 300], "={{ $('Error Trigger').first().json.workflow.name }}", OP.igual, "Remitos - Ingesta"),
+      http("Liberar turno", [x(5), 300], estado(5, "en_proceso", "''")),
     ],
     connections: conexiones([
       ["Error Trigger", "Config"],
       ["Config", "Fila"],
       ["Fila", "Anotar error"],
-      ["Anotar error", "Liberar turno"],
+      ["Anotar error", "¿Era la ingesta?"],
+      ["¿Era la ingesta?", "Liberar turno", 0],
     ]),
   };
 }
@@ -624,87 +642,144 @@ return [{ json: {
 }
 
 // ================================================================================
-// 4b) Reintento de firmas: cuando Gemini fallo, el remito se archivo igual con la
-//     firma en "error". Cada 10 minutos se toma UNO de esos y se vuelve a preguntar
-//     con el PDF archivado; si el modelo principal falla, se prueba el de respaldo.
+// 4b) Evaluar firmas: la ingesta archiva y deja la firma "pendiente". Cada 5
+//     minutos se toman unas pocas pendientes (o en "error" con intentos libres) y,
+//     DE A UNA y con una pausa, se le pregunta a Gemini con el PDF archivado. Si
+//     el modelo principal falla se prueba el de respaldo; si fallan los dos por
+//     cuota, saturacion o red, la corrida se corta y sigue en la proxima.
+//
+//     Adentro del bucle cada nodo lee el remito de ESA vuelta ($('X').itemMatching,
+//     por item emparejado), nunca $('X').first() de un nodo del bucle ni
+//     .isExecuted: esos miran la ultima vez que corrio el nodo, que puede ser la
+//     vuelta anterior, y escribirian la firma de un remito en la fila de otro.
 //     Antes de escribir se confirma que la fila sigue siendo la misma (por huella).
 // ================================================================================
 
-function wfReintentarFirmas() {
+const ULTIMA_COLUMNA_RESULTADOS = letraColumna(COLUMNAS.Resultados.length - 1);
+
+function wfEvaluarFirmas() {
   contador = 0;
   const F = 300;
   const gemini = (name, pos, campoModelo, cuerpoExpr) => http(name, pos, {
     method: "POST",
     url: `=https://generativelanguage.googleapis.com/v1beta/models/{{ ${CFG(campoModelo)} }}:generateContent`,
-    json: cuerpoExpr, auth: "gemini", timeout: 90000,
-    retryOnFail: true, maxTries: 2, waitBetweenTries: 5000,
+    json: cuerpoExpr, auth: "gemini", timeout: 60000,
+    // Respuesta completa y sin cortar en 4xx/5xx: asi se ve el codigo y el mensaje
+    // reales de Google (429 cuota, 503 saturacion). Sin reintentos automaticos:
+    // si falla se prueba el respaldo, y si no, la proxima corrida.
+    completa: true,
     onError: "continueRegularOutput",
   });
+  // Resultado de una evaluacion, con lo que hace falta para escribir la fila.
+  const resultado = (origenDatos, firmaExpr, modeloExpr) => `
+const cfg = $('Config').first().json;
+return $input.all().map((item, i) => {
+  const p = $('${origenDatos}').itemMatching(i).json;
   return {
-    name: "Remitos - Reintentar firmas",
+    json: { fila: p.fila, hash_sha256: p.hash_sha256, reintentos: p.reintentos, numero: p.numero,
+      firma: ${firmaExpr}, modelo_usado: ${modeloExpr} },
+    pairedItem: { item: i },
+  };
+});`;
+  // Escribir la firma: se relee la fila y solo se escribe si sigue siendo la misma.
+  const escribir = (sufijo, origen, y) => [
+    http(`Leer fila (${sufijo})`, [x(11), y], {
+      url: `=${SHEETS}/values/Resultados!A{{ $json.fila }}:${ULTIMA_COLUMNA_RESULTADOS}{{ $json.fila }}`,
+      auth: "google",
+    }),
+    codigo(`Armar actualización (${sufijo})`, `
+const out = [];
+for (const [i, item] of $input.all().entries()) {
+  const r = $('${origen}').itemMatching(i).json;
+  // Si alguien borro o movio filas entre la lectura y ahora, no se toca nada
+  // (y la corrida termina aca: la proxima vuelve a leer la planilla).
+  if (!mismaFila((item.json.values || [])[0], r.hash_sha256)) continue;
+  out.push({
+    json: { rango: rangoFirma(r.fila), values: [firmaReintentada(r.firma, r.modelo_usado, r.reintentos + 1)], seguir: !cortarCorrida(r.firma) },
+    pairedItem: { item: i },
+  });
+}
+return out;`, [x(12), y]),
+    http(`Actualizar firma (${sufijo})`, [x(13), y], {
+      method: "PUT", url: `=${SHEETS}/values/{{ $json.rango }}`, auth: "google",
+      query: { valueInputOption: "RAW" },
+      json: "={{ JSON.stringify({ values: $json.values }) }}",
+    }),
+  ];
+  return {
+    name: "Remitos - Evaluar firmas",
     nodes: [
-      nodo("Cada 10 minutos", "n8n-nodes-base.scheduleTrigger", 1.2,
-        { rule: { interval: [{ field: "minutes", minutesInterval: 10 }] } }, [x(0), F]),
+      nodo("Cada 5 minutos", "n8n-nodes-base.scheduleTrigger", 1.2,
+        { rule: { interval: [{ field: "minutes", minutesInterval: 5 }] } }, [x(0), F]),
       configNodo([x(1), F]),
       http("Leer Resultados", [x(2), F], leerPestana("Resultados")),
-      codigo("Elegir pendiente", `
-// Una firma en "error" por corrida. Si no hay ninguna, la corrida termina aca.
-const p = elegirFirmaPendiente($input.first().json.values, $('Config').first().json.max_reintentos_firma);
-return p ? [{ json: p }] : [];`, [x(3), F]),
-      http("Descargar PDF", [x(4), F], {
+      codigo("Elegir pendientes", `
+// Unas pocas por corrida. Si no hay ninguna, la corrida termina aca.
+const cfg = $('Config').first().json;
+return elegirFirmasPendientes($input.first().json.values, cfg.max_reintentos_firma, cfg.firmas_por_corrida).map(json => ({ json }));`, [x(3), F]),
+      nodo("Una por vez", "n8n-nodes-base.splitInBatches", 3, { batchSize: 1, options: {} }, [x(4), F]),
+      http("Descargar PDF", [x(5), F], {
         url: `=${DRIVE}/{{ $json.archivo_id }}`, query: { alt: "media" }, archivo: true, auth: "google",
         onError: "continueErrorOutput",
       }),
       codigo("Preparar pedido", `
-const buf = await this.helpers.getBinaryDataBuffer(0, 'data');
-return [{ json: {
-  ...$('Elegir pendiente').first().json,
-  gemini_body: cuerpoGeminiArchivo(buf.toString('base64'), 'application/pdf', $('Config').first().json.razonamiento),
-} }];`, [x(5), F]),
-      gemini("Gemini", [x(6), F], "modelo", "={{ JSON.stringify($json.gemini_body) }}"),
-      codigo("Interpretar", `return [{ json: { firma: interpretarFirma($json), modelo_usado: $('Config').first().json.modelo } }];`, [x(7), F]),
-      si("¿Anduvo?", [x(8), F], "={{ $json.firma.firma }}", OP.distinto, "error"),
-      gemini("Gemini respaldo", [x(9), F + 180], "modelo_respaldo", "={{ JSON.stringify($('Preparar pedido').first().json.gemini_body) }}"),
-      codigo("Interpretar respaldo", `return [{ json: { firma: interpretarFirma($json), modelo_usado: $('Config').first().json.modelo_respaldo } }];`, [x(10), F + 180]),
-      codigo("Sin archivo", `
-// No se pudo bajar el PDF archivado (lo movieron o borraron): cuenta como intento.
-const detalle = ($json.error && ($json.error.message || JSON.stringify($json.error))) || 'error desconocido';
-return [{ json: { firma: { firma: 'error', confianza: '', observacion: 'no se pudo bajar el PDF archivado: ' + String(detalle).slice(0, 200) }, modelo_usado: '' } }];`, [x(5), F + 360], { conLogica: false }),
-      http("Leer fila", [x(11), F], {
-        url: `=${SHEETS}/values/Resultados!A{{ $('Elegir pendiente').first().json.fila }}:T{{ $('Elegir pendiente').first().json.fila }}`,
-        auth: "google",
-      }),
-      codigo("Armar actualización", `
-const p = $('Elegir pendiente').first().json;
-// Si alguien borro o movio filas entre la lectura y ahora, no se toca nada.
-if (!mismaFila(($input.first().json.values || [])[0], p.hash_sha256)) return [];
-const origen = $('Interpretar respaldo').isExecuted ? 'Interpretar respaldo'
-  : $('Interpretar').isExecuted ? 'Interpretar' : 'Sin archivo';
-const r = $(origen).first().json;
-return [{ json: { rango: rangoFirma(p.fila), values: [firmaReintentada(r.firma, r.modelo_usado, p.reintentos + 1)] } }];`, [x(12), F]),
-      http("Actualizar firma", [x(13), F], {
-        method: "PUT", url: `=${SHEETS}/values/{{ $json.rango }}`, auth: "google",
-        query: { valueInputOption: "RAW" },
-        json: "={{ JSON.stringify({ values: $json.values }) }}",
-      }),
+const cfg = $('Config').first().json;
+const out = [];
+for (const [i] of $input.all().entries()) {
+  const p = $('Una por vez').itemMatching(i).json;
+  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');
+  out.push({
+    json: { ...p, gemini_body: cuerpoGeminiArchivo(buf.toString('base64'), 'application/pdf', cfg.razonamiento) },
+    pairedItem: { item: i },
+  });
+}
+return out;`, [x(6), F]),
+      gemini("Gemini", [x(7), F], "modelo", "={{ JSON.stringify($json.gemini_body) }}"),
+      codigo("Interpretar", resultado("Preparar pedido", "interpretarFirma(item.json)", "cfg.modelo"), [x(8), F]),
+      si("¿Anduvo?", [x(9), F], "={{ $json.firma.firma }}", OP.distinto, "error"),
+      gemini("Gemini respaldo", [x(9), F + 200], "modelo_respaldo", "={{ JSON.stringify($('Preparar pedido').item.json.gemini_body) }}"),
+      codigo("Interpretar respaldo", resultado("Preparar pedido", "interpretarFirma(item.json)", "cfg.modelo_respaldo"), [x(10), F + 200]),
+      codigo("Sin archivo", resultado(
+        "Una por vez",
+        "{ firma: 'error', confianza: '', tipo_error: 'otro', observacion: 'no se pudo bajar el PDF archivado: ' + String((item.json.error && (item.json.error.message || JSON.stringify(item.json.error))) || 'error desconocido').slice(0, 200) }",
+        "''",
+      ), [x(6), F + 400]),
+      ...escribir("principal", "Interpretar", F),
+      ...escribir("respaldo", "Interpretar respaldo", F + 200),
+      ...escribir("sin archivo", "Sin archivo", F + 400),
+      si("¿Seguir?", [x(14), F + 200], "={{ $('Armar actualización (respaldo)').item.json.seguir }}", OP.verdadero),
+      nodo("Pausa", "n8n-nodes-base.wait", 1.1,
+        { amount: `={{ ${CFG("segundos_entre_firmas")} || 3 }}`, unit: "seconds" }, [x(15), F]),
     ],
     connections: conexiones([
-      ["Cada 10 minutos", "Config"],
+      ["Cada 5 minutos", "Config"],
       ["Config", "Leer Resultados"],
-      ["Leer Resultados", "Elegir pendiente"],
-      ["Elegir pendiente", "Descargar PDF"],
+      ["Leer Resultados", "Elegir pendientes"],
+      ["Elegir pendientes", "Una por vez"],
+      // La salida 0 de "Una por vez" es "termine": no hay nada mas que hacer.
+      ["Una por vez", "Descargar PDF", 1],
       ["Descargar PDF", "Preparar pedido", 0],
       ["Descargar PDF", "Sin archivo", 1],
       ["Preparar pedido", "Gemini"],
       ["Gemini", "Interpretar"],
       ["Interpretar", "¿Anduvo?"],
-      ["¿Anduvo?", "Leer fila", 0],
+      ["¿Anduvo?", "Leer fila (principal)", 0],
       ["¿Anduvo?", "Gemini respaldo", 1],
       ["Gemini respaldo", "Interpretar respaldo"],
-      ["Interpretar respaldo", "Leer fila"],
-      ["Sin archivo", "Leer fila"],
-      ["Leer fila", "Armar actualización"],
-      ["Armar actualización", "Actualizar firma"],
+      ["Interpretar respaldo", "Leer fila (respaldo)"],
+      ["Sin archivo", "Leer fila (sin archivo)"],
+      ["Leer fila (principal)", "Armar actualización (principal)"],
+      ["Armar actualización (principal)", "Actualizar firma (principal)"],
+      ["Actualizar firma (principal)", "Pausa"],
+      ["Leer fila (respaldo)", "Armar actualización (respaldo)"],
+      ["Armar actualización (respaldo)", "Actualizar firma (respaldo)"],
+      ["Actualizar firma (respaldo)", "¿Seguir?"],
+      // Si fallaron los dos modelos por cuota o saturacion, se corta aca.
+      ["¿Seguir?", "Pausa", 0],
+      ["Leer fila (sin archivo)", "Armar actualización (sin archivo)"],
+      ["Armar actualización (sin archivo)", "Actualizar firma (sin archivo)"],
+      ["Actualizar firma (sin archivo)", "Pausa"],
+      ["Pausa", "Una por vez"],
     ]),
   };
 }
@@ -845,7 +920,7 @@ const workflows = {
   ingesta: wfIngesta(),
   errores: wfErrores(),
   vigilancia: wfVigilancia(),
-  "reintentar-firmas": wfReintentarFirmas(),
+  "evaluar-firmas": wfEvaluarFirmas(),
   instalacion: await wfInstalacion(),
 };
 for (const [archivo, wf] of Object.entries(workflows)) {
