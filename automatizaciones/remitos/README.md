@@ -16,6 +16,7 @@ Diseño: [`docs/plans/2026-09-17-remitos-firmados-design.md`](../../docs/plans/2
 | `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código. Sin estado, sin Google. |
 | `n8n/logica.mjs` | Reglas de negocio (qué archivar, qué mandar a revisar, versiones, firma). Puras y testeadas. |
 | `n8n/construir.mjs` | Arma los workflows de n8n incrustando `logica.mjs` en los nodos Code. |
+| `herramientas/` | `analizar-escaneo.mjs` corre el worker sobre un escaneo real y guarda cada recorte (diagnóstico de pruebas con papel). `comparar-workflow.mjs` confirma que un workflow importado a mano en n8n quedó igual al build. |
 | `test/` | `npm test` — 98 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
 
 `salida/` queda fuera de git: ahí van los datos reales, los PDF generados y los workflows

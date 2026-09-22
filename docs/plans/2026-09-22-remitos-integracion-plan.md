@@ -30,7 +30,7 @@
 ### Task 0.1: PR #123 verificado y mergeado
 
 1. 👤 **AGUSTÍN:** importar `salida/n8n/ingesta.json` en *Remitos - Ingesta* y `salida/n8n/evaluar-firmas.json` en *Remitos - Reintentar firmas*; renombrar este último a **Remitos - Evaluar firmas**; correrlo a mano 3 veces.
-2. Verificar la importación: `mcp__n8n__get_workflow` de `3HpqCFAWL8R4RD8R` y `2j4CmDLrsFobx4eW` (salen a archivo) y comparar contra el build con el script del scratchpad `comparar-wf.mjs`. Esperado: 0 diferencias salvo valores por defecto que n8n borra (`minutesInterval: 5`, `GET`, `runOnceForAllItems`).
+2. Verificar la importación: `mcp__n8n__get_workflow` de la Ingesta y de *Evaluar firmas* (ids en `automatizaciones/remitos/n8n/config.local.json`: `ingesta_id` y `evaluar_firmas_id`; la salida va a un archivo) y comparar contra el build con `node herramientas/comparar-workflow.mjs <archivo bajado> salida/n8n/ingesta.json` (y lo mismo con `evaluar-firmas.json`). Esperado: `0 diferencia(s)`. La herramienta ya ignora los valores por defecto que n8n borra.
 3. Pedir a Agustín la pestaña *Resultados* (captura o .xlsx) y confirmar que cada una de las 11 firmas corresponde a su ticket:
    - T-000012, 08, 09, 10, 11 y 20: firmados.
    - T-000014 y 15: en blanco.
@@ -241,7 +241,7 @@ git commit -m "Remitos: los tickets de prueba usan el diseño compacto; muestras
    - T-000915 y 916: QR de 18 mm.
 2. Abrir el HTML en el panel del navegador y sacar una captura para mandarle a Agustín, junto con la ruta del archivo.
 3. 👤 **AGUSTÍN:** imprimir con **Imprimir de a uno**, escanear los 6 juntos con la cartulina, sin que se toquen y algunos torcidos, y pasar la ruta del PDF.
-4. Correr `node <scratchpad>/analizar-prueba.mjs --pdf <ruta> --salida diag-muestras`. Para cada pieza anotar `ubicacion`, número, `dpi_lectura` y medidas. El script actual no imprime `dpi_lectura`; si hace falta, agregarlo a la salida del scratchpad.
+4. Correr `cd automatizaciones/remitos && node herramientas/analizar-escaneo.mjs --pdf <ruta> --salida salida/diag-muestras`. Imprime por pieza la ubicación, el número, la resolución a la que se leyó (`dpi 200` = primera pasada) y las medidas. Mirar los recortes que deja en la carpeta.
 5. **Criterio:** gana el lado más chico en el que las **dos** copias salen `identificado` con `dpi_lectura: 200`. Si ninguno cumple, se usa 18 y se avisa. Anotar además el largo de los tickets (medidas en mm): tiene que ser menor a ~140 mm.
 6. Fijar `QR_MM` en `comun/ticket-compacto.mjs` con el valor ganador, correr `npm test` y commitear:
 
@@ -446,7 +446,7 @@ export const CSS_TICKET_COMPACTO = `...`.trim();
 
 **Step 4:** `npx vitest run src/__tests__/ticket-compacto.test.ts` → PASA.
 
-**Step 5: verificación de lectura real del QR.** El sistema no tiene lector de QR. Se usa el zxing de la automatización desde un script del scratchpad:
+**Step 5: verificación de lectura real del QR.** El sistema no tiene lector de QR. Se usa el zxing de la automatización desde la raíz del repo, con un comando descartable:
 
 ```bash
 node -e "
@@ -578,7 +578,7 @@ y, antes del `return`:
 3. 👤 **AGUSTÍN:** mergear.
 4. Anotar la **hora UTC del despliegue** de Coolify. Si no se sabe, usar la hora del merge + 10 minutos. Se usa en la migración 116.
 5. 👤 **AGUSTÍN:** reimprimir desde la ficha de *Cuentas* un cargo cualquiera, escanearlo con la cartulina y pasar el PDF.
-6. Correr `analizar-prueba.mjs` sobre ese PDF. Tiene que salir `R-00xxxx` identificado con `dpi_lectura: 200`.
+6. Correr `node herramientas/analizar-escaneo.mjs --pdf <ruta>` (desde `automatizaciones/remitos`). Tiene que salir `R-00xxxx` identificado con `dpi 200`.
 
 ---
 
@@ -1409,7 +1409,7 @@ Commit: `git commit -m "Remitos: migracion 116, estado de firma de cada remito e
 
 La idea es mandar la migración entera (con `__DESPLIEGUE_B1__` reemplazado por la hora real) seguida de un bloque que ejercita los escenarios y termina en `RAISE EXCEPTION`. `exec_ddl` es atómico: se deshace todo y el mensaje de error trae los resultados. Esto **no requiere OK**, porque no queda nada escrito. Igual conviene avisarle a Agustín antes.
 
-1. Armar el payload con un script del scratchpad. El script lee el archivo, saca `BEGIN;` y `COMMIT;`, reemplaza el marcador, pasa CRLF a LF y agrega el bloque de prueba:
+1. Armar el payload con un script temporal, fuera del repo. El script lee el archivo, saca `BEGIN;` y `COMMIT;`, reemplaza el marcador, pasa CRLF a LF y agrega el bloque de prueba:
 
 ```sql
 DO $prueba$
@@ -3362,7 +3362,7 @@ $k$)
 1. `node n8n/construir.mjs`.
 2. Actualizar `Remitos - Config` por MCP (`update_workflow` con nodes y connections de `salida/n8n/config.json`) y verificarlo con `get_workflow`.
 3. 👤 **AGUSTÍN:** reimportar `salida/n8n/ingesta.json` en *Remitos - Ingesta* y `salida/n8n/evaluar-firmas.json` en *Remitos - Evaluar firmas*.
-4. Verificar las dos importaciones con `comparar-wf.mjs`.
+4. Verificar las dos importaciones con `node herramientas/comparar-workflow.mjs` (ver Task 0.1).
 5. Prueba de conexión: 👤 **AGUSTÍN** corre *Remitos - Evaluar firmas* a mano. Con la base vacía no hay pendientes y la corrida termina en `Elegir pendientes`. Por el MCP, `select ultima_evaluacion_at from public.remitos_ajustes` tiene que tener la hora de la corrida.
 
 ### Task 6.3: prueba real
