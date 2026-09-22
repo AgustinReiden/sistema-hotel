@@ -57,7 +57,11 @@ const ID_CONFIG = opcion("--config-id", local.config_id ?? "COMPLETAR_ID_CONFIG"
 
 // La logica partida en bloques de nivel superior (const/function). Cada nodo Code
 // lleva solo los bloques que menciona, mas sus dependencias.
-const FUENTE = (await readFile(join(AQUI, "logica.mjs"), "utf8")).replace(/^export \{[\s\S]*?\};\s*$/m, "");
+// Saltos de linea normalizados: un checkout de Windows (CRLF) tiene que armar
+// exactamente los mismos workflows que uno de Linux.
+const FUENTE = (await readFile(join(AQUI, "logica.mjs"), "utf8"))
+  .replace(/\r\n/g, "\n")
+  .replace(/^export \{[\s\S]*?\};\s*$/m, "");
 const BLOQUES = (() => {
   // Cada bloque arranca en su declaracion o en el comentario pegado arriba de ella.
   const lineas = FUENTE.split("\n");
@@ -69,10 +73,23 @@ const BLOQUES = (() => {
     while (desde > 0 && /^\s*(\/\/|\/\*\*|\*|\*\/)/.test(lineas[desde - 1])) desde--;
     inicios.push({ nombre: m[1], desde });
   });
+  // Un encabezado de seccion ("// --- Firma ---" y su parrafo) separado por una
+  // linea en blanco de lo que sigue no es de ningun bloque: si quedara al final
+  // del bloque anterior, apareceria en nodos que no tienen nada que ver.
+  const sinEncabezadoFinal = (ls) => {
+    let fin = ls.length;
+    for (;;) {
+      while (fin > 0 && ls[fin - 1].trim() === "") fin--;
+      let ini = fin;
+      while (ini > 0 && /^\s*\/\//.test(ls[ini - 1])) ini--;
+      if (ini === fin || ini === 0 || ls[ini - 1].trim() !== "") return ls.slice(0, fin);
+      fin = ini;
+    }
+  };
   const b = new Map();
   inicios.forEach((ini, k) => {
     const hasta = inicios[k + 1]?.desde ?? lineas.length;
-    b.set(ini.nombre, lineas.slice(ini.desde, hasta).join("\n").trim());
+    b.set(ini.nombre, sinEncabezadoFinal(lineas.slice(ini.desde, hasta)).join("\n").trim());
   });
   return b;
 })();

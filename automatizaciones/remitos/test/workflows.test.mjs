@@ -60,6 +60,8 @@ test("el codigo de cada nodo Code compila", () => {
       // n8n corre el codigo de un nodo Code dentro de una funcion async (admite await).
       const AsyncFunction = (async () => {}).constructor;
       assert.doesNotThrow(() => new AsyncFunction("$input", "$", "$json", "$now", n.parameters.jsCode), `${wf.name} / ${n.name}`);
+      // Mismo build en Windows y en Linux: sin CRLF de un checkout de Windows.
+      assert.ok(!n.parameters.jsCode.includes("\r"), `${wf.name} / ${n.name}: tiene \\r`);
     }
   }
 });
