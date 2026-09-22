@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findPendingArrival,
+  isEarlyMorning,
   isPendingArrival,
   occupancyCheckInDateKey,
 } from "@/lib/arrivals";
@@ -116,6 +117,43 @@ describe("findPendingArrival", () => {
     expect(result?.isOverdue).toBe(false);
   });
 
+  describe("de madrugada conviven la reserva de anoche y la de hoy (hab. 6, 21/09)", () => {
+    // Los datos reales: JUFEC del 20 14:00 al 21 10:00 y LA CHATA del 21 14:00 al 24.
+    const jufec = makeArrival({
+      id: "jufec-anoche",
+      check_in_target: "2026-09-20T17:00:00Z",
+      check_out_target: "2026-09-21T13:00:00Z",
+    });
+    const laChata = makeArrival({
+      id: "la-chata-hoy",
+      check_in_target: "2026-09-21T17:00:00Z",
+      check_out_target: "2026-09-24T13:00:00Z",
+    });
+
+    it("a las 00:30 gana la de anoche, que es la que está corriendo", () => {
+      // 00:30 de Tucumán del 21/09.
+      const result = findPendingArrival([laChata, jufec], "2026-09-21T03:30:00Z", TZ);
+
+      expect(result?.reservation.id).toBe("jufec-anoche");
+      expect(result?.arrivalDateKey).toBe("2026-09-20");
+      expect(result?.isOverdue).toBe(true);
+    });
+
+    it("el orden en que vienen las reservas no cambia el resultado", () => {
+      const result = findPendingArrival([jufec, laChata], "2026-09-21T03:30:00Z", TZ);
+
+      expect(result?.reservation.id).toBe("jufec-anoche");
+    });
+
+    it("pasada la hora de salida, la de anoche vence y queda la de hoy", () => {
+      // 10:30 de Tucumán del 21/09.
+      const result = findPendingArrival([laChata, jufec], "2026-09-21T13:30:00Z", TZ);
+
+      expect(result?.reservation.id).toBe("la-chata-hoy");
+      expect(result?.isOverdue).toBe(false);
+    });
+  });
+
   it("devuelve null cuando no hay ninguna llegada esperando", () => {
     const futura = makeArrival({
       check_in_target: "2026-08-10T17:00:00Z",
@@ -124,6 +162,24 @@ describe("findPendingArrival", () => {
 
     expect(findPendingArrival([futura], "2026-08-05T15:00:00Z", TZ)).toBeNull();
     expect(findPendingArrival([], "2026-08-05T15:00:00Z", TZ)).toBeNull();
+  });
+});
+
+describe("isEarlyMorning — la noche de ayer todavía no terminó", () => {
+  it("a las 00:30 del hotel es de madrugada", () => {
+    expect(isEarlyMorning("2026-09-21T03:30:00Z", "10:00:00", TZ)).toBe(true);
+  });
+
+  it("a la medianoche en punto ya es de madrugada", () => {
+    expect(isEarlyMorning("2026-09-21T03:00:00Z", "10:00:00", TZ)).toBe(true);
+  });
+
+  it("a la hora de salida deja de serlo", () => {
+    expect(isEarlyMorning("2026-09-21T13:00:00Z", "10:00:00", TZ)).toBe(false);
+  });
+
+  it("a las 23:00 no es de madrugada aunque en UTC ya sea el otro día", () => {
+    expect(isEarlyMorning("2026-09-22T02:00:00Z", "10:00:00", TZ)).toBe(false);
   });
 });
 

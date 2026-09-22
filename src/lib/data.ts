@@ -1859,6 +1859,8 @@ export async function assignWalkIn(input: AssignWalkInPayload): Promise<string> 
   // Sólo viaja cuando se está regularizando un uso pasado. En el walk-in normal ni
   // se manda, así que el RPC cae en su default (now()) y nada cambia.
   if (input.checkInDate) params.p_check_in_date = input.checkInDate;
+  // Walk-in de madrugada como la noche de anoche: la fecha la pone la base (mig 115).
+  if (input.lastNight) params.p_last_night = true;
 
   const { data, error } = await supabase.rpc("rpc_staff_assign_walk_in", params);
 

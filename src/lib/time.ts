@@ -86,6 +86,19 @@ export function hotelDateKey(iso: string | number | Date, timezone?: string): st
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+// Hora local del hotel como clave comparable "HH:MM" (24 hs). hourCycle h23 y no
+// hour12:false: con hour12 algunos motores escriben la medianoche como "24:00".
+export function hotelTimeKey(iso: string | number | Date, timezone?: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: timezone || DEFAULT_TZ,
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("hour")}:${get("minute")}`;
+}
+
 // Cantidad de noches calendario (zona del hotel) entre dos instantes. Puede ser
 // negativa si `toIso` es anterior a `fromIso`; el llamador aplica el mínimo.
 export function countHotelNights(

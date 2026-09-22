@@ -1,4 +1,4 @@
-import { addDaysToDateKey, hotelDateKey } from "./time";
+import { addDaysToDateKey, hotelDateKey, hotelTimeKey } from "./time";
 
 // Llegadas pendientes: reservas confirmadas cuyo día de entrada ya llegó y que
 // todavía no tienen el check-in hecho.
@@ -42,9 +42,18 @@ export function isPendingArrival(
 }
 
 /**
- * La llegada pendiente de una habitación, o null si no hay ninguna. Si hay más
- * de una candidata gana la de entrada más reciente: el pasajero que está en el
- * mostrador es el de hoy, no el que nunca apareció.
+ * La llegada pendiente de una habitación, o null si no hay ninguna.
+ *
+ * Dos candidatas a la vez sólo pueden ser una detrás de la otra (la base no deja
+ * superponer reservas activas en la misma pieza), y eso pasa únicamente de madrugada:
+ * entre las 00:00 y la hora de salida conviven la reserva de ANOCHE, que sigue
+ * corriendo, y la de la tarde, que ya "entra hoy". Gana la que ya empezó: a las 00:30
+ * el que está en el mostrador es el pasajero de anoche.
+ *
+ * Antes ganaba la de entrada más reciente. Pasó en la hab. 6 el 21/09: el pasajero de
+ * JUFEC llegó a las 00:30, la tarjeta mostraba la reserva que entraba ese día a las
+ * 14:00 y la suya no aparecía por ningún lado, así que no se le pudo hacer el
+ * check-in. A partir de la hora de salida la de anoche vence y queda sola la de hoy.
  */
 export function findPendingArrival<T extends ArrivalCandidate>(
   reservations: T[],
@@ -52,13 +61,21 @@ export function findPendingArrival<T extends ArrivalCandidate>(
   timezone: string
 ): PendingArrival<T> | null {
   const todayKey = hotelDateKey(now, timezone);
+  const nowMs = new Date(now).getTime();
+  const hasStarted = (reservation: ArrivalCandidate) =>
+    new Date(reservation.check_in_target).getTime() <= nowMs;
 
   let best: PendingArrival<T> | null = null;
   for (const reservation of reservations) {
     if (!isPendingArrival(reservation, now, timezone)) continue;
 
     const arrivalDateKey = hotelDateKey(reservation.check_in_target, timezone);
-    if (best && arrivalDateKey < best.arrivalDateKey) continue;
+    if (best) {
+      const started = hasStarted(reservation);
+      const bestStarted = hasStarted(best.reservation);
+      if (bestStarted && !started) continue;
+      if (started === bestStarted && arrivalDateKey < best.arrivalDateKey) continue;
+    }
 
     best = {
       reservation,
@@ -68,6 +85,20 @@ export function findPendingArrival<T extends ArrivalCandidate>(
   }
 
   return best;
+}
+
+/**
+ * ¿Es de madrugada para el hotel? Entre las 00:00 y la hora de salida estándar la
+ * noche de ayer todavía no terminó: el pasajero que entra ahora suele irse esa misma
+ * mañana. El walk-in lo usa para preguntar qué noche se está vendiendo; la base lo
+ * vuelve a validar con su propio reloj (mig 115).
+ */
+export function isEarlyMorning(
+  now: Date | string | number,
+  standardCheckOutTime: string,
+  timezone: string
+): boolean {
+  return hotelTimeKey(now, timezone) < standardCheckOutTime.slice(0, 5);
 }
 
 /**

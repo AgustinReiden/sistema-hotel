@@ -331,6 +331,7 @@ export default async function Dashboard() {
               associatedClients={associatedClients}
               isAdmin={isAdmin}
               timezone={hotelSettings.timezone}
+              standardCheckOutTime={hotelSettings.standard_check_out_time}
               fiscalEnabled={fiscalEnabled}
             />
           ))}

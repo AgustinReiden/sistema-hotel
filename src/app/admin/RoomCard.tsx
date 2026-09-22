@@ -81,6 +81,8 @@ type RoomCardProps = {
   associatedClients: AssociatedClient[];
   isAdmin?: boolean;
   timezone: string;
+  /** hotel_settings.standard_check_out_time: el walk-in de madrugada la usa (mig 115). */
+  standardCheckOutTime: string;
   /** fiscal_settings.enabled: habilita el prompt "¿Emitir factura?" post check-out. */
   fiscalEnabled?: boolean;
 };
@@ -94,7 +96,7 @@ function openAccountVoucher(movementId: string) {
   );
 }
 
-export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, fiscalEnabled = false }: RoomCardProps) {
+export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, standardCheckOutTime, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
@@ -744,6 +746,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         basePrice={room.basePrice}
         halfDayPrice={room.halfDayPrice}
         associatedClients={associatedClients}
+        timezone={timezone}
+        standardCheckOutTime={standardCheckOutTime}
         onSubmit={(data) => handleAssignWalkIn({ ...data, roomId: room.id })}
       />
 
