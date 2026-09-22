@@ -12,10 +12,7 @@
 //   --qr-mm cambia el lado del QR; por defecto, el del sistema (comun/ticket-compacto.mjs).
 //   --solo imprime parte del lote ("7-20", "1,3,7-9") sin cambiar la numeracion.
 //   El CSV sale siempre completo: es la pestana Comprobantes entera.
-//   El encabezado (nombre y direccion del hotel) sale de los datos; en las muestras
-//   tambien, si existe salida/datos.local.json, asi miden lo mismo que el ticket real.
 
-import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -31,15 +28,14 @@ const opcion = (nombre, porDefecto) => {
 };
 
 const SALIDA = opcion("--salida", "salida");
-const HOTEL_POR_DEFECTO = { nombre: "El Refugio", direccion: "", zona: "America/Argentina/Tucuman" };
+// El ticket no lleva nombre ni direccion del hotel: del hotel solo importa la zona
+// horaria, para la fecha impresa.
+const HOTEL_POR_DEFECTO = { zona: "America/Argentina/Tucuman" };
 
 await mkdir(SALIDA, { recursive: true });
 
 if (args.includes("--muestras")) {
-  const rutaHotel = opcion("--datos", join("salida", "datos.local.json"));
-  const hotel = existsSync(rutaHotel)
-    ? { ...HOTEL_POR_DEFECTO, ...JSON.parse(await readFile(rutaHotel, "utf8")).hotel }
-    : HOTEL_POR_DEFECTO;
+  const hotel = HOTEL_POR_DEFECTO;
   // Numeros 900+ reservados para muestras: no chocan con el lote (que arranca en 1).
   const tamanos = opcion("--tamanos", "14,16,18").split(",").map((s) => Number(s.trim())).filter((n) => n >= 8 && n <= 30);
   const secciones = [];

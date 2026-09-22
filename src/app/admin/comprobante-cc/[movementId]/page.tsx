@@ -123,8 +123,8 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
   return (
     <div className="thermal">
       <div className="compacto">
-        <h1>{hotelSettings?.name || "Hotel El Refugio"}</h1>
-        {hotelSettings?.address ? <p className="addr">{hotelSettings.address}</p> : null}
+        {/* Sin nombre ni dirección del hotel: sólo gastaban papel (pedido de Agustín,
+            2026-09-22). El remito arranca en el tipo de comprobante. */}
         <p className="tipo">COMPROBANTE CTA. CTE.</p>
         <hr />
         {/* QR al costado del número, no arriba: el bloque ocupa lo que mide el QR
