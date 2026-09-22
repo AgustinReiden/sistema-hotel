@@ -3,7 +3,8 @@
 Fecha: 2026-09-22
 Estado: aprobado por Agustín (brainstorming del 2026-09-22) e implementado el mismo día.
 B1 salió en los PR #124, #125 y #126; la migración 116 está aplicada en PROD; B2 (panel y
-workflows) va en su PR. Lo que cambió al implementarlo está en la [sección 10](#10-lo-que-cambió-al-implementarlo).
+workflows) salió en el #127. En marcha desde el 2026-09-22. Lo que cambió al implementarlo
+está en la [sección 10](#10-lo-que-cambió-al-implementarlo).
 Antecedentes: [`2026-09-17-remitos-firmados-design.md`](2026-09-17-remitos-firmados-design.md)
 (diseño general) y [`automatizaciones/remitos/README.md`](../../automatizaciones/remitos/README.md)
 (etapa 1, aislada del sistema).
@@ -307,3 +308,16 @@ Cada paso deja algo andando.
   porque corren en cada pantalla del admin.
 - **La planilla dejó de tener *Comprobantes* y *Resultados*.** La instalación crea solo
   *Lotes*, *Errores* y *Estado*, y el generador ya no escribe el CSV.
+- **"Resuelta" pide nota solo para descartar.** Para una pieza ya re-escaneada, la nota es
+  opcional. Re-escanear no cierra la pieza sola: la base no da por hecho que el escaneo nuevo
+  la reemplaza.
+
+**La puesta en marcha (2026-09-22)**
+- **La clave de n8n** se cargó con el OK de Agustín y va en la credencial *Supabase - Remitos*.
+- **Prueba real:** una hoja con 4 piezas. Los 3 remitos sueltos se leyeron por QR a 200 dpi y
+  la IA decidió sola los tres (98–99 %: dos firmados y uno sin firma). La pieza con dos
+  tickets encimados fue a revisar con sus dos números. Gemini contestó al primer intento.
+- **El panel filtra por la fecha del cargo.** Los remitos de la prueba eran de julio y
+  agosto, anteriores a `controlar_desde`: aparecen en su mes porque tienen un escaneo.
+- **Activos:** Ingesta, *Evaluar firmas* y Vigilancia. Vigilancia no tiene número de
+  WhatsApp cargado, así que sus alertas quedan solo en *Errores*.
