@@ -200,6 +200,22 @@ apagado y no hace falta volver a correrlo.
   respaldo del escaneo completo. Lo que se archivó antes de la mig 116 (pruebas `T-`,
   pruebas viejas en carpetas de clientes) sí se puede borrar.
 
+### 12. Una cuenta aparte para quien escanea
+
+Quien escanea no necesita ver el resto del Drive: alcanza con compartirle **solo
+`Remitos/_Entrada`**, como **Editor** (con Lector o Comentador no puede subir), y destildar
+"Los editores pueden cambiar los permisos y compartir". La carpeta le aparece en
+"Compartidos conmigo".
+
+Probado el 2026-09-23: un PDF subido desde otra cuenta se procesa igual, y la Ingesta
+mueve el original a `_Procesados` sin problema. Hay que tener en cuenta dos cosas:
+
+- **El original sigue siendo de la cuenta que lo subió.** Si esa cuenta se borra, los
+  originales de `_Procesados` desaparecen. Los tickets archivados los crea n8n con la
+  cuenta dueña, así que el panel no pierde nada.
+- **Un editor puede renombrar `_Entrada`.** Si lo hace, la Ingesta deja de encontrarla y
+  se frena, sin perder nada. El panel avisa en rojo a la hora sin latido.
+
 ## Qué pasa cuando algo falla
 
 | Falla | Qué hace |
