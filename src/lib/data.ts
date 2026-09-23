@@ -3863,7 +3863,8 @@ export async function resolveAdminAlert(alertId: number, notes?: string): Promis
 }
 
 /**
- * Las alertas de "pieza ocupada sin estadía" que siguen abiertas, para RECEPCIÓN.
+ * Las alertas de "pieza ocupada sin estadía", para RECEPCIÓN: las abiertas y, desde
+ * la mig 106, las cerradas en las últimas 48 h con su desenlace.
  *
  * No usa `listAdminAlerts`: esa RPC es admin-only porque `admin_alerts` tiene RLS
  * de admin. Ésta es una ventana `app_is_staff()` que expone un solo kind (mig 104),

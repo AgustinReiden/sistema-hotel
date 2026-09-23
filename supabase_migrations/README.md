@@ -24,8 +24,11 @@ CLI) quedó congelada en la migración 42 y de la 43 en adelante no quedaba rast
 
 ## Cómo escribir una migración nueva
 
-1. Numerala con el siguiente número libre. **Fijate que no exista ya**: hay dos
-   archivos que empiezan con `59_` porque eso ya pasó una vez.
+1. Numerala con el siguiente número libre. **Fijate que no exista ya**, en el repo
+   **y** en `applied_migrations`: hay dos archivos que empiezan con `59_`, dos con
+   `106_` y dos con `112_` porque eso ya pasó. El registro se indexa por nombre de
+   archivo, así que conviven, pero una migración aplicada en PROD desde otra rama
+   puede no estar todavía en `main`.
 2. Arrancá con un comentario que explique **por qué**, no qué. El qué se lee en el SQL.
 3. Envolvé todo en `BEGIN; ... COMMIT;`.
 4. Hacela idempotente donde se pueda (`IF NOT EXISTS`, `CREATE OR REPLACE`,
