@@ -38,7 +38,7 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-import { regularizeOccupiedRoomAction } from "@/app/admin/actions";
+import { closeOccupancyAlertAction, regularizeOccupiedRoomAction } from "@/app/admin/actions";
 
 const RESERVA = "7d1f3c1e-0a3b-4c2d-9e8f-1a2b3c4d5e6f";
 
@@ -146,6 +146,76 @@ describe("regularizeOccupiedRoomAction", () => {
 
     expect(result).toMatchObject({ success: false, code: "VALIDATION_ERROR" });
     expect(H.assignWalkIn).not.toHaveBeenCalled();
+    expect(H.regularizeOccupiedRoom).not.toHaveBeenCalled();
+  });
+});
+
+describe("closeOccupancyAlertAction (reintento del cierre)", () => {
+  it("cierra el aviso contra la estadía que ya se cargó, sin volver a cargarla", async () => {
+    const result = await closeOccupancyAlertAction(41, RESERVA);
+
+    expect(result).toEqual({ success: true });
+    expect(H.regularizeOccupiedRoom).toHaveBeenCalledTimes(1);
+    expect(H.regularizeOccupiedRoom).toHaveBeenCalledWith(41, RESERVA);
+    expect(H.assignWalkIn).not.toHaveBeenCalled();
+  });
+
+  it("el recepcionista tampoco lo cierra: decir que se cargó es decir que se cobró", async () => {
+    H.role = "receptionist";
+
+    const result = await closeOccupancyAlertAction(41, RESERVA);
+
+    expect(result).toEqual({
+      success: false,
+      error: "Solo el administrador decide si esta pieza se cobra.",
+      code: undefined,
+    });
+    expect(H.regularizeOccupiedRoom).not.toHaveBeenCalled();
+  });
+
+  it("sin sesión no toca el aviso", async () => {
+    H.role = null;
+
+    const result = await closeOccupancyAlertAction(41, RESERVA);
+
+    expect(result.success).toBe(false);
+    expect(H.regularizeOccupiedRoom).not.toHaveBeenCalled();
+  });
+
+  it("si la base lo rechaza, devuelve el motivo y no carga nada", async () => {
+    H.regularizeOccupiedRoom.mockRejectedValue({
+      code: "22023",
+      message: "La estadia tiene que estar con el huesped adentro para cerrar el aviso.",
+    });
+
+    const result = await closeOccupancyAlertAction(41, RESERVA);
+
+    expect(result).toEqual({
+      success: false,
+      error: "La estadia tiene que estar con el huesped adentro para cerrar el aviso.",
+      code: "22023",
+    });
+    expect(H.assignWalkIn).not.toHaveBeenCalled();
+  });
+
+  it("si sigue el CHECK viejo (sin la mig 117), falla sin filtrar la constraint", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    H.regularizeOccupiedRoom.mockRejectedValue(checkViolation);
+
+    const result = await closeOccupancyAlertAction(41, RESERVA);
+
+    expect(result).toMatchObject({ success: false, code: "23514" });
+    expect(result.success === false && result.error).not.toContain("admin_alerts");
+    spy.mockRestore();
+  });
+
+  it.each([
+    ["un aviso inválido", 0, RESERVA],
+    ["un id de estadía que no es uuid", 41, "r-1"],
+  ])("%s no llega a la base", async (_caso, alertId, reservationId) => {
+    const result = await closeOccupancyAlertAction(alertId, reservationId);
+
+    expect(result).toMatchObject({ success: false, code: "VALIDATION_ERROR" });
     expect(H.regularizeOccupiedRoom).not.toHaveBeenCalled();
   });
 });
