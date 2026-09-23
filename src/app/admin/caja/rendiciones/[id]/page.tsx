@@ -134,28 +134,27 @@ function ShiftCopy(props: ShiftCopyProps) {
         <span>TOTAL:</span>
         <span>{formatAmount(totalIncome)}</span>
       </p>
-      {creditCharged > 0 && (
-        <>
-          <hr />
-          <p className="section">CUENTA CORRIENTE ({creditList.length})</p>
-          {creditList.map((charge) => (
-            <div key={charge.id} className="payment-line">
-              <p className="row small">
-                <span>{charge.time} - Fiado</span>
-                <span>{formatAmount(charge.amount)}</span>
-              </p>
-              <p className="row small muted indent">
-                {charge.clientName}
-                {charge.roomNumber ? ` (Hab. ${charge.roomNumber})` : ""}
-              </p>
-            </div>
-          ))}
-          <p className="row big">
-            <span>TOTAL CTA CTE:</span>
-            <span>{formatAmount(creditCharged)}</span>
+      {/* Siempre visible, aunque sea 0: el papel dice que no hubo fiado. */}
+      <hr />
+      <p className="section">CUENTA CORRIENTE ({creditList.length})</p>
+      {creditList.map((charge) => (
+        <div key={charge.id} className="payment-line">
+          <p className="row small">
+            <span>{charge.time} - Fiado</span>
+            <span>{formatAmount(charge.amount)}</span>
           </p>
-          <p className="row small indent">no cobrado, va a la cuenta</p>
-        </>
+          <p className="row small muted indent">
+            {charge.clientName}
+            {charge.roomNumber ? ` (Hab. ${charge.roomNumber})` : ""}
+          </p>
+        </div>
+      ))}
+      <p className="row big">
+        <span>TOTAL CTA CTE:</span>
+        <span>{formatAmount(creditCharged)}</span>
+      </p>
+      {creditCharged > 0 && (
+        <p className="row small indent">no cobrado, va a la cuenta</p>
       )}
 
       <hr />
@@ -293,10 +292,10 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     ["Efectivo", totalsByMethod.cash],
     ["Tarjeta", totalsByMethod.credit_card + totalsByMethod.debit_card],
     ["Vale Blanco", totalsByMethod.vale_blanco],
+    ["Transferencia", totalsByMethod.bank_transfer],
     ...(
       [
         ["Mercado Pago", totalsByMethod.mercado_pago],
-        ["Transferencia", totalsByMethod.bank_transfer],
         ["Otro", totalsByMethod.other],
       ] as Array<[string, number]>
     ).filter(([, value]) => value > 0),
