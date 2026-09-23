@@ -88,8 +88,12 @@ async function abrir(onSaved = vi.fn()) {
 
 const resumen = () => screen.getByTestId("pago-resumen").textContent ?? "";
 const problemas = () => screen.queryByTestId("pago-problemas")?.textContent ?? "";
+// Los botones se buscan por su texto, no con getByRole: getByRole calcula el nombre
+// accesible de cada botón y llama a getComputedStyle de jsdom por cada ancestro, y
+// botonGuardar() corre adentro de waitFor, una vez por reintento. Fue lo que hizo
+// pasar los 5 s a CuentasClient.test.tsx con la suite entera en paralelo.
 const botonGuardar = () =>
-  screen.getByRole("button", { name: /Registrar e imprimir/ }) as HTMLButtonElement;
+  screen.getByText("Registrar e imprimir") as HTMLButtonElement;
 
 describe("RegisterPaymentModal", () => {
   beforeEach(() => {
@@ -127,7 +131,7 @@ describe("RegisterPaymentModal", () => {
   it("aplicar a lo más viejo primero salda la vieja antes de tocar la nueva", async () => {
     await abrir();
 
-    fireEvent.click(screen.getByRole("button", { name: /Aplicar a lo más viejo primero/ }));
+    fireEvent.click(screen.getByText("Aplicar a lo más viejo primero"));
 
     // $100.000 contra $90.000 de saldo: $40.000 a la vieja y $50.000 a la nueva, que
     // son sus saldos enteros. Los $10.000 que sobran quedan a cuenta, sin forzarlos
@@ -207,7 +211,7 @@ describe("RegisterPaymentModal", () => {
 
     await waitFor(() => expect(screen.getByText(/El pago quedó registrado/)).toBeTruthy());
     expect(screen.getByText(/recibo N° 000007/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Abrir el recibo/ })).toBeTruthy();
+    expect(screen.getByText("Abrir el recibo").tagName).toBe("BUTTON");
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -265,7 +269,7 @@ describe("RegisterPaymentModal — imputar a una estadía sin facturar (mig 114)
     // antes que la factura de julio.
     await abrir();
 
-    fireEvent.click(screen.getByRole("button", { name: /Aplicar a lo más viejo primero/ }));
+    fireEvent.click(screen.getByText("Aplicar a lo más viejo primero"));
 
     expect(montoDe(etiquetaEstadia).value).toBe("30.000,00");
     expect(montoDe(etiquetaVieja).value).toBe("40.000,00");
