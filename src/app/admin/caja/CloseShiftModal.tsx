@@ -16,6 +16,7 @@ import {
   Landmark,
   Loader2,
   Lock,
+  Pencil,
   Printer,
   RefreshCw,
   Wallet,
@@ -32,7 +33,8 @@ import {
 import { handleExtendReservation } from "@/app/admin/actions";
 import { logout } from "@/app/login/actions";
 import ExportCsvButton from "./ExportCsvButton";
-import { formatAmountForInput, parseArMoney } from "@/lib/format";
+import ParsedAmountHint, { UNREADABLE_AMOUNT_MESSAGE } from "@/app/admin/ParsedAmountHint";
+import { formatAmount, formatAmountForInput, parseArMoney } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { CloseShiftBlocker, PaymentMethod, ShiftCreditChargeRow } from "@/lib/types";
 
@@ -143,6 +145,10 @@ export default function CloseShiftModal({
   // queda bloqueado (evita tantear montos hasta adivinar el esperado).
   const [cashLocked, setCashLocked] = useState(false);
   const [notesRequired, setNotesRequired] = useState(false);
+  // Ese primer envío es irreversible (el monto queda firme), así que antes se
+  // muestra en grande lo que se va a declarar y se pide confirmarlo. Enter en el
+  // campo lleva a esta pantalla, nunca envía directo.
+  const [confirming, setConfirming] = useState(false);
 
   const fetchBlockers = useCallback(async () => {
     setCheckingBlockers(true);
@@ -191,14 +197,19 @@ export default function CloseShiftModal({
     // No cierra si el modal no se puede descartar (rendicion forzada), si ya se
     // cerro la caja (esa vista no tiene un onClose directo: "Listo" hace logout o
     // reabre turno segun `afterClose`, no alcanza con descartar) ni mientras hay
-    // un envio en curso (arqueo, ampliar/reportar salida vencida).
-    if (!isOpen || !dismissable || closed || loading || finishing || actionLoading) return;
+    // un envio en curso (arqueo, ampliar/reportar salida vencida). En la
+    // confirmación del arqueo, Escape vuelve a corregir el monto (también en la
+    // rendición forzada): cerrar todo ahí sería perder lo tipeado.
+    if (!isOpen || closed || loading || finishing || actionLoading) return;
+    if (!dismissable && !confirming) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (confirming) setConfirming(false);
+      else onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, dismissable, closed, loading, finishing, actionLoading, onClose]);
+  }, [isOpen, dismissable, closed, loading, finishing, actionLoading, confirming, onClose]);
 
   if (!isOpen) return null;
 
@@ -206,22 +217,38 @@ export default function CloseShiftModal({
   const otherMethods = (Object.entries(totalsByMethod) as [PaymentMethod, number][])
     .filter(([method, amount]) => method !== "cash" && amount > 0);
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (parsedActual === null) {
-      setError("Ingresa el efectivo declarado (cero o mayor).");
+      setError(
+        actualCash.trim()
+          ? UNREADABLE_AMOUNT_MESSAGE
+          : "Ingresá el efectivo que contaste (0 si no hay)."
+      );
       return;
     }
 
+    // Monto todavía sin enviar: primero se confirma. Con el monto ya bloqueado
+    // (segundo intento, con la nota de la diferencia) no hay nada que confirmar.
+    if (!cashLocked) {
+      setConfirming(true);
+      return;
+    }
+    void sendClose(parsedActual);
+  };
+
+  const sendClose = async (declared: number) => {
+    setError(null);
     setLoading(true);
     const result = await closeShiftAction({
       shiftId,
-      actualCash: parsedActual,
+      actualCash: declared,
       notes: notes.trim() || undefined,
     });
     setLoading(false);
+    setConfirming(false);
 
     if (!result.success) {
       if (result.code === "P0012") {
@@ -232,6 +259,8 @@ export default function CloseShiftModal({
         setError(
           "La caja no coincide con lo declarado. Explica la diferencia en las notas para poder cerrar."
         );
+        // Si venimos de la confirmación, las notas todavía no están montadas: el
+        // foco lo pone su autoFocus. Esto cubre el reintento sin nota, ya en el form.
         document.getElementById("close-notes")?.focus();
         return;
       }
@@ -677,6 +706,68 @@ export default function CloseShiftModal({
     );
   }
 
+  // ── Paso 2b: confirmar el monto antes del envío que lo deja firme ──
+  if (confirming && parsedActual !== null) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+        <div
+          className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[92dvh] sm:max-h-[88dvh] flex flex-col"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="close-shift-modal-title"
+          aria-describedby="close-shift-confirm-amount"
+        >
+          <div className="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50 shrink-0">
+            <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
+              <Wallet size={20} />
+            </div>
+            <div>
+              <h2 id="close-shift-modal-title" className="text-xl font-bold text-slate-800">Rendir Caja</h2>
+              <p className="text-slate-500 text-sm font-medium">Revisá el monto antes de enviarlo.</p>
+            </div>
+          </div>
+
+          <div className="p-6 text-center overflow-y-auto flex-1">
+            <p className="text-lg font-bold text-slate-600">Contaste</p>
+            <p
+              id="close-shift-confirm-amount"
+              className="my-2 text-4xl sm:text-5xl font-black text-slate-900 tabular-nums break-all"
+            >
+              {formatAmount(parsedActual)}
+            </p>
+            <p className="text-lg font-bold text-slate-600">¿Confirmás?</p>
+            <p className="mt-4 text-xs text-slate-500">
+              Una vez enviado, el efectivo declarado no se puede cambiar.
+            </p>
+          </div>
+
+          <div className="p-6 border-t border-slate-100 flex gap-3 bg-slate-50 shrink-0">
+            {/* Corregir arranca con el foco: un Enter de más vuelve al campo, no envía. */}
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={loading}
+              autoFocus
+              className="flex-1 px-5 py-3 border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-100 disabled:opacity-70 transition-colors flex items-center justify-center gap-2"
+            >
+              <Pencil size={18} />
+              Corregir
+            </button>
+            <button
+              type="button"
+              onClick={() => void sendClose(parsedActual)}
+              disabled={loading}
+              className="flex-1 px-5 py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-70 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {loading ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+              Confirmar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── Paso 2: arqueo a ciegas ──
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
@@ -768,14 +859,15 @@ export default function CloseShiftModal({
                     ? "border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed pr-10"
                     : "border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 text-slate-800"
                 }`}
-                placeholder="0.00"
+                placeholder="0"
                 required
-                autoFocus
+                autoFocus={!cashLocked}
               />
               {cashLocked && (
                 <Lock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
               )}
             </div>
+            <ParsedAmountHint value={actualCash} large />
             <p className="mt-1 text-xs text-slate-500">
               {cashLocked
                 ? "El efectivo declarado quedó registrado. Si te equivocaste, explicalo en las notas."
@@ -794,6 +886,7 @@ export default function CloseShiftModal({
               rows={3}
               maxLength={500}
               placeholder="Ej. Devolvi vuelto a huesped de Hab 5 por $200."
+              autoFocus={notesRequired}
               className={`w-full px-4 py-3 rounded-xl border focus:ring outline-none resize-none text-sm ${
                 notesRequired
                   ? "border-red-300 focus:border-red-500 focus:ring-red-200"

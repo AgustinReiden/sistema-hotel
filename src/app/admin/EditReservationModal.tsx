@@ -11,6 +11,7 @@ import {
 import DateTimePickerField from "./DateTimePickerField";
 import type { ReservationEditableRow } from "@/lib/data";
 import { formatAmountForInput, parseArMoney } from "@/lib/format";
+import ParsedAmountHint from "./ParsedAmountHint";
 
 type Props = {
   isOpen: boolean;
@@ -72,7 +73,7 @@ export default function EditReservationModal({
       setCheckOut(toDateTimeLocal(row.check_out_target));
       setGuestCount(row.guest_count ?? 1);
       setOverrideEnabled(false);
-      setOverrideValue(row.total_price.toString());
+      setOverrideValue(formatAmountForInput(row.total_price));
     });
     return () => {
       cancelled = true;
@@ -301,6 +302,7 @@ export default function EditReservationModal({
                         }}
                         className="w-full px-3 py-2 rounded-lg border border-amber-300 focus:border-amber-500 focus:ring outline-none"
                       />
+                      <ParsedAmountHint value={overrideValue} />
                       <p className="text-[11px] text-amber-700 mt-1">
                         Mínimo ${data.paid_amount.toLocaleString("es-AR", { minimumFractionDigits: 2 })} (ya pagado).
                       </p>

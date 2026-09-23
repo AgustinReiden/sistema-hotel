@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { handleAddExtraCharge } from "./actions";
 import { formatAmountForInput, parseArMoney } from "@/lib/format";
+import ParsedAmountHint from "./ParsedAmountHint";
 
 type ChargeType = "minibar" | "damage" | "service" | "other";
 
@@ -132,11 +133,12 @@ export default function ExtraChargesModal({
                 const parsed = parseArMoney(amount);
                 if (parsed !== null) setAmount(formatAmountForInput(parsed));
               }}
-              placeholder="0,00"
+              placeholder="0"
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring focus:ring-indigo-200 outline-none text-xl font-bold text-slate-800"
               required
               autoFocus
             />
+            <ParsedAmountHint value={amount} />
           </div>
 
           <div>

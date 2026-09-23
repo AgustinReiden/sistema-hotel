@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Save, X } from "lucide-react";
 import { toast } from "sonner";
+import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
 import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import type { RoomCategory } from "@/lib/types";
 
@@ -173,6 +174,7 @@ export default function CategoryModal({
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />
+                                <ParsedAmountHint value={form.basePrice} />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Precio Medio Dia</label>
@@ -190,6 +192,7 @@ export default function CategoryModal({
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />
+                                <ParsedAmountHint value={form.halfDayPrice} />
                             </div>
                         </div>
 

@@ -29,6 +29,7 @@ import {
   type DeudaAImputar,
   type ImputacionEnPantalla,
 } from "@/lib/cc-pagos";
+import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
 import { formatAmount, formatAmountForInput, formatShiftCode, parseArMoney } from "@/lib/format";
 import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types";
 
@@ -142,7 +143,7 @@ function fechaCorta(value: string | null): string {
 }
 
 /**
- * Un campo de importe vacío o a medio tipear ("1.500," sin nada después de la coma)
+ * Un campo de importe vacío o a medio tipear ("1.500.0" camino a "1.500.000")
  * no es un número válido para parseArMoney: acá cualquiera de los dos vale cero,
  * para que el resumen en vivo no parpadee en NaN mientras se escribe.
  */
@@ -391,6 +392,7 @@ export default function RegisterPaymentModal({
                 required
                 autoFocus
               />
+              <ParsedAmountHint value={amount} />
               <p className="text-[11px] text-slate-500 mt-1">
                 Incluye las retenciones: es lo que le baja de deuda al cliente.
               </p>
@@ -626,20 +628,23 @@ function GrupoDeDeudas({
                   </span>
                 </span>
               </label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={imputado[d.clave] ?? ""}
-                onChange={(e) => onImporte(d.clave, e.target.value)}
-                onBlur={(e) => {
-                  const parsed = parseArMoney(e.target.value);
-                  if (parsed !== null) onImporte(d.clave, formatAmountForInput(parsed));
-                }}
-                disabled={!tildada}
-                aria-label={`Importe imputado a ${d.etiqueta}`}
-                placeholder="0,00"
-                className="w-32 px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-right font-semibold outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
-              />
+              <div className="w-32">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={imputado[d.clave] ?? ""}
+                  onChange={(e) => onImporte(d.clave, e.target.value)}
+                  onBlur={(e) => {
+                    const parsed = parseArMoney(e.target.value);
+                    if (parsed !== null) onImporte(d.clave, formatAmountForInput(parsed));
+                  }}
+                  disabled={!tildada}
+                  aria-label={`Importe imputado a ${d.etiqueta}`}
+                  placeholder="0,00"
+                  className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-right font-semibold outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+                />
+                {tildada && <ParsedAmountHint value={imputado[d.clave] ?? ""} className="text-right" />}
+              </div>
             </li>
           );
         })}
@@ -692,6 +697,7 @@ function Retenciones({
             placeholder="0,00"
             className={inputClass}
           />
+          <ParsedAmountHint value={ganancias} />
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="ret-iibb">
@@ -707,6 +713,7 @@ function Retenciones({
             placeholder="0,00"
             className={inputClass}
           />
+          <ParsedAmountHint value={iibb} />
         </div>
       </div>
       <div>
