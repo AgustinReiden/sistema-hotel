@@ -50,6 +50,11 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/admin/fiscal/control");
   // Panel de remitos firmados: sólo admin (mig 116). La página también redirige.
   const isAdminOnlyRemitosPath = pathname.startsWith("/admin/remitos");
+  // Finanzas: sólo admin. Muestra el efectivo del día, que la caja le oculta a recepción
+  // (arqueo a ciegas). La página también redirige. registerPaymentAction vive en
+  // finances/actions.ts pero no pasa por acá: una server action se postea a la URL de
+  // la pantalla que la llama (/admin, /admin/calendario...), no a /admin/finances.
+  const isAdminOnlyFinancesPath = pathname.startsWith("/admin/finances");
   const isForbiddenPath = pathname.startsWith("/forbidden");
   const isProtectedPath = isAdminPath || isMaintenancePath;
 
@@ -91,8 +96,11 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // /admin/settings, facturación consolidada/control y remitos — sólo admin
-  if ((isSettingsPath || isAdminOnlyFiscalPath || isAdminOnlyRemitosPath) && role !== "admin") {
+  // /admin/settings, facturación consolidada/control, remitos y finanzas — sólo admin
+  if (
+    (isSettingsPath || isAdminOnlyFiscalPath || isAdminOnlyRemitosPath || isAdminOnlyFinancesPath) &&
+    role !== "admin"
+  ) {
     return NextResponse.redirect(new URL("/forbidden", request.url));
   }
 
