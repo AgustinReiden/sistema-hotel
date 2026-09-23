@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Loader2, Save } from "lucide-react";
 import type { RoomCategory } from "@/lib/types";
+import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
 import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import { createRoomAction } from "./actions";
 import RoomTypeSelector from "./RoomTypeSelector";
@@ -227,6 +228,7 @@ export default function CreateRoomModal({
                                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring focus:ring-brand-200 outline-none transition-all"
                                     required
                                 />
+                                <ParsedAmountHint value={basePrice} />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Capacidad</label>

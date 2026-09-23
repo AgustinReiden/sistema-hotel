@@ -61,26 +61,53 @@ export function formatShiftCode(shiftNumber: number, minDigits = 6): string {
   return String(Math.trunc(shiftNumber)).padStart(minDigits, "0");
 }
 
+// Miles con punto bien agrupados: "43.700", "1.500.000". El primer grupo no
+// arranca en 0 ("0.500" no es quinientos pesos escrito por nadie).
+const AR_THOUSANDS = /^[1-9]\d{0,2}(?:\.\d{3})+$/;
+// Con coma decimal: entero liso o agrupado con puntos, y hasta 2 decimales. La
+// coma sola al final ("1.500,") es lo que queda a medio tipear y vale como entero.
+const AR_WITH_COMMA = /^([1-9]\d{0,2}(?:\.\d{3})+|\d+),(\d{0,2})$/;
+// Punto decimal con 1 o 2 decimales ("1500.5", "1500.50"), o entero liso.
+const PLAIN_DECIMAL = /^\d+(?:\.\d{0,2})?$/;
+
 /**
- * Parsea un monto tipeado en formato argentino ("1.500,00") o con punto
- * decimal simple ("1500.50", lo que devuelve un <input type="number">). La
- * coma decide el formato: si hay coma, los puntos son separadores de miles y
- * se descartan; si no hay coma, el punto es decimal y se deja como está.
- * `parseFloat(x.replace(",", "."))` sobre "1.500,00" da 1.5 (mal) porque dos
- * puntos hacen que parseFloat corte ahí. Devuelve null si no es un número
- * válido o es negativo.
+ * Parsea un monto tipeado como se escribe en Argentina ("43.700", "1.500.000",
+ * "1.500,50") o con punto decimal ("1500.50").
+ *
+ * - Con coma: la coma es decimal y los puntos son miles.
+ * - Sin coma: un punto seguido de exactamente 3 dígitos, o varios puntos, son
+ *   miles ("43.700" = 43700). No existen montos con 3 decimales, así que no hay
+ *   ambigüedad. Un punto con 1 o 2 dígitos es decimal ("1500.5").
+ *
+ * Antes, sin coma el punto era siempre decimal: "43.700" daba 43,70 y
+ * "1.500.000" no se entendía. Así se escribe en Argentina, y el arqueo a ciegas
+ * no deja corregir el monto una vez enviado.
+ *
+ * Todo lo que no encaja devuelve null en vez de adivinar: miles mal agrupados
+ * ("1.50.000", "1234.567"), más de 2 decimales, notación científica, negativos.
+ * El campo muestra en vivo cómo se leyó (ParsedAmountHint), así que un null se
+ * ve al tipear y no recién al enviar.
  */
 export function parseArMoney(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  const normalized = trimmed.includes(",")
-    ? trimmed.replace(/\./g, "").replace(",", ".")
-    : trimmed;
+  let normalized: string;
+  const withComma = AR_WITH_COMMA.exec(trimmed);
+  if (withComma) {
+    normalized = `${withComma[1].replace(/\./g, "")}.${withComma[2] || "0"}`;
+  } else if (trimmed.includes(",")) {
+    return null;
+  } else if (AR_THOUSANDS.test(trimmed)) {
+    normalized = trimmed.replace(/\./g, "");
+  } else if (PLAIN_DECIMAL.test(trimmed)) {
+    normalized = trimmed;
+  } else {
+    return null;
+  }
 
   const value = Number(normalized);
-  if (!Number.isFinite(value) || value < 0) return null;
-  return value;
+  return Number.isFinite(value) ? value : null;
 }
 
 /**

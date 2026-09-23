@@ -6,6 +6,8 @@ import { X, Loader2, DollarSign, CreditCard, Banknote, Landmark, Wallet, CircleD
 import { toast } from "sonner";
 
 import { registerPaymentAction } from "@/app/admin/finances/actions";
+import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
+import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import type { ActionResult, PaymentMethod } from "@/lib/types";
 
 function openReceipt(paymentId: string) {
@@ -79,13 +81,16 @@ export default function PaymentModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [noOpenShift, setNoOpenShift] = useState(false);
-  const [amount, setAmount] = useState(debt > 0 ? debt.toString() : "0");
+  // Precargado ya formateado ("43.700,00"). Con debt.toString() un saldo con restos
+  // de coma flotante ("0.19999999999999998") tiene más de 2 decimales y
+  // parseArMoney no lo acepta.
+  const [amount, setAmount] = useState(debt > 0 ? formatAmountForInput(debt) : "");
   const [method, setMethod] = useState<PaymentMethod>("cash");
 
   // En check-out el monto es el saldo exacto, derivado EN VIVO de las props (no del
   // useState, que se congela al montar). Así, si se agrega un cargo extra mientras el
   // modal está abierto, el "Monto a abonar" se actualiza y el check-out no se traba.
-  const displayAmount = isCheckoutMode ? String(debt) : amount;
+  const displayAmount = isCheckoutMode ? formatAmountForInput(debt) : amount;
 
   if (!isOpen) return null;
 
@@ -96,9 +101,10 @@ export default function PaymentModal({
     setNoOpenShift(false);
 
     // En check-out se cobra el saldo exacto (derivado en vivo); en pago suelto, lo tipeado.
-    const parsedAmount = isCheckoutMode ? debt : parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      setError("El monto debe ser numerico y mayor a 0.");
+    // parseArMoney y no parseFloat: "43.700" son cuarenta y tres mil pesos, no 43,70.
+    const parsedAmount = isCheckoutMode ? debt : parseArMoney(amount);
+    if (parsedAmount === null || parsedAmount <= 0) {
+      setError("Ingresá un monto mayor a 0 (ej. 43.700 o 43.700,50).");
       setLoading(false);
       return;
     }
@@ -215,13 +221,19 @@ export default function PaymentModal({
 
           <form id="payment-form" onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Monto a abonar ($)</label>
+              <label htmlFor="payment-amount" className="block text-sm font-bold text-slate-700 mb-2">Monto a abonar ($)</label>
               <input
-                type="number"
-                step="0.01"
-                min="0.01"
+                id="payment-amount"
+                type="text"
+                inputMode="decimal"
                 value={displayAmount}
                 onChange={(e) => setAmount(e.target.value)}
+                onBlur={() => {
+                  if (!amountEditable) return;
+                  const parsed = parseArMoney(amount);
+                  if (parsed !== null) setAmount(formatAmountForInput(parsed));
+                }}
+                placeholder="0"
                 readOnly={!amountEditable}
                 className={`w-full px-4 py-3 rounded-xl border outline-none transition-all text-xl font-bold ${
                   amountEditable
@@ -230,6 +242,7 @@ export default function PaymentModal({
                 }`}
                 required
               />
+              {amountEditable && <ParsedAmountHint value={amount} />}
               <p className="mt-2 text-xs text-slate-500">
                 {isCheckoutMode
                   ? "El check-out solo permite cobrar el saldo exacto pendiente."

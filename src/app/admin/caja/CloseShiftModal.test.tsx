@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CloseShiftModal from "./CloseShiftModal";
@@ -21,9 +21,10 @@ vi.mock("@/app/login/actions", () => ({
 }));
 
 const getCloseShiftBlockersAction = vi.fn();
+const closeShiftAction = vi.fn();
 vi.mock("./actions", () => ({
   getCloseShiftBlockersAction: (...args: unknown[]) => getCloseShiftBlockersAction(...args),
-  closeShiftAction: vi.fn(),
+  closeShiftAction: (...args: unknown[]) => closeShiftAction(...args),
   openShiftAction: vi.fn(),
   reportShiftConflictAction: vi.fn(),
 }));
@@ -105,5 +106,122 @@ describe("CloseShiftModal", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Efectivo declarado ($)")).toBeInTheDocument()
     );
+  });
+});
+
+describe("CloseShiftModal — arqueo a ciegas", () => {
+  beforeEach(() => {
+    getCloseShiftBlockersAction.mockReset();
+    getCloseShiftBlockersAction.mockResolvedValue({
+      success: true,
+      data: { blockers: [], occupied_alerts_count: 0, unbilled_count: 0 },
+    });
+    closeShiftAction.mockReset();
+    closeShiftAction.mockResolvedValue({
+      success: true,
+      data: { expected_cash: 43700, actual_cash: 43700, discrepancy: 0, shouldLogout: false },
+    });
+    // Al cerrar se abre el comprobante en otra ventana: jsdom no la implementa.
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  async function abrirArqueo() {
+    render(
+      <CloseShiftModal
+        isOpen
+        onClose={() => {}}
+        shiftId="s1"
+        shiftNumber={1}
+        totalsByMethod={totalsByMethod}
+        creditCharged={0}
+        creditCharges={[]}
+        checkoutsCount={0}
+      />
+    );
+    return (await screen.findByLabelText("Efectivo declarado ($)")) as HTMLInputElement;
+  }
+
+  /** Lo que hace el navegador al apretar Enter en el campo. */
+  function apretarEnter(input: HTMLInputElement) {
+    fireEvent.submit(input.closest("form")!);
+  }
+
+  it("muestra en vivo cómo leyó el monto: 43.700 son cuarenta y tres mil", async () => {
+    const input = await abrirArqueo();
+    fireEvent.change(input, { target: { value: "43.700" } });
+    expect(screen.getByText("= $43.700,00")).toBeInTheDocument();
+  });
+
+  it("Enter no envía: pide confirmar el monto en grande", async () => {
+    const input = await abrirArqueo();
+    fireEvent.change(input, { target: { value: "43.700" } });
+    apretarEnter(input);
+
+    expect(screen.getByText("¿Confirmás?")).toBeInTheDocument();
+    expect(screen.getByText("$43.700,00")).toBeInTheDocument();
+    expect(closeShiftAction).not.toHaveBeenCalled();
+  });
+
+  it("Corregir vuelve al campo con lo tipeado, sin enviar nada", async () => {
+    const input = await abrirArqueo();
+    fireEvent.change(input, { target: { value: "15.000" } });
+    apretarEnter(input);
+
+    fireEvent.click(screen.getByRole("button", { name: /Corregir/ }));
+
+    const deVuelta = screen.getByLabelText("Efectivo declarado ($)") as HTMLInputElement;
+    expect(deVuelta.value).toBe("15.000");
+    expect(closeShiftAction).not.toHaveBeenCalled();
+  });
+
+  it("Confirmar envía el monto como se leyó", async () => {
+    const input = await abrirArqueo();
+    fireEvent.change(input, { target: { value: "43.700" } });
+    apretarEnter(input);
+    fireEvent.click(screen.getByRole("button", { name: /Confirmar/ }));
+
+    await waitFor(() => expect(closeShiftAction).toHaveBeenCalledTimes(1));
+    expect(closeShiftAction.mock.calls[0][0]).toMatchObject({ shiftId: "s1", actualCash: 43700 });
+    expect(await screen.findByText("Caja cerrada")).toBeInTheDocument();
+  });
+
+  it("un monto que no se entiende no llega a la confirmación", async () => {
+    const input = await abrirArqueo();
+    fireEvent.change(input, { target: { value: "1.50.000" } });
+    apretarEnter(input);
+
+    expect(screen.queryByText("¿Confirmás?")).not.toBeInTheDocument();
+    // Una vez en la pista en vivo y otra en el error del envío.
+    expect(screen.getAllByText(/No se entiende el monto/)).toHaveLength(2);
+  });
+
+  it("si no cuadra, el reintento con la nota no vuelve a pedir confirmación", async () => {
+    closeShiftAction.mockResolvedValueOnce({
+      success: false,
+      error: "falta la nota",
+      code: "P0012",
+    });
+
+    const input = await abrirArqueo();
+    fireEvent.change(input, { target: { value: "15.000" } });
+    apretarEnter(input);
+    fireEvent.click(screen.getByRole("button", { name: /Confirmar/ }));
+
+    // Vuelve al formulario con el monto bloqueado y la nota obligatoria.
+    const bloqueado = (await screen.findByLabelText("Efectivo declarado ($)")) as HTMLInputElement;
+    expect(bloqueado.readOnly).toBe(true);
+    expect(screen.getByText(/Notas \(obligatorias por la diferencia\)/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Notas/), {
+      target: { value: "Presioné mal una tecla: eran 150.000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Cerrar Turno/ }));
+
+    await waitFor(() => expect(closeShiftAction).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("¿Confirmás?")).not.toBeInTheDocument();
+    expect(closeShiftAction.mock.calls[1][0]).toMatchObject({
+      actualCash: 15000,
+      notes: "Presioné mal una tecla: eran 150.000",
+    });
   });
 });

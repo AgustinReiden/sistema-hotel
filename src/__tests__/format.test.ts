@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   formatAmount,
+  formatAmountForInput,
   formatMoney,
   formatShiftCode,
   formatSignedAmount,
@@ -125,6 +126,53 @@ describe("parseArMoney", () => {
 
   it("acepta cero", () => {
     expect(parseArMoney("0")).toBe(0);
+  });
+
+  // Así se escribe en Argentina. Antes "43.700" daba 43,70 y en el arqueo a ciegas
+  // el monto no se puede corregir una vez enviado.
+  it("punto seguido de 3 dígitos es separador de miles", () => {
+    expect(parseArMoney("43.700")).toBe(43700);
+    expect(parseArMoney("2.500")).toBe(2500);
+    expect(parseArMoney("150.000")).toBe(150000);
+  });
+
+  it("varios puntos son separadores de miles", () => {
+    expect(parseArMoney("1.500.000")).toBe(1500000);
+  });
+
+  it("punto con 1 o 2 dígitos sigue siendo decimal", () => {
+    expect(parseArMoney("1500.5")).toBe(1500.5);
+    expect(parseArMoney("43.70")).toBe(43.7);
+  });
+
+  it("miles con punto y decimales con coma", () => {
+    expect(parseArMoney("1.500.000,50")).toBe(1500000.5);
+    expect(parseArMoney("1500,50")).toBe(1500.5);
+  });
+
+  it("lo que queda a medio tipear vale como entero", () => {
+    expect(parseArMoney("1.500,")).toBe(1500);
+    expect(parseArMoney("1500.")).toBe(1500);
+  });
+
+  it("devuelve null en vez de adivinar si el formato no es claro", () => {
+    // Miles mal agrupados.
+    expect(parseArMoney("1.50.000")).toBeNull();
+    expect(parseArMoney("1234.567")).toBeNull();
+    expect(parseArMoney("0.500")).toBeNull();
+    // Más de 2 decimales, o coma de miles al estilo inglés.
+    expect(parseArMoney("12,555")).toBeNull();
+    expect(parseArMoney("1,500.50")).toBeNull();
+    // Cosas que Number() acepta pero nadie tipea como monto.
+    expect(parseArMoney("1e3")).toBeNull();
+    expect(parseArMoney("0x10")).toBeNull();
+    expect(parseArMoney("Infinity")).toBeNull();
+  });
+
+  it("entiende de vuelta lo que escribe formatAmountForInput", () => {
+    for (const n of [0, 5, 43700, 1500000.5, 123456789.99]) {
+      expect(parseArMoney(formatAmountForInput(n))).toBe(n);
+    }
   });
 });
 
