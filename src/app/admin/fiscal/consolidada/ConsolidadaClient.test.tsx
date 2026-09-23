@@ -105,6 +105,11 @@ const fila = (habitacion: string) => filaCheckbox(habitacion).closest("li") as H
 const plata = (n: number) =>
   n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Los botones y la barra se buscan por su texto o su aria-label, no con getByRole sobre
+// toda la pantalla: getByRole calcula el nombre accesible de cada botón y llama a
+// getComputedStyle de jsdom por cada ancestro, y esta pantalla es grande. Fue lo que
+// hizo pasar los 5 s a CuentasClient.test.tsx con la suite entera en paralelo. Adentro
+// de la barra (within) sí se usa getByRole: ahí el árbol es chico.
 const BARRA = "Resumen de la factura consolidada";
 
 /** El payload con el que se llamó a la acción de emitir. */
@@ -206,7 +211,7 @@ describe("ConsolidadaClient", () => {
 
     // La no facturable ni siquiera se pinta en "Pendientes": para el tramo hay
     // que verla en pantalla, así que se pasa a "Todas".
-    fireEvent.click(screen.getByRole("button", { name: "Todas" }));
+    fireEvent.click(screen.getByText("Todas"));
 
     // Arrancar de cero: por defecto viene todo lo pendiente tildado.
     fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
@@ -256,7 +261,7 @@ describe("ConsolidadaClient", () => {
 
     await waitFor(() => expect(screen.getByText(/Mostrando 3 de 3 estadías/)).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Este año" }));
+    fireEvent.click(screen.getByText("Este año"));
 
     await waitFor(() =>
       expect(loadCcAccountStaysAction).toHaveBeenCalledWith(
@@ -272,7 +277,7 @@ describe("ConsolidadaClient", () => {
 
     // INVARIANTE: lo que salió de la lista deja de estar seleccionado solo, así
     // que no puede terminar en el comprobante.
-    const barra = screen.getByRole("region", { name: BARRA });
+    const barra = screen.getByLabelText(BARRA);
     expect(barra.textContent).toContain(`1 estadía · Total $${plata(10000)}`);
     expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
   });
@@ -286,7 +291,7 @@ describe("ConsolidadaClient", () => {
     );
     renderClient();
 
-    const barra = await screen.findByRole("region", { name: BARRA });
+    const barra = await screen.findByLabelText(BARRA);
     expect(barra.textContent).toContain(`2 estadías · Total $${plata(35000)}`);
 
     // Al destildar una, el total acompaña.
@@ -295,13 +300,13 @@ describe("ConsolidadaClient", () => {
 
     // Sin nada seleccionado no hay barra, así que tampoco hay botón de emitir.
     fireEvent.click(fila("1"));
-    expect(screen.queryByRole("region", { name: BARRA })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
   });
 
   it("con el receptor incompleto, el botón queda deshabilitado y la barra dice qué falta", async () => {
     renderClient();
 
-    const barra = await screen.findByRole("region", { name: BARRA });
+    const barra = await screen.findByLabelText(BARRA);
     const emitir = within(barra).getByRole("button", { name: /Emitir factura consolidada/ });
 
     // La ficha de Acme viene completa: se puede emitir.
@@ -334,7 +339,7 @@ describe("ConsolidadaClient", () => {
       renderClient();
 
       await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
-      expect(screen.getByRole("button", { name: "Pendientes de facturar" })).toHaveAttribute(
+      expect(screen.getByText("Pendientes de facturar")).toHaveAttribute(
         "aria-pressed",
         "true"
       );
@@ -353,7 +358,7 @@ describe("ConsolidadaClient", () => {
       await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
       expect(screen.queryByLabelText("Incluir estadía de habitación 2")).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Todas" }));
+      fireEvent.click(screen.getByText("Todas"));
 
       const yaFacturada = screen.getByLabelText("Incluir estadía de habitación 2");
       expect(yaFacturada).toBeInTheDocument();
@@ -373,7 +378,7 @@ describe("ConsolidadaClient", () => {
       await screen.findByText(/ya están cubiertas/);
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Ver todas" }));
+      fireEvent.click(screen.getByText("Ver todas"));
 
       expect(screen.getByLabelText("Incluir estadía de habitación 1")).toBeInTheDocument();
     });
@@ -394,17 +399,17 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
       fireEvent.click(fila("1"));
 
-      fireEvent.click(screen.getByRole("button", { name: /Siguiente/ }));
+      fireEvent.click(screen.getByText("Siguiente"));
 
       // La fila 1 quedó en la página anterior: no está a la vista, pero el
       // aviso dice que sigue tildada.
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
       expect(screen.getByText(/1 estadía tildada en otras páginas/)).toBeInTheDocument();
 
-      const barra = screen.getByRole("region", { name: BARRA });
+      const barra = screen.getByLabelText(BARRA);
       expect(barra.textContent).toContain("1 estadía");
 
-      fireEvent.click(screen.getByRole("button", { name: /Emitir factura consolidada/ }));
+      fireEvent.click(screen.getByText("Emitir factura consolidada"));
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().detalle).toHaveLength(1);
@@ -419,13 +424,13 @@ describe("ConsolidadaClient", () => {
     });
 
     const emitir = () =>
-      fireEvent.click(screen.getByRole("button", { name: /Emitir factura consolidada/ }));
+      fireEvent.click(screen.getByText("Emitir factura consolidada"));
 
     it("con «un solo concepto», manda el texto y NO las líneas por estadía", async () => {
       renderClient();
-      await screen.findByRole("region", { name: BARRA });
+      await screen.findByLabelText(BARRA);
 
-      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+      fireEvent.click(screen.getByText("Un solo concepto"));
 
       // Arranca en "Alojamiento" y es editable.
       const campo = screen.getByLabelText("Texto del concepto único");
@@ -448,7 +453,7 @@ describe("ConsolidadaClient", () => {
 
     it("en «detallado» (el default) sigue mandando el array por estadía, como antes", async () => {
       renderClient();
-      await screen.findByRole("region", { name: BARRA });
+      await screen.findByLabelText(BARRA);
 
       // No se toca el interruptor: el modo de siempre es el default.
       emitir();
@@ -462,13 +467,13 @@ describe("ConsolidadaClient", () => {
 
     it("ir a «un solo concepto» y volver no pierde los textos editados por estadía", async () => {
       renderClient();
-      await screen.findByRole("region", { name: BARRA });
+      await screen.findByLabelText(BARRA);
 
       const linea = () => screen.getByLabelText("Descripción de la estadía de habitación 5");
       fireEvent.change(linea(), { target: { value: "Convención anual" } });
 
-      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
-      fireEvent.click(screen.getByRole("button", { name: "Detallado" }));
+      fireEvent.click(screen.getByText("Un solo concepto"));
+      fireEvent.click(screen.getByText("Detallado"));
 
       expect(linea()).toHaveValue("Convención anual");
 
@@ -479,9 +484,9 @@ describe("ConsolidadaClient", () => {
 
     it("si se borra el texto del concepto, se emite el default que muestra el placeholder", async () => {
       renderClient();
-      await screen.findByRole("region", { name: BARRA });
+      await screen.findByLabelText(BARRA);
 
-      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+      fireEvent.click(screen.getByText("Un solo concepto"));
       fireEvent.change(screen.getByLabelText("Texto del concepto único"), {
         target: { value: "   " },
       });
@@ -497,13 +502,13 @@ describe("ConsolidadaClient", () => {
 
     it("«Restaurar» también devuelve el texto del concepto a «Alojamiento»", async () => {
       renderClient();
-      await screen.findByRole("region", { name: BARRA });
+      await screen.findByLabelText(BARRA);
 
-      fireEvent.click(screen.getByRole("button", { name: "Un solo concepto" }));
+      fireEvent.click(screen.getByText("Un solo concepto"));
       fireEvent.change(screen.getByLabelText("Texto del concepto único"), {
         target: { value: "Otra cosa" },
       });
-      fireEvent.click(screen.getByRole("button", { name: /Restaurar/ }));
+      fireEvent.click(screen.getByText("Restaurar"));
 
       expect(screen.getByLabelText("Texto del concepto único")).toHaveValue("Alojamiento");
     });
