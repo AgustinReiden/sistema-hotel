@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
-import { getActiveOpenShift } from "@/lib/data";
+import { getActiveOpenShift, getCurrentUserRole } from "@/lib/data";
 import { formatHotelTime } from "@/lib/time";
 import { localToISO } from "@/lib/format";
 import { addDaysToDateKey } from "@/lib/analytics";
@@ -39,6 +40,14 @@ type FinancesPageProps = {
 };
 
 export default async function FinancesPage({ searchParams }: FinancesPageProps) {
+    // Sólo admin: la pantalla muestra lo cobrado en efectivo, que /admin/caja le oculta
+    // a recepción a propósito (arqueo a ciegas). La RLS de `payments` deja leer a todo
+    // el staff porque recepción cobra, así que el corte tiene que estar acá.
+    const role = await getCurrentUserRole();
+    if (role !== "admin") {
+        redirect("/forbidden");
+    }
+
     const supabase = await createClient();
     const params = await searchParams;
 
