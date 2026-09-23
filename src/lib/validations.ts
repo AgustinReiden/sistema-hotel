@@ -366,6 +366,15 @@ export const reportShiftConflictSchema = z.object({
     .max(500, "La nota no puede superar los 500 caracteres."),
 });
 
+/**
+ * Reintento del cierre del aviso de pieza ocupada contra la estadía que ya se cargó.
+ * Que la reserva sea de esa pieza y esté con el huésped adentro lo valida la base.
+ */
+export const closeOccupancyAlertSchema = z.object({
+  alertId: z.number().int().positive("El aviso es invalido."),
+  reservationId: z.string().uuid("La estadia a la que apunta el aviso es invalida."),
+});
+
 export const SUPPORTED_PHONE_COUNTRY_CODES = [
   "54",
   "55",

@@ -6,6 +6,7 @@ import type { AssignWalkInPayload, RoomOccupancyAlert } from "@/lib/types";
 
 const H = vi.hoisted(() => ({
   regularizeOccupiedRoomAction: vi.fn(),
+  closeOccupancyAlertAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 
@@ -13,6 +14,7 @@ vi.mock("sonner", () => ({ toast: H.toast }));
 
 vi.mock("./actions", () => ({
   regularizeOccupiedRoomAction: H.regularizeOccupiedRoomAction,
+  closeOccupancyAlertAction: H.closeOccupancyAlertAction,
 }));
 
 /**
@@ -105,9 +107,22 @@ function renderBanner(alerts: RoomOccupancyAlert[], isAdmin: boolean) {
 
 beforeEach(() => {
   H.regularizeOccupiedRoomAction.mockReset();
+  H.closeOccupancyAlertAction.mockReset();
   H.toast.success.mockReset();
   H.toast.warning.mockReset();
+  H.toast.error.mockReset();
 });
+
+/** Carga la estadía desde el aviso abierto y la acción contesta que el aviso quedó sin cerrar. */
+async function cargarConAvisoSinCerrar() {
+  H.regularizeOccupiedRoomAction.mockResolvedValue({
+    success: true,
+    data: { reservationId: "r-1", alertPendiente: true },
+  });
+  fireEvent.click(screen.getByText("Cargar la estadía"));
+  fireEvent.click(screen.getByText("Confirmar walk-in"));
+  await waitFor(() => expect(H.toast.warning).toHaveBeenCalled());
+}
 
 describe("OccupiedRoomAlertBanner", () => {
   it("sin avisos no dibuja nada", () => {
@@ -171,17 +186,106 @@ describe("OccupiedRoomAlertBanner", () => {
   });
 
   it("si la estadía entró pero el aviso no se cerró, avisa que no la vuelvan a cargar", async () => {
+    renderBanner([abierta], true);
+
+    await cargarConAvisoSinCerrar();
+
+    const aviso = H.toast.warning.mock.calls[0][0] as string;
+    expect(aviso).toContain("no la vuelvas a cargar");
+    // Refrescar pierde la reserva que hay que cerrar: el camino es el botón.
+    expect(aviso).toContain("Cerrar el aviso");
+    expect(aviso).not.toMatch(/refresc/i);
+    expect(H.toast.success).not.toHaveBeenCalled();
+  });
+
+  it("después de eso la fila ofrece cerrar el aviso y ya no cargar la estadía", async () => {
+    renderBanner([abierta], true);
+
+    await cargarConAvisoSinCerrar();
+
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+    expect(screen.queryByText("Cargar la estadía")).not.toBeInTheDocument();
+    expect(screen.getByText(/La estadía ya está cargada; falta cerrar el aviso/)).toBeInTheDocument();
+    // Ya no "se cargaría": se cargó.
+    expect(screen.queryByText(/se cargaría desde el/)).not.toBeInTheDocument();
+  });
+
+  it("cerrar el aviso reintenta solo el cierre, contra la estadía que se cargó", async () => {
+    H.closeOccupancyAlertAction.mockResolvedValue({ success: true });
+    renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
+    expect(H.closeOccupancyAlertAction).toHaveBeenCalledWith(10, "r-1");
+    // La estadía se cargó una sola vez.
+    expect(H.regularizeOccupiedRoomAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+  });
+
+  it("si el cierre vuelve a fallar, muestra el motivo y deja el botón para reintentar", async () => {
+    H.closeOccupancyAlertAction.mockResolvedValue({
+      success: false,
+      error: "La estadia tiene que estar con el huesped adentro para cerrar el aviso.",
+      code: "22023",
+    });
+    renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+
+    await waitFor(() =>
+      expect(H.toast.error).toHaveBeenCalledWith(
+        "La estadia tiene que estar con el huesped adentro para cerrar el aviso."
+      )
+    );
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+    expect(screen.queryByText("Cargar la estadía")).not.toBeInTheDocument();
+  });
+
+  it("si la acción ni contesta (red), no pierde la estadía que hay que cerrar", async () => {
+    H.closeOccupancyAlertAction.mockRejectedValue(new Error("Failed to fetch"));
+    renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+
+    await waitFor(() => expect(H.toast.error).toHaveBeenCalled());
+    expect(H.toast.error.mock.calls[0][0]).toContain("La estadía sigue cargada");
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+  });
+
+  it("cuando el aviso llega cerrado (el refresco de la acción), sale de los abiertos", async () => {
+    const { rerender } = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    rerender(
+      <OccupiedRoomAlertBanner
+        alerts={[{ ...abierta, resolved_at: "2026-09-23T15:00:00.000Z", decision: "regularizada" }]}
+        pricingByRoomId={pricingByRoomId}
+        associatedClients={[]}
+        timezone={TZ}
+        isAdmin
+      />
+    );
+
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    expect(screen.getByText(/se cargó la estadía/)).toBeInTheDocument();
+  });
+
+  it("si el aviso se cerró en el primer intento, no queda nada para cerrar", async () => {
     H.regularizeOccupiedRoomAction.mockResolvedValue({
       success: true,
-      data: { reservationId: "r-1", alertPendiente: true },
+      data: { reservationId: "r-1", alertPendiente: false },
     });
     renderBanner([abierta], true);
 
     fireEvent.click(screen.getByText("Cargar la estadía"));
     fireEvent.click(screen.getByText("Confirmar walk-in"));
 
-    await waitFor(() => expect(H.toast.warning).toHaveBeenCalled());
-    expect(H.toast.warning.mock.calls[0][0]).toContain("no la vuelvas a cargar");
-    expect(H.toast.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
   });
 });

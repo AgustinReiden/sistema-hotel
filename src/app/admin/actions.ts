@@ -53,7 +53,12 @@ import type {
   PaymentMethod,
   Room,
 } from "@/lib/types";
-import { assignWalkInSchema, checkInSchema, createReservationSchema } from "@/lib/validations";
+import {
+  assignWalkInSchema,
+  checkInSchema,
+  closeOccupancyAlertSchema,
+  createReservationSchema,
+} from "@/lib/validations";
 
 type CheckoutPayload = {
   reservationId: string;
@@ -222,8 +227,9 @@ export async function handleAssignWalkIn(
  * SON DOS ESCRITURAS Y NO HAY TRANSACCIÓN QUE LAS ABRACE. Si la segunda falla, la
  * estadía YA quedó cargada: decir "no se pudo" sería mentira y llevaría a cargarla
  * de nuevo, duplicando la reserva. Por eso el éxito parcial se reporta como éxito,
- * con el aviso de que el cartel sigue ahí. `rpc_regularize_occupied_room` es
- * idempotente, así que el próximo intento lo cierra sin romper nada.
+ * con el aviso de que el cartel sigue ahí. El reintento es `closeOccupancyAlertAction`,
+ * que repite solo el cierre; `rpc_regularize_occupied_room` es idempotente, así que
+ * reintentar no rompe nada.
  */
 export async function regularizeOccupiedRoomAction(input: {
   alertId: number;
@@ -250,6 +256,34 @@ export async function regularizeOccupiedRoomAction(input: {
     return { success: true, data: { reservationId, alertPendiente } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al cargar la estadia.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Reintenta cerrar el aviso cuando `regularizeOccupiedRoomAction` cargó la estadía
+ * pero no pudo cerrarlo (`alertPendiente`). Hace SOLO la segunda escritura: no toca
+ * reservas, así que apretarlo dos veces no carga nada dos veces.
+ *
+ * El `reservationId` es el que devolvió esa carga, no uno que se busca en la base:
+ * ver "SI LA ESTADÍA ENTRÓ Y EL AVISO NO SE CERRÓ" en OccupiedRoomAlertBanner.
+ * Mismo gate que la carga: cerrarlo como "se cargó la estadía" es decir que se cobró.
+ */
+export async function closeOccupancyAlertAction(
+  alertId: number,
+  reservationId: string
+): Promise<ActionResult> {
+  try {
+    await assertAdmin("Solo el administrador decide si esta pieza se cobra.");
+    const validated = closeOccupancyAlertSchema.parse({ alertId, reservationId });
+    await regularizeOccupiedRoom(validated.alertId, validated.reservationId);
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/mantenimiento");
+
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo cerrar el aviso.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }
