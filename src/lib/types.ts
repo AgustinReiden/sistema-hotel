@@ -41,6 +41,14 @@ export type TariffRequestPayload = {
   new_total_price: number;
 };
 
+/**
+ * Lo que admite el CHECK `admin_alerts_decision_check` (mig 117). `authorized` y
+ * `rejected` son del pedido de tarifa vieja; `regularizada` la sella
+ * `rpc_regularize_occupied_room` cuando el aviso de pieza ocupada se cierra
+ * cargando la estadía.
+ */
+export type AdminAlertDecision = "authorized" | "rejected" | "regularizada";
+
 export type AdminAlert = {
   id: number;
   kind: string;
@@ -49,7 +57,7 @@ export type AdminAlert = {
   related_room_number: string | null;
   related_cleaning_log_id: number | null;
   related_reservation_id: string | null;
-  decision: "authorized" | "rejected" | null;
+  decision: AdminAlertDecision | null;
   payload: TariffRequestPayload | null;
   created_at: string;
   resolved_at: string | null;
@@ -739,6 +747,12 @@ export type RoomOccupancyAlert = {
   /** Cuándo la mucama la marcó: es la fecha que se precarga en la estadía. */
   detected_at: string;
   reported_by_name: string | null;
+  /** null = sigue abierta. Las resueltas se arrastran 48 h para mostrar en qué terminaron. */
+  resolved_at: string | null;
+  /** `"regularizada"` = se cargó la estadía. Resuelta sin esto = se cerró sin cobrar. */
+  decision: AdminAlertDecision | null;
+  resolved_notes: string | null;
+  resolved_by_name: string | null;
 };
 
 /**

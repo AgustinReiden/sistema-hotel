@@ -246,6 +246,7 @@ export default async function Dashboard() {
           )}
           associatedClients={associatedClients}
           timezone={hotelSettings.timezone}
+          isAdmin={isAdmin}
         />
         {isAdmin && unresolvedAlertsCount > 0 && (
           <div className="mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
