@@ -36,6 +36,13 @@ vi.mock("./actions", () => ({
     revertPaymentImputacionAction(...args),
 }));
 
+// Los botones se buscan por su texto o su aria-label, no con getByRole sobre toda la
+// pantalla. getByRole calcula el nombre accesible de cada botón y llama a
+// getComputedStyle de jsdom por cada ancestro: con el listado de fondo más la ficha
+// abierta eran 100–300 ms por búsqueda (casi 2 s en frío con la máquina cargada), y
+// con la suite entera en paralelo el test del filtro de fecha pasaba los 5 s. Adentro
+// de una fila o una solapa (within) sí se usa getByRole: ahí el árbol es chico.
+
 const accounts: CtaCteAccount[] = [
   { kind: "company", id: "acme", name: "Acme SA", document_id: "20111111112", balance: 15000 },
 ];
@@ -112,7 +119,7 @@ const invoices: ClientInvoiceRow[] = [
 async function abrirSolapaFacturas() {
   render(<CuentasClient accounts={accounts} />);
   fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
-  fireEvent.click(screen.getByRole("button", { name: "Facturas" }));
+  fireEvent.click(screen.getByText("Facturas"));
   await waitFor(() => expect(loadClientInvoicesAction).toHaveBeenCalledWith("company", "acme"));
 }
 
@@ -144,7 +151,7 @@ describe("CuentasClient — FichaClienteModal", () => {
     const balanceBefore = screen.getByTestId("ficha-balance").textContent;
 
     // Cualquier preset de rango deja movimientos afuera con este dataset.
-    fireEvent.click(screen.getByRole("button", { name: "Este mes" }));
+    fireEvent.click(screen.getByText("Este mes"));
 
     await waitFor(() =>
       expect(screen.getByText("Hay movimientos fuera del período elegido.")).toBeTruthy()
@@ -330,7 +337,7 @@ const estadias: CcAccountStayRow[] = [
 async function abrirSolapaPagos() {
   render(<CuentasClient accounts={accounts} />);
   fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
-  fireEvent.click(screen.getByRole("button", { name: "Pagos" }));
+  fireEvent.click(screen.getByText("Pagos"));
   await waitFor(() => expect(loadClientPaymentsAction).toHaveBeenCalledWith("company", "acme"));
 }
 
@@ -510,9 +517,9 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     // un año, que es la mitad de la razón por la que se marca en vez de borrarse.
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+    fireEvent.click(await screen.findByLabelText("Desimputar"));
 
-    const confirmar = screen.getByRole("button", { name: /Confirmar/ });
+    const confirmar = screen.getByText("Confirmar");
     expect(confirmar).toBeDisabled();
 
     fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
@@ -536,11 +543,11 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     // que ya la sacó.
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+    fireEvent.click(await screen.findByLabelText("Desimputar"));
     fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
       target: { value: "Error de carga" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Confirmar/ }));
+    fireEvent.click(screen.getByText("Confirmar"));
 
     await waitFor(() => expect(loadClientPaymentsAction).toHaveBeenCalledTimes(2));
   });
@@ -549,8 +556,8 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     // Abrir el panel no puede tener efecto: lo que mueve plata es Confirmar.
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    fireEvent.click(await screen.findByLabelText("Desimputar"));
+    fireEvent.click(screen.getByText("Cancelar"));
 
     expect(revertPaymentImputacionAction).not.toHaveBeenCalled();
     expect(screen.queryByPlaceholderText(/Por qué se desimputa/)).toBeNull();
@@ -566,11 +573,11 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
 
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desimputar" }));
+    fireEvent.click(await screen.findByLabelText("Desimputar"));
     fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
       target: { value: "Probando" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Confirmar/ }));
+    fireEvent.click(screen.getByText("Confirmar"));
 
     await waitFor(() => expect(revertPaymentImputacionAction).toHaveBeenCalled());
     expect(loadClientPaymentsAction).toHaveBeenCalledTimes(1);
