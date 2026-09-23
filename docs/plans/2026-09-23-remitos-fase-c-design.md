@@ -102,11 +102,19 @@ filtro de cliente. Lista las consolidadas del cliente autorizadas y no anuladas.
 impreso. De cada uno, el escaneo vigente (`remito_control.escaneo_id`, el que abre "Ver").
 
 **Cómo se arma.**
-1. "Armar paquete" guarda un pedido con la lista exacta de escaneos, en orden, y la huella
-   (`hash_sha256`) de cada uno.
+1. "Armar paquete" guarda un pedido con la lista exacta de escaneos, en orden, con el
+   archivo de Drive y la hora en que se archivó cada uno.
 2. El workflow nuevo **Remitos - Paquetes** corre cada minuto. Toma el pedido más viejo y lo
    marca "armando".
-3. Baja cada escaneo de Drive y compara su sha256 con la huella del pedido.
+3. Le pregunta a Drive por cada archivo: que exista, que no esté en la papelera y que no se
+   haya modificado después de archivarse (más de 10 minutos de margen). Si alguno falla, el
+   pedido termina en error sin bajar nada.
+
+   *Cambio respecto de lo aprobado:* la idea era comparar la huella (`hash_sha256`). Al
+   escribir el plan apareció que esa huella es la de la **imagen** del ticket (la que hace
+   idempotente la ingesta), no la del PDF que queda en Drive, así que no sirve para verificar
+   el archivo. La fecha de modificación de Drive cubre lo mismo: un PDF reemplazado o editado
+   cambia de fecha.
 4. El worker une los PDF (función nueva `/unir`).
 5. n8n sube el resultado a `Remitos/<Cliente>/Paquetes/` con el número de factura en el
    nombre, y le avisa a la base con el id y el link del archivo.
@@ -133,7 +141,7 @@ deploy de C1**. No toca tablas existentes fuera de las de remitos.
   (`invoice_id`, única), `faltantes JSONB` (número, movimiento y estado de cada uno), motivo
   (no vacío), usuario y fecha.
 - **`remito_paquetes`** (nueva, cerrada): factura, `version`, `estado` (`pedido`, `armando`,
-  `listo`, `error`), `escaneos JSONB` (en orden, con número, `drive_file_id` y huella),
+  `listo`, `error`), `escaneos JSONB` (en orden, con número, `drive_file_id` y hora de archivo),
   `total_estadias`, `drive_file_id`, `drive_link`, `error`, quién lo pidió y las fechas.
 - **Panel (authenticated + `app_is_admin()`):** listar vencidos, faltantes de una lista de
   movimientos, guardar la constancia, pedir un paquete, listar las consolidadas de un cliente
@@ -166,8 +174,9 @@ color principal `brand-700`. Tests con Testing Library buscando por texto o `ari
   `alertar_desde`), qué es faltante al facturar, el conteo del numerito sin doble conteo.
 - **Servidor:** la acción de la consolidada rechaza sin motivo cuando hay faltantes, guarda la
   constancia antes de emitir y no emite si la constancia falla.
-- **Paquete:** el orden sale del impreso; con una huella distinta, el pedido termina en error
-  y no se sube nada; `/unir` devuelve un PDF con tantas páginas como entraron.
+- **Paquete:** el orden sale del impreso; con un archivo borrado, en la papelera o modificado
+  después de archivarse, el pedido termina en error y no se sube nada; `/unir` devuelve un
+  PDF con tantas páginas como entraron.
 - **Workflow:** la estructura del *Remitos - Paquetes* (credenciales, llamadas a la base,
   bucle sin `.first()` de nodos del bucle), como los tests de la 116.
 - **Migración:** prueba en seco contra PROD antes de aplicarla, como la 116.
