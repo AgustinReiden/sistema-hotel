@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { X, Loader2, DollarSign, CreditCard, Banknote, Landmark, Wallet, CircleDollarSign } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +28,9 @@ function isNoOpenShiftError(error: string | undefined, code: string | undefined)
   return /abrir\s+la\s+caja/i.test(error);
 }
 
+const METHOD_GROUP_ID = "payment-method-group";
+const METHOD_MISSING_MESSAGE = "Elegí cómo paga: efectivo, tarjeta, transferencia o Mercado Pago";
+
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -40,6 +43,16 @@ interface PaymentModalProps {
   reservationId?: string;
   /** Habilita el método "Cuenta corriente" (solo para clientes con cta cte habilitada). */
   accountCreditEnabled?: boolean;
+  /**
+   * Medio que viene marcado al abrir. Solo cuenta 'cuenta_corriente', y solo en el
+   * check-out con la cuenta habilitada: una empresa con cuenta casi siempre fía. En
+   * todo lo demás el medio arranca vacío y hay que elegirlo, porque un Efectivo
+   * marcado de antemano se quedaba así aunque pagaran con tarjeta, y el arqueo no
+   * cuadraba.
+   */
+  defaultMethod?: PaymentMethod;
+  /** A nombre de quién queda lo fiado (la empresa). Si no llega, se usa clientName. */
+  accountHolderName?: string | null;
   onSuccess?: () => void;
   onSubmitPayment?: (payload: {
     amount: number;
@@ -60,6 +73,8 @@ export default function PaymentModal({
   paidAmount,
   reservationId,
   accountCreditEnabled = false,
+  defaultMethod,
+  accountHolderName,
   onSuccess,
   onSubmitPayment,
   noteText,
@@ -85,7 +100,23 @@ export default function PaymentModal({
   // de coma flotante ("0.19999999999999998") tiene más de 2 decimales y
   // parseArMoney no lo acepta.
   const [amount, setAmount] = useState(debt > 0 ? formatAmountForInput(debt) : "");
-  const [method, setMethod] = useState<PaymentMethod>("cash");
+  // Sin medio de antemano (null): la recepcionista lo elige siempre. La única
+  // excepción es fiar en el check-out de una empresa con cuenta corriente.
+  const [method, setMethod] = useState<PaymentMethod | null>(
+    defaultMethod === "cuenta_corriente" && accountCreditEnabled && isCheckoutMode
+      ? "cuenta_corriente"
+      : null
+  );
+  const [methodMissing, setMethodMissing] = useState(false);
+  const methodGroupRef = useRef<HTMLDivElement>(null);
+
+  const isAccountCredit = method === "cuenta_corriente";
+  const holderName = accountHolderName || clientName;
+
+  const chooseMethod = (next: PaymentMethod) => {
+    setMethod(next);
+    setMethodMissing(false);
+  };
 
   // En check-out el monto es el saldo exacto, derivado EN VIVO de las props (no del
   // useState, que se congela al montar). Así, si se agrega un cargo extra mientras el
@@ -109,6 +140,15 @@ export default function PaymentModal({
       return;
     }
 
+    // Sin medio no se registra nada: se avisa al lado de los medios y el foco va
+    // ahí, para que se vea qué falta elegir.
+    if (!method) {
+      setMethodMissing(true);
+      setLoading(false);
+      methodGroupRef.current?.focus();
+      return;
+    }
+
     let result: ActionResult<{ paymentId: string | null }>;
 
     if (onSubmitPayment) {
@@ -129,7 +169,13 @@ export default function PaymentModal({
     setLoading(false);
 
     if (result.success) {
-      toast.success(isCheckoutMode ? "Pago registrado y check-out realizado." : "Pago registrado exitosamente.");
+      toast.success(
+        !isCheckoutMode
+          ? "Pago registrado exitosamente."
+          : method === "cuenta_corriente"
+            ? `Check-out hecho. Queda a cuenta de ${holderName}.`
+            : "Pago registrado y check-out realizado."
+      );
       // Abrir recibo imprimible (si el RPC devolvió payment_id)
       const paymentId = (result.data as { paymentId?: string | null } | undefined)?.paymentId;
       if (paymentId) {
@@ -221,7 +267,9 @@ export default function PaymentModal({
 
           <form id="payment-form" onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label htmlFor="payment-amount" className="block text-sm font-bold text-slate-700 mb-2">Monto a abonar ($)</label>
+              <label htmlFor="payment-amount" className="block text-sm font-bold text-slate-700 mb-2">
+                {isAccountCredit ? "Monto a cuenta corriente" : "Monto a abonar ($)"}
+              </label>
               <input
                 id="payment-amount"
                 type="text"
@@ -251,25 +299,38 @@ export default function PaymentModal({
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Metodo de Pago</label>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <p id="payment-method-label" className="block text-sm font-bold text-slate-700 mb-2">Método de Pago</p>
+              {/* Ningún medio viene marcado (salvo Cta. Cte. en empresas con cuenta): si
+                  se cobra sin elegir, el foco vuelve acá con el aviso de abajo. */}
+              <div
+                id={METHOD_GROUP_ID}
+                ref={methodGroupRef}
+                role="radiogroup"
+                aria-labelledby="payment-method-label"
+                aria-invalid={methodMissing || undefined}
+                aria-describedby={methodMissing ? "payment-method-error" : undefined}
+                tabIndex={-1}
+                className={`grid grid-cols-2 lg:grid-cols-3 gap-3 rounded-xl outline-none ${
+                  methodMissing ? "ring-2 ring-red-300 ring-offset-2" : ""
+                }`}
+              >
                 <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cash" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                  <input type="radio" name="method" value="cash" checked={method === "cash"} onChange={() => setMethod("cash")} className="sr-only" />
+                  <input type="radio" name="method" value="cash" checked={method === "cash"} onChange={() => chooseMethod("cash")} className="sr-only" />
                   <Banknote size={18} />
                   <span className="text-sm">Efectivo</span>
                 </label>
                 <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "mercado_pago" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                  <input type="radio" name="method" value="mercado_pago" checked={method === "mercado_pago"} onChange={() => setMethod("mercado_pago")} className="sr-only" />
+                  <input type="radio" name="method" value="mercado_pago" checked={method === "mercado_pago"} onChange={() => chooseMethod("mercado_pago")} className="sr-only" />
                   <Wallet size={18} className="text-blue-500" />
                   <span className="text-sm whitespace-nowrap">Mercado Pago</span>
                 </label>
                 <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "bank_transfer" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                  <input type="radio" name="method" value="bank_transfer" checked={method === "bank_transfer"} onChange={() => setMethod("bank_transfer")} className="sr-only" />
+                  <input type="radio" name="method" value="bank_transfer" checked={method === "bank_transfer"} onChange={() => chooseMethod("bank_transfer")} className="sr-only" />
                   <Landmark size={18} />
                   <span className="text-sm">Transferencia</span>
                 </label>
                 <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "credit_card" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                  <input type="radio" name="method" value="credit_card" checked={method === "credit_card"} onChange={() => setMethod("credit_card")} className="sr-only" />
+                  <input type="radio" name="method" value="credit_card" checked={method === "credit_card"} onChange={() => chooseMethod("credit_card")} className="sr-only" />
                   <CreditCard size={18} />
                   <span className="text-sm">Tarjeta</span>
                 </label>
@@ -277,7 +338,7 @@ export default function PaymentModal({
                     cubrir el total de una sola vez, sin combinar con otro medio. */}
                 {numericPaid === 0 && (
                   <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "vale_blanco" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                    <input type="radio" name="method" value="vale_blanco" checked={method === "vale_blanco"} onChange={() => setMethod("vale_blanco")} className="sr-only" />
+                    <input type="radio" name="method" value="vale_blanco" checked={method === "vale_blanco"} onChange={() => chooseMethod("vale_blanco")} className="sr-only" />
                     <Banknote size={18} className="text-slate-400" />
                     <span className="text-sm">Vale Blanco</span>
                   </label>
@@ -286,13 +347,25 @@ export default function PaymentModal({
                     el cargo en la cuenta del cliente. Fuera del check-out el RPC lo
                     rechaza (mig 89); mejor ni ofrecerlo. */}
                 {accountCreditEnabled && isCheckoutMode && (
-                  <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cuenta_corriente" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
-                    <input type="radio" name="method" value="cuenta_corriente" checked={method === "cuenta_corriente"} onChange={() => setMethod("cuenta_corriente")} className="sr-only" />
+                  <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "cuenta_corriente" ? "border-purple-500 bg-purple-50 text-purple-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
+                    <input type="radio" name="method" value="cuenta_corriente" checked={method === "cuenta_corriente"} onChange={() => chooseMethod("cuenta_corriente")} className="sr-only" />
                     <Wallet size={18} className="text-purple-500" />
                     <span className="text-sm">Cta. Cte.</span>
                   </label>
                 )}
               </div>
+              {methodMissing && (
+                <p id="payment-method-error" className="mt-2 text-red-600 text-sm font-bold bg-red-50 p-3 rounded-lg">
+                  {METHOD_MISSING_MESSAGE}
+                </p>
+              )}
+              {/* Fiar se ve distinto de cobrar: si el pasajero paga de su bolsillo, se
+                  cambia el medio y este recuadro desaparece. */}
+              {isAccountCredit && (
+                <div className="mt-3 bg-purple-50 border border-purple-200 rounded-xl p-3 text-sm font-bold text-purple-800">
+                  Queda a cuenta de {holderName}. Sale el remito para que firme el pasajero.
+                </div>
+              )}
             </div>
 
             {noOpenShift && (
@@ -333,7 +406,11 @@ export default function PaymentModal({
             className="px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-70"
           >
             {loading ? <Loader2 className="animate-spin" size={20} /> : <DollarSign size={20} />}
-            {isCheckoutMode ? "Registrar y Cerrar" : "Registrar Pago"}
+            {!isCheckoutMode
+              ? "Registrar Pago"
+              : isAccountCredit
+                ? "Cargar a la cuenta y cerrar"
+                : "Registrar y Cerrar"}
           </button>
         </div>
       </div>
