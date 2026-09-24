@@ -2,6 +2,7 @@
 // testeadas: la decisión de fondo (qué estado queda) la toma la base (mig 116).
 
 import { interpretarCodigo, numeroVisible } from "./remito-codigo";
+import { hotelDateKey } from "./time";
 import type { RemitoEstado, RemitoEstadoPersona, RemitoPanelRow, RemitosSalud } from "./types";
 
 export const REMITO_ESTADO_LABEL: Record<RemitoEstado, string> = {
@@ -96,11 +97,12 @@ const PARTES: { estado: RemitoEstado; uno: string; varios: string }[] = [
   { estado: "sin_remito", uno: "sin remito", varios: "sin remito" },
 ];
 
-export function textoSemaforo(r: ResumenRemitos): string {
+export function textoSemaforo(r: ResumenRemitos, vencidos = 0): string {
   if (r.total === 0) return "No hay remitos en este período.";
   const partes = PARTES.filter((p) => r.porEstado[p.estado] > 0).map(
     (p) => `${r.porEstado[p.estado]} ${r.porEstado[p.estado] === 1 ? p.uno : p.varios}`
   );
+  if (vencidos > 0) partes.push(`${vencidos} ${vencidos === 1 ? "vencido" : "vencidos"}`);
   return `${r.total} ${r.total === 1 ? "remito" : "remitos"}: ${partes.join(" · ")}`;
 }
 
@@ -141,6 +143,75 @@ export function haceDias(iso: string, ahoraMs: number): string {
   const dias = Math.floor((ahoraMs - Date.parse(iso)) / 86_400_000);
   if (dias <= 0) return "hoy";
   return `hace ${dias} ${dias === 1 ? "día" : "días"}`;
+}
+
+// ─── Vencidos (mig 124) ────────────────────────────────────────────────────────
+
+export type AjustesVencimiento = { horas_vencimiento: number; alertar_desde: string };
+
+/**
+ * Misma regla que app_remitos_vencido (mig 124): cargo desde `alertar_desde` (fecha
+ * del hotel), pasaron `horas_vencimiento` corridas y no está firmado ni "sin remito".
+ */
+export function esVencido(
+  row: Pick<RemitoPanelRow, "estado" | "created_at">,
+  aj: AjustesVencimiento,
+  ahoraMs: number
+): boolean {
+  if (row.estado === "firmado" || row.estado === "sin_remito") return false;
+  if (hotelDateKey(row.created_at) < aj.alertar_desde) return false;
+  return ahoraMs - Date.parse(row.created_at) >= aj.horas_vencimiento * 3_600_000;
+}
+
+const MOTIVO_VENCIDO: Partial<Record<RemitoEstado, string>> = {
+  sin_escanear: "sin escanear",
+  evaluando: "la IA todavía no lo miró",
+  a_revisar: "a revisar",
+  sin_firma: "sin firma",
+};
+
+export function motivoVencido(estado: RemitoEstado): string {
+  return MOTIVO_VENCIDO[estado] ?? REMITO_ESTADO_LABEL[estado].toLowerCase();
+}
+
+export function textoVencidos(rows: Pick<RemitoPanelRow, "estado">[]): string {
+  const cuenta = new Map<string, number>();
+  for (const r of rows) {
+    // En el resumen, "evaluando" a secas; la frase larga es para el renglón.
+    const m = r.estado === "evaluando" ? "evaluando" : motivoVencido(r.estado);
+    cuenta.set(m, (cuenta.get(m) ?? 0) + 1);
+  }
+  const partes = [...cuenta].map(([m, c]) => `${c} ${m}`);
+  return `${rows.length} ${rows.length === 1 ? "vencido" : "vencidos"}: ${partes.join(" · ")}`;
+}
+
+export type ParaRevisar = { remitos: number; vencidos: number; piezas: number; total: number };
+
+/**
+ * Lo que cuenta el numerito del menú y lo que dice la línea "Para revisar" del
+ * panel (regla de F1-2 del plan de UX: lo que dice el menú es lo que se ve al abrir).
+ * Un remito a revisar que además venció se cuenta una sola vez, como vencido.
+ */
+export function remitosParaRevisar(s: RemitosSalud): ParaRevisar {
+  const remitos = Math.max(0, s.a_revisar - s.a_revisar_vencidos);
+  return { remitos, vencidos: s.vencidos, piezas: s.piezas_abiertas, total: remitos + s.vencidos + s.piezas_abiertas };
+}
+
+export function textoParaRevisar(p: ParaRevisar): string | null {
+  const partes = [
+    p.remitos > 0 ? `${p.remitos} ${p.remitos === 1 ? "remito" : "remitos"}` : null,
+    p.vencidos > 0 ? `${p.vencidos} ${p.vencidos === 1 ? "vencido" : "vencidos"}` : null,
+    p.piezas > 0 ? `${p.piezas} ${p.piezas === 1 ? "pieza" : "piezas"}` : null,
+  ].filter((x): x is string => x !== null);
+  if (partes.length === 0) return null;
+  const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+  return `Para revisar: ${lista}`;
+}
+
+export function haceCuanto(iso: string, ahoraMs: number): string {
+  const horas = Math.floor((ahoraMs - Date.parse(iso)) / 3_600_000);
+  if (horas < 72) return `hace ${Math.max(0, horas)} h`;
+  return haceDias(iso, ahoraMs);
 }
 
 /** "2026-09" → primer y último día del mes. */

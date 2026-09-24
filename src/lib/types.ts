@@ -1347,6 +1347,13 @@ export type RemitosSalud = {
   umbral_confianza: number;
   controlar_desde: number;
   max_intentos_firma: number;
+  /** Remitos vencidos (mig 124): pasaron `horas_vencimiento` del check-out y no están firmados. */
+  vencidos: number;
+  /** Cuántos de los `a_revisar` también están vencidos (para no contarlos dos veces). */
+  a_revisar_vencidos: number;
+  horas_vencimiento: number;
+  /** "AAAA-MM-DD": los cargos desde esa fecha (hora del hotel) pueden vencer. */
+  alertar_desde: string;
 };
 
 export type RemitoLookup =
