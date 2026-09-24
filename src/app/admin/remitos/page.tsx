@@ -13,6 +13,7 @@ const MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const SALUD_VACIA: RemitosSalud = {
   ultima_ingesta_at: null, ultima_evaluacion_at: null, evaluando_viejos: 0, a_revisar: 0,
   piezas_abiertas: 0, umbral_confianza: 0.95, controlar_desde: 1, max_intentos_firma: 5,
+  vencidos: 0, a_revisar_vencidos: 0, horas_vencimiento: 48, alertar_desde: "2026-09-24",
 };
 
 export default async function RemitosPage({
