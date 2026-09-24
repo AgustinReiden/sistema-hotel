@@ -23,7 +23,9 @@ import {
 } from "./actions";
 import PaymentModal from "../components/PaymentModal";
 import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal";
+import PrintBlockedModal from "./PrintBlockedModal";
 import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
+import { openPrintWindow } from "@/lib/print-window";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import { isBankPaymentMethod } from "@/lib/billing";
 import type {
@@ -87,18 +89,20 @@ type RoomCardProps = {
   fiscalEnabled?: boolean;
 };
 
-function openAccountVoucher(movementId: string) {
-  if (typeof window === "undefined") return;
-  window.open(
-    `/admin/comprobante-cc/${movementId}?autoprint=1`,
-    "comprobante-" + movementId,
-    "width=420,height=720"
-  );
+/** Remito de cuenta corriente (el que firma el pasajero). false = el navegador lo bloqueó. */
+function openAccountVoucher(movementId: string): boolean {
+  return openPrintWindow(`/admin/comprobante-cc/${movementId}?autoprint=1`, "comprobante-" + movementId);
 }
+
+/** Check-out fiado cuyo remito no salió: el cargo ya está, falta el papel. */
+type RemitoBloqueado = { movementId: string; holder: string };
 
 export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, standardCheckOutTime, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
+  // Como invoicePrompt, vive acá y no en el PaymentModal: RoomCard no se desmonta con
+  // el revalidate del check-out, así que el aviso del remito no se pierde.
+  const [remitoBloqueado, setRemitoBloqueado] = useState<RemitoBloqueado | null>(null);
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -124,6 +128,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     : null;
   /** Reserva de empresa cuya estadía todavía no tiene un humano cargado (mig 88). */
   const passengerPending = room.billedToCompany && !room.companyPassengerId;
+  // Una empresa con cuenta corriente casi siempre fía: el cobro abre con Cta. Cte.
+  // marcada. En todo lo demás (también el particular con cuenta) no viene ningún medio.
+  const defaultPaymentMethod: PaymentMethod | undefined =
+    room.billedToCompany && room.accountCreditEnabled ? "cuenta_corriente" : undefined;
+  /** A nombre de quién queda lo fiado: la empresa de la reserva, o el huésped. */
+  const accountHolderName = reservationCompany?.display_name ?? room.client;
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
   const isConfirmedArrival = room.hasPendingArrival;
@@ -341,6 +351,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const reservationId = room.reservationId;
     if (!reservationId) return { success: false as const, error: "Reserva no encontrada." };
     const prompt = buildInvoicePrompt(paymentMethod);
+    const holder = accountHolderName ?? "Desconocido";
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
     const result = await runCheckout({
@@ -351,9 +362,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
 
     if (result.success) {
       setIsPaymentModalOpen(false);
-      // Cierre a cuenta corriente: imprimir el comprobante que firma el cliente.
-      if (paymentMethod === "cuenta_corriente" && result.data?.movementId) {
-        openAccountVoucher(result.data.movementId);
+      // Cierre a cuenta corriente: imprimir el remito que firma el pasajero. Si el
+      // navegador bloquea la ventana, el cargo ya está hecho y falta el papel: queda
+      // un cuadro con el botón para imprimirlo, que no se va solo.
+      const movementId = paymentMethod === "cuenta_corriente" ? result.data?.movementId : null;
+      if (movementId && !openAccountVoucher(movementId)) {
+        setRemitoBloqueado({ movementId, holder });
       }
       if (shouldPromptInvoice(paymentMethod) && prompt) setInvoicePrompt(prompt);
     }
@@ -762,6 +776,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           totalPrice={early ? early.newTotal : room.totalPrice}
           paidAmount={room.paidAmount}
           accountCreditEnabled={room.accountCreditEnabled}
+          defaultMethod={defaultPaymentMethod}
+          accountHolderName={accountHolderName}
           onSubmitPayment={submitCheckoutPayment}
           noteText={
             early
@@ -776,6 +792,25 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         data={invoicePrompt}
         onClose={() => setInvoicePrompt(null)}
       />
+
+      {remitoBloqueado && (
+        <PrintBlockedModal
+          titulo={`El check-out quedó hecho y la estadía quedó a cuenta de ${remitoBloqueado.holder}.`}
+          detalle="Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero."
+          botonLabel="Imprimir remito"
+          onPrint={() => {
+            // Es un click del usuario: esta vez el navegador la deja abrir.
+            if (openAccountVoucher(remitoBloqueado.movementId)) {
+              setRemitoBloqueado(null);
+              return;
+            }
+            toast.error(
+              "El navegador volvió a bloquear la ventana. Permití ventanas emergentes para este sitio y volvé a apretar."
+            );
+          }}
+          onClose={() => setRemitoBloqueado(null)}
+        />
+      )}
 
       {isEarlyModalOpen && earlyPreview && (
         <EarlyCheckoutModal
