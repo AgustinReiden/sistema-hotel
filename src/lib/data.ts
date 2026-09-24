@@ -4828,6 +4828,10 @@ export async function getRemitosSalud(): Promise<RemitosSalud> {
     umbral_confianza: Number(r.umbral_confianza) || 0.95,
     controlar_desde: Number(r.controlar_desde) || 1,
     max_intentos_firma: Number(r.max_intentos_firma) || 5,
+    vencidos: Number(r.vencidos) || 0,
+    a_revisar_vencidos: Number(r.a_revisar_vencidos) || 0,
+    horas_vencimiento: Number(r.horas_vencimiento) || 48,
+    alertar_desde: strOrNull(r.alertar_desde) ?? "2026-09-24",
   };
 }
 
@@ -4905,6 +4909,15 @@ export async function saveRemitosAjustes(umbral: number, controlarDesde: number)
   const { error } = await supabase.rpc("rpc_remitos_guardar_ajustes", {
     p_umbral: umbral,
     p_controlar_desde: controlarDesde,
+  });
+  if (error) throw error;
+}
+
+export async function saveRemitosVencimiento(horas: number, alertarDesde: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_remitos_guardar_vencimiento", {
+    p_horas: horas,
+    p_alertar_desde: alertarDesde,
   });
   if (error) throw error;
 }

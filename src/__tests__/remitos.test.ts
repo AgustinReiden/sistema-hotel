@@ -3,14 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
   accionesRemito,
   avisosSalud,
+  esVencido,
+  haceCuanto,
   haceDias,
   iaTexto,
   motivoPiezaLabel,
+  motivoVencido,
   parseNumeroRemito,
   piezaAsignable,
   rangoDeMes,
+  remitosParaRevisar,
   resumirRemitos,
+  textoParaRevisar,
   textoSemaforo,
+  textoVencidos,
 } from "@/lib/remitos";
 import { codigoRemito } from "@/lib/remito-codigo";
 import type { RemitoEstado, RemitoPanelRow, RemitosSalud } from "@/lib/types";
@@ -26,6 +32,7 @@ const fila = (estado: RemitoEstado, extra: Partial<RemitoPanelRow> = {}): Remito
 const SALUD: RemitosSalud = {
   ultima_ingesta_at: null, ultima_evaluacion_at: null, evaluando_viejos: 0, a_revisar: 0,
   piezas_abiertas: 0, umbral_confianza: 0.95, controlar_desde: 158, max_intentos_firma: 5,
+  vencidos: 0, a_revisar_vencidos: 0, horas_vencimiento: 48, alertar_desde: "2026-09-24",
 };
 const AHORA = Date.parse("2026-09-22T15:00:00Z");
 
@@ -84,5 +91,60 @@ describe("remitos: ayudantes del panel", () => {
     expect(haceDias("2026-09-22T10:00:00Z", AHORA)).toBe("hoy");
     expect(rangoDeMes("2028-02")).toEqual({ desde: "2028-02-01", hasta: "2028-02-29" });
     expect(rangoDeMes("2026-12")).toEqual({ desde: "2026-12-01", hasta: "2026-12-31" });
+  });
+});
+
+describe("vencidos (mig 124)", () => {
+  const AHORA = Date.parse("2026-09-28T15:00:00Z");
+  const AJ = { horas_vencimiento: 48, alertar_desde: "2026-09-24" };
+  const hace = (h: number) => new Date(AHORA - h * 3_600_000).toISOString();
+
+  it("vence a las 48 h si no está firmado ni marcado sin remito", () => {
+    expect(esVencido(fila("sin_escanear", { created_at: hace(49) }), AJ, AHORA)).toBe(true);
+    expect(esVencido(fila("sin_escanear", { created_at: hace(47) }), AJ, AHORA)).toBe(false);
+    for (const e of ["evaluando", "a_revisar", "sin_firma"] as const) {
+      expect(esVencido(fila(e, { created_at: hace(49) }), AJ, AHORA)).toBe(true);
+    }
+    expect(esVencido(fila("firmado", { created_at: hace(200) }), AJ, AHORA)).toBe(false);
+    expect(esVencido(fila("sin_remito", { created_at: hace(200) }), AJ, AHORA)).toBe(false);
+  });
+
+  it("los cargos anteriores a alertar_desde no vencen", () => {
+    // 2026-09-23 21:00 en Argentina es 2026-09-24 00:00 UTC: cuenta la fecha del hotel.
+    expect(esVencido(fila("sin_escanear", { created_at: "2026-09-24T00:00:00Z" }), AJ, AHORA)).toBe(false);
+    expect(esVencido(fila("sin_escanear", { created_at: "2026-09-24T03:30:00Z" }), AJ, AHORA)).toBe(true);
+  });
+
+  it("motivo del vencido en castellano", () => {
+    expect(motivoVencido("sin_escanear")).toBe("sin escanear");
+    expect(motivoVencido("evaluando")).toBe("la IA todavía no lo miró");
+    expect(motivoVencido("a_revisar")).toBe("a revisar");
+    expect(motivoVencido("sin_firma")).toBe("sin firma");
+  });
+
+  it("resumen de vencidos por motivo", () => {
+    expect(textoVencidos([fila("sin_escanear"), fila("sin_escanear"), fila("sin_firma")])).toBe(
+      "3 vencidos: 2 sin escanear · 1 sin firma"
+    );
+    expect(textoVencidos([fila("a_revisar")])).toBe("1 vencido: 1 a revisar");
+  });
+
+  it("para revisar: el menú y el panel dicen lo mismo, sin contar dos veces", () => {
+    const s = { ...SALUD, a_revisar: 3, a_revisar_vencidos: 1, vencidos: 4, piezas_abiertas: 1 };
+    expect(remitosParaRevisar(s)).toEqual({ remitos: 2, vencidos: 4, piezas: 1, total: 7 });
+    expect(textoParaRevisar(remitosParaRevisar(s))).toBe("Para revisar: 2 remitos, 4 vencidos y 1 pieza");
+    expect(textoParaRevisar({ remitos: 0, vencidos: 1, piezas: 0, total: 1 })).toBe("Para revisar: 1 vencido");
+    expect(textoParaRevisar({ remitos: 0, vencidos: 0, piezas: 0, total: 0 })).toBeNull();
+  });
+
+  it("hace cuánto salió: horas hasta 3 días, después días", () => {
+    expect(haceCuanto(hace(50), AHORA)).toBe("hace 50 h");
+    expect(haceCuanto(hace(80), AHORA)).toBe("hace 3 días");
+  });
+
+  it("el semáforo del mes suma los vencidos", () => {
+    const r = resumirRemitos([fila("firmado"), fila("sin_escanear")]);
+    expect(textoSemaforo(r, 1)).toBe("2 remitos: 1 firmado · 1 sin escanear · 1 vencido");
+    expect(textoSemaforo(r)).toBe("2 remitos: 1 firmado · 1 sin escanear");
   });
 });

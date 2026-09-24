@@ -35,7 +35,7 @@ const fila = (estado: RemitoEstado, extra: Partial<RemitoPanelRow> = {}): Remito
 const SALUD: RemitosSalud = {
   ultima_ingesta_at: "2026-09-22T14:55:00Z", ultima_evaluacion_at: "2026-09-22T14:55:00Z",
   evaluando_viejos: 0, a_revisar: 0, piezas_abiertas: 0, umbral_confianza: 0.95, controlar_desde: 151,
-  max_intentos_firma: 5,
+  max_intentos_firma: 5, vencidos: 0, a_revisar_vencidos: 0, horas_vencimiento: 48, alertar_desde: "2026-09-24",
 };
 const pieza = (motivo: string, extra: Partial<RemitoPieza> = {}): RemitoPieza => ({
   id: `p-${motivo}`, created_at: "2026-09-22T12:00:00Z", motivo, numeros_leidos: [],
@@ -102,5 +102,25 @@ describe("RemitosClient", () => {
     renderPanel({ piezas: [pieza("forma_no_reconocida", { numeros_leidos: ["R-000001", "R-000002"] })] });
     expect(screen.queryByRole("button", { name: "Asignar a un remito" })).toBeNull();
     expect(screen.getByText(/Adentro se leyó: R-000001, R-000002/)).toBeInTheDocument();
+  });
+
+  it("la línea 'para revisar' dice lo mismo que el numerito del menú", () => {
+    renderPanel({ salud: { ...SALUD, a_revisar: 2, a_revisar_vencidos: 1, vencidos: 3, piezas_abiertas: 1 } });
+    expect(screen.getByTestId("para-revisar")).toHaveTextContent("Para revisar: 1 remito, 3 vencidos y 1 pieza");
+  });
+
+  it("muestra los vencidos con sus acciones", () => {
+    renderPanel({ vencidos: [fila("sin_escanear", { created_at: "2026-09-19T12:00:00Z" })] });
+    expect(screen.getByText("Vencidos (1)")).toBeInTheDocument();
+    expect(screen.getByText("Sin remito")).toBeInTheDocument();
+  });
+
+  it("los ajustes mandan horas y fecha", async () => {
+    saveRemitosAjustesAction.mockResolvedValue({ success: true });
+    renderPanel();
+    fireEvent.click(screen.getByText("Ajustes"));
+    fireEvent.change(screen.getByLabelText("Horas para que un remito venza"), { target: { value: "72" } });
+    fireEvent.click(screen.getByText("Guardar"));
+    await waitFor(() => expect(saveRemitosAjustesAction).toHaveBeenCalledWith(95, 151, 72, "2026-09-24"));
   });
 });

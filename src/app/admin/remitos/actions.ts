@@ -8,7 +8,9 @@ import {
   markRemito,
   resolveRemitoPieza,
   saveRemitosAjustes,
+  saveRemitosVencimiento,
 } from "@/lib/data";
+import { DATE_KEY } from "@/lib/date-range";
 import { parseActionError } from "@/lib/error-utils";
 import { assertAdmin } from "@/lib/server-auth";
 import type { ActionResult, RemitoEstadoPersona, RemitoLookup } from "@/lib/types";
@@ -83,14 +85,24 @@ export async function resolveRemitoPiezaAction(
   }
 }
 
-export async function saveRemitosAjustesAction(umbralPct: number, controlarDesde: number): Promise<ActionResult> {
+export async function saveRemitosAjustesAction(
+  umbralPct: number,
+  controlarDesde: number,
+  horasVencimiento: number,
+  alertarDesde: string
+): Promise<ActionResult> {
   if (!Number.isFinite(umbralPct) || umbralPct < 50 || umbralPct > 100) {
     return { success: false, error: "El umbral tiene que estar entre 50 y 100." };
   }
   if (!numeroValido(controlarDesde)) return { success: false, error: "Número de remito inválido." };
+  if (!Number.isInteger(horasVencimiento) || horasVencimiento < 1 || horasVencimiento > 720) {
+    return { success: false, error: "Las horas para vencer tienen que estar entre 1 y 720." };
+  }
+  if (!DATE_KEY.test(alertarDesde)) return { success: false, error: "Fecha inválida." };
   try {
     await assertRemitosAdmin();
     await saveRemitosAjustes(Math.round(umbralPct) / 100, controlarDesde);
+    await saveRemitosVencimiento(horasVencimiento, alertarDesde);
     revalidar();
     return { success: true };
   } catch (error: unknown) {

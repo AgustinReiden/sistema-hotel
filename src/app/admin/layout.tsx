@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { countBillingPending, getActiveOpenShift, getRemitosSalud, getShiftSummary } from "@/lib/data";
 import { BILLING_PENDING_DAYS, totalPendingBilling } from "@/lib/billing";
+import { remitosParaRevisar } from "@/lib/remitos";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 import IdleLogout from "./IdleLogout";
 import ForcedShiftHandover from "./caja/ForcedShiftHandover";
@@ -86,7 +87,7 @@ export default async function AdminLayout({
                       .then(totalPendingBilling)
                       .catch(() => 0),
                   getRemitosSalud()
-                      .then((s) => s.a_revisar + s.piezas_abiertas)
+                      .then((s) => remitosParaRevisar(s).total)
                       .catch(() => 0),
               ])
             : [0, 0];
