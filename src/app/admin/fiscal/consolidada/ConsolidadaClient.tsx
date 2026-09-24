@@ -551,12 +551,20 @@ export default function ConsolidadaClient({
 
     if (result === null) {
       // No se reintenta solo: si la factura salió, emitirla de nuevo sería la segunda.
-      // La lista recargada dice si la estadía ya figura facturada o "en proceso".
+      // La pregunta es qué salió, y se contesta con lo que queda en "Pendientes de
+      // facturar": lo facturado o "en proceso" deja de ser facturable y desaparece de ahí
+      // (en "Todas" podría quedar en otra página). Por eso se vuelve a ese filtro.
+      setEstadoFiltro("pendientes");
       toast.error(
-        "No sabemos si la factura salió porque se cortó la comunicación. Antes de volver a emitir, mirá la lista: si la estadía figura facturada o «Factura en proceso», no la emitas de nuevo y revisala en Facturación.",
+        "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila.",
         { duration: 15000 }
       );
       await loadRows();
+      // La recarga vuelve a tildar todo lo pendiente: si la factura salió, lo que queda
+      // tildado es justo lo que se había dejado afuera a propósito, con "Revisar y
+      // emitir" listo. Después de un resultado incierto no queda nada tildado: cada
+      // estadía se vuelve a elegir a mano.
+      setPicked(new Set());
       return;
     }
 

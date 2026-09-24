@@ -612,14 +612,66 @@ describe("ConsolidadaClient", () => {
         expect.stringContaining("No sabemos si la factura salió"),
         expect.anything()
       );
-      // Recarga la lista: si salió, la estadía aparece facturada o «Factura en proceso».
+      // Recarga la lista: si salió, la estadía deja de figurar en «Pendientes de facturar».
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      // Acá no salió (la estadía sigue pendiente), pero queda sin tildar: se elige a mano.
+      await waitFor(() => expect(filaCheckbox("5")).not.toBeChecked());
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
 
-      // Nada quedó trabado: el cuadro se vuelve a abrir con los dos botones andando.
+      // Nada quedó trabado: se vuelve a tildar y el cuadro abre con los dos botones andando.
+      fireEvent.click(fila("5"));
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
       const cuadro = abrirCuadro();
       expect(within(cuadro).getByText("Volver").closest("button")).toBeEnabled();
       await confirmarListo(cuadro);
+    });
+
+    it("si la llamada se corta y la factura salió, lo que se había dejado afuera NO queda tildado y la lista vuelve a «Pendientes de facturar»", async () => {
+      // Cinco pendientes; se destildan las hab. 4 y 5 porque van el mes que viene.
+      const pendientes = ["1", "2", "3", "4", "5"].map((n) => makeRow(`r${n}`, n));
+      // La factura salió: las tres emitidas quedan «en proceso» (dejan de ser facturables)
+      // y siguen pendientes sólo las dos que se habían dejado afuera.
+      const enProceso = (n: string): CcAccountStayRow => ({
+        ...makeRow(`r${n}`, n, { facturable: false }),
+        estado: "en_proceso",
+      });
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => Promise.resolve({ success: true, data: pendientes }))
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            success: true,
+            data: [enProceso("1"), enProceso("2"), enProceso("3"), pendientes[3], pendientes[4]],
+          })
+        );
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("5")).toBeChecked());
+
+      fireEvent.click(fila("4"));
+      fireEvent.click(fila("5"));
+      // Parado en «Todas»: igual vuelve a «Pendientes», que es donde se ve qué salió.
+      fireEvent.click(screen.getByText("Todas"));
+
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).getByText(/^3 estadías/)).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(cuadro));
+
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      // El aviso habla de lo que queda a la vista, no de un estado que el filtro esconde.
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("«Pendientes de facturar»"),
+        expect.anything()
+      );
+      await waitFor(() =>
+        expect(screen.getByText("Pendientes de facturar")).toHaveAttribute("aria-pressed", "true")
+      );
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      // Las dos que se habían dejado afuera a propósito siguen ahí, sin tildar, y no hay
+      // barra con «Revisar y emitir» lista para mandar una segunda factura.
+      await waitFor(() => expect(filaCheckbox("4")).not.toBeChecked());
+      expect(filaCheckbox("5")).not.toBeChecked();
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
     });
 
     it("mientras la lista se recarga, «Revisar y emitir» no abre el cuadro (la recarga cambia la selección)", async () => {
