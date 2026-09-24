@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, CreditCard, Hash, Loader2, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { isValidCuit } from "@/lib/arca/amounts";
 import { avisoModoFacturacion, modoFacturacionAlCambiarCtaCte } from "@/lib/billing";
 import type { AssociatedClient, CondicionIva, FacturacionModo } from "@/lib/types";
 import { findCompaniesByDocumentAction } from "./actions";
@@ -103,6 +104,10 @@ export default function AssociatedClientModal({
 
   const mostrarNotaConsolidada =
     modoPrevio !== null && form.cuentaCorrienteHabilitada && form.facturacionModo === "consolidada";
+  // La consolidada de una empresa sale a su CUIT. Si lo cargado no es un CUIT válido
+  // pasa igual a Consolidada, pero la nota sale en ámbar y lo pide (decisión del
+  // 24/09). Solo es pantalla: no cambia qué se guarda.
+  const notaPideCuit = mostrarNotaConsolidada && !isValidCuit(form.documentId);
   const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, form.facturacionModo);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -303,7 +308,19 @@ export default function AssociatedClientModal({
                 Consolidada: las estadías no se facturan al cerrar; se juntan en una sola factura
                 desde Control de facturación.
               </p>
-              {mostrarNotaConsolidada && (
+              {notaPideCuit && (
+                <p
+                  role="status"
+                  className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                >
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <span>
+                    La consolidada de una empresa pide CUIT: cargalo en DNI o CUIT o elegí
+                    Factura por cada check-out.
+                  </span>
+                </p>
+              )}
+              {mostrarNotaConsolidada && !notaPideCuit && (
                 <p
                   role="status"
                   className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"

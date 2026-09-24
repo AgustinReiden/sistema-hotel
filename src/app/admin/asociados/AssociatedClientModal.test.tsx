@@ -17,6 +17,11 @@ vi.mock("./actions", () => ({
 
 const NOTA = /Pasó a Factura consolidada/;
 const AVISO = /no entra en la consolidada/;
+const NOTA_CUIT = /La consolidada de una empresa pide CUIT/;
+
+// Ficticios: el CUIT pasa isValidCuit; el DNI tiene 8 dígitos, así que no es CUIT.
+const CUIT_FICTICIO = "30-12345678-1";
+const DNI_FICTICIO = "12345678";
 
 function empresa(patch: Partial<AssociatedClient> = {}): AssociatedClient {
   return {
@@ -56,6 +61,10 @@ function montar(initialClient: AssociatedClient | null = null) {
 
 const cuentaCorriente = () => screen.getByLabelText("Cuenta corriente") as HTMLSelectElement;
 const facturacion = () => screen.getByLabelText("Facturación") as HTMLSelectElement;
+const cargarDocumento = (valor: string) =>
+  fireEvent.change(screen.getByLabelText("DNI o CUIT"), { target: { value: valor } });
+/** El recuadro de una nota o un aviso: el color vive en su clase (emerald o amber). */
+const recuadro = (texto: RegExp) => screen.getByText(texto).closest("p") as HTMLElement;
 
 describe("AssociatedClientModal: cuenta corriente y modo de facturación", () => {
   beforeEach(() => {
@@ -73,6 +82,7 @@ describe("AssociatedClientModal: cuenta corriente y modo de facturación", () =>
 
   it("poner Cuenta corriente = Sí deja elegida 'Factura consolidada' y muestra la nota", () => {
     montar();
+    cargarDocumento(CUIT_FICTICIO);
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
 
     expect(facturacion().value).toBe("consolidada");
@@ -138,6 +148,7 @@ describe("AssociatedClientModal: cuenta corriente y modo de facturación", () =>
 
   it("Sí, No y otra vez Sí vuelve a Consolidada con la nota", () => {
     montar();
+    cargarDocumento(CUIT_FICTICIO);
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
     fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
@@ -180,5 +191,83 @@ describe("AssociatedClientModal: cuenta corriente y modo de facturación", () =>
     expect(facturacion().value).toBe("por_checkout");
     expect(screen.getByText(AVISO)).toBeTruthy();
     expect(screen.queryByText(NOTA)).toBeNull();
+  });
+});
+
+// Decisión del 24/09: pasa igual a Consolidada y avisa. La consolidada de una empresa
+// sale con CUIT; si el documento cargado no lo es, la nota sale en ámbar y lo pide.
+describe("AssociatedClientModal: la consolidada de una empresa pide CUIT", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    H.findCompaniesByDocumentAction.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it("con un DNI, poner Sí deja Consolidada y la nota sale en ámbar pidiendo el CUIT", () => {
+    montar(empresa({ document_id: DNI_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(facturacion().value).toBe("consolidada");
+    expect(screen.getByText(NOTA_CUIT).textContent).toBe(
+      "La consolidada de una empresa pide CUIT: cargalo en DNI o CUIT o elegí Factura por cada check-out."
+    );
+    expect(recuadro(NOTA_CUIT).className).toContain("amber");
+    expect(recuadro(NOTA_CUIT).className).not.toContain("emerald");
+    expect(screen.queryByText(NOTA)).toBeNull();
+    expect(screen.queryByText(AVISO)).toBeNull();
+  });
+
+  it("con un CUIT válido sale la nota verde de siempre", () => {
+    montar(empresa({ document_id: CUIT_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(facturacion().value).toBe("consolidada");
+    expect(recuadro(NOTA).className).toContain("emerald");
+    expect(recuadro(NOTA).className).not.toContain("amber");
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+  });
+
+  it("una empresa nueva sin documento cargado también sale con el aviso ámbar", () => {
+    montar();
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(facturacion().value).toBe("consolidada");
+    expect(recuadro(NOTA_CUIT).className).toContain("amber");
+    expect(screen.queryByText(NOTA)).toBeNull();
+  });
+
+  it("corregir el documento a un CUIT válido cambia el aviso ámbar por la nota verde", () => {
+    montar(empresa({ document_id: DNI_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(screen.getByText(NOTA_CUIT)).toBeTruthy();
+
+    cargarDocumento(CUIT_FICTICIO);
+
+    expect(facturacion().value).toBe("consolidada");
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+    expect(recuadro(NOTA).className).toContain("emerald");
+  });
+
+  it("volver a No saca el aviso del CUIT junto con el cambio automático", () => {
+    montar(empresa({ document_id: DNI_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+
+    expect(facturacion().value).toBe("por_checkout");
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+    expect(screen.queryByText(NOTA)).toBeNull();
+  });
+
+  it("es solo un aviso: se guarda en Consolidada con el DNI, como antes", async () => {
+    const { onSubmit } = montar(empresa({ document_id: DNI_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    fireEvent.click(screen.getByText("Guardar Cambios"));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      documentId: DNI_FICTICIO,
+      cuentaCorrienteHabilitada: true,
+      facturacionModo: "consolidada",
+    });
   });
 });
