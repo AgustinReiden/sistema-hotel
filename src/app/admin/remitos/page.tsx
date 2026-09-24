@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Signature } from "lucide-react";
 
 import { getCtaCteAccounts, getCurrentUserRole, getRemitosSalud, listRemitoPiezas, listRemitos } from "@/lib/data";
-import { rangoDeMes } from "@/lib/remitos";
+import { esVencido, rangoDeMes } from "@/lib/remitos";
 import { hotelDateKey } from "@/lib/time";
 import type { CtaCteClientKind, RemitosSalud } from "@/lib/types";
 import RemitosClient from "./RemitosClient";
@@ -51,6 +51,15 @@ export default async function RemitosPage({
     cargar(getCtaCteAccounts(), [], "los clientes"),
   ]);
 
+  // Los vencidos no dependen del mes elegido. Solo se buscan si la salud dice que hay.
+  const hoyKey = hotelDateKey(ahora);
+  const vencidos =
+    salud.vencidos > 0
+      ? (await cargar(listRemitos(salud.alertar_desde, hoyKey), [], "los remitos vencidos"))
+          .filter((r) => esVencido(r, salud, ahora.getTime()))
+          .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      : [];
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <header className="h-auto bg-white border-b border-slate-200 px-4 md:px-6 py-3 shrink-0">
@@ -68,6 +77,7 @@ export default async function RemitosPage({
         <div className="max-w-[1400px] mx-auto">
           <RemitosClient
             rows={rows}
+            vencidos={vencidos}
             piezas={piezas}
             salud={salud}
             accounts={accounts}

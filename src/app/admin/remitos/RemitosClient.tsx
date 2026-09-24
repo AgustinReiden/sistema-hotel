@@ -13,13 +13,16 @@ import {
   REMITO_ESTADO_TONO,
   accionesRemito,
   avisosSalud,
+  esVencido,
   haceDias,
   iaTexto,
   motivoPiezaLabel,
   numeroRemitoVisible,
   parseNumeroRemito,
   piezaAsignable,
+  remitosParaRevisar,
   resumirRemitos,
+  textoParaRevisar,
   textoSemaforo,
 } from "@/lib/remitos";
 import type {
@@ -37,9 +40,12 @@ import {
   resolveRemitoPiezaAction,
   saveRemitosAjustesAction,
 } from "./actions";
+import VencidosSection from "./VencidosSection";
 
 type Props = {
   rows: RemitoPanelRow[];
+  /** Remitos vencidos de cualquier mes (mig 124): no dependen del filtro. */
+  vencidos?: RemitoPanelRow[];
   piezas: RemitoPieza[];
   salud: RemitosSalud;
   accounts: CtaCteAccount[];
@@ -99,7 +105,7 @@ function EnlaceEscaneo({ row }: { row: RemitoPanelRow }) {
   );
 }
 
-export default function RemitosClient({ rows, piezas, salud, accounts, cliente, mes, nowMs, errores }: Props) {
+export default function RemitosClient({ rows, vencidos = [], piezas, salud, accounts, cliente, mes, nowMs, errores }: Props) {
   const router = useRouter();
   const [clienteSel, setClienteSel] = useState(cliente);
   const [mesSel, setMesSel] = useState(mes);
@@ -119,8 +125,12 @@ export default function RemitosClient({ rows, piezas, salud, accounts, cliente, 
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   const [umbralPct, setUmbralPct] = useState(String(Math.round(salud.umbral_confianza * 100)));
   const [desdeTexto, setDesdeTexto] = useState(String(salud.controlar_desde));
+  const [horasTexto, setHorasTexto] = useState(String(salud.horas_vencimiento));
+  const [alertarDesde, setAlertarDesde] = useState(salud.alertar_desde);
 
   const resumen = useMemo(() => resumirRemitos(rows), [rows]);
+  const vencidosDelMes = useMemo(() => rows.filter((r) => esVencido(r, salud, nowMs)).length, [rows, salud, nowMs]);
+  const paraRevisar = textoParaRevisar(remitosParaRevisar(salud));
   const avisos = useMemo(() => avisosSalud(salud, nowMs), [salud, nowMs]);
   const mostrarCliente = cliente === "";
 
@@ -192,7 +202,7 @@ export default function RemitosClient({ rows, piezas, salud, accounts, cliente, 
 
   async function guardarAjustes() {
     setBusy(true);
-    const r = await saveRemitosAjustesAction(Number(umbralPct), Number(desdeTexto));
+    const r = await saveRemitosAjustesAction(Number(umbralPct), Number(desdeTexto), Number(horasTexto), alertarDesde);
     setBusy(false);
     if (!r.success) {
       toast.error(r.error);
@@ -264,8 +274,16 @@ export default function RemitosClient({ rows, piezas, salud, accounts, cliente, 
         </div>
       ))}
 
+      <VencidosSection rows={vencidos} horas={salud.horas_vencimiento} nowMs={nowMs} renderAcciones={accionesDe} />
+
+      {paraRevisar && (
+        <p className="text-sm font-semibold text-rose-800" data-testid="para-revisar">
+          {paraRevisar}
+        </p>
+      )}
+
       <p className="text-sm font-semibold text-slate-700" data-testid="semaforo">
-        {textoSemaforo(resumen)}
+        {textoSemaforo(resumen, vencidosDelMes)}
       </p>
 
       {rows.length > 0 && (
@@ -589,6 +607,34 @@ export default function RemitosClient({ rows, piezas, salud, accounts, cliente, 
               onChange={(e) => setDesdeTexto(e.target.value)}
               className={`${inputClass} w-32`}
             />
+          </div>
+          <div>
+            <label htmlFor="ajuste-horas" className="block text-sm font-semibold text-slate-700 mb-1.5">
+              Horas para que un remito venza
+            </label>
+            <input
+              id="ajuste-horas"
+              type="number"
+              min={1}
+              max={720}
+              value={horasTexto}
+              onChange={(e) => setHorasTexto(e.target.value)}
+              className={`${inputClass} w-full`}
+            />
+            <p className="text-xs text-slate-600 mt-1">Desde el check-out. Si no está firmado a esa altura, aparece en Vencidos.</p>
+          </div>
+          <div>
+            <label htmlFor="ajuste-alertar" className="block text-sm font-semibold text-slate-700 mb-1.5">
+              Alertar desde
+            </label>
+            <input
+              id="ajuste-alertar"
+              type="date"
+              value={alertarDesde}
+              onChange={(e) => setAlertarDesde(e.target.value)}
+              className={`${inputClass} w-full`}
+            />
+            <p className="text-xs text-slate-600 mt-1">Los cargos anteriores a esta fecha nunca vencen.</p>
           </div>
         </Modal>
       )}
