@@ -74,6 +74,8 @@ describe("middleware: Habitaciones, Categorías y Limpiezas son sólo admin", ()
     expect(await visit("/admin/categorias")).toBe("/forbidden");
     expect(await visit("/admin/mantenimiento")).toBe("/forbidden");
     expect(await visit("/admin/mantenimiento?page=2")).toBe("/forbidden");
+    // Y /forbidden la devuelve a Hoy.
+    expect(await visit("/forbidden")).toBe("/admin");
   });
 
   it("el admin entra a las tres como hoy", async () => {
