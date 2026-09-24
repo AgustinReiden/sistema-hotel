@@ -4360,31 +4360,36 @@ export async function getInvoiceStays(
 }
 
 /**
- * Datos de facturación de las fichas habilitadas a cuenta corriente, indexados
- * por `${kind}:${id}`. Lo usa la pantalla de factura consolidada para precargar
- * el receptor y anticipar la letra, tanto para empresas como para huéspedes.
+ * Datos de facturación de la ficha de UN cliente de cuenta corriente. Lo usa la
+ * pantalla de factura consolidada para precargar el receptor y anticipar la letra,
+ * tanto para empresas como para huéspedes. Null si la ficha no existe.
+ *
+ * No filtra por `cuenta_corriente_habilitada`: la consolidada también factura a los
+ * clientes con saldo a los que después se les apagó la cuenta corriente (los que
+ * getCtaCteAccounts suma aparte). La ficha precarga pero no decide el comprobante
+ * (decisión del 24/09): si la ficha no llegara, un huésped en Responsable Inscripto
+ * se vería como consumidor final y saldría Factura B con DNI. Por lo mismo, un error
+ * de lectura se tira en lugar de devolver la ficha vacía.
  */
-export async function getCtaCteBillingProfiles(): Promise<Record<string, InvoiceReceptorPrefill>> {
+export async function getCtaCteBillingProfile(
+  kind: CtaCteClientKind,
+  id: string
+): Promise<InvoiceReceptorPrefill | null> {
   const supabase = await createClient();
-  const [companyRes, guestRes] = await Promise.all([
-    supabase
-      .from("associated_clients")
-      .select("id, cuenta_corriente_habilitada, condicion_iva, document_id, display_name, razon_social, domicilio")
-      .eq("cuenta_corriente_habilitada", true),
-    supabase
-      .from("guests")
-      .select("id, cuenta_corriente_habilitada, condicion_iva, cuit, full_name, razon_social, domicilio_fiscal")
-      .eq("cuenta_corriente_habilitada", true),
-  ]);
-
-  const map: Record<string, InvoiceReceptorPrefill> = {};
-  for (const c of (companyRes.data ?? []) as BillingClientRow[]) {
-    map[`company:${c.id}`] = toInvoicePrefill(c, null);
-  }
-  for (const g of (guestRes.data ?? []) as BillingClientRow[]) {
-    map[`guest:${g.id}`] = toInvoicePrefill(g, null);
-  }
-  return map;
+  const { data, error } =
+    kind === "company"
+      ? await supabase
+          .from("associated_clients")
+          .select("id, cuenta_corriente_habilitada, condicion_iva, document_id, display_name, razon_social, domicilio")
+          .eq("id", id)
+          .maybeSingle()
+      : await supabase
+          .from("guests")
+          .select("id, cuenta_corriente_habilitada, condicion_iva, cuit, full_name, razon_social, domicilio_fiscal")
+          .eq("id", id)
+          .maybeSingle();
+  if (error) throw error;
+  return data ? toInvoicePrefill(data as BillingClientRow, null) : null;
 }
 
 /**

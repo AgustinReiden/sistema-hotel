@@ -33,13 +33,13 @@ vi.mock("next/navigation", () => ({
 }));
 const getCurrentUserRole = vi.fn();
 const getCtaCteAccounts = vi.fn();
-const getCtaCteBillingProfiles = vi.fn();
+const getCtaCteBillingProfile = vi.fn();
 const getFiscalSettings = vi.fn();
 const getHotelSettings = vi.fn();
 vi.mock("@/lib/data", () => ({
   getCurrentUserRole: () => getCurrentUserRole(),
   getCtaCteAccounts: () => getCtaCteAccounts(),
-  getCtaCteBillingProfiles: () => getCtaCteBillingProfiles(),
+  getCtaCteBillingProfile: (...args: unknown[]) => getCtaCteBillingProfile(...args),
   getFiscalSettings: () => getFiscalSettings(),
   getHotelSettings: () => getHotelSettings(),
 }));
@@ -988,7 +988,10 @@ describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", ()
     redirect.mockClear();
     getCurrentUserRole.mockResolvedValue("admin");
     getCtaCteAccounts.mockResolvedValue(accounts);
-    getCtaCteBillingProfiles.mockResolvedValue(billingProfiles);
+    getCtaCteBillingProfile.mockReset();
+    getCtaCteBillingProfile.mockImplementation((kind: string, id: string) =>
+      Promise.resolve(billingProfiles[`${kind}:${id}`] ?? null)
+    );
     getFiscalSettings.mockResolvedValue({
       id: 1,
       enabled: true,
@@ -1024,12 +1027,15 @@ describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", ()
   ])("%s, lleva a Control", async (_caso, params) => {
     await expect(abrir(params)).rejects.toThrow("NEXT_REDIRECT");
     expect(redirect).toHaveBeenCalledWith("/admin/fiscal/control");
+    // El id de la URL recién va a la base con el cliente validado.
+    expect(getCtaCteBillingProfile).not.toHaveBeenCalled();
   });
 
   it("con cliente, abre la pantalla con su nombre y el cuadro lleva el ambiente, el punto de venta y el plazo", async () => {
     render(await abrir({ kind: "company", id: "acme" }));
 
     expect(redirect).not.toHaveBeenCalled();
+    expect(getCtaCteBillingProfile).toHaveBeenCalledWith("company", "acme");
     expect(screen.getByText("Acme SA")).toBeInTheDocument();
     await screen.findByLabelText(BARRA);
 
@@ -1039,5 +1045,28 @@ describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", ()
     expect(
       within(cuadro).getByText("Condición de venta: cuenta corriente · vence a 45 días")
     ).toBeInTheDocument();
+  });
+
+  // La pantalla manda 'consumidor_final' cuando no ve una condición: si la ficha del
+  // cliente de la URL no llegara (antes se leían sólo las fichas con la cuenta corriente
+  // prendida), un huésped en Responsable Inscripto se vería como consumidor final y
+  // saldría Factura B con DNI. La página lee la ficha de ese cliente, sin más filtro.
+  it("precarga la ficha del cliente de la URL: un huésped en Responsable Inscripto ve Factura A con su CUIT", async () => {
+    render(await abrir({ kind: "guest", id: "g-ri" }));
+
+    expect(getCtaCteBillingProfile).toHaveBeenCalledWith("guest", "g-ri");
+    await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563"));
+    expect(screen.getByLabelText("Condición frente al IVA")).toHaveValue("responsable_inscripto");
+
+    const cuadro = abrirCuadro();
+    expect(within(cuadro).getByText("Factura A")).toBeInTheDocument();
+    expect(within(cuadro).getByText("CUIT 20-30123456-3")).toBeInTheDocument();
+  });
+
+  it("si no se puede leer la ficha, la página no abre en lugar de mostrarlo como consumidor final", async () => {
+    getCtaCteBillingProfile.mockRejectedValue(new Error("no se pudo leer la ficha"));
+
+    await expect(abrir({ kind: "guest", id: "g-ri" })).rejects.toThrow("no se pudo leer la ficha");
+    expect(redirect).not.toHaveBeenCalled();
   });
 });

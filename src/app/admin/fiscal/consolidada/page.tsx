@@ -3,7 +3,7 @@ import { Layers } from "lucide-react";
 
 import {
   getCtaCteAccounts,
-  getCtaCteBillingProfiles,
+  getCtaCteBillingProfile,
   getCurrentUserRole,
   getFiscalSettings,
   getHotelSettings,
@@ -35,9 +35,8 @@ export default async function ConsolidadaPage({
     redirect("/admin/fiscal/control");
   }
 
-  const [accounts, billingProfiles, settings, hotel] = await Promise.all([
+  const [accounts, settings, hotel] = await Promise.all([
     getCtaCteAccounts(),
-    getCtaCteBillingProfiles(),
     getFiscalSettings().catch(() => null),
     // Sólo se usa para la zona horaria de los presets: si falla, la pantalla
     // tiene que seguir funcionando igual, no morirse por unos botones.
@@ -53,6 +52,13 @@ export default async function ConsolidadaPage({
   if (!accounts.some((a) => a.kind === preselectKind && a.id === preselectId)) {
     redirect("/admin/fiscal/control");
   }
+
+  // La ficha del cliente precarga el receptor, tenga o no la cuenta corriente prendida:
+  // la pantalla manda 'consumidor_final' si no ve una condición, así que una ficha que
+  // no llega haría salir B con DNI a un Responsable Inscripto. Se lee recién con el
+  // cliente validado, porque el id viene de la URL.
+  const profile = await getCtaCteBillingProfile(preselectKind, preselectId);
+  const billingProfiles = profile ? { [`${preselectKind}:${preselectId}`]: profile } : {};
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
