@@ -18,17 +18,29 @@ const RETURN_GAP_MS = 2000;
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 /**
+ * La capa oscura que tapa toda la pantalla: la tienen todos los cuadros del panel.
+ * Casi ninguno tiene todavía `aria-modal` (llega con F5-8), así que se los reconoce por ella.
+ */
+const OVERLAY_SELECTOR = ".fixed.inset-0";
+
+/**
  * ¿Conviene NO recargar ahora? Sí cuando:
  * - la pestaña está oculta (nadie la mira: se pone al día al volver),
- * - hay un cuadro abierto con `aria-modal="true"`,
+ * - no hay conexión,
+ * - hay un cuadro abierto (`aria-modal="true"` o la capa `fixed inset-0`),
  * - el foco está en un campo (input, textarea, select o algo editable).
  *
- * `router.refresh()` conserva el estado del cliente, pero el cuadro que se está
- * completando podría mostrar un dato que cambió abajo de la persona. Mejor esperar.
+ * Un cuadro abierto lee la tarjeta recién cuando se confirma: si la recarga le cambia la
+ * reserva o el saldo abajo, el cobro, el check-in o la cancelación caen sobre otro dato.
+ * Y `router.refresh()` conserva lo que está en pantalla solo si la consulta sale bien:
+ * sin conexión, con un error del servidor o después de un deploy, Next recarga la página
+ * entera y se pierde lo que estaba cargado. Con un cuadro abierto, mejor esperar.
  */
 export function shouldSkipRefresh(doc: Document): boolean {
   if (doc.hidden) return true;
+  if (doc.defaultView?.navigator.onLine === false) return true;
   if (doc.querySelector('[aria-modal="true"]')) return true;
+  if (doc.querySelector(OVERLAY_SELECTOR)) return true;
 
   const active = doc.activeElement;
   if (!active) return false;
@@ -47,8 +59,8 @@ type UseAutoRefreshOptions = {
 /**
  * Pone al día la pantalla sola: cada `intervalMs`, al volver a la ventana (`focus`) y
  * al volver a la pestaña (`visibilitychange`). Usa `router.refresh()`, que vuelve a
- * pedir los server components sin perder lo que el cliente tiene en pantalla (el mismo
- * patrón que la Caja). Es el único hook de refresco del panel: lo usan Hoy y, más
+ * pedir los server components (el mismo patrón que la Caja). Cuándo no recarga lo decide
+ * `shouldSkipRefresh`. Es el único hook de refresco del panel: lo usan Hoy y, más
  * adelante, la pantalla de mantenimiento.
  */
 export function useAutoRefresh({

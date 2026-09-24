@@ -15,6 +15,7 @@ import { shouldSkipRefresh, useAutoRefresh } from "@/app/admin/useAutoRefresh";
 const refresh = H.router.refresh;
 
 let tabOculta = false;
+let sinConexion = false;
 
 /** Simula que la recepcionista cambia de pestaña (oculta) o vuelve a Hoy (visible). */
 function cambiarVisibilidad(oculta: boolean) {
@@ -22,10 +23,26 @@ function cambiarVisibilidad(oculta: boolean) {
   document.dispatchEvent(new Event("visibilitychange"));
 }
 
+/**
+ * Un cuadro de Hoy como los de RoomCard (cancelar reserva, check-in de empresa, cobro):
+ * la capa oscura `fixed inset-0` y adentro un campo y un botón, sin `aria-modal`.
+ */
+function abrirCuadroSinAriaModal() {
+  const capa = document.createElement("div");
+  capa.className = "fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/50";
+  const motivo = document.createElement("textarea");
+  const confirmar = document.createElement("button");
+  confirmar.textContent = "Sí, Cancelar";
+  capa.append(motivo, confirmar);
+  document.body.appendChild(capa);
+  return { capa, motivo, confirmar };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   refresh.mockClear();
   tabOculta = false;
+  sinConexion = false;
   Object.defineProperty(document, "hidden", {
     configurable: true,
     get: () => tabOculta,
@@ -33,6 +50,10 @@ beforeEach(() => {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     get: () => (tabOculta ? "hidden" : "visible"),
+  });
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => !sinConexion,
   });
 });
 
@@ -93,6 +114,39 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(refresh).not.toHaveBeenCalled();
 
     cuadro.remove();
+    vi.advanceTimersByTime(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("con un cuadro abierto sin aria-modal y el foco fuera del campo no refresca; al cerrarlo vuelve", () => {
+    // Escribió el motivo, tocó fuera del campo y el foco quedó en el botón: si la tarjeta
+    // se recargara abajo, el cuadro podría pasar a apuntar a otra reserva.
+    renderHook(() => useAutoRefresh());
+    const { capa, motivo, confirmar } = abrirCuadroSinAriaModal();
+    motivo.focus();
+    confirmar.focus();
+    expect(document.activeElement).toBe(confirmar);
+
+    vi.advanceTimersByTime(90_000);
+    window.dispatchEvent(new Event("focus"));
+    cambiarVisibilidad(true);
+    cambiarVisibilidad(false);
+    expect(refresh).not.toHaveBeenCalled();
+
+    capa.remove();
+    vi.advanceTimersByTime(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin conexión no refresca (Next cambiaría Hoy por la página sin conexión); al volver, sí", () => {
+    renderHook(() => useAutoRefresh());
+    sinConexion = true;
+
+    vi.advanceTimersByTime(60_000);
+    window.dispatchEvent(new Event("focus"));
+    expect(refresh).not.toHaveBeenCalled();
+
+    sinConexion = false;
     vi.advanceTimersByTime(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -189,6 +243,27 @@ describe("shouldSkipRefresh — cuándo no conviene recargar", () => {
     expect(shouldSkipRefresh(document)).toBe(false);
 
     cuadro.setAttribute("aria-modal", "true");
+    expect(shouldSkipRefresh(document)).toBe(true);
+  });
+
+  it("saltea con un cuadro sin aria-modal (la capa fixed inset-0), aunque el foco esté en un botón", () => {
+    const { confirmar } = abrirCuadroSinAriaModal();
+    confirmar.focus();
+    expect(document.activeElement).toBe(confirmar);
+    expect(shouldSkipRefresh(document)).toBe(true);
+  });
+
+  it("no saltea por otra cosa fija o por una capa absolute inset-0", () => {
+    const barraFija = document.createElement("div");
+    barraFija.className = "fixed bottom-4 right-4";
+    const capaInterna = document.createElement("div");
+    capaInterna.className = "absolute inset-0";
+    document.body.append(barraFija, capaInterna);
+    expect(shouldSkipRefresh(document)).toBe(false);
+  });
+
+  it("saltea sin conexión", () => {
+    sinConexion = true;
     expect(shouldSkipRefresh(document)).toBe(true);
   });
 
