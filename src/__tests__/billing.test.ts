@@ -4,14 +4,16 @@ import {
   BANK_PAYMENT_METHODS,
   DETALLE_LINEA_MAX,
   DETALLE_NOTA_MAX,
+  avisoModoFacturacion,
   defaultStayDescription,
   initialInvoiceStep,
   isBankPaymentMethod,
   letraDeReceptor,
+  modoFacturacionAlCambiarCtaCte,
   sanitizeDetalleLine,
   stepAfterYes,
 } from "@/lib/billing";
-import type { PaymentMethod } from "@/lib/types";
+import type { FacturacionModo, PaymentMethod } from "@/lib/types";
 
 // Los 8 valores del enum (types.ts y el CHECK de payments en la mig 10).
 const ALL_METHODS: PaymentMethod[] = [
@@ -226,5 +228,62 @@ describe("letraDeReceptor", () => {
     expect(letraDeReceptor({ ...base, condicionIva: "monotributo" })).toBe("A");
     // Exento lleva CUIT pero el comprobante es B.
     expect(letraDeReceptor({ ...base, condicionIva: "exento" })).toBe("B");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cuenta corriente y modo de facturación (F0-2).
+// Una ficha con cuenta corriente en "por cada check-out" factura cada estadía
+// fiada al cerrarla (o la deja sin factura) y nunca entra en la consolidada.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TODOS_LOS_MODOS: FacturacionModo[] = ["por_checkout", "consolidada", "no_factura"];
+
+describe("modoFacturacionAlCambiarCtaCte", () => {
+  it("habilitar la cuenta corriente con 'por_checkout' pasa a consolidada", () => {
+    expect(modoFacturacionAlCambiarCtaCte("por_checkout", true)).toBe("consolidada");
+  });
+
+  it("habilitarla con 'no_factura' lo deja como estaba", () => {
+    expect(modoFacturacionAlCambiarCtaCte("no_factura", true)).toBe("no_factura");
+  });
+
+  it("habilitarla con 'consolidada' sigue en consolidada", () => {
+    expect(modoFacturacionAlCambiarCtaCte("consolidada", true)).toBe("consolidada");
+  });
+
+  it("deshabilitarla no cambia el modo, sea cual sea", () => {
+    for (const modo of TODOS_LOS_MODOS) {
+      expect(modoFacturacionAlCambiarCtaCte(modo, false)).toBe(modo);
+    }
+  });
+});
+
+describe("avisoModoFacturacion", () => {
+  it("con cuenta corriente y factura por check-out avisa", () => {
+    const aviso = avisoModoFacturacion(true, "por_checkout");
+    expect(aviso).toEqual(expect.any(String));
+    expect(aviso).toMatch(/no entra en la consolidada/);
+  });
+
+  it("con cuenta corriente y consolidada no avisa", () => {
+    expect(avisoModoFacturacion(true, "consolidada")).toBeNull();
+  });
+
+  it("sin cuenta corriente no avisa, aunque facture por check-out", () => {
+    expect(avisoModoFacturacion(false, "por_checkout")).toBeNull();
+  });
+
+  it("sólo avisa en la combinación cuenta corriente + por check-out", () => {
+    for (const habilitada of [false, true]) {
+      for (const modo of TODOS_LOS_MODOS) {
+        const aviso = avisoModoFacturacion(habilitada, modo);
+        if (habilitada && modo === "por_checkout") {
+          expect(aviso).not.toBeNull();
+        } else {
+          expect(aviso).toBeNull();
+        }
+      }
+    }
   });
 });
