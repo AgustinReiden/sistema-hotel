@@ -47,30 +47,36 @@ export default async function AdminLayout({
 
     if (forceHandover && openShift) {
         const summary = await getShiftSummary(openShift.id).catch(() => null);
+        // El cierre por inactividad va también acá, igual que en el panel: una PC olvidada
+        // en Hoy pasa sola a este bloqueo cuando otra recepcionista abre la caja, y sin esto
+        // la sesión de la que se fue no vencía nunca.
         return (
-            <ForcedShiftHandover
-                shiftId={openShift.id}
-                shiftNumber={openShift.shift_number}
-                openedByName={summary?.openedByName ?? null}
-                currentUserName={currentUserName}
-                totalsByMethod={
-                    summary
-                        ? { ...summary.totalsByMethod, cash: 0 }
-                        : {
-                              cash: 0,
-                              credit_card: 0,
-                              debit_card: 0,
-                              bank_transfer: 0,
-                              mercado_pago: 0,
-                              vale_blanco: 0,
-                              cuenta_corriente: 0,
-                              other: 0,
-                          }
-                }
-                creditCharged={summary?.creditCharged ?? 0}
-                creditCharges={summary?.creditCharges ?? []}
-                checkoutsCount={summary?.checkoutsCount ?? 0}
-            />
+            <>
+                {role === "receptionist" && <IdleLogout />}
+                <ForcedShiftHandover
+                    shiftId={openShift.id}
+                    shiftNumber={openShift.shift_number}
+                    openedByName={summary?.openedByName ?? null}
+                    currentUserName={currentUserName}
+                    totalsByMethod={
+                        summary
+                            ? { ...summary.totalsByMethod, cash: 0 }
+                            : {
+                                  cash: 0,
+                                  credit_card: 0,
+                                  debit_card: 0,
+                                  bank_transfer: 0,
+                                  mercado_pago: 0,
+                                  vale_blanco: 0,
+                                  cuenta_corriente: 0,
+                                  other: 0,
+                              }
+                    }
+                    creditCharged={summary?.creditCharged ?? 0}
+                    creditCharges={summary?.creditCharges ?? []}
+                    checkoutsCount={summary?.checkoutsCount ?? 0}
+                />
+            </>
         );
     }
 
