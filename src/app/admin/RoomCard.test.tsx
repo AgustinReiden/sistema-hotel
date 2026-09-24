@@ -214,6 +214,14 @@ describe("RoomCard: check-out a cuenta corriente y el remito", () => {
       )
     ).toBeTruthy();
     expect(screen.getByText(/Falta el remito: el navegador bloqueó la ventana/)).toBeTruthy();
+    // Recepción no entra a Cuenta Corriente: el cuadro dice quién lo reimprime si se
+    // cierra, y el botón de cerrar dice que el papel no sale.
+    expect(
+      screen.getByText(
+        /Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente/
+      )
+    ).toBeTruthy();
+    expect(screen.getByText("Cerrar sin imprimir")).toBeTruthy();
 
     // Vuelve a bloquear: el cuadro sigue ahí y avisa qué hacer.
     fireEvent.click(screen.getByText("Imprimir remito"));
@@ -231,5 +239,21 @@ describe("RoomCard: check-out a cuenta corriente y el remito", () => {
       "width=420,height=720"
     );
     expect(screen.queryByText("Imprimir remito")).toBeNull();
+  });
+
+  it("el cuadro del remito solo se va sin imprimir si se aprieta «Cerrar sin imprimir»", async () => {
+    const open = vi.fn().mockReturnValue(null);
+    vi.stubGlobal("open", open);
+    abrir(habitacion());
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByText("Cargar a la cuenta y cerrar"));
+
+    await waitFor(() => expect(screen.getByText("Cerrar sin imprimir")).toBeTruthy());
+    fireEvent.click(screen.getByText("Cerrar sin imprimir"));
+
+    expect(screen.queryByText("Imprimir remito")).toBeNull();
+    // Cerrar no intenta abrir el remito de nuevo: fue una decisión, no un reintento.
+    expect(open).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,7 +6,10 @@ import { Printer } from "lucide-react";
 export type PrintBlockedModalProps = {
   /** Qué ya quedó hecho (ej. "El check-out quedó hecho y la estadía quedó a cuenta de X."). */
   titulo: string;
-  /** Qué papel falta y por qué. */
+  /**
+   * Qué papel falta, por qué, y quién lo reimprime y desde dónde si se cierra sin
+   * imprimir (como ReciboPendiente): para recepción, cerrar puede no tener vuelta.
+   */
   detalle: string;
   /** Texto del botón que vuelve a abrir el impreso (ej. "Imprimir remito"). */
   botonLabel: string;
@@ -21,7 +24,8 @@ export type PrintBlockedModalProps = {
  *
  * Es un cuadro propio y no un toast porque ese estado no se puede perder de vista
  * con un aviso que se desvanece solo: no se cierra con un click afuera ni con el
- * tiempo, solo con sus botones. Mismo diseño que ReciboPendiente
+ * tiempo, solo con sus botones. El de cerrar dice "Cerrar sin imprimir", para que
+ * nadie lo apriete creyendo que el papel ya salió. Mismo diseño que ReciboPendiente
  * (cuentas/RegisterPaymentModal.tsx). Va por encima de los demás modales del panel
  * (z-[70]), porque el papel es lo que hay que resolver primero.
  */
@@ -63,7 +67,7 @@ export default function PrintBlockedModal({
             onClick={onClose}
             className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-600 font-semibold rounded-xl hover:bg-slate-50"
           >
-            Cerrar
+            Cerrar sin imprimir
           </button>
           <button
             type="button"

@@ -796,7 +796,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       {remitoBloqueado && (
         <PrintBlockedModal
           titulo={`El check-out quedó hecho y la estadía quedó a cuenta de ${remitoBloqueado.holder}.`}
-          detalle="Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero."
+          detalle="Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente (solapa Movimientos)."
           botonLabel="Imprimir remito"
           onPrint={() => {
             // Es un click del usuario: esta vez el navegador la deja abrir.

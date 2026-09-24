@@ -137,6 +137,21 @@ describe("PaymentModal: el medio de pago arranca vacío", () => {
     await waitFor(() => expect(H.registerPaymentAction).toHaveBeenCalledTimes(1));
     expect(H.registerPaymentAction).toHaveBeenCalledWith("res-1", 50000, "bank_transfer");
   });
+
+  it("la tarjeta tiene scroll propio: en un celular el botón de cobrar no queda fuera de pantalla", () => {
+    const { container } = abrirCheckout({
+      defaultMethod: "cuenta_corriente",
+      accountCreditEnabled: true,
+      accountHolderName: "Empresa Ficticia SA",
+    });
+
+    // jsdom no mide alturas: se comprueba que la tarjeta que contiene el formulario
+    // tope su alto y scrollee, en vez de recortarse (antes era overflow-hidden).
+    const tarjeta = container.querySelector("#payment-form")?.closest(".overflow-y-auto");
+    expect(tarjeta).not.toBeNull();
+    expect(tarjeta?.classList.contains("max-h-[92dvh]")).toBe(true);
+    expect(tarjeta?.classList.contains("overflow-hidden")).toBe(false);
+  });
 });
 
 describe("PaymentModal: Cta. Cte. en el check-out de una empresa con cuenta", () => {

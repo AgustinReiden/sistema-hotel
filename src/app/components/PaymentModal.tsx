@@ -195,7 +195,10 @@ export default function PaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200 w-full h-full text-left">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden relative">
+      {/* Con scroll propio: en un celular, fiar (recuadro violeta, botón largo) o el
+          aviso de "Elegí cómo paga" pasan el alto de la pantalla, y sin esto la X y
+          el botón de cobrar quedaban recortados y sin forma de llegar. */}
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92dvh] overflow-y-auto overscroll-contain relative">
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
