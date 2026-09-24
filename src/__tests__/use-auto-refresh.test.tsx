@@ -225,12 +225,14 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("si el servidor no contesta en 5 s, corta el pedido, no refresca y no deja nada pendiente", async () => {
+  it("si el servidor no contesta en 5 s, corta el pedido, no refresca y en el turno siguiente vuelve a probar", async () => {
     renderHook(() => useAutoRefresh());
     servidorColgado();
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(false);
     // El intervalo y el plazo del pedido.
     expect(vi.getTimerCount()).toBe(2);
 
@@ -240,8 +242,17 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(5_000);
+    expect(signal?.aborted).toBe(true);
     expect(refresh).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(1);
+
+    // Si el pedido colgado no se cortara, Hoy quedaría trabado: ninguna recarga más
+    // saldría. Cuando el servidor vuelve, el turno siguiente pregunta y recarga.
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ status: 200 });
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("si mientras espera al servidor se abre un cuadro, no refresca", async () => {
