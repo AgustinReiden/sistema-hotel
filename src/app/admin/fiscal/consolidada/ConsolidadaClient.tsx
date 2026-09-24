@@ -127,6 +127,13 @@ export default function ConsolidadaClient({
   const [rows, setRows] = useState<CcAccountStayRow[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // La última carga de la lista falló: la lista vacía no quiere decir que el cliente no
+  // tenga estadías (después de una emisión incierta, eso se leería como "salió").
+  const [errorCarga, setErrorCarga] = useState(false);
+  // Después de una emisión con resultado incierto, la próxima carga que ande no tilda
+  // nada (ver emitConfirmado): si la factura salió, lo que se tildaría es justo lo que
+  // se había dejado afuera a propósito. Es un ref porque lo lee `loadRows` y no se pinta.
+  const sinTildarEnLaProximaCarga = useRef(false);
   const [emitting, setEmitting] = useState(false);
   // Cuadro "Revisá antes de emitir" abierto. El botón de la barra sólo lo abre: a ARCA
   // se va recién desde "Confirmar y emitir en ARCA".
@@ -186,26 +193,44 @@ export default function ConsolidadaClient({
   const lineaDetalle = (r: CcAccountStayRow) =>
     detalleOverrides[r.reservation_id] ?? defaultStayDescription(r);
 
-  const loadRows = useCallback(async () => {
+  /**
+   * Carga la lista y devuelve si pudo. No tira nunca: si la acción no contesta (se
+   * cortó la red, hubo un deploy con la pantalla abierta), la lista no puede quedar en
+   * «Cargando…» con «Recargar» deshabilitado. La emisión con resultado incierto mira
+   * lo que devuelve para no prometer una lista que no se cargó.
+   */
+  const loadRows = useCallback(async (): Promise<boolean> => {
     setLastClickedIndex(null);
     // La recarga vuelve a tildar todo lo pendiente (abajo): un cuadro de revisión
     // abierto pasaría a decir otra cosa que lo que se revisó. Se cierra.
     setRevisando(false);
     setLoading(true);
-    // Los vacíos van como undefined, no como "": el filtro por período es
-    // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
-    const result = await loadCcAccountStaysAction(
-      kind,
-      id,
-      range.from || undefined,
-      range.to || undefined
-    );
-    setLoading(false);
+    setErrorCarga(false);
+    let result: Awaited<ReturnType<typeof loadCcAccountStaysAction>>;
+    try {
+      // Los vacíos van como undefined, no como "": el filtro por período es
+      // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
+      result = await loadCcAccountStaysAction(
+        kind,
+        id,
+        range.from || undefined,
+        range.to || undefined
+      );
+    } catch {
+      result = {
+        success: false,
+        error:
+          "No pudimos cargar la lista. Revisá la conexión y volvé a intentar; si sigue sin cargar, recargá la página.",
+      };
+    } finally {
+      setLoading(false);
+    }
     if (!result.success) {
       toast.error(result.error);
       setRows([]);
       setPicked(new Set());
-      return;
+      setErrorCarga(true);
+      return false;
     }
     const data = result.data ?? [];
     setRows(data);
@@ -213,8 +238,15 @@ export default function ConsolidadaClient({
     // fijar el "de M" del contador.
     if (!range.from && !range.to) setTotalStays(data.length);
     // Por defecto se selecciona todo lo pendiente: el caso normal es
-    // "facturame todo lo que debe".
-    setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
+    // "facturame todo lo que debe". Salvo la primera carga que anda después de una
+    // emisión incierta: ahí no se tilda nada y cada estadía se vuelve a elegir a mano.
+    if (sinTildarEnLaProximaCarga.current) {
+      sinTildarEnLaProximaCarga.current = false;
+      setPicked(new Set());
+    } else {
+      setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
+    }
+    return true;
   }, [kind, id, range.from, range.to]);
 
   useEffect(() => {
@@ -555,16 +587,21 @@ export default function ConsolidadaClient({
       // facturar": lo facturado o "en proceso" deja de ser facturable y desaparece de ahí
       // (en "Todas" podría quedar en otra página). Por eso se vuelve a ese filtro.
       setEstadoFiltro("pendientes");
-      toast.error(
-        "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila.",
-        { duration: 15000 }
-      );
-      await loadRows();
       // La recarga vuelve a tildar todo lo pendiente: si la factura salió, lo que queda
       // tildado es justo lo que se había dejado afuera a propósito, con "Revisar y
-      // emitir" listo. Después de un resultado incierto no queda nada tildado: cada
-      // estadía se vuelve a elegir a mano.
+      // emitir" listo. Después de un resultado incierto no queda nada tildado: ni
+      // mientras recarga, ni si la recarga también falla (la red sigue cortada), ni en
+      // la próxima carga que ande, sea esta o un «Recargar» de más tarde.
       setPicked(new Set());
+      sinTildarEnLaProximaCarga.current = true;
+      const recargada = await loadRows();
+      // El aviso sale después de la recarga: sólo promete la lista si se pudo cargar.
+      toast.error(
+        recargada
+          ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila."
+          : "No sabemos si la factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir.",
+        { duration: 15000 }
+      );
       return;
     }
 
@@ -688,7 +725,18 @@ export default function ConsolidadaClient({
           ) : visible.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-4">
               {rows.length === 0 ? (
-                rangoActivo ? (
+                errorCarga ? (
+                  <>
+                    No pudimos cargar la lista. Revisá la conexión.{" "}
+                    <button
+                      type="button"
+                      onClick={() => void loadRows()}
+                      className="underline font-bold text-slate-600 hover:text-slate-800"
+                    >
+                      Volver a cargar la lista
+                    </button>
+                  </>
+                ) : rangoActivo ? (
                   "No hay estadías en este período. Probá con «Todo» para ver la cuenta entera."
                 ) : (
                   "Este cliente no tiene estadías cargadas a cuenta corriente."

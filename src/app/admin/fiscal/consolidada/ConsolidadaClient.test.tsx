@@ -235,6 +235,9 @@ const payloadEmitido = () => emitConsolidatedInvoiceAction.mock.calls[0][0] as E
 
 describe("ConsolidadaClient", () => {
   beforeEach(() => {
+    // Los avisos de un test no cuentan para el siguiente: sin esto, un "se llamó con"
+    // pasaría por un toast que dejó otro test.
+    vi.mocked(toast.error).mockClear();
     loadCcAccountStaysAction.mockReset();
     loadCcAccountStaysAction.mockImplementation((kind: string, id: string) =>
       Promise.resolve({ success: true, data: [makeRow(`${kind}-${id}-1`, "5")] })
@@ -608,12 +611,15 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(await confirmarListo(abrirCuadro()));
 
       await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
-      expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining("No sabemos si la factura salió"),
-        expect.anything()
-      );
       // Recarga la lista: si salió, la estadía deja de figurar en «Pendientes de facturar».
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      // El aviso sale cuando terminó la recarga: recién ahí se sabe qué lista quedó a la vista.
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining("No sabemos si la factura salió"),
+          expect.anything()
+        )
+      );
       // Acá no salió (la estadía sigue pendiente), pero queda sin tildar: se elige a mano.
       await waitFor(() => expect(filaCheckbox("5")).not.toBeChecked());
       expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
@@ -658,9 +664,11 @@ describe("ConsolidadaClient", () => {
 
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
       // El aviso habla de lo que queda a la vista, no de un estado que el filtro esconde.
-      expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining("«Pendientes de facturar»"),
-        expect.anything()
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining("«Pendientes de facturar»"),
+          expect.anything()
+        )
       );
       await waitFor(() =>
         expect(screen.getByText("Pendientes de facturar")).toHaveAttribute("aria-pressed", "true")
@@ -672,6 +680,117 @@ describe("ConsolidadaClient", () => {
       expect(filaCheckbox("5")).not.toBeChecked();
       expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+    });
+
+    it("si la recarga también se corta, la lista no queda en «Cargando…»: nada tildado, se puede volver a cargar y el aviso no promete una lista que no está", async () => {
+      // Tres pendientes; la hab. 3 se deja afuera a propósito.
+      const pendientes = ["1", "2", "3"].map((n) => makeRow(`r${n}`, n));
+      const enProceso = (n: string): CcAccountStayRow => ({
+        ...makeRow(`r${n}`, n, { facturable: false }),
+        estado: "en_proceso",
+      });
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => Promise.resolve({ success: true, data: pendientes }))
+        // La red sigue cortada: la recarga tampoco contesta.
+        .mockImplementationOnce(() => Promise.reject(new Error("Failed to fetch")))
+        // Vuelve la conexión: la factura había salido y sólo queda pendiente la hab. 3.
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            success: true,
+            data: [enProceso("1"), enProceso("2"), pendientes[2]],
+          })
+        );
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      fireEvent.click(fila("3"));
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).getByText(/^2 estadías/)).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(cuadro));
+
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      // La lista dice que no se pudo cargar (no que el cliente no tiene estadías, que se
+      // leería como "la factura salió"), sin «Cargando…» y con «Recargar» andando.
+      await waitFor(() =>
+        expect(screen.getByText(/No pudimos cargar la lista/)).toBeInTheDocument()
+      );
+      expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
+      expect(screen.queryByText(/no tiene estadías cargadas/)).not.toBeInTheDocument();
+      expect(screen.getByTitle("Recargar")).toBeEnabled();
+      // Nada tildado: no queda una barra con «2 estadías» ofreciendo lo que no se sabe si salió.
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
+      // El aviso no promete la lista en «Pendientes»: dice que no se pudo comprobar y qué hacer.
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining("tampoco pudimos volver a cargar la lista"),
+          expect.anything()
+        )
+      );
+      expect(toast.error).not.toHaveBeenCalledWith(
+        expect.stringContaining("Te dejamos la lista"),
+        expect.anything()
+      );
+
+      // Vuelve la conexión y se vuelve a cargar: la factura había salido. Lo que se había
+      // dejado afuera aparece, pero sin tildar: no hay «Revisar y emitir» listo para
+      // mandar una segunda factura.
+      fireEvent.click(screen.getByText("Volver a cargar la lista"));
+      await waitFor(() => expect(filaCheckbox("3")).not.toBeChecked());
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+    });
+
+    it("si la recarga contesta con error, la lista dice que no se pudo cargar y el aviso no dice «Te dejamos la lista»", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() =>
+          Promise.resolve({ success: true, data: [makeRow("r1", "1")] })
+        )
+        .mockImplementationOnce(() =>
+          Promise.resolve({ success: false, error: "No se pudo leer la cuenta." })
+        );
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      // Una lista vacía con "no tiene estadías cargadas" se leería como "la factura salió".
+      await waitFor(() =>
+        expect(screen.getByText(/No pudimos cargar la lista/)).toBeInTheDocument()
+      );
+      expect(screen.queryByText(/no tiene estadías cargadas/)).not.toBeInTheDocument();
+      expect(toast.error).toHaveBeenCalledWith("No se pudo leer la cuenta.");
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining("tampoco pudimos volver a cargar la lista"),
+          expect.anything()
+        )
+      );
+      expect(toast.error).not.toHaveBeenCalledWith(
+        expect.stringContaining("Te dejamos la lista"),
+        expect.anything()
+      );
+    });
+
+    it("si la carga no contesta, no queda en «Cargando…»: avisa y se puede volver a cargar (sin emisión de por medio, vuelve a tildar lo pendiente)", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => Promise.reject(new Error("Failed to fetch")))
+        .mockImplementationOnce(() =>
+          Promise.resolve({ success: true, data: [makeRow("r1", "1")] })
+        );
+      renderClient();
+
+      await waitFor(() =>
+        expect(screen.getByText(/No pudimos cargar la lista/)).toBeInTheDocument()
+      );
+      expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("No pudimos cargar la lista"));
+
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+      expect(screen.queryByText(/No pudimos cargar la lista/)).not.toBeInTheDocument();
     });
 
     it("mientras la lista se recarga, «Revisar y emitir» no abre el cuadro (la recarga cambia la selección)", async () => {
