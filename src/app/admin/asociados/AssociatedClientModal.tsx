@@ -105,9 +105,14 @@ export default function AssociatedClientModal({
   const mostrarNotaConsolidada =
     modoPrevio !== null && form.cuentaCorrienteHabilitada && form.facturacionModo === "consolidada";
   // La consolidada de una empresa sale a su CUIT. Si lo cargado no es un CUIT válido
-  // pasa igual a Consolidada, pero la nota sale en ámbar y lo pide (decisión del
-  // 24/09). Solo es pantalla: no cambia qué se guarda.
-  const notaPideCuit = mostrarNotaConsolidada && !isValidCuit(form.documentId);
+  // pasa igual a Consolidada, pero en lugar de la nota verde sale un aviso ámbar que
+  // lo pide (decisión del 24/09). También cuando Consolidada se elige a mano: así se
+  // corrigen las fichas que ya tienen cuenta corriente. Solo es pantalla: no cambia
+  // qué se guarda.
+  const notaPideCuit =
+    form.cuentaCorrienteHabilitada &&
+    form.facturacionModo === "consolidada" &&
+    !isValidCuit(form.documentId);
   const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, form.facturacionModo);
 
   const handleSubmit = async (e: React.FormEvent) => {

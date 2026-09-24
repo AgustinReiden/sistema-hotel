@@ -270,4 +270,43 @@ describe("AssociatedClientModal: la consolidada de una empresa pide CUIT", () =>
       facturacionModo: "consolidada",
     });
   });
+
+  // Así se corrigen las fichas de Q1: ya tienen cuenta corriente y se pasa Facturación
+  // a Consolidada a mano. El aviso tiene que salir también ahí.
+  it("pasar a mano a Consolidada una empresa con cuenta corriente y DNI muestra el aviso ámbar", () => {
+    montar(empresa({ document_id: DNI_FICTICIO, cuenta_corriente_habilitada: true }));
+    fireEvent.change(facturacion(), { target: { value: "consolidada" } });
+
+    expect(recuadro(NOTA_CUIT).className).toContain("amber");
+    expect(screen.queryByText(NOTA)).toBeNull();
+    expect(screen.queryByText(AVISO)).toBeNull();
+  });
+
+  it("pasar a mano a Consolidada una empresa con cuenta corriente y CUIT válido no avisa nada", () => {
+    montar(empresa({ document_id: CUIT_FICTICIO, cuenta_corriente_habilitada: true }));
+    fireEvent.change(facturacion(), { target: { value: "consolidada" } });
+
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+    expect(screen.queryByText(NOTA)).toBeNull();
+    expect(screen.queryByText(AVISO)).toBeNull();
+  });
+
+  it("al abrir una empresa que ya está en cuenta corriente + Consolidada con DNI, el aviso se ve", () => {
+    montar(
+      empresa({
+        document_id: DNI_FICTICIO,
+        cuenta_corriente_habilitada: true,
+        facturacion_modo: "consolidada",
+      })
+    );
+
+    expect(recuadro(NOTA_CUIT).className).toContain("amber");
+    expect(screen.queryByText(NOTA)).toBeNull();
+  });
+
+  it("sin cuenta corriente no pide CUIT, aunque la empresa esté en Consolidada", () => {
+    montar(empresa({ document_id: DNI_FICTICIO, facturacion_modo: "consolidada" }));
+
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+  });
 });
