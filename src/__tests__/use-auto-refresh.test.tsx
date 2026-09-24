@@ -14,8 +14,18 @@ import { shouldSkipRefresh, useAutoRefresh } from "@/app/admin/useAutoRefresh";
 
 const refresh = H.router.refresh;
 
+/** El pedido al servidor que hace el hook antes de recargar (por defecto, contesta 200). */
+const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<{ status: number }>>();
+
 let tabOculta = false;
 let sinConexion = false;
+
+/**
+ * Deja correr lo que quedó esperando la respuesta del servidor, sin mover el reloj.
+ * La recarga sale después de esa respuesta, así que los avisos (`focus`,
+ * `visibilitychange`) necesitan esto antes de mirar `router.refresh`.
+ */
+const alDia = () => vi.advanceTimersByTimeAsync(0);
 
 /** Simula que la recepcionista cambia de pestaña (oculta) o vuelve a Hoy (visible). */
 function cambiarVisibilidad(oculta: boolean) {
@@ -38,9 +48,22 @@ function abrirCuadroSinAriaModal() {
   return { capa, motivo, confirmar };
 }
 
+/** Un servidor que no contesta: el pedido queda colgado hasta que el hook lo corta. */
+function servidorColgado() {
+  fetchMock.mockImplementation(
+    (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("abortado")));
+      })
+  );
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   refresh.mockClear();
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue({ status: 200 });
+  vi.stubGlobal("fetch", fetchMock);
   tabOculta = false;
   sinConexion = false;
   Object.defineProperty(document, "hidden", {
@@ -62,63 +85,65 @@ afterEach(() => {
   // en uno cambiaría lo que ve el siguiente.
   cleanup();
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("useAutoRefresh — Hoy se pone al día solo", () => {
-  it("a los 30 s refresca una vez y a los 60 s dos", () => {
+  it("a los 30 s refresca una vez y a los 60 s dos", async () => {
     renderHook(() => useAutoRefresh());
 
-    vi.advanceTimersByTime(29_999);
+    await vi.advanceTimersByTimeAsync(29_999);
     expect(refresh).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(refresh).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("con paused no refresca, y cuando se despausa vuelve a hacerlo", () => {
+  it("con paused no refresca, y cuando se despausa vuelve a hacerlo", async () => {
     const { rerender } = renderHook(
       ({ paused }: { paused: boolean }) => useAutoRefresh({ paused }),
       { initialProps: { paused: true } }
     );
 
-    vi.advanceTimersByTime(90_000);
+    await vi.advanceTimersByTimeAsync(90_000);
     window.dispatchEvent(new Event("focus"));
+    await alDia();
     expect(refresh).not.toHaveBeenCalled();
 
     rerender({ paused: false });
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("respeta otro intervalo (mantenimiento lo usa cada 60 s)", () => {
+  it("respeta otro intervalo (mantenimiento lo usa cada 60 s)", async () => {
     renderHook(() => useAutoRefresh({ intervalMs: 60_000 }));
 
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("con un cuadro abierto (aria-modal) no refresca; al cerrarlo vuelve a refrescar", () => {
+  it("con un cuadro abierto (aria-modal) no refresca; al cerrarlo vuelve a refrescar", async () => {
     renderHook(() => useAutoRefresh());
     const cuadro = document.createElement("div");
     cuadro.setAttribute("aria-modal", "true");
     document.body.appendChild(cuadro);
 
-    vi.advanceTimersByTime(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(refresh).not.toHaveBeenCalled();
 
     cuadro.remove();
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("con un cuadro abierto sin aria-modal y el foco fuera del campo no refresca; al cerrarlo vuelve", () => {
+  it("con un cuadro abierto sin aria-modal y el foco fuera del campo no refresca; al cerrarlo vuelve", async () => {
     // Escribió el motivo, tocó fuera del campo y el foco quedó en el botón: si la tarjeta
     // se recargara abajo, el cuadro podría pasar a apuntar a otra reserva.
     renderHook(() => useAutoRefresh());
@@ -127,101 +152,218 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     confirmar.focus();
     expect(document.activeElement).toBe(confirmar);
 
-    vi.advanceTimersByTime(90_000);
+    await vi.advanceTimersByTimeAsync(90_000);
     window.dispatchEvent(new Event("focus"));
     cambiarVisibilidad(true);
     cambiarVisibilidad(false);
+    await alDia();
     expect(refresh).not.toHaveBeenCalled();
 
     capa.remove();
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("sin conexión no refresca (Next cambiaría Hoy por la página sin conexión); al volver, sí", () => {
+  it("sin red en la PC no refresca ni le pregunta al servidor; al volver la red, sí", async () => {
     renderHook(() => useAutoRefresh());
     sinConexion = true;
 
-    vi.advanceTimersByTime(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     window.dispatchEvent(new Event("focus"));
+    await alDia();
     expect(refresh).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
 
     sinConexion = false;
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("con el foco en un campo no refresca (no se pierde lo tipeado); al salir del campo vuelve", () => {
+  it("antes de recargar le pregunta al servidor pidiendo el ícono, sin cuerpo y sin caché", async () => {
+    renderHook(() => useAutoRefresh());
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.startsWith("/favicon.ico?")).toBe(true);
+    expect(init?.method).toBe("HEAD");
+    expect(init?.cache).toBe("no-store");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("con internet cortado y la red local arriba (el pedido falla) no refresca; cuando vuelve, sí", async () => {
+    // navigator.onLine sigue en true: el router está prendido. Si recargara, Next cambiaría
+    // Hoy por la página de error de Chrome.
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(refresh).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValue({ status: 200 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([502, 503, 500])("si el servidor contesta %i (por ejemplo, durante un deploy) no refresca", async (status) => {
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockResolvedValue({ status });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("un 404 del ícono no frena el refresco (el servidor está, aunque falte el archivo)", async () => {
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockResolvedValue({ status: 404 });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el servidor no contesta en 5 s, corta el pedido, no refresca y no deja nada pendiente", async () => {
+    renderHook(() => useAutoRefresh());
+    servidorColgado();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // El intervalo y el plazo del pedido.
+    expect(vi.getTimerCount()).toBe(2);
+
+    // Mientras espera, volver a la ventana no arranca otro pedido.
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("si mientras espera al servidor se abre un cuadro, no refresca", async () => {
+    renderHook(() => useAutoRefresh());
+    let contestar: (r: { status: number }) => void = () => {};
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          contestar = resolve;
+        })
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    abrirCuadroSinAriaModal();
+    contestar({ status: 200 });
+    await alDia();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("con el foco en un campo no refresca (no se pierde lo tipeado); al salir del campo vuelve", async () => {
     renderHook(() => useAutoRefresh());
     const campo = document.createElement("input");
     document.body.appendChild(campo);
     campo.focus();
     expect(document.activeElement).toBe(campo);
 
-    vi.advanceTimersByTime(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     // Volver a la ventana tampoco refresca si el cursor quedó en el campo.
     window.dispatchEvent(new Event("focus"));
+    await alDia();
     expect(refresh).not.toHaveBeenCalled();
 
     campo.blur();
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("al volver a la ventana (focus) refresca en el momento", () => {
+  it("al volver a la ventana (focus) refresca en el momento", async () => {
     renderHook(() => useAutoRefresh());
 
     window.dispatchEvent(new Event("focus"));
+    await alDia();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("con la pestaña oculta no refresca; al volver a verla se pone al día enseguida", () => {
+  it("con la pestaña oculta no refresca; al volver a verla se pone al día enseguida", async () => {
     renderHook(() => useAutoRefresh());
 
     cambiarVisibilidad(true);
-    vi.advanceTimersByTime(90_000);
+    await vi.advanceTimersByTimeAsync(90_000);
     expect(refresh).not.toHaveBeenCalled();
 
     cambiarVisibilidad(false);
+    await alDia();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("al volver a la pestaña llegan visibilitychange y focus juntos: refresca una sola vez", () => {
+  it("al volver a la pestaña llegan visibilitychange y focus juntos: refresca una sola vez", async () => {
     renderHook(() => useAutoRefresh());
     cambiarVisibilidad(true);
 
     cambiarVisibilidad(false);
     window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Si el focus llega un poco después de la recarga, el margen de 2 s lo frena igual.
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
     expect(refresh).toHaveBeenCalledTimes(1);
 
     // El intervalo sigue su curso normal después.
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("una recarga por volver a la ventana no demora la del intervalo (30 s como máximo)", () => {
+  it("una recarga por volver a la ventana no demora la del intervalo (30 s como máximo)", async () => {
     renderHook(() => useAutoRefresh());
 
-    vi.advanceTimersByTime(29_000);
+    await vi.advanceTimersByTimeAsync(29_000);
     window.dispatchEvent(new Event("focus"));
+    await alDia();
     expect(refresh).toHaveBeenCalledTimes(1);
 
     // Un segundo después toca la del intervalo: no se saltea por la de recién.
-    vi.advanceTimersByTime(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("al desmontar no quedan intervalos ni listeners", () => {
+  it("al desmontar no quedan intervalos ni listeners", async () => {
     const { unmount } = renderHook(() => useAutoRefresh());
     expect(vi.getTimerCount()).toBe(1);
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);
 
-    vi.advanceTimersByTime(120_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     window.dispatchEvent(new Event("focus"));
     cambiarVisibilidad(true);
     cambiarVisibilidad(false);
+    await alDia();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("si se desmonta mientras espera al servidor, corta el pedido y no refresca", async () => {
+    const { unmount } = renderHook(() => useAutoRefresh());
+    servidorColgado();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    await alDia();
     expect(refresh).not.toHaveBeenCalled();
   });
 });
@@ -262,7 +404,7 @@ describe("shouldSkipRefresh — cuándo no conviene recargar", () => {
     expect(shouldSkipRefresh(document)).toBe(false);
   });
 
-  it("saltea sin conexión", () => {
+  it("saltea sin red en la PC", () => {
     sinConexion = true;
     expect(shouldSkipRefresh(document)).toBe(true);
   });
@@ -305,11 +447,11 @@ describe("shouldSkipRefresh — cuándo no conviene recargar", () => {
 });
 
 describe("AutoRefresh — lo que se monta en Hoy", () => {
-  it("no pinta nada y refresca cada 30 s", () => {
+  it("no pinta nada y refresca cada 30 s", async () => {
     const { container } = render(<AutoRefresh />);
     expect(container.innerHTML).toBe("");
 
-    vi.advanceTimersByTime(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
