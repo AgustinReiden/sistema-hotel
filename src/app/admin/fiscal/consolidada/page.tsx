@@ -24,7 +24,17 @@ export default async function ConsolidadaPage({
     redirect("/forbidden");
   }
 
+  // A la consolidada se entra siempre con el cliente puesto: desde Control, Cuentas o
+  // la ficha, que mandan `kind` e `id`. Sin cliente no hay nada que revisar, así que
+  // se vuelve a Control en vez de abrir un selector vacío.
   const { kind, id } = await searchParams;
+  const preselectKind: CtaCteClientKind | null =
+    kind === "company" || kind === "guest" ? kind : null;
+  const preselectId = id?.trim() || null;
+  if (!preselectKind || !preselectId) {
+    redirect("/admin/fiscal/control");
+  }
+
   const [accounts, billingProfiles, settings, hotel] = await Promise.all([
     getCtaCteAccounts(),
     getCtaCteBillingProfiles(),
@@ -39,9 +49,10 @@ export default async function ConsolidadaPage({
   // después según la máquina de la recepción.
   const todayKey = hotelDateKey(new Date(), hotel?.timezone || undefined);
 
-  const preselectKind: CtaCteClientKind | null =
-    kind === "company" || kind === "guest" ? kind : null;
-  const preselectId = id && preselectKind ? id : null;
+  // Un id que no es de ningún cliente de cuenta corriente tampoco es un cliente puesto.
+  if (!accounts.some((a) => a.kind === preselectKind && a.id === preselectId)) {
+    redirect("/admin/fiscal/control");
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -75,6 +86,15 @@ export default async function ConsolidadaPage({
             preselectKind={preselectKind}
             preselectId={preselectId}
             todayKey={todayKey}
+            fiscal={
+              settings
+                ? {
+                    environment: settings.environment,
+                    punto_venta: settings.punto_venta,
+                    dias_vto_cuenta_corriente: settings.dias_vto_cuenta_corriente,
+                  }
+                : null
+            }
           />
         </div>
       </div>

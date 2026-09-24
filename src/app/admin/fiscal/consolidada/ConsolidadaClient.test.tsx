@@ -1,8 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ConsolidadaClient from "./ConsolidadaClient";
-import type { CcAccountStayRow, CtaCteAccount, InvoiceReceptorPrefill } from "@/lib/types";
+import ConsolidadaClient, { type ConsolidadaFiscal } from "./ConsolidadaClient";
+import ConsolidadaPage from "./page";
+import type {
+  CcAccountStayRow,
+  CtaCteAccount,
+  CtaCteClientKind,
+  InvoiceReceptorPrefill,
+} from "@/lib/types";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -15,10 +21,31 @@ vi.mock("./actions", () => ({
   emitConsolidatedInvoiceAction: (...args: unknown[]) => emitConsolidatedInvoiceAction(...args),
 }));
 
+// Para los tests de page.tsx: el redirect de Next corta la ejecución tirando un error,
+// y los datos vienen de la base, que acá no hay.
+const redirect = vi.fn((url: string) => {
+  throw new Error(`NEXT_REDIRECT ${url}`);
+});
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => redirect(url),
+}));
+const getCurrentUserRole = vi.fn();
+const getCtaCteAccounts = vi.fn();
+const getCtaCteBillingProfiles = vi.fn();
+const getFiscalSettings = vi.fn();
+const getHotelSettings = vi.fn();
+vi.mock("@/lib/data", () => ({
+  getCurrentUserRole: () => getCurrentUserRole(),
+  getCtaCteAccounts: () => getCtaCteAccounts(),
+  getCtaCteBillingProfiles: () => getCtaCteBillingProfiles(),
+  getFiscalSettings: () => getFiscalSettings(),
+  getHotelSettings: () => getHotelSettings(),
+}));
+
 function makeRow(
   reservationId: string,
   roomNumber: string,
-  opts: { amount?: number; facturable?: boolean } = {}
+  opts: { amount?: number; facturable?: boolean; desde?: string; hasta?: string } = {}
 ): CcAccountStayRow {
   const facturable = opts.facturable ?? true;
   return {
@@ -26,8 +53,8 @@ function makeRow(
     movimiento_id: `mov-${reservationId}`,
     room_number: roomNumber,
     passenger: "Huesped de prueba",
-    fch_desde: "2026-09-01",
-    fch_hasta: "2026-09-03",
+    fch_desde: opts.desde ?? "2026-09-01",
+    fch_hasta: opts.hasta ?? "2026-09-03",
     amount: opts.amount ?? 10000,
     total_price: opts.amount ?? 10000,
     actual_check_out: "2026-09-03T10:00:00Z",
@@ -60,6 +87,17 @@ const accounts: CtaCteAccount[] = [
   // A propósito fuera de `billingProfiles`: los dos resuelven a `profile` null.
   { kind: "company", id: "sf1", name: "Sin Ficha Uno", document_id: null, balance: 1000 },
   { kind: "company", id: "sf2", name: "Sin Ficha Dos", document_id: null, balance: 2000 },
+  // CUIT ficticio con dígito verificador válido.
+  {
+    kind: "company",
+    id: "ficticia",
+    name: "Empresa Ficticia SA",
+    document_id: "30123456781",
+    balance: 45000,
+  },
+  // Huéspedes sin ficha de facturación: consumidor final, Factura B con el DNI.
+  { kind: "guest", id: "g-dni-ok", name: "Juan Prueba", document_id: "30123456", balance: 8000 },
+  { kind: "guest", id: "g-dni-mal", name: "Ana Prueba", document_id: "123", balance: 8000 },
 ];
 
 const billingProfiles: Record<string, InvoiceReceptorPrefill> = {
@@ -79,19 +117,47 @@ const billingProfiles: Record<string, InvoiceReceptorPrefill> = {
     suggestA: false,
     complete: false,
   },
+  "company:ficticia": {
+    razonSocial: "Empresa Ficticia SA",
+    cuit: "30123456781",
+    condicionIva: "responsable_inscripto",
+    domicilio: "Calle Inventada 100",
+    suggestA: true,
+    complete: true,
+  },
 };
 
-function renderClient(preselectId = "acme") {
-  return render(
+const FISCAL_PROD: ConsolidadaFiscal = {
+  environment: "produccion",
+  punto_venta: 3,
+  dias_vto_cuenta_corriente: 30,
+};
+const FISCAL_PRUEBA: ConsolidadaFiscal = { ...FISCAL_PROD, environment: "homologacion" };
+
+/**
+ * La pantalla con un cliente puesto. Se usa también con `rerender`: si la URL cambia
+ * de cliente sin salir de la página, Next no desmonta el componente, le cambia las props.
+ */
+function clientElement(
+  preselectId = "acme",
+  preselectKind: CtaCteClientKind = "company",
+  fiscal: ConsolidadaFiscal = FISCAL_PROD
+) {
+  return (
     <ConsolidadaClient
       enabled
       accounts={accounts}
       billingProfiles={billingProfiles}
-      preselectKind="company"
+      preselectKind={preselectKind}
       preselectId={preselectId}
       todayKey="2026-09-16"
+      fiscal={fiscal}
     />
   );
+}
+
+function renderClient(...args: Parameters<typeof clientElement>) {
+  return render(clientElement(...args));
 }
 
 /** El checkbox de una fila, por el nombre accesible que le pone la lista. */
@@ -111,11 +177,25 @@ const plata = (n: number) =>
 // hizo pasar los 5 s a CuentasClient.test.tsx con la suite entera en paralelo. Adentro
 // de la barra (within) sí se usa getByRole: ahí el árbol es chico.
 const BARRA = "Resumen de la factura consolidada";
+const CUADRO = "Revisá antes de emitir";
+const REVISAR = "Revisar y emitir factura consolidada";
+const CONFIRMAR = "Confirmar y emitir en ARCA";
+
+/** Aprieta el botón de la barra y devuelve el cuadro de revisión que abre. */
+function abrirCuadro() {
+  fireEvent.click(screen.getByText(REVISAR));
+  return screen.getByLabelText(CUADRO);
+}
+
+/** El botón "Confirmar y emitir en ARCA" del cuadro. */
+const botonConfirmar = (cuadro: HTMLElement) =>
+  within(cuadro).getByText(CONFIRMAR).closest("button") as HTMLButtonElement;
 
 /** El payload con el que se llamó a la acción de emitir. */
 type EmitPayload = {
   detalle?: { reservationId: string; descripcion: string }[];
   conceptoUnico?: string;
+  nota?: string;
 };
 const payloadEmitido = () => emitConsolidatedInvoiceAction.mock.calls[0][0] as EmitPayload;
 
@@ -142,14 +222,29 @@ describe("ConsolidadaClient", () => {
     expect(screen.getByLabelText("Domicilio")).toHaveValue("Calle Falsa 123");
   });
 
+  it("se entra con el cliente puesto: su nombre, si es empresa y el saldo, sin selector y con un link a Control", async () => {
+    const { container } = renderClient();
+    await screen.findByLabelText(BARRA);
+
+    expect(screen.getByText("Acme SA")).toBeInTheDocument();
+    expect(screen.getByText(`Empresa · saldo $${plata(10000)}`)).toBeInTheDocument();
+    // Ya no hay selector de cliente: a la consolidada se entra desde Control, Cuentas o
+    // la ficha, siempre con el cliente puesto.
+    expect(container.querySelector("#consolidada-cliente")).toBeNull();
+    expect(screen.queryByText("Elegí un cliente…")).not.toBeInTheDocument();
+    expect(screen.getByText("Elegir otro cliente").closest("a")).toHaveAttribute(
+      "href",
+      "/admin/fiscal/control"
+    );
+  });
+
   it("al cambiar de cliente, reemplaza los datos fiscales por los de la nueva ficha (no los mezcla)", async () => {
-    renderClient();
+    const { rerender } = renderClient();
 
     await waitFor(() => expect(screen.getByLabelText("Razón social")).toHaveValue("Acme SA"));
 
-    fireEvent.change(screen.getByLabelText("Cliente de cuenta corriente"), {
-      target: { value: "guest:g1" },
-    });
+    // Otra URL de la misma página: Next le cambia las props, no la desmonta.
+    rerender(clientElement("g1", "guest"));
 
     expect(loadCcAccountStaysAction).toHaveBeenCalledWith("guest", "g1", undefined, undefined);
     await waitFor(() => expect(screen.getByLabelText("Razón social")).toHaveValue("Juan Perez"));
@@ -158,7 +253,7 @@ describe("ConsolidadaClient", () => {
   });
 
   it("entre dos clientes SIN ficha de facturación, tampoco arrastra los datos fiscales del anterior", async () => {
-    renderClient("sf1");
+    const { rerender } = renderClient("sf1");
     await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue(""));
 
     // Sin ficha cargada, el admin completa el receptor a mano.
@@ -166,9 +261,7 @@ describe("ConsolidadaClient", () => {
     fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Sin Ficha Uno" } });
     fireEvent.change(screen.getByLabelText("Domicilio"), { target: { value: "Calle Uno 1" } });
 
-    fireEvent.change(screen.getByLabelText("Cliente de cuenta corriente"), {
-      target: { value: "company:sf2" },
-    });
+    rerender(clientElement("sf2"));
 
     // Los dos dan `profile` null: comparando por identidad el cambio pasaba
     // desapercibido y se le podía emitir al segundo con el CUIT del primero.
@@ -307,25 +400,183 @@ describe("ConsolidadaClient", () => {
     renderClient();
 
     const barra = await screen.findByLabelText(BARRA);
-    const emitir = within(barra).getByRole("button", { name: /Emitir factura consolidada/ });
+    const revisar = within(barra).getByRole("button", { name: /Revisar y emitir factura consolidada/ });
 
     // La ficha de Acme viene completa: se puede emitir.
-    expect(emitir).toBeEnabled();
+    expect(revisar).toBeEnabled();
     expect(within(barra).queryByText(/Falta:/)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "" } });
-    expect(emitir).toBeDisabled();
+    expect(revisar).toBeDisabled();
     expect(within(barra).getByText(/Falta: CUIT/)).toBeInTheDocument();
 
     // Dos faltantes se enumeran en castellano, no como lista técnica.
     fireEvent.change(screen.getByLabelText("Domicilio"), { target: { value: "  " } });
     expect(within(barra).getByText(/Falta: CUIT y domicilio/)).toBeInTheDocument();
-    expect(emitir).toBeDisabled();
+    expect(revisar).toBeDisabled();
 
     // Un CUIT cargado pero con el dígito verificador mal no es lo mismo que uno
     // vacío: con el botón deshabilitado, el toast del motivo ya no se dispara.
     fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "20111111113" } });
     expect(within(barra).getByText(/Falta: CUIT válido y domicilio/)).toBeInTheDocument();
+  });
+
+  describe("cuadro «Revisá antes de emitir»", () => {
+    beforeEach(() => {
+      // Emitir abre la ventana del impreso; en jsdom no está implementada.
+      vi.spyOn(window, "open").mockImplementation(() => null);
+    });
+
+    it("«Revisar y emitir» no emite: muestra la letra, la razón social, el CUIT con guiones, las estadías, el período, el total y el vencimiento", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({
+          success: true,
+          data: [
+            makeRow("r1", "1", { amount: 10000, desde: "2026-09-01", hasta: "2026-09-03" }),
+            makeRow("r2", "2", { amount: 20000, desde: "2026-09-05", hasta: "2026-09-08" }),
+            makeRow("r3", "3", { amount: 15000, desde: "2026-09-10", hasta: "2026-09-12" }),
+          ],
+        })
+      );
+      renderClient("ficticia");
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+      expect(within(cuadro).getByText("Factura A")).toBeInTheDocument();
+      expect(within(cuadro).getByText("Empresa Ficticia SA")).toBeInTheDocument();
+      expect(within(cuadro).getByText("CUIT 30-12345678-1")).toBeInTheDocument();
+      expect(within(cuadro).getByText("Responsable Inscripto")).toBeInTheDocument();
+      expect(
+        within(cuadro).getByText("3 estadías · del 01/09/2026 al 12/09/2026")
+      ).toBeInTheDocument();
+      expect(within(cuadro).getByText(`$${plata(45000)}`)).toBeInTheDocument();
+      expect(
+        within(cuadro).getByText("Condición de venta: cuenta corriente · vence a 30 días")
+      ).toBeInTheDocument();
+      expect(within(cuadro).getByText(/una línea por estadía/)).toBeInTheDocument();
+      expect(within(cuadro).getByText("Punto de venta 3")).toBeInTheDocument();
+    });
+
+    it("«Volver» cierra sin emitir, y la selección y los textos editados siguen ahí", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({
+          success: true,
+          data: [makeRow("r1", "1"), makeRow("r2", "2")],
+        })
+      );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      fireEvent.click(fila("2"));
+      fireEvent.change(screen.getByLabelText("Descripción de la estadía de habitación 1"), {
+        target: { value: "Convención anual" },
+      });
+      fireEvent.change(screen.getByLabelText(/Nota al pie/), {
+        target: { value: "Orden de compra 99" },
+      });
+
+      const cuadro = abrirCuadro();
+      // Lo que se va a imprimir también se repasa en el cuadro.
+      expect(within(cuadro).getByText("Nota al pie: «Orden de compra 99»")).toBeInTheDocument();
+
+      fireEvent.click(within(cuadro).getByText("Volver"));
+
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+      expect(filaCheckbox("1")).toBeChecked();
+      expect(filaCheckbox("2")).not.toBeChecked();
+      expect(screen.getByLabelText("Descripción de la estadía de habitación 1")).toHaveValue(
+        "Convención anual"
+      );
+      expect(screen.getByLabelText(/Nota al pie/)).toHaveValue("Orden de compra 99");
+    });
+
+    it("«Confirmar y emitir en ARCA» emite una sola vez aunque se haga doble click, y abre el impreso", async () => {
+      let responder: (value: unknown) => void = () => {};
+      emitConsolidatedInvoiceAction.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            responder = resolve;
+          })
+      );
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+      const confirmar = botonConfirmar(cuadro);
+      fireEvent.click(confirmar);
+      fireEvent.click(confirmar);
+
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+      expect(confirmar).toBeDisabled();
+
+      responder({
+        success: true,
+        data: { status: "authorized", invoiceId: "inv-1", numero: "0003-00000001", count: 1 },
+      });
+
+      await waitFor(() =>
+        expect(window.open).toHaveBeenCalledWith(
+          "/admin/factura/inv-1?autoprint=1",
+          "factura-inv-1",
+          "width=420,height=720"
+        )
+      );
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
+    });
+
+    it("en producción muestra la banda PRODUCCIÓN", async () => {
+      renderClient("acme", "company", FISCAL_PROD);
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+
+      expect(
+        within(cuadro).getByText(
+          "PRODUCCIÓN: es una factura real ante ARCA. Si sale mal, se anula con nota de crédito."
+        )
+      ).toBeInTheDocument();
+      expect(within(cuadro).queryByText(/PRUEBA/)).not.toBeInTheDocument();
+    });
+
+    it("en homologación muestra la banda PRUEBA", async () => {
+      renderClient("acme", "company", FISCAL_PRUEBA);
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+
+      expect(within(cuadro).getByText(/^PRUEBA/)).toBeInTheDocument();
+      expect(within(cuadro).queryByText(/PRODUCCIÓN/)).not.toBeInTheDocument();
+    });
+
+    it("un huésped consumidor final se factura con el DNI de su ficha", async () => {
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+
+      expect(within(cuadro).getByText("Factura B")).toBeInTheDocument();
+      expect(within(cuadro).getByText("Juan Prueba")).toBeInTheDocument();
+      expect(within(cuadro).getByText("DNI 30123456")).toBeInTheDocument();
+      expect(within(cuadro).getByText("Consumidor Final")).toBeInTheDocument();
+      expect(botonConfirmar(cuadro)).toBeEnabled();
+    });
+
+    it("un huésped con DNI inválido ve el aviso y no puede confirmar", async () => {
+      renderClient("g-dni-mal", "guest");
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+
+      expect(within(cuadro).getByText(/no sirve para facturar/)).toBeInTheDocument();
+      const confirmar = botonConfirmar(cuadro);
+      expect(confirmar).toBeDisabled();
+      fireEvent.click(confirmar);
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+    });
   });
 
   describe("filtro de estado y paginación de la lista", () => {
@@ -409,7 +660,11 @@ describe("ConsolidadaClient", () => {
       const barra = screen.getByLabelText(BARRA);
       expect(barra.textContent).toContain("1 estadía");
 
-      fireEvent.click(screen.getByText("Emitir factura consolidada"));
+      const cuadro = abrirCuadro();
+      // El aviso se repite en el cuadro: es lo último que se mira antes de emitir.
+      expect(within(cuadro).getByText(/1 estadía tildada en otras páginas/)).toBeInTheDocument();
+
+      fireEvent.click(within(cuadro).getByText(CONFIRMAR));
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().detalle).toHaveLength(1);
@@ -419,12 +674,15 @@ describe("ConsolidadaClient", () => {
 
   describe("forma del detalle impreso (mig 102)", () => {
     beforeEach(() => {
-      // emit() abre la ventana del impreso; en jsdom no está implementada.
+      // emitConfirmado() abre la ventana del impreso; en jsdom no está implementada.
       vi.spyOn(window, "open").mockImplementation(() => null);
     });
 
-    const emitir = () =>
-      fireEvent.click(screen.getByText("Emitir factura consolidada"));
+    /** Emitir ahora son dos pasos: revisar y confirmar. */
+    const emitir = () => {
+      const cuadro = abrirCuadro();
+      fireEvent.click(within(cuadro).getByText(CONFIRMAR));
+    };
 
     it("con «un solo concepto», manda el texto y NO las líneas por estadía", async () => {
       renderClient();
@@ -442,7 +700,11 @@ describe("ConsolidadaClient", () => {
         screen.queryByLabelText("Descripción de la estadía de habitación 5")
       ).not.toBeInTheDocument();
 
-      emitir();
+      // El cuadro dice la forma elegida antes de emitir.
+      expect(
+        within(abrirCuadro()).getByText(/un solo concepto, «Servicios de alojamiento»/)
+      ).toBeInTheDocument();
+      fireEvent.click(within(screen.getByLabelText(CUADRO)).getByText(CONFIRMAR));
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().conceptoUnico).toBe("Servicios de alojamiento");
@@ -512,5 +774,64 @@ describe("ConsolidadaClient", () => {
 
       expect(screen.getByLabelText("Texto del concepto único")).toHaveValue("Alojamiento");
     });
+  });
+});
+
+describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", () => {
+  beforeEach(() => {
+    redirect.mockClear();
+    getCurrentUserRole.mockResolvedValue("admin");
+    getCtaCteAccounts.mockResolvedValue(accounts);
+    getCtaCteBillingProfiles.mockResolvedValue(billingProfiles);
+    getFiscalSettings.mockResolvedValue({
+      id: 1,
+      enabled: true,
+      environment: "produccion",
+      cuit: null,
+      razon_social: null,
+      domicilio_fiscal: null,
+      iibb: null,
+      inicio_actividades: null,
+      punto_venta: 3,
+      cbte_tipo: 6,
+      concepto: 2,
+      iva_pct: 21,
+      prefijo_archivos: null,
+      dias_vto_cuenta_corriente: 45,
+    });
+    getHotelSettings.mockResolvedValue(null);
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockImplementation((kind: string, id: string) =>
+      Promise.resolve({ success: true, data: [makeRow(`${kind}-${id}-1`, "5")] })
+    );
+  });
+
+  const abrir = (params: { kind?: string; id?: string }) =>
+    ConsolidadaPage({ searchParams: Promise.resolve(params) });
+
+  it.each([
+    ["sin parámetros", {}],
+    ["sin id", { kind: "company" }],
+    ["sin kind", { id: "acme" }],
+    ["con un kind que no existe", { kind: "otra", id: "acme" }],
+    ["con un cliente que no es de cuenta corriente", { kind: "company", id: "no-existe" }],
+  ])("%s, lleva a Control", async (_caso, params) => {
+    await expect(abrir(params)).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledWith("/admin/fiscal/control");
+  });
+
+  it("con cliente, abre la pantalla con su nombre y el cuadro lleva el ambiente, el punto de venta y el plazo", async () => {
+    render(await abrir({ kind: "company", id: "acme" }));
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(screen.getByText("Acme SA")).toBeInTheDocument();
+    await screen.findByLabelText(BARRA);
+
+    const cuadro = abrirCuadro();
+    expect(within(cuadro).getByText(/^PRODUCCIÓN: es una factura real/)).toBeInTheDocument();
+    expect(within(cuadro).getByText("Punto de venta 3")).toBeInTheDocument();
+    expect(
+      within(cuadro).getByText("Condición de venta: cuenta corriente · vence a 45 días")
+    ).toBeInTheDocument();
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, FileText, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,20 +23,40 @@ import type {
   CcAccountStayRow,
   CtaCteAccount,
   CtaCteClientKind,
+  FiscalSettings,
   InvoiceReceptorPrefill,
   ReceptorCondicionCuit,
 } from "@/lib/types";
 import { emitConsolidatedInvoiceAction, loadCcAccountStaysAction } from "./actions";
+import ConsolidadaConfirmModal, { type ConsolidadaDocumento } from "./ConsolidadaConfirmModal";
+
+/** Lo de la configuración fiscal que dice el cuadro "Revisá antes de emitir". */
+export type ConsolidadaFiscal = Pick<
+  FiscalSettings,
+  "environment" | "punto_venta" | "dias_vto_cuenta_corriente"
+>;
 
 type Props = {
   enabled: boolean;
   accounts: CtaCteAccount[];
   /** Datos de facturación por ficha, indexados `${kind}:${id}` (mig 81). */
   billingProfiles: Record<string, InvoiceReceptorPrefill>;
-  preselectKind: CtaCteClientKind | null;
-  preselectId: string | null;
+  /**
+   * El cliente viene siempre de la URL: page.tsx manda a Control si falta. Si la URL
+   * cambia de cliente sin salir de la página, Next cambia estas props sin desmontar.
+   */
+  preselectKind: CtaCteClientKind;
+  preselectId: string;
   /** "Hoy" en zona del hotel, calculado en el servidor: base de los presets. */
   todayKey: string;
+  /** null si no se pudo leer la configuración fiscal. */
+  fiscal: ConsolidadaFiscal | null;
+};
+
+const CONDICION_IVA_LABEL: Record<ReceptorCondicionCuit, string> = {
+  responsable_inscripto: "Responsable Inscripto",
+  monotributo: "Monotributo",
+  exento: "IVA Sujeto Exento",
 };
 
 
@@ -96,14 +117,23 @@ export default function ConsolidadaClient({
   preselectKind,
   preselectId,
   todayKey,
+  fiscal,
 }: Props) {
-  const [selectedKey, setSelectedKey] = useState<string>(
-    preselectKind && preselectId ? `${preselectKind}:${preselectId}` : ""
-  );
+  // Sin selector: el cliente es el de la URL. Para elegir otro se vuelve a Control.
+  const kind = preselectKind;
+  const id = preselectId;
+  const selectedKey = `${kind}:${id}`;
+  const cuenta = accounts.find((a) => a.kind === kind && a.id === id) ?? null;
   const [rows, setRows] = useState<CcAccountStayRow[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [emitting, setEmitting] = useState(false);
+  // Cuadro "Revisá antes de emitir" abierto. El botón de la barra sólo lo abre: a ARCA
+  // se va recién desde "Confirmar y emitir en ARCA".
+  const [revisando, setRevisando] = useState(false);
+  // Anti doble click de la emisión: el ref corta aunque el segundo click llegue antes
+  // del render que deshabilita el botón.
+  const emisionEnCurso = useRef(false);
 
   // Rango del listado. Vacío = "Todo", que es el default a propósito: el caso
   // normal sigue siendo "facturame todo lo que debe", y un rango puesto de
@@ -125,9 +155,8 @@ export default function ConsolidadaClient({
   const rangoActivo = range.from !== "" || range.to !== "";
   const presets = useMemo(() => buildBillingPresets(todayKey), [todayKey]);
 
-  const [kind, id] = selectedKey ? (selectedKey.split(":") as [CtaCteClientKind, string]) : [null, null];
   const isCompany = kind === "company";
-  const profile = selectedKey ? billingProfiles[selectedKey] ?? null : null;
+  const profile = billingProfiles[selectedKey] ?? null;
 
   // Receptor: se precarga de la ficha y el admin puede corregirlo antes de emitir.
   const [razonSocial, setRazonSocial] = useState(profile?.razonSocial ?? "");
@@ -159,12 +188,6 @@ export default function ConsolidadaClient({
 
   const loadRows = useCallback(async () => {
     setLastClickedIndex(null);
-    if (!kind || !id) {
-      setRows([]);
-      setPicked(new Set());
-      setTotalStays(null);
-      return;
-    }
     setLoading(true);
     // Los vacíos van como undefined, no como "": el filtro por período es
     // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
@@ -202,9 +225,10 @@ export default function ConsolidadaClient({
     void run();
   }, [loadRows]);
 
-  // Al elegir otro cliente se reinicia todo lo que era "de este cliente": los
-  // datos fiscales vuelven a los de la ficha nueva (el valor inicial ya sale de
-  // `profile` arriba) y el rango vuelve a "Todo".
+  // Si la URL cambia de cliente (Next no desmonta la página, le cambia las props),
+  // se reinicia todo lo que era "de este cliente": los datos fiscales vuelven a los
+  // de la ficha nueva (el valor inicial ya sale de `profile` arriba) y el rango
+  // vuelve a "Todo".
   //
   // Se compara por `selectedKey` y NO por la identidad de `profile`: dos clientes
   // sin ficha de facturación resuelven los dos a null, así que mirando `profile`
@@ -235,6 +259,8 @@ export default function ConsolidadaClient({
     // no una preferencia del cliente (mig 102).
     setConceptoUnicoModo(false);
     setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
+    // Un cuadro de revisión abierto era del cliente anterior.
+    setRevisando(false);
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
@@ -304,8 +330,8 @@ export default function ConsolidadaClient({
 
   // Única fuente de verdad de "¿está completo el receptor?": la usan la barra
   // flotante (para deshabilitar el botón y decir qué falta ANTES de apretarlo) y
-  // emit() (para no mandarle a ARCA un comprobante incompleto). Si estuviera
-  // duplicada, la barra podría habilitar algo que emit() después rebota.
+  // revisar() (para no mandarle a ARCA un comprobante incompleto). Si estuviera
+  // duplicada, la barra podría habilitar algo que revisar() después rebota.
   const faltantesReceptor = useMemo<FaltanteReceptor[]>(() => {
     if (!requiereCuit) return [];
     const faltan: FaltanteReceptor[] = [];
@@ -424,8 +450,32 @@ export default function ConsolidadaClient({
     toast.success("Detalle restaurado.");
   };
 
-  const emit = async () => {
-    if (!kind || !id) return;
+  // Nota y concepto tal como van a ARCA. Se calculan una vez para el cuadro y para
+  // emitConfirmado(): lo que se lee en "Revisá antes de emitir" es lo que se manda.
+  const notaLimpia = sanitizeDetalleLine(nota, DETALLE_NOTA_MAX);
+  // Si el admin borró el texto, vale el default que muestra el placeholder: lo
+  // mismo que ya hacen las líneas por estadía cuando quedan vacías. Mandar vacío
+  // sería peor, porque en el servidor NULL significa "detallado" y el impreso
+  // saldría distinto de lo que la pantalla venía mostrando.
+  const conceptoUnicoLimpio = conceptoUnicoModo
+    ? sanitizeDetalleLine(conceptoUnicoTexto) ?? CONCEPTO_UNICO_DEFAULT
+    : null;
+
+  // Receptor que muestra el cuadro. Sin CUIT (huésped consumidor final) el servidor
+  // factura con el nombre y el DNI de la ficha del huésped (mig 103).
+  const receptorNombre = requiereCuit ? razonSocial.trim() : cuenta?.name ?? "";
+  const documento: ConsolidadaDocumento = requiereCuit
+    ? { tipo: "CUIT", numero: cuit.replace(/\D/g, "") }
+    : { tipo: "DNI", numero: cuenta?.document_id ?? null };
+  const condicionIvaLabel = condicionIva ? CONDICION_IVA_LABEL[condicionIva] : "Consumidor Final";
+
+  /**
+   * El botón de la barra: valida y abre "Revisá antes de emitir". No manda nada a
+   * ARCA. Se llama con `void revisar()` para que pueda volverse async sin tocar el
+   * botón: la fase C de remitos (C2) va a consultar acá los remitos faltantes antes
+   * de abrir el cuadro.
+   */
+  const revisar = () => {
     if (selectedRows.length === 0) {
       toast.error("Seleccioná al menos una estadía.");
       return;
@@ -437,15 +487,13 @@ export default function ConsolidadaClient({
       toast.error(faltantesReceptor[0].mensaje);
       return;
     }
+    setRevisando(true);
+  };
 
-    const notaLimpia = sanitizeDetalleLine(nota, DETALLE_NOTA_MAX);
-    // Si el admin borró el texto, vale el default que muestra el placeholder: lo
-    // mismo que ya hacen las líneas por estadía cuando quedan vacías. Mandar vacío
-    // sería peor, porque en el servidor NULL significa "detallado" y el impreso
-    // saldría distinto de lo que la pantalla venía mostrando.
-    const conceptoUnicoLimpio = conceptoUnicoModo
-      ? sanitizeDetalleLine(conceptoUnicoTexto) ?? CONCEPTO_UNICO_DEFAULT
-      : null;
+  /** "Confirmar y emitir en ARCA": recién acá se emite, y una sola vez. */
+  const emitConfirmado = async () => {
+    if (emitting || emisionEnCurso.current) return;
+    emisionEnCurso.current = true;
 
     setEmitting(true);
     const result = await emitConsolidatedInvoiceAction({
@@ -475,6 +523,8 @@ export default function ConsolidadaClient({
         : {}),
     });
     setEmitting(false);
+    emisionEnCurso.current = false;
+    setRevisando(false);
 
     if (!result.success) {
       toast.error(result.error);
@@ -504,198 +554,198 @@ export default function ConsolidadaClient({
 
   return (
     <div className="space-y-6">
-      {/* 1) Cliente */}
-      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
-        <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="consolidada-cliente">
-          Cliente de cuenta corriente
-        </label>
-        <select
-          id="consolidada-cliente"
-          value={selectedKey}
-          onChange={(e) => setSelectedKey(e.target.value)}
-          className={inputClass}
+      {/* 1) Cliente: de solo lectura. Se entra siempre con el cliente puesto (desde
+          Control, Cuentas o la ficha); para facturarle a otro se vuelve a Control. */}
+      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">
+            Cliente de cuenta corriente
+          </p>
+          <p className="text-lg font-bold text-slate-800 break-words">{cuenta?.name ?? "—"}</p>
+          {cuenta && (
+            <p className="text-xs text-slate-500">
+              {isCompany ? "Empresa" : "Huésped"} · saldo {formatAmount(cuenta.balance)}
+            </p>
+          )}
+        </div>
+        <Link
+          href="/admin/fiscal/control"
+          className="shrink-0 text-sm font-semibold text-brand-700 hover:underline"
         >
-          <option value="">Elegí un cliente…</option>
-          {accounts.map((a) => (
-            <option key={`${a.kind}:${a.id}`} value={`${a.kind}:${a.id}`}>
-              {a.name} {a.kind === "company" ? "(empresa)" : "(huésped)"} — saldo {formatAmount(a.balance)}
-            </option>
-          ))}
-        </select>
+          Elegir otro cliente
+        </Link>
       </section>
 
       {/* 2) Estadías de la cuenta: pendientes y ya facturadas */}
-      {selectedKey && (
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-800">Estadías de la cuenta</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Se factura el cargo a cuenta corriente de cada estadía, no el total de la reserva.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadRows()}
-              disabled={loading}
-              className="p-2 border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 disabled:opacity-60 transition-colors"
-              title="Recargar"
+      <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-800">Estadías de la cuenta</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Se factura el cargo a cuenta corriente de cada estadía, no el total de la reserva.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadRows()}
+            disabled={loading}
+            className="p-2 border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 disabled:opacity-60 transition-colors"
+            title="Recargar"
+          >
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* El filtro va afuera del if de carga: si se esconde cuando no hay
+              resultados, no queda nada que explique por qué la lista está
+              vacía ni cómo volver a "Todo". */}
+          <div>
+            <DateRangeFilter
+              from={range.from}
+              to={range.to}
+              presets={presets}
+              onChange={(from, to) => setRange({ from, to })}
+              allowAll
+            />
+            <p
+              className={`text-xs mt-2 ${rangoActivo ? "font-semibold text-amber-700" : "text-slate-400"}`}
             >
-              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-            </button>
+              Mostrando {rows.length} de {totalStays ?? rows.length} estadías de la cuenta
+              {rangoActivo ? " (hay un período puesto)." : "."}
+            </p>
           </div>
 
-          <div className="p-5 space-y-4">
-            {/* El filtro va afuera del if de carga: si se esconde cuando no hay
-                resultados, no queda nada que explique por qué la lista está
-                vacía ni cómo volver a "Todo". */}
-            <div>
-              <DateRangeFilter
-                from={range.from}
-                to={range.to}
-                presets={presets}
-                onChange={(from, to) => setRange({ from, to })}
-                allowAll
-              />
-              <p
-                className={`text-xs mt-2 ${rangoActivo ? "font-semibold text-amber-700" : "text-slate-400"}`}
+          {/* Filtro de estado: abre en "Pendientes" para no aterrizar en dos
+              años de historial. Va afuera del if de carga por lo mismo que el
+              de período: si se esconde con la lista vacía, no queda nada que
+              explique el vacío ni cómo salir de él. */}
+          {rows.length > 0 && (
+            <div role="group" aria-label="Filtro por estado de facturación" className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-pressed={estadoFiltro === "pendientes"}
+                onClick={() => setEstadoFiltro("pendientes")}
+                className={pillClass(estadoFiltro === "pendientes")}
               >
-                Mostrando {rows.length} de {totalStays ?? rows.length} estadías de la cuenta
-                {rangoActivo ? " (hay un período puesto)." : "."}
-              </p>
+                Pendientes de facturar
+              </button>
+              <button
+                type="button"
+                aria-pressed={estadoFiltro === "todas"}
+                onClick={() => setEstadoFiltro("todas")}
+                className={pillClass(estadoFiltro === "todas")}
+              >
+                Todas
+              </button>
             </div>
+          )}
 
-            {/* Filtro de estado: abre en "Pendientes" para no aterrizar en dos
-                años de historial. Va afuera del if de carga por lo mismo que el
-                de período: si se esconde con la lista vacía, no queda nada que
-                explique el vacío ni cómo salir de él. */}
-            {rows.length > 0 && (
-              <div role="group" aria-label="Filtro por estado de facturación" className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  aria-pressed={estadoFiltro === "pendientes"}
-                  onClick={() => setEstadoFiltro("pendientes")}
-                  className={pillClass(estadoFiltro === "pendientes")}
-                >
-                  Pendientes de facturar
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={estadoFiltro === "todas"}
-                  onClick={() => setEstadoFiltro("todas")}
-                  className={pillClass(estadoFiltro === "todas")}
-                >
-                  Todas
-                </button>
-              </div>
-            )}
-
-            {loading ? (
-              <p className="text-sm text-slate-400 text-center py-4">Cargando…</p>
-            ) : visible.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-4">
-                {rows.length === 0 ? (
-                  rangoActivo ? (
-                    "No hay estadías en este período. Probá con «Todo» para ver la cuenta entera."
-                  ) : (
-                    "Este cliente no tiene estadías cargadas a cuenta corriente."
-                  )
+          {loading ? (
+            <p className="text-sm text-slate-400 text-center py-4">Cargando…</p>
+          ) : visible.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-4">
+              {rows.length === 0 ? (
+                rangoActivo ? (
+                  "No hay estadías en este período. Probá con «Todo» para ver la cuenta entera."
                 ) : (
-                  <>
-                    No hay estadías pendientes de facturar: las {rows.length} de esta cuenta ya
-                    están cubiertas.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setEstadoFiltro("todas")}
-                      className="underline font-bold text-slate-600 hover:text-slate-800"
+                  "Este cliente no tiene estadías cargadas a cuenta corriente."
+                )
+              ) : (
+                <>
+                  No hay estadías pendientes de facturar: las {rows.length} de esta cuenta ya
+                  están cubiertas.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setEstadoFiltro("todas")}
+                    className="underline font-bold text-slate-600 hover:text-slate-800"
+                  >
+                    Ver todas
+                  </button>
+                </>
+              )}
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                  <input
+                    ref={todasRef}
+                    type="checkbox"
+                    // Nombre fijo: el texto visible alterna entre "Seleccionar"
+                    // y "Deseleccionar", y un lector de pantalla ya anuncia el
+                    // estado por `checked`/`indeterminate`.
+                    aria-label="Seleccionar todas las estadías"
+                    checked={todasTildadas}
+                    onChange={toggleAll}
+                    disabled={facturables.length === 0}
+                    className="w-4 h-4 accent-emerald-600 disabled:cursor-not-allowed"
+                  />
+                  {todasTildadas ? "Deseleccionar todo" : "Seleccionar todo"}
+                </label>
+                <span className="text-xs text-slate-400">
+                  {facturables.length} sin facturar · {rows.length - facturables.length} ya cubiertas
+                </span>
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {pagina.map((r, index) => {
+                  const cobertura = coberturaLabel(r);
+                  const tildada = picked.has(r.reservation_id);
+                  return (
+                    <li
+                      key={r.reservation_id}
+                      onClick={r.facturable ? (e) => handleRowClick(index, e) : undefined}
+                      className={`py-2.5 px-2 -mx-2 rounded-lg flex items-center gap-3 transition-colors ${
+                        r.facturable
+                          ? `cursor-pointer ${tildada ? "bg-emerald-50" : "hover:bg-slate-50"}`
+                          : "opacity-60 cursor-not-allowed"
+                      }`}
                     >
-                      Ver todas
-                    </button>
-                  </>
-                )}
-              </p>
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
-                    <input
-                      ref={todasRef}
-                      type="checkbox"
-                      // Nombre fijo: el texto visible alterna entre "Seleccionar"
-                      // y "Deseleccionar", y un lector de pantalla ya anuncia el
-                      // estado por `checked`/`indeterminate`.
-                      aria-label="Seleccionar todas las estadías"
-                      checked={todasTildadas}
-                      onChange={toggleAll}
-                      disabled={facturables.length === 0}
-                      className="w-4 h-4 accent-emerald-600 disabled:cursor-not-allowed"
-                    />
-                    {todasTildadas ? "Deseleccionar todo" : "Seleccionar todo"}
-                  </label>
-                  <span className="text-xs text-slate-400">
-                    {facturables.length} sin facturar · {rows.length - facturables.length} ya cubiertas
-                  </span>
-                </div>
-                <ul className="divide-y divide-slate-100">
-                  {pagina.map((r, index) => {
-                    const cobertura = coberturaLabel(r);
-                    const tildada = picked.has(r.reservation_id);
-                    return (
-                      <li
-                        key={r.reservation_id}
-                        onClick={r.facturable ? (e) => handleRowClick(index, e) : undefined}
-                        className={`py-2.5 px-2 -mx-2 rounded-lg flex items-center gap-3 transition-colors ${
-                          r.facturable
-                            ? `cursor-pointer ${tildada ? "bg-emerald-50" : "hover:bg-slate-50"}`
-                            : "opacity-60 cursor-not-allowed"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={tildada}
-                          // No-op a propósito: el toggle lo hace el onClick del
-                          // <li>, al que este click (o el Espacio del teclado)
-                          // burbujea. Ver handleRowClick.
-                          onChange={() => {}}
-                          disabled={!r.facturable}
-                          className="w-4 h-4 accent-emerald-600 shrink-0 disabled:cursor-not-allowed"
-                          aria-label={`Incluir estadía de habitación ${r.room_number ?? "?"}`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-slate-800 truncate">
-                            Hab. {r.room_number ?? "—"} · {shortDate(r.fch_desde)} → {shortDate(r.fch_hasta)}
-                            {r.passenger ? ` · ${r.passenger}` : ""}
+                      <input
+                        type="checkbox"
+                        checked={tildada}
+                        // No-op a propósito: el toggle lo hace el onClick del
+                        // <li>, al que este click (o el Espacio del teclado)
+                        // burbujea. Ver handleRowClick.
+                        onChange={() => {}}
+                        disabled={!r.facturable}
+                        className="w-4 h-4 accent-emerald-600 shrink-0 disabled:cursor-not-allowed"
+                        aria-label={`Incluir estadía de habitación ${r.room_number ?? "?"}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-slate-800 truncate">
+                          Hab. {r.room_number ?? "—"} · {shortDate(r.fch_desde)} → {shortDate(r.fch_hasta)}
+                          {r.passenger ? ` · ${r.passenger}` : ""}
+                        </p>
+                        {r.facturable && r.mixed_payment && (
+                          <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
+                            <AlertTriangle size={11} className="shrink-0" />
+                            Pago mixto: se factura sólo el cargo a cuenta ({formatAmount(r.amount)} de{" "}
+                            {formatAmount(r.total_price)}).
                           </p>
-                          {r.facturable && r.mixed_payment && (
-                            <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
-                              <AlertTriangle size={11} className="shrink-0" />
-                              Pago mixto: se factura sólo el cargo a cuenta ({formatAmount(r.amount)} de{" "}
-                              {formatAmount(r.total_price)}).
-                            </p>
-                          )}
-                          {cobertura && (
-                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{cobertura}</p>
-                          )}
-                        </div>
-                        <span className="text-sm font-bold text-slate-700 shrink-0">{formatAmount(r.amount)}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <PaginationFooter
-                  {...paginacion}
-                  noun="estadías"
-                  onPageChange={setPage}
-                  note={avisoFueraDePagina}
-                />
-              </>
-            )}
-          </div>
-        </section>
-      )}
+                        )}
+                        {cobertura && (
+                          <p className="text-[11px] text-slate-500 mt-0.5 truncate">{cobertura}</p>
+                        )}
+                      </div>
+                      <span className="text-sm font-bold text-slate-700 shrink-0">{formatAmount(r.amount)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <PaginationFooter
+                {...paginacion}
+                noun="estadías"
+                onPageChange={setPage}
+                note={avisoFueraDePagina}
+              />
+            </>
+          )}
+        </div>
+      </section>
 
       {/* 3) Detalle impreso (mig 93; la forma, mig 102) */}
-      {selectedKey && selectedRows.length > 0 && (
+      {selectedRows.length > 0 && (
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -806,7 +856,7 @@ export default function ConsolidadaClient({
       )}
 
       {/* 4) Receptor + emisión */}
-      {selectedKey && facturables.length > 0 && (
+      {facturables.length > 0 && (
         <section
           ref={receptorRef}
           className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4"
@@ -948,18 +998,42 @@ export default function ConsolidadaClient({
                 </button>
               </p>
             )}
+            {/* No emite: abre "Revisá antes de emitir". A ARCA se va desde el cuadro. */}
             <button
               type="button"
-              onClick={() => void emit()}
+              onClick={() => void revisar()}
               disabled={emitting || selectedRows.length === 0 || faltantesReceptor.length > 0}
               className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-2"
             >
               {emitting ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />}
-              Emitir factura consolidada
+              Revisar y emitir factura consolidada
             </button>
           </div>
         </div>
       </StickyActionBar>
+
+      {revisando && selectedRows.length > 0 && (
+        <ConsolidadaConfirmModal
+          letra={letra}
+          receptorNombre={receptorNombre}
+          documento={documento}
+          condicionIvaLabel={condicionIvaLabel}
+          estadias={selectedRows.length}
+          total={total}
+          periodo={periodo}
+          conceptoUnico={conceptoUnicoLimpio}
+          nota={notaLimpia}
+          fueraDePagina={fueraDePagina}
+          // Sin la configuración fiscal a mano se asume producción: la banda roja
+          // es la que no puede faltar si la factura es real.
+          environment={fiscal?.environment ?? "produccion"}
+          puntoVenta={fiscal?.punto_venta ?? null}
+          diasVto={fiscal?.dias_vto_cuenta_corriente ?? 30}
+          emitting={emitting}
+          onConfirm={() => void emitConfirmado()}
+          onCancel={() => setRevisando(false)}
+        />
+      )}
     </div>
   );
 }
