@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Hash, Loader2, Percent, Receipt, UserRound, Wallet, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CreditCard, Hash, Loader2, Percent, Receipt, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { avisoModoFacturacion, modoFacturacionAlCambiarCtaCte } from "@/lib/billing";
 import { loadGuestRecordAction, updateGuestAction, type GuestRecordPayload } from "./actions";
 
 type GuestModalProps = {
@@ -38,11 +39,15 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
   const [form, setForm] = useState<GuestRecordPayload>(emptyForm);
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Facturación pasó sola a consolidada al habilitar la cuenta corriente: se avisa
+  // con una nota hasta que alguien elija el modo a mano.
+  const [modoCambioSolo, setModoCambioSolo] = useState(false);
 
   useEffect(() => {
     if (!guestId) return;
     let active = true;
     setLoading(true);
+    setModoCambioSolo(false);
     (async () => {
       const result = await loadGuestRecordAction(guestId);
       if (!active) return;
@@ -80,6 +85,18 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
   if (!guestId) return null;
 
   const set = (patch: Partial<GuestRecordPayload>) => setForm((current) => ({ ...current, ...patch }));
+
+  const modoActual = form.facturacionModo ?? "por_checkout";
+
+  const cambiarCuentaCorriente = (habilitada: boolean) => {
+    const modo = modoFacturacionAlCambiarCtaCte(modoActual, habilitada);
+    if (modo !== modoActual) setModoCambioSolo(true);
+    set({ cuentaCorrienteHabilitada: habilitada, facturacionModo: modo });
+  };
+
+  const mostrarNotaConsolidada =
+    modoCambioSolo && form.cuentaCorrienteHabilitada && modoActual === "consolidada";
+  const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, modoActual);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,15 +210,16 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="guest-cc">
                   <span className="flex items-center gap-1.5">
                     <Wallet size={14} />
                     Cuenta corriente
                   </span>
                 </label>
                 <select
+                  id="guest-cc"
                   value={form.cuentaCorrienteHabilitada ? "si" : "no"}
-                  onChange={(e) => set({ cuentaCorrienteHabilitada: e.target.value === "si" })}
+                  onChange={(e) => cambiarCuentaCorriente(e.target.value === "si")}
                   className={inputClass}
                 >
                   <option value="no">No</option>
@@ -209,17 +227,19 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="guest-facturacion">
                   <span className="flex items-center gap-1.5">
                     <Receipt size={14} />
                     Facturación
                   </span>
                 </label>
                 <select
-                  value={form.facturacionModo ?? "por_checkout"}
-                  onChange={(e) =>
-                    set({ facturacionModo: e.target.value as GuestRecordPayload["facturacionModo"] })
-                  }
+                  id="guest-facturacion"
+                  value={modoActual}
+                  onChange={(e) => {
+                    setModoCambioSolo(false);
+                    set({ facturacionModo: e.target.value as GuestRecordPayload["facturacionModo"] });
+                  }}
                   className={inputClass}
                 >
                   <option value="por_checkout">Factura por cada check-out</option>
@@ -229,6 +249,27 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                 <p className="text-[11px] text-slate-500 mt-1">
                   Consolidada: las estadías a cuenta corriente se juntan en una sola factura.
                 </p>
+                {mostrarNotaConsolidada && (
+                  <p
+                    role="status"
+                    className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+                  >
+                    <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      Pasó a Factura consolidada: lo fiado se junta en una factura. Si este huésped
+                      quiere factura en cada check-out, cambialo acá.
+                    </span>
+                  </p>
+                )}
+                {avisoFacturacion && (
+                  <p
+                    role="status"
+                    className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                  >
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>{avisoFacturacion}</span>
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Localidad</label>
