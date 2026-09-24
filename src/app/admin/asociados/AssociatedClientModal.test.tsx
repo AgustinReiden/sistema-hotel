@@ -92,7 +92,10 @@ describe("AssociatedClientModal: cuenta corriente y modo de facturación", () =>
 
   it("volver a 'por cada check-out' muestra el aviso ámbar y saca la nota", () => {
     montar();
+    // Con un CUIT válido el Sí muestra la nota verde; sin él, "saca la nota" no probaría nada.
+    cargarDocumento(CUIT_FICTICIO);
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(screen.getByText(NOTA)).toBeTruthy();
     fireEvent.change(facturacion(), { target: { value: "por_checkout" } });
 
     expect(facturacion().value).toBe("por_checkout");
@@ -122,7 +125,9 @@ describe("AssociatedClientModal: cuenta corriente y modo de facturación", () =>
 
   it("volver a No después del Sí deshace el cambio automático y la nota se va", () => {
     montar();
+    cargarDocumento(CUIT_FICTICIO);
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(screen.getByText(NOTA)).toBeTruthy();
     fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
 
     // Nadie eligió Consolidada: deshacer el Sí deja la ficha como estaba. Una ficha
@@ -255,6 +260,30 @@ describe("AssociatedClientModal: la consolidada de una empresa pide CUIT", () =>
     expect(facturacion().value).toBe("por_checkout");
     expect(screen.queryByText(NOTA_CUIT)).toBeNull();
     expect(screen.queryByText(NOTA)).toBeNull();
+  });
+
+  // El aviso ofrece "o elegí Factura por cada check-out": si se elige, el pedido del CUIT
+  // se va y queda solo el aviso de cuenta corriente + check-out.
+  it("con un DNI, elegir 'por cada check-out' saca el aviso del CUIT", () => {
+    montar(empresa({ document_id: DNI_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(screen.getByText(NOTA_CUIT)).toBeTruthy();
+
+    fireEvent.change(facturacion(), { target: { value: "por_checkout" } });
+
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+    expect(screen.getByText(AVISO)).toBeTruthy();
+  });
+
+  it("con un DNI, elegir 'No se factura' saca el aviso del CUIT", () => {
+    montar(empresa({ document_id: DNI_FICTICIO }));
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(screen.getByText(NOTA_CUIT)).toBeTruthy();
+
+    fireEvent.change(facturacion(), { target: { value: "no_factura" } });
+
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+    expect(screen.queryByText(AVISO)).toBeNull();
   });
 
   it("es solo un aviso: se guarda en Consolidada con el DNI, como antes", async () => {
