@@ -1,14 +1,19 @@
 // Host de Supabase para el CSP y para images.remotePatterns. Sale SOLO de
 // NEXT_PUBLIC_SUPABASE_URL: el repo es público y el host del proyecto no se
 // escribe acá. Si la variable falta, ninguno de los dos suma un host de Supabase
-// (next/image deja de aceptar esas imágenes) y el build avisa por consola.
+// y se avisa por consola.
+// Ojo: Next lee este archivo dos veces. En `next build` queda fijo el CSP (los
+// headers salen del build), y en `next start` se vuelve a leer para next/image
+// (remotePatterns se toma al arrancar). La variable tiene que estar en los dos
+// momentos: si falta al arrancar, las imágenes de Supabase que pasan por
+// next/image dejan de cargar aunque el build haya salido limpio.
 const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
     : null;
 
 if (!supabaseHost) {
     console.warn(
-        '[next.config] Falta NEXT_PUBLIC_SUPABASE_URL: el CSP y next/image quedan sin el host de Supabase. Definila antes del build.',
+        '[next.config] Falta NEXT_PUBLIC_SUPABASE_URL: el CSP y next/image quedan sin el host de Supabase. Definila en el entorno del build y también en el del arranque (next start).',
     );
 }
 
