@@ -465,11 +465,11 @@ export default function ConsolidadaClient({
     : null;
 
   // Receptor que muestra el cuadro. Sin CUIT (huésped consumidor final) el servidor
-  // factura con el nombre y el DNI de la ficha del huésped (mig 103).
-  // OJO, pendiente de antes: para consumidor final no se manda condición, y la mig 103
-  // cae en la de la ficha si tiene una. Con la ficha en RI/monotributo/exento, el
-  // servidor emitiría con CUIT aunque acá diga DNI (el caso que la mig 112 cerró en la
-  // factura de check-out mandando 'consumidor_final' explícito).
+  // factura con el nombre y el DNI de la ficha del huésped (mig 103). Para que eso sea
+  // lo que de verdad sale, emitConfirmado() manda 'consumidor_final' explícito: si no,
+  // la RPC cae en la condición de la ficha y, con la ficha en RI/monotributo/exento,
+  // emitiría con CUIT aunque el cuadro diga DNI (decisión del 24/09, la misma regla que
+  // la mig 112 en la factura de check-out: la ficha precarga, no decide el comprobante).
   const receptorNombre = requiereCuit ? razonSocial.trim() : cuenta?.name ?? "";
   const documento: ConsolidadaDocumento = requiereCuit
     ? { tipo: "CUIT", numero: cuit.replace(/\D/g, "") }
@@ -525,6 +525,10 @@ export default function ConsolidadaClient({
               })),
             }),
         ...(notaLimpia ? { nota: notaLimpia } : {}),
+        // La condición viaja siempre explícita. Sin CUIT sólo puede ser un huésped (la
+        // empresa siempre lo requiere) y va 'consumidor_final': omitida, la RPC toma la
+        // de la ficha y emitiría Factura A con el CUIT de la ficha lo que el cuadro
+        // mostró como B con DNI (decisión del 24/09, como la mig 112 en el check-out).
         ...(requiereCuit
           ? {
               cuit: cuit.replace(/\D/g, ""),
@@ -532,7 +536,7 @@ export default function ConsolidadaClient({
               razonSocial: razonSocial.trim(),
               domicilio: domicilio.trim(),
             }
-          : {}),
+          : { condicionIva: "consumidor_final" as const }),
       });
     } catch {
       // La acción no llegó a contestar: se cortó la red, la función tardó de más o

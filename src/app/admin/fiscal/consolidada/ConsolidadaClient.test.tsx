@@ -100,6 +100,8 @@ const accounts: CtaCteAccount[] = [
   // Huéspedes sin ficha de facturación: consumidor final, Factura B con el DNI.
   { kind: "guest", id: "g-dni-ok", name: "Juan Prueba", document_id: "30123456", balance: 8000 },
   { kind: "guest", id: "g-dni-mal", name: "Ana Prueba", document_id: "123", balance: 8000 },
+  // Huésped con ficha de facturación en Responsable Inscripto (CUIT ficticio válido).
+  { kind: "guest", id: "g-ri", name: "Pedro Prueba", document_id: "30123457", balance: 8000 },
 ];
 
 const billingProfiles: Record<string, InvoiceReceptorPrefill> = {
@@ -124,6 +126,14 @@ const billingProfiles: Record<string, InvoiceReceptorPrefill> = {
     cuit: "30123456781",
     condicionIva: "responsable_inscripto",
     domicilio: "Calle Inventada 100",
+    suggestA: true,
+    complete: true,
+  },
+  "guest:g-ri": {
+    razonSocial: "Pedro Prueba Servicios",
+    cuit: "20301234563",
+    condicionIva: "responsable_inscripto",
+    domicilio: "Calle Inventada 200",
     suggestA: true,
     complete: true,
   },
@@ -212,6 +222,11 @@ const botonRevisar = () => screen.getByText(REVISAR).closest("button") as HTMLBu
 
 /** El payload con el que se llamó a la acción de emitir. */
 type EmitPayload = {
+  kind?: CtaCteClientKind;
+  cuit?: string;
+  condicionIva?: string;
+  razonSocial?: string;
+  domicilio?: string;
   detalle?: { reservationId: string; descripcion: string }[];
   conceptoUnico?: string;
   nota?: string;
@@ -688,6 +703,86 @@ describe("ConsolidadaClient", () => {
       expect(confirmar).toBeDisabled();
       fireEvent.click(confirmar);
       expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+    });
+  });
+
+  // Decisión del 24/09 (misma regla que la mig 112 en el check-out): la ficha precarga la
+  // pantalla, pero el comprobante lo decide lo que se eligió en la pantalla. Sin condición
+  // en el payload, la RPC cae en la de la ficha del huésped y emite con su CUIT aunque el
+  // cuadro haya dicho Factura B con DNI.
+  describe("condición frente al IVA que se manda: la ficha precarga, no decide", () => {
+    beforeEach(() => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+    });
+
+    it("huésped con ficha en Responsable Inscripto y «Consumidor final» elegido: el cuadro dice B con DNI y se manda 'consumidor_final' sin CUIT", async () => {
+      renderClient("g-ri", "guest");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563"));
+
+      // La pantalla arranca con la condición de la ficha; el que factura elige consumidor final.
+      fireEvent.change(screen.getByLabelText("Condición frente al IVA"), { target: { value: "" } });
+
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).getByText("Factura B")).toBeInTheDocument();
+      expect(within(cuadro).getByText("Pedro Prueba")).toBeInTheDocument();
+      expect(within(cuadro).getByText("DNI 30123457")).toBeInTheDocument();
+      expect(within(cuadro).getByText("Consumidor Final")).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(cuadro));
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
+      const payload = payloadEmitido();
+      expect(payload.kind).toBe("guest");
+      expect(payload.condicionIva).toBe("consumidor_final");
+      expect(payload.cuit).toBeUndefined();
+      expect(payload.razonSocial).toBeUndefined();
+      expect(payload.domicilio).toBeUndefined();
+    });
+
+    it("huésped sin ficha de facturación (consumidor final de entrada): también manda 'consumidor_final'", async () => {
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
+      const payload = payloadEmitido();
+      expect(payload.condicionIva).toBe("consumidor_final");
+      expect(payload.cuit).toBeUndefined();
+    });
+
+    it("huésped que se factura con CUIT: sigue mandando su condición y su CUIT, como antes", async () => {
+      renderClient("g-ri", "guest");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563"));
+
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).getByText("Factura A")).toBeInTheDocument();
+      expect(within(cuadro).getByText("CUIT 20-30123456-3")).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(cuadro));
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
+      expect(payloadEmitido()).toMatchObject({
+        kind: "guest",
+        condicionIva: "responsable_inscripto",
+        cuit: "20301234563",
+        razonSocial: "Pedro Prueba Servicios",
+        domicilio: "Calle Inventada 200",
+      });
+    });
+
+    it("empresa: manda su condición y su CUIT, sin cambios", async () => {
+      renderClient("ficticia");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("30123456781"));
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
+      expect(payloadEmitido()).toMatchObject({
+        kind: "company",
+        condicionIva: "responsable_inscripto",
+        cuit: "30123456781",
+        razonSocial: "Empresa Ficticia SA",
+        domicilio: "Calle Inventada 100",
+      });
     });
   });
 

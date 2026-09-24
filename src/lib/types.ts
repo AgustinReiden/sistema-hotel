@@ -1268,7 +1268,12 @@ export type ConsolidatedInvoicePayload = {
   reservationIds: string[];
   /** Receptor: si se omite, sale de la ficha del cliente. */
   cuit?: string;
-  condicionIva?: ReceptorCondicionCuit;
+  /**
+   * La pantalla la manda siempre, también 'consumidor_final' (huésped con Factura B y
+   * DNI): omitida, la RPC toma la de la ficha y podría emitir con CUIT lo que la
+   * pantalla mostró como B. La ficha precarga, no decide el comprobante (como mig 112).
+   */
+  condicionIva?: ReceptorCondicionCuit | "consumidor_final";
   razonSocial?: string;
   domicilio?: string;
   /**
