@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CloseShiftModal from "./CloseShiftModal";
+import ForcedShiftHandover from "./ForcedShiftHandover";
 import type { PaymentMethod } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
@@ -325,5 +326,56 @@ describe("CloseShiftModal — ¿No sos vos? (traspaso forzado)", () => {
 
     expect(screen.queryByText(/Entraste como/)).not.toBeInTheDocument();
     expect(screen.queryByText("Cerrar sesión")).not.toBeInTheDocument();
+  });
+});
+
+describe("ForcedShiftHandover — el traspaso tal como lo arma el layout", () => {
+  beforeEach(() => {
+    getCloseShiftBlockersAction.mockReset();
+    getCloseShiftBlockersAction.mockResolvedValue({
+      success: true,
+      data: { blockers: [], occupied_alerts_count: 0, unbilled_count: 0 },
+    });
+    closeShiftAction.mockReset();
+    logout.mockReset();
+  });
+
+  function abrirHandover(openedByName: string | null) {
+    render(
+      <ForcedShiftHandover
+        shiftId="s1"
+        shiftNumber={1}
+        openedByName={openedByName}
+        currentUserName="Juan Prueba"
+        totalsByMethod={totalsByMethod}
+        creditCharged={0}
+        creditCharges={[]}
+        checkoutsCount={0}
+      />
+    );
+  }
+
+  it("el aviso dice quién dejó la caja y arriba con quién se entró, con Cerrar sesión", async () => {
+    abrirHandover("Ana Ficticia");
+    await screen.findByLabelText("Efectivo declarado ($)");
+
+    expect(screen.getByText(/La caja abierta la dejó Ana Ficticia\./)).toBeInTheDocument();
+    expect(screen.getByText(/Entraste como/)).toBeInTheDocument();
+    expect(screen.getByText("Juan Prueba")).toBeInTheDocument();
+    // No se puede descartar sin rendir: no hay Cancelar.
+    expect(screen.queryByText("Cancelar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Cerrar sesión"));
+
+    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    expect(closeShiftAction).not.toHaveBeenCalled();
+  });
+
+  it("si no se sabe quién la dejó, el aviso dice otro usuario", async () => {
+    abrirHandover(null);
+    await screen.findByLabelText("Efectivo declarado ($)");
+
+    expect(screen.getByText(/La caja abierta la dejó otro usuario\./)).toBeInTheDocument();
+    expect(screen.getByText("Juan Prueba")).toBeInTheDocument();
   });
 });
