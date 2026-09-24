@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CreditCard, Hash, Loader2, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CreditCard, Hash, Loader2, MapPin, Percent, Phone, Receipt, StickyNote, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { avisoModoFacturacion, modoFacturacionAlCambiarCtaCte } from "@/lib/billing";
 import type { AssociatedClient, CondicionIva, FacturacionModo } from "@/lib/types";
 import { findCompaniesByDocumentAction } from "./actions";
 
@@ -73,14 +74,28 @@ export default function AssociatedClientModal({
   // puede ser dos áreas de la misma empresa. El guard pasa a ser una confirmación.
   const [duplicados, setDuplicados] = useState<{ id: string; display_name: string }[] | null>(null);
   const [chequeando, setChequeando] = useState(false);
+  // Facturación pasó sola a consolidada al habilitar la cuenta corriente: se avisa
+  // con una nota hasta que alguien elija el modo a mano.
+  const [modoCambioSolo, setModoCambioSolo] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialClient));
     setDuplicados(null);
+    setModoCambioSolo(false);
   }, [isOpen, initialClient]);
 
   if (!isOpen) return null;
+
+  const cambiarCuentaCorriente = (habilitada: boolean) => {
+    const modo = modoFacturacionAlCambiarCtaCte(form.facturacionModo, habilitada);
+    if (modo !== form.facturacionModo) setModoCambioSolo(true);
+    setForm((current) => ({ ...current, cuentaCorrienteHabilitada: habilitada, facturacionModo: modo }));
+  };
+
+  const mostrarNotaConsolidada =
+    modoCambioSolo && form.cuentaCorrienteHabilitada && form.facturacionModo === "consolidada";
+  const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, form.facturacionModo);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -244,9 +259,7 @@ export default function AssociatedClientModal({
               <select
                 id="associated-cc"
                 value={form.cuentaCorrienteHabilitada ? "si" : "no"}
-                onChange={(e) =>
-                  setForm((current) => ({ ...current, cuentaCorrienteHabilitada: e.target.value === "si" }))
-                }
+                onChange={(e) => cambiarCuentaCorriente(e.target.value === "si")}
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
               >
                 <option value="no">No</option>
@@ -265,12 +278,13 @@ export default function AssociatedClientModal({
               <select
                 id="associated-facturacion"
                 value={form.facturacionModo}
-                onChange={(e) =>
+                onChange={(e) => {
+                  setModoCambioSolo(false);
                   setForm((current) => ({
                     ...current,
                     facturacionModo: e.target.value as FacturacionModo,
-                  }))
-                }
+                  }));
+                }}
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
               >
                 <option value="por_checkout">Factura por cada check-out</option>
@@ -281,6 +295,27 @@ export default function AssociatedClientModal({
                 Consolidada: las estadías no se facturan al cerrar; se juntan en una sola factura
                 desde Control de facturación.
               </p>
+              {mostrarNotaConsolidada && (
+                <p
+                  role="status"
+                  className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
+                >
+                  <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+                  <span>
+                    Pasó a Factura consolidada: lo fiado se junta en una factura. Si esta empresa
+                    quiere factura en cada check-out, cambialo acá.
+                  </span>
+                </p>
+              )}
+              {avisoFacturacion && (
+                <p
+                  role="status"
+                  className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                >
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <span>{avisoFacturacion}</span>
+                </p>
+              )}
             </div>
 
             <div>
