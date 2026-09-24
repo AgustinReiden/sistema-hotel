@@ -74,27 +74,35 @@ export default function AssociatedClientModal({
   // puede ser dos áreas de la misma empresa. El guard pasa a ser una confirmación.
   const [duplicados, setDuplicados] = useState<{ id: string; display_name: string }[] | null>(null);
   const [chequeando, setChequeando] = useState(false);
-  // Facturación pasó sola a consolidada al habilitar la cuenta corriente: se avisa
-  // con una nota hasta que alguien elija el modo a mano.
-  const [modoCambioSolo, setModoCambioSolo] = useState(false);
+  // Facturación pasó sola a consolidada al habilitar la cuenta corriente: guarda el
+  // modo que había antes. Se avisa con una nota hasta que alguien elija el modo a
+  // mano, y si la cuenta vuelve a No se restaura (una ficha en consolidada sin
+  // cuenta corriente saca sus check-outs de "Por facturar"). null = nadie lo cambió solo.
+  const [modoPrevio, setModoPrevio] = useState<FacturacionModo | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialClient));
     setDuplicados(null);
-    setModoCambioSolo(false);
+    setModoPrevio(null);
   }, [isOpen, initialClient]);
 
   if (!isOpen) return null;
 
   const cambiarCuentaCorriente = (habilitada: boolean) => {
+    if (!habilitada && modoPrevio !== null) {
+      // Deshacer el Sí deshace también el cambio automático.
+      setModoPrevio(null);
+      setForm((current) => ({ ...current, cuentaCorrienteHabilitada: false, facturacionModo: modoPrevio }));
+      return;
+    }
     const modo = modoFacturacionAlCambiarCtaCte(form.facturacionModo, habilitada);
-    if (modo !== form.facturacionModo) setModoCambioSolo(true);
+    if (modo !== form.facturacionModo) setModoPrevio(form.facturacionModo);
     setForm((current) => ({ ...current, cuentaCorrienteHabilitada: habilitada, facturacionModo: modo }));
   };
 
   const mostrarNotaConsolidada =
-    modoCambioSolo && form.cuentaCorrienteHabilitada && form.facturacionModo === "consolidada";
+    modoPrevio !== null && form.cuentaCorrienteHabilitada && form.facturacionModo === "consolidada";
   const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, form.facturacionModo);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -279,7 +287,7 @@ export default function AssociatedClientModal({
                 id="associated-facturacion"
                 value={form.facturacionModo}
                 onChange={(e) => {
-                  setModoCambioSolo(false);
+                  setModoPrevio(null);
                   setForm((current) => ({
                     ...current,
                     facturacionModo: e.target.value as FacturacionModo,

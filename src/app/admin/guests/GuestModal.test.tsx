@@ -89,6 +89,35 @@ describe("GuestModal: cuenta corriente y modo de facturación", () => {
     });
   });
 
+  it("volver a No después del Sí deja la ficha como estaba y se guarda así", async () => {
+    await montar(huesped());
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+
+    // Nadie eligió Consolidada: deshacer el Sí deshace también el cambio automático.
+    expect(facturacion().value).toBe("por_checkout");
+    expect(screen.queryByText(NOTA)).toBeNull();
+    expect(screen.queryByText(AVISO)).toBeNull();
+
+    fireEvent.click(screen.getByText("Guardar Cambios"));
+
+    await waitFor(() => expect(H.updateGuestAction).toHaveBeenCalledTimes(1));
+    expect(H.updateGuestAction.mock.calls[0][1]).toMatchObject({
+      cuentaCorrienteHabilitada: false,
+      facturacionModo: "por_checkout",
+    });
+  });
+
+  it("si Facturación se eligió a mano, volver a No no la toca", async () => {
+    await montar(huesped());
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    fireEvent.change(facturacion(), { target: { value: "no_factura" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+
+    expect(facturacion().value).toBe("no_factura");
+    expect(screen.queryByText(NOTA)).toBeNull();
+  });
+
   it("con Cuenta corriente = No no cambia nada", async () => {
     await montar(huesped({ cuenta_corriente_habilitada: true, facturacion_modo: "por_checkout" }));
     // La ficha ya estaba en cuenta corriente + por check-out: el aviso se ve al abrir.

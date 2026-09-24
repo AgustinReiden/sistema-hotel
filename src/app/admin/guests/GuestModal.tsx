@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, CreditCard, Hash, Loader2, Percent, Receip
 import { toast } from "sonner";
 
 import { avisoModoFacturacion, modoFacturacionAlCambiarCtaCte } from "@/lib/billing";
+import type { FacturacionModo } from "@/lib/types";
 import { loadGuestRecordAction, updateGuestAction, type GuestRecordPayload } from "./actions";
 
 type GuestModalProps = {
@@ -39,15 +40,17 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
   const [form, setForm] = useState<GuestRecordPayload>(emptyForm);
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // Facturación pasó sola a consolidada al habilitar la cuenta corriente: se avisa
-  // con una nota hasta que alguien elija el modo a mano.
-  const [modoCambioSolo, setModoCambioSolo] = useState(false);
+  // Facturación pasó sola a consolidada al habilitar la cuenta corriente: guarda el
+  // modo que había antes. Se avisa con una nota hasta que alguien elija el modo a
+  // mano, y si la cuenta vuelve a No se restaura (una ficha en consolidada sin
+  // cuenta corriente saca sus check-outs de "Por facturar"). null = nadie lo cambió solo.
+  const [modoPrevio, setModoPrevio] = useState<FacturacionModo | null>(null);
 
   useEffect(() => {
     if (!guestId) return;
     let active = true;
     setLoading(true);
-    setModoCambioSolo(false);
+    setModoPrevio(null);
     (async () => {
       const result = await loadGuestRecordAction(guestId);
       if (!active) return;
@@ -89,13 +92,19 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
   const modoActual = form.facturacionModo ?? "por_checkout";
 
   const cambiarCuentaCorriente = (habilitada: boolean) => {
+    if (!habilitada && modoPrevio !== null) {
+      // Deshacer el Sí deshace también el cambio automático.
+      setModoPrevio(null);
+      set({ cuentaCorrienteHabilitada: false, facturacionModo: modoPrevio });
+      return;
+    }
     const modo = modoFacturacionAlCambiarCtaCte(modoActual, habilitada);
-    if (modo !== modoActual) setModoCambioSolo(true);
+    if (modo !== modoActual) setModoPrevio(modoActual);
     set({ cuentaCorrienteHabilitada: habilitada, facturacionModo: modo });
   };
 
   const mostrarNotaConsolidada =
-    modoCambioSolo && form.cuentaCorrienteHabilitada && modoActual === "consolidada";
+    modoPrevio !== null && form.cuentaCorrienteHabilitada && modoActual === "consolidada";
   const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, modoActual);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -237,7 +246,7 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                   id="guest-facturacion"
                   value={modoActual}
                   onChange={(e) => {
-                    setModoCambioSolo(false);
+                    setModoPrevio(null);
                     set({ facturacionModo: e.target.value as GuestRecordPayload["facturacionModo"] });
                   }}
                   className={inputClass}

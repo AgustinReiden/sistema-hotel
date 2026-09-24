@@ -110,15 +110,50 @@ describe("AssociatedClientModal: cuenta corriente y modo de facturación", () =>
     });
   });
 
-  it("volver a No después del Sí no toca Facturación y la nota se va", () => {
+  it("volver a No después del Sí deshace el cambio automático y la nota se va", () => {
     montar();
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
     fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
 
-    // Deshabilitar no cambia el modo: queda lo que se veía elegido.
-    expect(facturacion().value).toBe("consolidada");
+    // Nadie eligió Consolidada: deshacer el Sí deja la ficha como estaba. Una ficha
+    // en consolidada sin cuenta corriente saca sus check-outs de "Por facturar".
+    expect(facturacion().value).toBe("por_checkout");
     expect(screen.queryByText(NOTA)).toBeNull();
     expect(screen.queryByText(AVISO)).toBeNull();
+  });
+
+  it("Sí y No al editar una empresa se guarda con 'por cada check-out'", async () => {
+    const { onSubmit } = montar(empresa());
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+
+    fireEvent.click(screen.getByText("Guardar Cambios"));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      cuentaCorrienteHabilitada: false,
+      facturacionModo: "por_checkout",
+    });
+  });
+
+  it("Sí, No y otra vez Sí vuelve a Consolidada con la nota", () => {
+    montar();
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(facturacion().value).toBe("consolidada");
+    expect(screen.getByText(NOTA)).toBeTruthy();
+  });
+
+  it("si Facturación se eligió a mano, volver a No no la toca", () => {
+    montar();
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    fireEvent.change(facturacion(), { target: { value: "no_factura" } });
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+
+    expect(facturacion().value).toBe("no_factura");
+    expect(screen.queryByText(NOTA)).toBeNull();
   });
 
   it("con Cuenta corriente = No no cambia nada", () => {
