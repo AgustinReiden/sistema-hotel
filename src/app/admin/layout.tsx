@@ -26,12 +26,15 @@ export default async function AdminLayout({
     let role = "receptionist";
     const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, full_name')
         .eq('id', user.id)
         .single();
     if (profile?.role) {
         role = profile.role;
     }
+    // Con qué usuario se entró, para el "¿No sos vos?" del traspaso forzado. Si el perfil
+    // no tiene nombre cargado va el email: la salida tiene que estar igual.
+    const currentUserName: string = profile?.full_name?.trim() || userEmail;
     const openShift = await getActiveOpenShift().catch(() => null);
 
     // Traspaso de caja: si un recepcionista entra y la caja abierta la dejó OTRO usuario,
@@ -49,6 +52,7 @@ export default async function AdminLayout({
                 shiftId={openShift.id}
                 shiftNumber={openShift.shift_number}
                 openedByName={summary?.openedByName ?? null}
+                currentUserName={currentUserName}
                 totalsByMethod={
                     summary
                         ? { ...summary.totalsByMethod, cash: 0 }
