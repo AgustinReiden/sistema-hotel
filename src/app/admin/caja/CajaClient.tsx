@@ -129,7 +129,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
                   </span>
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Abrio: {summary.openedByEmail ?? "---"}
+                  Abrio: {summary.openedByName ?? "---"}
                 </p>
               </div>
             </div>

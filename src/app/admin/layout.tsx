@@ -48,7 +48,7 @@ export default async function AdminLayout({
             <ForcedShiftHandover
                 shiftId={openShift.id}
                 shiftNumber={openShift.shift_number}
-                openedByName={summary?.openedByEmail ?? null}
+                openedByName={summary?.openedByName ?? null}
                 totalsByMethod={
                     summary
                         ? { ...summary.totalsByMethod, cash: 0 }
