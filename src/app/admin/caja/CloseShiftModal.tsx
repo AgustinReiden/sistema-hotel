@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -16,6 +16,7 @@ import {
   Landmark,
   Loader2,
   Lock,
+  LogOut,
   Pencil,
   Printer,
   RefreshCw,
@@ -67,6 +68,12 @@ type Props = {
    * quedan Ampliar y Reportar como válvula de escape.
    */
   context?: "normal" | "handover";
+  /**
+   * Con qué usuario se entró. Si viene, arriba de cada paso sale "Entraste como
+   * {name}. ¿No sos vos?" con "Cerrar sesión", que anda aunque el modal no se pueda
+   * descartar: si quedó abierta la sesión equivocada, se sale sin rendir.
+   */
+  identity?: { name: string };
   hotelTimezone?: string;
 };
 
@@ -117,9 +124,11 @@ export default function CloseShiftModal({
   dismissable = true,
   notice,
   context = "normal",
+  identity,
   hotelTimezone,
 }: Props) {
   const router = useRouter();
+  const [loggingOut, startLogout] = useTransition();
   const [actualCash, setActualCash] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
@@ -495,6 +504,26 @@ export default function CloseShiftModal({
       </div>
     ) : null;
 
+  // "¿No sos vos?": en el traspaso forzado el modal no se puede descartar, así que si
+  // quedó abierta la sesión equivocada esta es la única salida. Va en los pasos 1, 2 y
+  // 2b; después de cerrar ya no hace falta (el "Listo" sigue su camino).
+  const identityBar = identity ? (
+    <div className="px-6 py-3 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-2 shrink-0">
+      <p className="text-sm text-slate-600">
+        Entraste como <strong className="text-slate-800">{identity.name}</strong>. ¿No sos vos?
+      </p>
+      <button
+        type="button"
+        onClick={() => startLogout(() => logout())}
+        disabled={loggingOut || loading}
+        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-red-50 hover:text-red-700 hover:border-red-200 disabled:opacity-70 transition-colors flex items-center gap-1.5"
+      >
+        {loggingOut ? <Loader2 className="animate-spin" size={13} /> : <LogOut size={13} />}
+        Cerrar sesión
+      </button>
+    </div>
+  ) : null;
+
   // ── Paso 1: salidas vencidas sin resolver ──
   const hasBlockers = blockers !== null && blockers.length > 0;
   if (blockers === null || hasBlockers) {
@@ -524,6 +553,7 @@ export default function CloseShiftModal({
               </button>
             )}
           </div>
+          {identityBar}
 
           <div className="p-6 space-y-4 overflow-y-auto flex-1">
             {notice && (
@@ -726,6 +756,7 @@ export default function CloseShiftModal({
               <p className="text-slate-500 text-sm font-medium">Revisá el monto antes de enviarlo.</p>
             </div>
           </div>
+          {identityBar}
 
           <div className="p-6 text-center overflow-y-auto flex-1">
             <p className="text-lg font-bold text-slate-600">Contaste</p>
@@ -795,6 +826,7 @@ export default function CloseShiftModal({
             </button>
           )}
         </div>
+        {identityBar}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
           {notice && (
