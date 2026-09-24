@@ -20,8 +20,8 @@
 -- recién en la migración 91, muchísimo después de esta en la secuencia real de
 -- reconstrucción. Ver la sección "Reconstruir desde cero" en README.md.
 --
--- Definiciones capturadas TAL CUAL de PROD (`supabase-sistema-hotel-prod`,
--- proyecto `xoqxbtlpppsyzccljjxp`) el 2026-09-09, vía el conector MCP de solo
+-- Definiciones capturadas TAL CUAL del proyecto de PROD
+-- (`supabase-sistema-hotel-prod`) el 2026-09-09, vía el conector MCP de solo
 -- lectura, con:
 --
 --   select p.proname, pg_get_functiondef(p.oid), r.rolname as owner, p.proacl

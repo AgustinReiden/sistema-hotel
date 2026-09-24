@@ -1,6 +1,6 @@
 # Solapamiento entre Cuentas corrientes y Control de facturación
 
-**Fecha:** 2026-09-18 · **Base auditada:** PROD (`xoqxbtlpppsyzccljjxp`, Brasil), sólo lectura
+**Fecha:** 2026-09-18 · **Base auditada:** PROD (Brasil), sólo lectura
 **Alcance:** las cuatro pantallas que hoy contestan "¿esto está facturado?", más el badge del menú.
 **Método:** leer el código y **contar contra PROD**. Ningún número de este documento es una estimación.
 
