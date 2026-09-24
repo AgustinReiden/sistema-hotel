@@ -14,6 +14,7 @@ const EMPTY_INVOICE_PREFILL: InvoiceReceptorPrefill = {
   suggestA: false,
   complete: false,
 };
+import AutoRefresh from "./AutoRefresh";
 import NewReservationButton from "./NewReservationButton";
 import OccupiedRoomAlertBanner from "./OccupiedRoomAlertBanner";
 import RoomCard from "./RoomCard";
@@ -209,6 +210,8 @@ export default async function Dashboard() {
 
   return (
     <>
+      {/* Si la mucama marca una limpia u otra PC hace un check-out, Hoy lo muestra solo. */}
+      <AutoRefresh />
       <PageHeader
         title={`Vista Global: ${formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}`}
         badge={
