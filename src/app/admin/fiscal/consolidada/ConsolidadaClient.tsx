@@ -188,6 +188,9 @@ export default function ConsolidadaClient({
 
   const loadRows = useCallback(async () => {
     setLastClickedIndex(null);
+    // La recarga vuelve a tildar todo lo pendiente (abajo): un cuadro de revisión
+    // abierto pasaría a decir otra cosa que lo que se revisó. Se cierra.
+    setRevisando(false);
     setLoading(true);
     // Los vacíos van como undefined, no como "": el filtro por período es
     // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
@@ -463,6 +466,10 @@ export default function ConsolidadaClient({
 
   // Receptor que muestra el cuadro. Sin CUIT (huésped consumidor final) el servidor
   // factura con el nombre y el DNI de la ficha del huésped (mig 103).
+  // OJO, pendiente de antes: para consumidor final no se manda condición, y la mig 103
+  // cae en la de la ficha si tiene una. Con la ficha en RI/monotributo/exento, el
+  // servidor emitiría con CUIT aunque acá diga DNI (el caso que la mig 112 cerró en la
+  // factura de check-out mandando 'consumidor_final' explícito).
   const receptorNombre = requiereCuit ? razonSocial.trim() : cuenta?.name ?? "";
   const documento: ConsolidadaDocumento = requiereCuit
     ? { tipo: "CUIT", numero: cuit.replace(/\D/g, "") }
@@ -476,6 +483,9 @@ export default function ConsolidadaClient({
    * de abrir el cuadro.
    */
   const revisar = () => {
+    // Con la lista recargándose, la selección está por cambiar (la recarga vuelve a
+    // tildar todo lo pendiente): no se revisa algo que no es lo que va a quedar.
+    if (loading) return;
     if (selectedRows.length === 0) {
       toast.error("Seleccioná al menos una estadía.");
       return;
@@ -496,35 +506,55 @@ export default function ConsolidadaClient({
     emisionEnCurso.current = true;
 
     setEmitting(true);
-    const result = await emitConsolidatedInvoiceAction({
-      kind,
-      clientId: id,
-      reservationIds: selectedRows.map((r) => r.reservation_id),
-      // Una forma o la otra, nunca las dos: con un solo concepto, las líneas por
-      // estadía no se imprimen, así que mandar sus textos sería guardar en el
-      // comprobante algo que nadie eligió ni va a ver.
-      ...(conceptoUnicoLimpio
-        ? { conceptoUnico: conceptoUnicoLimpio }
-        : {
-            detalle: selectedRows.map((r) => ({
-              reservationId: r.reservation_id,
-              // Si quedó vacío, el servidor pone el texto automático.
-              descripcion: sanitizeDetalleLine(lineaDetalle(r)) ?? "",
-            })),
-          }),
-      ...(notaLimpia ? { nota: notaLimpia } : {}),
-      ...(requiereCuit
-        ? {
-            cuit: cuit.replace(/\D/g, ""),
-            condicionIva: condicionIva as ReceptorCondicionCuit,
-            razonSocial: razonSocial.trim(),
-            domicilio: domicilio.trim(),
-          }
-        : {}),
-    });
-    setEmitting(false);
-    emisionEnCurso.current = false;
-    setRevisando(false);
+    let result: Awaited<ReturnType<typeof emitConsolidatedInvoiceAction>> | null = null;
+    try {
+      result = await emitConsolidatedInvoiceAction({
+        kind,
+        clientId: id,
+        reservationIds: selectedRows.map((r) => r.reservation_id),
+        // Una forma o la otra, nunca las dos: con un solo concepto, las líneas por
+        // estadía no se imprimen, así que mandar sus textos sería guardar en el
+        // comprobante algo que nadie eligió ni va a ver.
+        ...(conceptoUnicoLimpio
+          ? { conceptoUnico: conceptoUnicoLimpio }
+          : {
+              detalle: selectedRows.map((r) => ({
+                reservationId: r.reservation_id,
+                // Si quedó vacío, el servidor pone el texto automático.
+                descripcion: sanitizeDetalleLine(lineaDetalle(r)) ?? "",
+              })),
+            }),
+        ...(notaLimpia ? { nota: notaLimpia } : {}),
+        ...(requiereCuit
+          ? {
+              cuit: cuit.replace(/\D/g, ""),
+              condicionIva: condicionIva as ReceptorCondicionCuit,
+              razonSocial: razonSocial.trim(),
+              domicilio: domicilio.trim(),
+            }
+          : {}),
+      });
+    } catch {
+      // La acción no llegó a contestar: se cortó la red, la función tardó de más o
+      // hubo un deploy con la pantalla abierta. Queda `null`: no se sabe si salió.
+    } finally {
+      // Pase lo que pase, el cuadro no puede quedar trabado diciendo "no cierres
+      // esta ventana".
+      setEmitting(false);
+      emisionEnCurso.current = false;
+      setRevisando(false);
+    }
+
+    if (result === null) {
+      // No se reintenta solo: si la factura salió, emitirla de nuevo sería la segunda.
+      // La lista recargada dice si la estadía ya figura facturada o "en proceso".
+      toast.error(
+        "No sabemos si la factura salió porque se cortó la comunicación. Antes de volver a emitir, mirá la lista: si la estadía figura facturada o «Factura en proceso», no la emitas de nuevo y revisala en Facturación.",
+        { duration: 15000 }
+      );
+      await loadRows();
+      return;
+    }
 
     if (!result.success) {
       toast.error(result.error);
@@ -1002,7 +1032,9 @@ export default function ConsolidadaClient({
             <button
               type="button"
               onClick={() => void revisar()}
-              disabled={emitting || selectedRows.length === 0 || faltantesReceptor.length > 0}
+              disabled={
+                emitting || loading || selectedRows.length === 0 || faltantesReceptor.length > 0
+              }
               className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-2"
             >
               {emitting ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />}

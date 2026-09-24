@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ConsolidadaClient, { type ConsolidadaFiscal } from "./ConsolidadaClient";
+import { CONFIRMAR_ESPERA_MS } from "./ConsolidadaConfirmModal";
 import ConsolidadaPage from "./page";
 import type {
   CcAccountStayRow,
@@ -190,6 +192,23 @@ function abrirCuadro() {
 /** El botón "Confirmar y emitir en ARCA" del cuadro. */
 const botonConfirmar = (cuadro: HTMLElement) =>
   within(cuadro).getByText(CONFIRMAR).closest("button") as HTMLButtonElement;
+
+/**
+ * "Confirmar" arranca deshabilitado un instante después de abrir el cuadro (así un doble
+ * toque sobre la barra no emite): espera a que se habilite y lo devuelve.
+ */
+async function confirmarListo(cuadro: HTMLElement) {
+  const boton = botonConfirmar(cuadro);
+  await waitFor(() => expect(boton).toBeEnabled());
+  return boton;
+}
+
+/** Deja pasar la espera de "Confirmar" sin mirar el botón. */
+const pasarEsperaConfirmar = () =>
+  act(() => new Promise((resolve) => setTimeout(resolve, CONFIRMAR_ESPERA_MS + 100)));
+
+/** El botón "Revisar y emitir…" de la barra. */
+const botonRevisar = () => screen.getByText(REVISAR).closest("button") as HTMLButtonElement;
 
 /** El payload con el que se llamó a la acción de emitir. */
 type EmitPayload = {
@@ -505,7 +524,7 @@ describe("ConsolidadaClient", () => {
       await screen.findByLabelText(BARRA);
 
       const cuadro = abrirCuadro();
-      const confirmar = botonConfirmar(cuadro);
+      const confirmar = await confirmarListo(cuadro);
       fireEvent.click(confirmar);
       fireEvent.click(confirmar);
 
@@ -526,6 +545,97 @@ describe("ConsolidadaClient", () => {
       );
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
       await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
+    });
+
+    it("un doble toque sobre la barra no emite: «Confirmar» recién responde un instante después de abrir el cuadro", async () => {
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      // En el celular el cuadro sale desde abajo y «Confirmar» queda donde estaba el
+      // botón de la barra: el segundo toque cae ahí apenas se abre.
+      const cuadro = abrirCuadro();
+      const confirmar = botonConfirmar(cuadro);
+      expect(confirmar).toBeDisabled();
+      fireEvent.click(confirmar);
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+
+      // Pasado el instante, sí emite.
+      fireEvent.click(await confirmarListo(cuadro));
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
+    });
+
+    it("si la emisión falla, el cuadro se cierra, dice por qué y se puede volver a intentar", async () => {
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: false,
+        error: "ARCA no respondió. Probá de nuevo en unos minutos.",
+      });
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
+      expect(toast.error).toHaveBeenCalledWith("ARCA no respondió. Probá de nuevo en unos minutos.");
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(2));
+    });
+
+    it("si la llamada se corta sin respuesta, el cuadro no queda trabado: avisa que no se sabe si salió y recarga la lista", async () => {
+      // Se corta la red o hubo un deploy con la pantalla abierta: la acción no devuelve
+      // { success: false }, directamente falla.
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await screen.findByLabelText(BARRA);
+      expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("No sabemos si la factura salió"),
+        expect.anything()
+      );
+      // Recarga la lista: si salió, la estadía aparece facturada o «Factura en proceso».
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+
+      // Nada quedó trabado: el cuadro se vuelve a abrir con los dos botones andando.
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).getByText("Volver").closest("button")).toBeEnabled();
+      await confirmarListo(cuadro);
+    });
+
+    it("mientras la lista se recarga, «Revisar y emitir» no abre el cuadro (la recarga cambia la selección)", async () => {
+      const filas = [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")];
+      let responderRecarga: (value: unknown) => void = () => {};
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => Promise.resolve({ success: true, data: filas }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              responderRecarga = resolve;
+            })
+        );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      // Se destilda la hab. 2 a propósito y se aprieta "Recargar".
+      fireEvent.click(fila("2"));
+      fireEvent.click(screen.getByTitle("Recargar"));
+
+      expect(botonRevisar()).toBeDisabled();
+      fireEvent.click(botonRevisar());
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+
+      // La recarga vuelve a tildar todo lo pendiente: recién ahí se puede revisar, y el
+      // cuadro dice lo que va de verdad.
+      await act(async () => {
+        responderRecarga({ success: true, data: filas });
+      });
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      expect(within(abrirCuadro()).getByText(/^3 estadías/)).toBeInTheDocument();
     });
 
     it("en producción muestra la banda PRODUCCIÓN", async () => {
@@ -562,7 +672,7 @@ describe("ConsolidadaClient", () => {
       expect(within(cuadro).getByText("Juan Prueba")).toBeInTheDocument();
       expect(within(cuadro).getByText("DNI 30123456")).toBeInTheDocument();
       expect(within(cuadro).getByText("Consumidor Final")).toBeInTheDocument();
-      expect(botonConfirmar(cuadro)).toBeEnabled();
+      await confirmarListo(cuadro);
     });
 
     it("un huésped con DNI inválido ve el aviso y no puede confirmar", async () => {
@@ -572,6 +682,8 @@ describe("ConsolidadaClient", () => {
       const cuadro = abrirCuadro();
 
       expect(within(cuadro).getByText(/no sirve para facturar/)).toBeInTheDocument();
+      // Pasada la espera anti doble toque, sigue deshabilitado: lo traba el DNI.
+      await pasarEsperaConfirmar();
       const confirmar = botonConfirmar(cuadro);
       expect(confirmar).toBeDisabled();
       fireEvent.click(confirmar);
@@ -664,7 +776,7 @@ describe("ConsolidadaClient", () => {
       // El aviso se repite en el cuadro: es lo último que se mira antes de emitir.
       expect(within(cuadro).getByText(/1 estadía tildada en otras páginas/)).toBeInTheDocument();
 
-      fireEvent.click(within(cuadro).getByText(CONFIRMAR));
+      fireEvent.click(await confirmarListo(cuadro));
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().detalle).toHaveLength(1);
@@ -679,9 +791,8 @@ describe("ConsolidadaClient", () => {
     });
 
     /** Emitir ahora son dos pasos: revisar y confirmar. */
-    const emitir = () => {
-      const cuadro = abrirCuadro();
-      fireEvent.click(within(cuadro).getByText(CONFIRMAR));
+    const emitir = async () => {
+      fireEvent.click(await confirmarListo(abrirCuadro()));
     };
 
     it("con «un solo concepto», manda el texto y NO las líneas por estadía", async () => {
@@ -704,7 +815,7 @@ describe("ConsolidadaClient", () => {
       expect(
         within(abrirCuadro()).getByText(/un solo concepto, «Servicios de alojamiento»/)
       ).toBeInTheDocument();
-      fireEvent.click(within(screen.getByLabelText(CUADRO)).getByText(CONFIRMAR));
+      fireEvent.click(await confirmarListo(screen.getByLabelText(CUADRO)));
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().conceptoUnico).toBe("Servicios de alojamiento");
@@ -718,7 +829,7 @@ describe("ConsolidadaClient", () => {
       await screen.findByLabelText(BARRA);
 
       // No se toca el interruptor: el modo de siempre es el default.
-      emitir();
+      await emitir();
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().conceptoUnico).toBeUndefined();
@@ -739,7 +850,7 @@ describe("ConsolidadaClient", () => {
 
       expect(linea()).toHaveValue("Convención anual");
 
-      emitir();
+      await emitir();
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().detalle?.[0].descripcion).toBe("Convención anual");
     });
@@ -753,7 +864,7 @@ describe("ConsolidadaClient", () => {
         target: { value: "   " },
       });
 
-      emitir();
+      await emitir();
 
       // Mandar vacío sería peor: en el servidor NULL significa "detallado", así que
       // el impreso saldría distinto de lo que la pantalla venía mostrando.

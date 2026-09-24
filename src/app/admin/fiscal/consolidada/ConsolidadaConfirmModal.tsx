@@ -1,11 +1,20 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, FileText, Loader2 } from "lucide-react";
 
 import { formatCuit } from "@/lib/arca/amounts";
 import { formatAmount } from "@/lib/format";
 import type { FiscalEnvironment } from "@/lib/types";
+
+/**
+ * Cuánto tarda "Confirmar" en habilitarse después de abrir el cuadro. En el celular el
+ * cuadro sale desde abajo y "Confirmar" queda donde estaba el botón de la barra: sin esta
+ * espera, un doble toque sobre la barra abre el cuadro con el primer toque y emite con el
+ * segundo, sin que nadie lo haya leído. Un doble toque dura menos de 300 ms; leer el
+ * cuadro, bastante más.
+ */
+export const CONFIRMAR_ESPERA_MS = 500;
 
 /** Con qué documento sale el receptor: CUIT (A, o B a exento) o DNI (B a consumidor final). */
 export type ConsolidadaDocumento =
@@ -87,6 +96,14 @@ export default function ConsolidadaConfirmModal({
   const dniDigits = documento.tipo === "DNI" ? (documento.numero ?? "").replace(/\D/g, "") : "";
   const dniInvalido = documento.tipo === "DNI" && dniDigits.length !== 7 && dniDigits.length !== 8;
 
+  // El cuadro se monta al abrirse: "Confirmar" arranca deshabilitado y se habilita pasada
+  // la espera (ver CONFIRMAR_ESPERA_MS).
+  const [listo, setListo] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setListo(true), CONFIRMAR_ESPERA_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
       <div
@@ -122,7 +139,7 @@ export default function ConsolidadaConfirmModal({
             </div>
           )}
 
-          {/* Lo que se lee acá es exactamente lo que se manda a ARCA. */}
+          {/* Sale de los mismos datos que se mandan a ARCA (ver el receptor en ConsolidadaClient). */}
           <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Se va a emitir</p>
             <p className="text-2xl font-black text-slate-800 mt-1">Factura {letra}</p>
@@ -197,7 +214,7 @@ export default function ConsolidadaConfirmModal({
             <button
               type="button"
               onClick={onConfirm}
-              disabled={emitting || dniInvalido || bloquearConfirmar}
+              disabled={!listo || emitting || dniInvalido || bloquearConfirmar}
               className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-base font-black rounded-2xl transition-colors flex items-center justify-center gap-2"
             >
               {emitting ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
