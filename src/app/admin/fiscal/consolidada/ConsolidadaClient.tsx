@@ -628,7 +628,7 @@ export default function ConsolidadaClient({
       setEmisionIncierta(true);
       toast.error(
         recargada
-          ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila."
+          ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada. Si siguen ahí, volvé a tildarlas y emitila."
           : "No sabemos si la factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir.",
         { duration: 15000 }
       );
@@ -698,7 +698,7 @@ export default function ConsolidadaClient({
             <p className="text-sm font-semibold text-rose-800">
               {errorCarga
                 ? "No sabemos si la última factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir."
-                : "No sabemos si la última factura salió porque se cortó la comunicación. Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila."}
+                : "No sabemos si la última factura salió porque se cortó la comunicación. Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada. Si siguen ahí, volvé a tildarlas y emitila."}
             </p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
               <Link href="/admin/fiscal" className="text-brand-700 hover:underline">

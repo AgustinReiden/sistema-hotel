@@ -725,9 +725,12 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(await confirmarListo(abrirCuadro()));
 
       const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      // Que falten en «Pendientes» sólo prueba que se generó un comprobante, que puede
+      // haber quedado emitido, pendiente o rechazado: no se afirma que "salió".
       expect(aviso.textContent).toContain(
-        "Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura salió: no la emitas de nuevo"
+        "Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada."
       );
+      expect(aviso.textContent).not.toContain("la factura salió:");
       expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
         "href",
         "/admin/fiscal"
@@ -798,6 +801,13 @@ describe("ConsolidadaClient", () => {
           expect.stringContaining("«Pendientes de facturar»"),
           expect.anything()
         )
+      );
+      // Y no promete que salió: que falten sólo dice que se generó un comprobante.
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "ya no están ahí, la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada."
+        ),
+        expect.anything()
       );
       await waitFor(() =>
         expect(screen.getByText("Pendientes de facturar")).toHaveAttribute("aria-pressed", "true")
@@ -875,7 +885,7 @@ describe("ConsolidadaClient", () => {
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
       // Con la lista a la vista, el aviso sigue y ahora sí dice cómo leerla.
       expect(screen.getByLabelText(AVISO_INCIERTO).textContent).toContain(
-        "ya no están en «Pendientes de facturar», la factura salió"
+        "ya no están en «Pendientes de facturar», la factura se generó"
       );
     });
 
