@@ -123,7 +123,9 @@ export default function ConsolidadaConfirmModal({
   bloquearConfirmar = false,
 }: Props) {
   // El servidor rechaza un DNI que no tenga 7 u 8 dígitos (P0022). Se avisa acá para no
-  // llegar al rechazo con el cuadro ya confirmado.
+  // llegar al rechazo con el cuadro ya confirmado. El DNI es el que se leyó al abrir la
+  // página: si lo corrigen en Huéspedes con la página abierta, el cuadro sigue trabado
+  // hasta que se recarga, y por eso el aviso lo pide.
   const dniDigits = documento.tipo === "DNI" ? (documento.numero ?? "").replace(/\D/g, "") : "";
   const dniInvalido = documento.tipo === "DNI" && dniDigits.length !== 7 && dniDigits.length !== 8;
 
@@ -258,7 +260,8 @@ export default function ConsolidadaConfirmModal({
               <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
               <p className="text-xs font-semibold text-rose-800">
                 El DNI de la ficha del huésped ({dniDigits || "vacío"}) no sirve para facturar: tiene
-                que tener 7 u 8 dígitos. Corregilo en Huéspedes antes de emitir.
+                que tener 7 u 8 dígitos. Corregilo en Huéspedes y después recargá esta página: el
+                DNI se lee al abrirla.
               </p>
             </div>
           )}

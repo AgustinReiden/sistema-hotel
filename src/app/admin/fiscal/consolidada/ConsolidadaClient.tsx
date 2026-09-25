@@ -154,13 +154,19 @@ export default function ConsolidadaClient({
   // es la de la última, para que la vieja conteste lo mismo que ella.
   const numeroCarga = useRef(0);
   const ultimaCarga = useRef<Promise<boolean> | null>(null);
+  // Cliente (`kind:id`) de la última carga que se pidió: una carga vieja de otro cliente
+  // (la URL cambió de cliente con la anterior en camino) no puede fijar el total de este.
+  const clienteUltimaCarga = useRef<string | null>(null);
+  // Número de la carga sin rango que fijó el total: una más vieja no lo pisa.
+  const totalFijadoPor = useRef(0);
 
   // Rango del listado. Vacío = "Todo", que es el default a propósito: el caso
   // normal sigue siendo "facturame todo lo que debe", y un rango puesto de
   // arranque escondería deuda sin que nadie lo haya pedido.
   const [range, setRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
   // Estadías que tiene la cuenta entera, para poder decir "N de M". Se guarda de
-  // la última carga sin rango; el servidor sólo devuelve lo filtrado.
+  // la última carga sin rango que contestó, aunque haya quedado vieja (ver loadRows);
+  // el servidor sólo devuelve lo filtrado.
   const [totalStays, setTotalStays] = useState<number | null>(null);
   // Qué se pinta en la lista: sólo lo que falta facturar (default, para no abrir
   // en un pozo de historial) o la cuenta entera. Es un filtro de PANTALLA, no va
@@ -217,6 +223,11 @@ export default function ConsolidadaClient({
    */
   const loadRows = useCallback((): Promise<boolean> => {
     const numero = ++numeroCarga.current;
+    const cliente = `${kind}:${id}`;
+    clienteUltimaCarga.current = cliente;
+    // Sin rango, lo que vuelva ES la cuenta entera: es la única carga que puede fijar el
+    // "de M" del contador.
+    const sinRango = !range.from && !range.to;
     const promesa = (async (): Promise<boolean> => {
       setLastClickedIndex(null);
       // La recarga vuelve a tildar todo lo pendiente (abajo): un cuadro de revisión
@@ -242,9 +253,25 @@ export default function ConsolidadaClient({
         };
       }
       // Llegó tarde: después de esta se pidió otra, que es la que manda. Esta no toca
-      // nada (ni «Cargando…», ni la lista, ni lo tildado, ni el aviso de emisión incierta)
-      // y contesta lo que conteste la última.
-      if (numero !== numeroCarga.current) return ultimaCarga.current ?? false;
+      // «Cargando…», ni la lista, ni lo tildado, ni el aviso de emisión incierta, y
+      // contesta lo que conteste la última.
+      if (numero !== numeroCarga.current) {
+        // Lo único que sí deja es el total de la cuenta: la lista es vieja, pero sin rango
+        // lo que vino es la cuenta entera del mismo cliente. Si no, con un período elegido
+        // antes de que contestara la primera carga, el contador diría "1 de 1" y
+        // escondería la deuda que el período deja afuera, que es justo lo que avisa.
+        // No lo fija una carga de otro cliente ni una más vieja que la que ya lo fijó.
+        if (
+          result.success &&
+          sinRango &&
+          cliente === clienteUltimaCarga.current &&
+          numero > totalFijadoPor.current
+        ) {
+          totalFijadoPor.current = numero;
+          setTotalStays((result.data ?? []).length);
+        }
+        return ultimaCarga.current ?? false;
+      }
       setLoading(false);
       // Se cierra también al terminar, no sólo al arrancar: la lista que sigue no es la
       // que se revisó.
@@ -258,9 +285,10 @@ export default function ConsolidadaClient({
       }
       const data = result.data ?? [];
       setRows(data);
-      // Sin rango, lo que vino ES la cuenta entera: es la única carga que puede
-      // fijar el "de M" del contador.
-      if (!range.from && !range.to) setTotalStays(data.length);
+      if (sinRango) {
+        totalFijadoPor.current = numero;
+        setTotalStays(data.length);
+      }
       // Por defecto se selecciona todo lo pendiente: el caso normal es
       // "facturame todo lo que debe". Salvo la primera carga que anda después de una
       // emisión incierta: ahí no se tilda nada y cada estadía se vuelve a elegir a mano.
@@ -1123,9 +1151,11 @@ export default function ConsolidadaClient({
               </p>
             </div>
           ) : (
+            // El DNI se lee al abrir la página (`accounts`): corregido en Huéspedes, esta
+            // pantalla sigue con el viejo, y el cuadro lo sigue trabando, hasta que se recarga.
             <p className="text-sm text-slate-500">
               Se emite <strong>Factura B</strong> con el DNI de la ficha del huésped. Si el DNI está
-              mal, corregilo en Huéspedes antes de emitir.
+              mal, corregilo en Huéspedes y después recargá esta página: el DNI se lee al abrirla.
             </p>
           )}
         </section>

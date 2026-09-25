@@ -978,7 +978,10 @@ describe("ConsolidadaClient", () => {
     const TODA_LA_CUENTA = [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")];
     const DEL_MES = [makeRow("r3", "3")];
 
-    /** Cada carga queda en camino hasta que el test la contesta, en el orden que elija. */
+    /**
+     * Cada carga queda en camino hasta que el test la contesta, en el orden que elija.
+     * `n` es el orden en que se pidió (0 = la primera). "falla" contesta con error.
+     */
     function cargasEnFila() {
       const respuestas: ((value: unknown) => void)[] = [];
       loadCcAccountStaysAction.mockImplementation(
@@ -987,9 +990,13 @@ describe("ConsolidadaClient", () => {
             respuestas.push(resolve);
           })
       );
-      return (n: number, data: CcAccountStayRow[]) =>
+      return (n: number, data: CcAccountStayRow[] | "falla") =>
         act(async () => {
-          respuestas[n]({ success: true, data });
+          respuestas[n](
+            data === "falla"
+              ? { success: false, error: "No se pudo leer la cuenta." }
+              : { success: true, data }
+          );
         });
     }
 
@@ -1018,6 +1025,10 @@ describe("ConsolidadaClient", () => {
       await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
       expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      // La lista de la vieja no vale, pero el total de la cuenta sí: el contador no puede
+      // decir que la cuenta entera es lo que muestra el período, que es justo lo que tiene
+      // que avisar (el período esconde deuda).
+      expect(screen.getByText(/Mostrando 1 de 3 estadías de la cuenta/)).toBeInTheDocument();
       expect(screen.getByLabelText(BARRA).textContent).toContain(`1 estadía · Total $${plata(10000)}`);
       expect(within(abrirCuadro()).getByText(/^1 estadía /)).toBeInTheDocument();
     });
@@ -1036,6 +1047,168 @@ describe("ConsolidadaClient", () => {
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
       expect(screen.queryByLabelText("Incluir estadía de habitación 2")).not.toBeInTheDocument();
       expect(screen.getByLabelText(BARRA).textContent).toContain(`1 estadía · Total $${plata(10000)}`);
+      // Lo único que la vieja sí deja es el total de la cuenta.
+      expect(screen.getByText(/Mostrando 1 de 3 estadías de la cuenta/)).toBeInTheDocument();
+    });
+
+    it("una carga vieja de OTRO cliente no fija el total de la cuenta del cliente que quedó", async () => {
+      const contestar = cargasEnFila();
+      const { rerender } = renderClient("acme");
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+
+      // La URL cambia de cliente con la carga del anterior en camino, y enseguida se elige
+      // un período para el nuevo.
+      rerender(clientElement("ficticia"));
+      await waitFor(() =>
+        expect(loadCcAccountStaysAction).toHaveBeenLastCalledWith(
+          "company",
+          "ficticia",
+          undefined,
+          undefined
+        )
+      );
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+
+      await contestar(2, DEL_MES);
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      // La del cliente anterior (3 estadías) llega tarde: no es la cuenta de este cliente.
+      await contestar(0, TODA_LA_CUENTA);
+      expect(screen.queryByText(/de 3 estadías de la cuenta/)).not.toBeInTheDocument();
+
+      // La de este cliente sin rango sí: es su cuenta entera. Y tampoco pinta su lista.
+      await contestar(1, [makeRow("r3", "3"), makeRow("r4", "4")]);
+      expect(screen.getByText(/Mostrando 1 de 2 estadías de la cuenta/)).toBeInTheDocument();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 4")).not.toBeInTheDocument();
+    });
+
+    it("una carga vieja sin rango no pisa el total que ya fijó una más nueva sin rango", async () => {
+      const contestar = cargasEnFila();
+      renderClient();
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByText("Todo"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+
+      // La última (sin rango) trae la cuenta como está ahora.
+      await contestar(2, TODA_LA_CUENTA);
+      await waitFor(() => expect(screen.getByText(/Mostrando 3 de 3 estadías/)).toBeInTheDocument());
+
+      // La primera, también sin rango, llega después con la cuenta de antes: no la pisa.
+      await contestar(0, [makeRow("r1", "1"), makeRow("r2", "2")]);
+      await contestar(1, DEL_MES);
+      expect(screen.getByText(/Mostrando 3 de 3 estadías/)).toBeInTheDocument();
+    });
+
+    // Una emisión incierta con dos cargas en fila: la recarga que sigue a la emisión y la
+    // de un período elegido mientras esa sigue en camino. Sólo la última consume el "no
+    // tildar nada" y decide qué aviso sale. Si la vieja lo consumiera, la última volvería a
+    // tildar lo que se había dejado afuera a propósito, con «Revisar y emitir» listo para
+    // mandar una segunda factura real.
+    async function emisionInciertaConCargasEnFila() {
+      const contestar = cargasEnFila();
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+      await contestar(0, TODA_LA_CUENTA);
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      // La hab. 3 se deja afuera a propósito y se emiten la 1 y la 2: la llamada se corta.
+      fireEvent.click(fila("3"));
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).getByText(/^2 estadías/)).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(cuadro));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+
+      // Con la recarga en camino se elige «Este mes»: el filtro no se traba con la carga.
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() =>
+        expect(loadCcAccountStaysAction).toHaveBeenLastCalledWith(
+          "company",
+          "acme",
+          "2026-09-01",
+          "2026-09-16"
+        )
+      );
+      expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3);
+      return contestar;
+    }
+
+    /** Lo que tiene que quedar después de la emisión incierta: nada tildado y sin barra. */
+    async function esperarSinNadaTildado() {
+      await waitFor(() => expect(filaCheckbox("3")).not.toBeChecked());
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+    }
+
+    it("emisión incierta y período elegido con la recarga en camino: contesta primero la del mes y después la vieja, y no queda nada tildado", async () => {
+      const contestar = await emisionInciertaConCargasEnFila();
+
+      await contestar(2, DEL_MES);
+      await contestar(1, TODA_LA_CUENTA);
+
+      await esperarSinNadaTildado();
+      // El aviso es el de la lista del mes, que es la que quedó a la vista y sí se cargó.
+      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      expect(aviso.textContent).toContain(
+        "ya no están en «Pendientes de facturar», la factura se generó"
+      );
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("Te dejamos la lista"),
+        expect.anything()
+      );
+    });
+
+    it("emisión incierta y período elegido con la recarga en camino: contesta primero la vieja y después la del mes, y no queda nada tildado", async () => {
+      const contestar = await emisionInciertaConCargasEnFila();
+
+      // La vieja no consume el "no tildar nada" ni hace salir el aviso: la del mes sigue en
+      // camino.
+      await contestar(1, TODA_LA_CUENTA);
+      expect(screen.getByText("Cargando…")).toBeInTheDocument();
+      expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument();
+
+      await contestar(2, DEL_MES);
+
+      await esperarSinNadaTildado();
+      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      expect(aviso.textContent).toContain(
+        "ya no están en «Pendientes de facturar», la factura se generó"
+      );
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("Te dejamos la lista"),
+        expect.anything()
+      );
+    });
+
+    it("emisión incierta con la recarga en camino: si la del mes falla y la vieja anda, el aviso dice que tampoco se pudo cargar la lista", async () => {
+      const contestar = await emisionInciertaConCargasEnFila();
+
+      await contestar(2, "falla");
+      await contestar(1, TODA_LA_CUENTA);
+
+      // Quedó a la vista la del mes, que no se cargó: la vieja no pinta su lista ni hace
+      // decir al aviso «Te dejamos la lista».
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining("tampoco pudimos volver a cargar la lista"),
+          expect.anything()
+        )
+      );
+      expect(toast.error).not.toHaveBeenCalledWith(
+        expect.stringContaining("Te dejamos la lista"),
+        expect.anything()
+      );
+      expect(screen.getByText(/No pudimos cargar la lista/)).toBeInTheDocument();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 3")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
+      expect(screen.getByLabelText(AVISO_INCIERTO).textContent).toContain(
+        "tampoco pudimos volver a cargar la lista"
+      );
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
     });
 
     it("en producción muestra la banda PRODUCCIÓN", async () => {
@@ -1078,10 +1251,18 @@ describe("ConsolidadaClient", () => {
     it("un huésped con DNI inválido ve el aviso y no puede confirmar", async () => {
       renderClient("g-dni-mal", "guest");
       await screen.findByLabelText(BARRA);
+      // El DNI se lee al abrir la página: corregido en Huéspedes, esta pantalla no se entera
+      // hasta que se recarga. Lo dice antes de abrir el cuadro y adentro del cuadro.
+      expect(
+        screen.getByText(/corregilo en Huéspedes y después recargá esta página/)
+      ).toBeInTheDocument();
 
       const cuadro = abrirCuadro();
 
       expect(within(cuadro).getByText(/no sirve para facturar/)).toBeInTheDocument();
+      expect(
+        within(cuadro).getByText(/Corregilo en Huéspedes y después recargá esta página/)
+      ).toBeInTheDocument();
       // Pasada la espera anti doble toque, sigue deshabilitado: lo traba el DNI.
       await pasarEsperaConfirmar();
       const confirmar = botonConfirmar(cuadro);
