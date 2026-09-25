@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ConsolidadaClient, { type ConsolidadaFiscal } from "./ConsolidadaClient";
 import { CONFIRMAR_ESPERA_MS } from "./ConsolidadaConfirmModal";
@@ -193,8 +193,20 @@ const CUADRO = "Revisá antes de emitir";
 const REVISAR = "Revisar y emitir factura consolidada";
 const CONFIRMAR = "Confirmar y emitir en ARCA";
 
-/** Aprieta el botón de la barra y devuelve el cuadro de revisión que abre. */
+/**
+ * Aprieta el botón de la barra y devuelve el cuadro de revisión que abre.
+ *
+ * Desde acá la espera de "Confirmar" (CONFIRMAR_ESPERA_MS) corre con reloj falso: con el
+ * reloj real, cada confirmarListo() gastaba medio segundo de verdad contra el segundo que
+ * da waitFor, y con la suite entera en paralelo el test más largo rozaba los 5 s. Se
+ * falsean sólo setTimeout y clearTimeout, y el reloj falso sigue avanzando solo
+ * (shouldAdvanceTime): waitFor y las acciones simuladas andan como con el real. El
+ * afterEach de abajo vuelve al reloj real.
+ */
 function abrirCuadro() {
+  if (!vi.isFakeTimers()) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+  }
   fireEvent.click(screen.getByText(REVISAR));
   return screen.getByLabelText(CUADRO);
 }
@@ -203,19 +215,22 @@ function abrirCuadro() {
 const botonConfirmar = (cuadro: HTMLElement) =>
   within(cuadro).getByText(CONFIRMAR).closest("button") as HTMLButtonElement;
 
+/** Deja pasar la espera de "Confirmar" (reloj falso: ver abrirCuadro). */
+const pasarEsperaConfirmar = () =>
+  act(() => {
+    vi.advanceTimersByTime(CONFIRMAR_ESPERA_MS);
+  });
+
 /**
  * "Confirmar" arranca deshabilitado un instante después de abrir el cuadro (así un doble
- * toque sobre la barra no emite): espera a que se habilite y lo devuelve.
+ * toque sobre la barra no emite): deja pasar esa espera y devuelve el botón ya habilitado.
  */
 async function confirmarListo(cuadro: HTMLElement) {
   const boton = botonConfirmar(cuadro);
-  await waitFor(() => expect(boton).toBeEnabled());
+  pasarEsperaConfirmar();
+  expect(boton).toBeEnabled();
   return boton;
 }
-
-/** Deja pasar la espera de "Confirmar" sin mirar el botón. */
-const pasarEsperaConfirmar = () =>
-  act(() => new Promise((resolve) => setTimeout(resolve, CONFIRMAR_ESPERA_MS + 100)));
 
 /** El botón "Revisar y emitir…" de la barra. */
 const botonRevisar = () => screen.getByText(REVISAR).closest("button") as HTMLButtonElement;
@@ -232,6 +247,14 @@ type EmitPayload = {
   nota?: string;
 };
 const payloadEmitido = () => emitConsolidatedInvoiceAction.mock.calls[0][0] as EmitPayload;
+
+/** El aviso fijo de una emisión con resultado incierto. */
+const AVISO_INCIERTO = "No sabemos si la factura salió";
+
+// abrirCuadro() pasa al reloj falso; cada test arranca con el real.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("ConsolidadaClient", () => {
   beforeEach(() => {
@@ -530,6 +553,67 @@ describe("ConsolidadaClient", () => {
       expect(screen.getByLabelText(/Nota al pie/)).toHaveValue("Orden de compra 99");
     });
 
+    it("el foco arranca en «Volver» sin desplazar el cuadro: en un celular chico, el título y la banda de PRODUCCIÓN quedan a la vista", async () => {
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      const focus = vi.spyOn(HTMLElement.prototype, "focus");
+      try {
+        const cuadro = abrirCuadro();
+
+        expect(document.activeElement).toBe(within(cuadro).getByText("Volver").closest("button"));
+        // «Volver» está al fondo del cuadro: un focus() común (el de autoFocus) baja el
+        // cuadro hasta ahí y deja arriba, fuera de la vista, el título y la banda.
+        expect(focus).toHaveBeenCalled();
+        expect(focus.mock.calls.every(([opciones]) => opciones?.preventScroll === true)).toBe(true);
+      } finally {
+        focus.mockRestore();
+      }
+    });
+
+    it("el cuadro dice cómo sale el detalle: las líneas con texto escrito a mano salen tal cual, sin prometer habitación y fechas", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({
+          success: true,
+          data: [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")],
+        })
+      );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+      const linea = (habitacion: string) =>
+        screen.getByLabelText(`Descripción de la estadía de habitación ${habitacion}`);
+      const detalleDelCuadro = () => {
+        const cuadro = abrirCuadro();
+        const texto = within(cuadro).getByText(/^Detalle:/).textContent;
+        fireEvent.click(within(cuadro).getByText("Volver"));
+        return texto;
+      };
+
+      // Sin tocar nada, cada línea lleva su habitación y sus fechas.
+      expect(detalleDelCuadro()).toBe(
+        "Detalle: una línea por estadía, con su habitación y sus fechas."
+      );
+
+      // La de la hab. 1 se reemplaza. La de la hab. 2 se vacía: esa no cuenta, porque el
+      // servidor le pone el texto automático.
+      fireEvent.change(linea("1"), { target: { value: "Convención anual" } });
+      fireEvent.change(linea("2"), { target: { value: "  " } });
+      expect(detalleDelCuadro()).toBe(
+        "Detalle: una línea por estadía. Una sale con el texto que escribiste en «Detalle del comprobante»; las demás, con su habitación y sus fechas."
+      );
+
+      fireEvent.change(linea("2"), { target: { value: "Salón" } });
+      expect(detalleDelCuadro()).toBe(
+        "Detalle: una línea por estadía. 2 salen con el texto que escribiste en «Detalle del comprobante»; las demás, con su habitación y sus fechas."
+      );
+
+      fireEvent.change(linea("3"), { target: { value: "Catering" } });
+      expect(detalleDelCuadro()).toBe(
+        "Detalle: una línea por estadía, con el texto que escribiste en «Detalle del comprobante»."
+      );
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+    });
+
     it("«Confirmar y emitir en ARCA» emite una sola vez aunque se haga doble click, y abre el impreso", async () => {
       let responder: (value: unknown) => void = () => {};
       emitConsolidatedInvoiceAction.mockImplementation(
@@ -632,6 +716,51 @@ describe("ConsolidadaClient", () => {
       await confirmarListo(cuadro);
     });
 
+    it("si no se sabe si la factura salió, queda un aviso fijo arriba de la lista (el toast se va solo) con el enlace a Facturación, hasta cerrarlo", async () => {
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await screen.findByLabelText(BARRA);
+      expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument();
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      expect(aviso.textContent).toContain(
+        "Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura salió: no la emitas de nuevo"
+      );
+      expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
+        "href",
+        "/admin/fiscal"
+      );
+
+      // Sigue ahí mientras se trabaja con la lista: no depende de haber visto el toast.
+      await waitFor(() => expect(filaCheckbox("5")).not.toBeChecked());
+      fireEvent.click(fila("5"));
+      fireEvent.click(screen.getByText("Todas"));
+      expect(screen.getByLabelText(AVISO_INCIERTO)).toBeInTheDocument();
+
+      fireEvent.click(within(aviso).getByText("Cerrar el aviso"));
+      expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument();
+    });
+
+    it("el aviso de la emisión incierta se va con la próxima emisión", async () => {
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await screen.findByLabelText(AVISO_INCIERTO);
+
+      // Seguía pendiente: se vuelve a tildar y se emite. Esta vez sale bien.
+      await waitFor(() => expect(filaCheckbox("5")).not.toBeChecked());
+      fireEvent.click(fila("5"));
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument());
+    });
+
     it("si la llamada se corta y la factura salió, lo que se había dejado afuera NO queda tildado y la lista vuelve a «Pendientes de facturar»", async () => {
       // Cinco pendientes; se destildan las hab. 4 y 5 porque van el mes que viene.
       const pendientes = ["1", "2", "3", "4", "5"].map((n) => makeRow(`r${n}`, n));
@@ -731,6 +860,10 @@ describe("ConsolidadaClient", () => {
         expect.stringContaining("Te dejamos la lista"),
         expect.anything()
       );
+      // El aviso fijo dice lo mismo que el toast, sin mandar a mirar una lista que no está.
+      const aviso = screen.getByLabelText(AVISO_INCIERTO);
+      expect(aviso.textContent).toContain("tampoco pudimos volver a cargar la lista");
+      expect(aviso.textContent).not.toContain("«Pendientes de facturar»");
 
       // Vuelve la conexión y se vuelve a cargar: la factura había salido. Lo que se había
       // dejado afuera aparece, pero sin tildar: no hay «Revisar y emitir» listo para
@@ -740,6 +873,10 @@ describe("ConsolidadaClient", () => {
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
       expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+      // Con la lista a la vista, el aviso sigue y ahora sí dice cómo leerla.
+      expect(screen.getByLabelText(AVISO_INCIERTO).textContent).toContain(
+        "ya no están en «Pendientes de facturar», la factura salió"
+      );
     });
 
     it("si la recarga contesta con error, la lista dice que no se pudo cargar y el aviso no dice «Te dejamos la lista»", async () => {

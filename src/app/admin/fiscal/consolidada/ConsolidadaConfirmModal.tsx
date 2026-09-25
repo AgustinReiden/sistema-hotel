@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, FileText, Loader2 } from "lucide-react";
 
 import { formatCuit } from "@/lib/arca/amounts";
@@ -33,6 +33,11 @@ type Props = {
   periodo: { desde: string; hasta: string } | null;
   /** Texto de la línea única, o null si sale detallado (una línea por estadía). */
   conceptoUnico: string | null;
+  /**
+   * En el detallado, cuántas líneas por estadía llevan un texto escrito a mano: esas
+   * salen impresas tal cual, no con la habitación y las fechas automáticas.
+   */
+  lineasEditadas: number;
   /** Nota al pie ya saneada, o null si no hay. */
   nota: string | null;
   /** Estadías tildadas que no están en la página que se estaba viendo. */
@@ -66,6 +71,24 @@ function textoVencimiento(dias: number) {
 }
 
 /**
+ * Cómo sale el detalle impreso. Una línea con texto escrito a mano se imprime tal cual
+ * (factura/[invoiceId]: `descripcion ?? automático`), así que de esa no se puede prometer
+ * que lleve la habitación y las fechas.
+ */
+function textoDetalle(conceptoUnico: string | null, estadias: number, lineasEditadas: number) {
+  if (conceptoUnico !== null) {
+    return `Detalle: un solo concepto, «${conceptoUnico}», por el total. No figuran las habitaciones ni las fechas de cada estadía.`;
+  }
+  if (lineasEditadas <= 0) return "Detalle: una línea por estadía, con su habitación y sus fechas.";
+  if (lineasEditadas >= estadias) {
+    return "Detalle: una línea por estadía, con el texto que escribiste en «Detalle del comprobante».";
+  }
+  return `Detalle: una línea por estadía. ${
+    lineasEditadas === 1 ? "Una sale" : `${lineasEditadas} salen`
+  } con el texto que escribiste en «Detalle del comprobante»; las demás, con su habitación y sus fechas.`;
+}
+
+/**
  * "Revisá antes de emitir": lo último que se mira antes de mandar la consolidada a ARCA.
  * Dice letra, receptor, documento, estadías, período, total, vencimiento y la forma del
  * detalle. Una factura con CAE no se borra: se anula con nota de crédito y quedan los dos
@@ -80,6 +103,7 @@ export default function ConsolidadaConfirmModal({
   total,
   periodo,
   conceptoUnico,
+  lineasEditadas,
   nota,
   fueraDePagina,
   environment,
@@ -102,6 +126,15 @@ export default function ConsolidadaConfirmModal({
   useEffect(() => {
     const t = window.setTimeout(() => setListo(true), CONFIRMAR_ESPERA_MS);
     return () => window.clearTimeout(t);
+  }, []);
+
+  // El foco arranca en "Volver": un Enter de más no emite nada. Se pone a mano y sin
+  // desplazar, no con autoFocus: "Volver" está al fondo del cuadro, y en un celular chico
+  // el foco común bajaría el cuadro hasta ahí y dejaría fuera de la vista el título y la
+  // banda de PRODUCCIÓN, que es lo primero que hay que leer.
+  const volverRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    volverRef.current?.focus({ preventScroll: true });
   }, []);
 
   return (
@@ -169,11 +202,7 @@ export default function ConsolidadaConfirmModal({
           </div>
 
           <div className="text-xs text-slate-600 space-y-1">
-            <p>
-              {conceptoUnico !== null
-                ? `Detalle: un solo concepto, «${conceptoUnico}», por el total. No figuran las habitaciones ni las fechas de cada estadía.`
-                : "Detalle: una línea por estadía, con su habitación y sus fechas."}
-            </p>
+            <p>{textoDetalle(conceptoUnico, estadias, lineasEditadas)}</p>
             {nota && <p>Nota al pie: «{nota}»</p>}
           </div>
 
@@ -201,10 +230,10 @@ export default function ConsolidadaConfirmModal({
           {avisos}
 
           <div className="flex gap-3 pt-1">
-            {/* El foco arranca en "Volver": un Enter de más no emite nada. */}
+            {/* El foco arranca acá (ver volverRef): un Enter de más no emite nada. */}
             <button
+              ref={volverRef}
               type="button"
-              autoFocus
               onClick={onCancel}
               disabled={emitting}
               className="px-5 py-4 border-2 border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-base font-black rounded-2xl transition-colors"

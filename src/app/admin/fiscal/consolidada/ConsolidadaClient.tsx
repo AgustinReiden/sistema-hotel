@@ -135,6 +135,10 @@ export default function ConsolidadaClient({
   // se había dejado afuera a propósito. Es un ref porque lo lee `loadRows` y no se pinta.
   const sinTildarEnLaProximaCarga = useRef(false);
   const [emitting, setEmitting] = useState(false);
+  // La última emisión quedó sin respuesta: no se sabe si la factura salió. El toast se va
+  // solo, y quien factura puede estar atendiendo a alguien; este aviso queda arriba de la
+  // lista hasta la próxima emisión o hasta que lo cierren.
+  const [emisionIncierta, setEmisionIncierta] = useState(false);
   // Cuadro "Revisá antes de emitir" abierto. El botón de la barra sólo lo abre: a ARCA
   // se va recién desde "Confirmar y emitir en ARCA".
   const [revisando, setRevisando] = useState(false);
@@ -294,8 +298,10 @@ export default function ConsolidadaClient({
     // no una preferencia del cliente (mig 102).
     setConceptoUnicoModo(false);
     setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
-    // Un cuadro de revisión abierto era del cliente anterior.
+    // Un cuadro de revisión abierto era del cliente anterior, y el aviso de emisión
+    // incierta habla de su lista.
     setRevisando(false);
+    setEmisionIncierta(false);
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
@@ -495,6 +501,16 @@ export default function ConsolidadaClient({
   const conceptoUnicoLimpio = conceptoUnicoModo
     ? sanitizeDetalleLine(conceptoUnicoTexto) ?? CONCEPTO_UNICO_DEFAULT
     : null;
+  // Líneas por estadía con un texto escrito a mano: salen impresas tal cual, así que el
+  // cuadro no puede decir que llevan la habitación y las fechas. Una que quedó vacía no
+  // cuenta: el servidor le pone el texto automático (mig 93).
+  const lineasEditadas =
+    conceptoUnicoLimpio !== null
+      ? 0
+      : selectedRows.filter((r) => {
+          const texto = sanitizeDetalleLine(lineaDetalle(r));
+          return texto !== null && texto !== sanitizeDetalleLine(defaultStayDescription(r));
+        }).length;
 
   // Receptor que muestra el cuadro. Sin CUIT (huésped consumidor final) el servidor
   // factura con el nombre y el DNI de la ficha del huésped (mig 103). Para que eso sea
@@ -536,6 +552,9 @@ export default function ConsolidadaClient({
   const emitConfirmado = async () => {
     if (emitting || emisionEnCurso.current) return;
     emisionEnCurso.current = true;
+    // El aviso de una emisión incierta anterior queda viejo: si esta también se corta,
+    // vuelve a salir.
+    setEmisionIncierta(false);
 
     setEmitting(true);
     let result: Awaited<ReturnType<typeof emitConsolidatedInvoiceAction>> | null = null;
@@ -596,6 +615,8 @@ export default function ConsolidadaClient({
       sinTildarEnLaProximaCarga.current = true;
       const recargada = await loadRows();
       // El aviso sale después de la recarga: sólo promete la lista si se pudo cargar.
+      // El toast se va solo; el aviso fijo arriba de la lista queda (ver emisionIncierta).
+      setEmisionIncierta(true);
       toast.error(
         recargada
           ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila."
@@ -654,6 +675,37 @@ export default function ConsolidadaClient({
           Elegir otro cliente
         </Link>
       </section>
+
+      {/* Emisión con resultado incierto: queda a la vista aunque el toast ya se haya ido.
+          El texto sigue a la lista: si no se pudo cargar, no se promete nada sobre ella. */}
+      {emisionIncierta && (
+        <div
+          role="alert"
+          aria-label="No sabemos si la factura salió"
+          className="flex items-start gap-3 bg-rose-50 border border-rose-200 rounded-2xl p-4"
+        >
+          <AlertTriangle size={18} className="text-rose-600 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="text-sm font-semibold text-rose-800">
+              {errorCarga
+                ? "No sabemos si la última factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir."
+                : "No sabemos si la última factura salió porque se cortó la comunicación. Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura salió: no la emitas de nuevo y revisala en Facturación. Si siguen ahí, volvé a tildarlas y emitila."}
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
+              <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
+                Ir a Facturación
+              </Link>
+              <button
+                type="button"
+                onClick={() => setEmisionIncierta(false)}
+                className="text-rose-700 underline hover:text-rose-900"
+              >
+                Cerrar el aviso
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2) Estadías de la cuenta: pendientes y ya facturadas */}
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -1114,6 +1166,7 @@ export default function ConsolidadaClient({
           total={total}
           periodo={periodo}
           conceptoUnico={conceptoUnicoLimpio}
+          lineasEditadas={lineasEditadas}
           nota={notaLimpia}
           fueraDePagina={fueraDePagina}
           // Sin la configuración fiscal a mano se asume producción: la banda roja
