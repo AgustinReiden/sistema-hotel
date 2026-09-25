@@ -725,11 +725,14 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(await confirmarListo(abrirCuadro()));
 
       const aviso = await screen.findByLabelText(AVISO_INCIERTO);
-      // Que falten en «Pendientes» sólo prueba que se generó un comprobante, que puede
-      // haber quedado emitido, pendiente o rechazado: no se afirma que "salió".
-      expect(aviso.textContent).toContain(
-        "Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada."
+      // El aviso no pide deducir qué salió de lo que falta en la lista: mira la estadía que
+      // se estaba emitiendo y dice en qué quedó. Acá la recarga la trae pendiente.
+      await waitFor(() =>
+        expect(aviso.textContent).toContain(
+          "La estadía que ibas a facturar sigue pendiente de facturar: volvé a tildarla y emitila."
+        )
       );
+      expect(aviso.textContent).not.toContain("se generó");
       expect(aviso.textContent).not.toContain("la factura salió:");
       expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
         "href",
@@ -795,19 +798,21 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(await confirmarListo(cuadro));
 
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
-      // El aviso habla de lo que queda a la vista, no de un estado que el filtro esconde.
+      // El toast dice dónde quedó la lista y manda al aviso fijo, que dice qué pasó.
       await waitFor(() =>
         expect(toast.error).toHaveBeenCalledWith(
           expect.stringContaining("«Pendientes de facturar»"),
           expect.anything()
         )
       );
-      // Y no promete que salió: que falten sólo dice que se generó un comprobante.
       expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "ya no están ahí, la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada."
-        ),
+        expect.stringContaining("Antes de volver a emitir, leé el aviso de arriba de la lista."),
         expect.anything()
+      );
+      // Las tres que se emitían ya tienen comprobante: se generó (no se promete que salió,
+      // puede haber quedado emitida, pendiente o rechazada).
+      expect((await screen.findByLabelText(AVISO_INCIERTO)).textContent).toContain(
+        "Las 3 estadías que ibas a facturar ya tienen comprobante, así que la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada."
       );
       await waitFor(() =>
         expect(screen.getByText("Pendientes de facturar")).toHaveAttribute("aria-pressed", "true")
@@ -879,13 +884,18 @@ describe("ConsolidadaClient", () => {
       // dejado afuera aparece, pero sin tildar: no hay «Revisar y emitir» listo para
       // mandar una segunda factura.
       fireEvent.click(screen.getByText("Volver a cargar la lista"));
+      // Mientras carga, la lista de atrás está vacía: el aviso no la lee como "no aparecen".
+      expect(screen.getByLabelText(AVISO_INCIERTO).textContent).toContain(
+        "Estamos cargando la lista para ver qué pasó con lo que ibas a facturar: no la emitas de nuevo todavía."
+      );
       await waitFor(() => expect(filaCheckbox("3")).not.toBeChecked());
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
       expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
-      // Con la lista a la vista, el aviso sigue y ahora sí dice cómo leerla.
+      // Con la lista a la vista, el aviso sigue y ahora dice en qué quedaron las dos que
+      // se emitían, aunque «Pendientes de facturar» ya no las muestre.
       expect(screen.getByLabelText(AVISO_INCIERTO).textContent).toContain(
-        "ya no están en «Pendientes de facturar», la factura se generó"
+        "Las 2 estadías que ibas a facturar ya tienen comprobante, así que la factura se generó"
       );
     });
 
@@ -977,6 +987,11 @@ describe("ConsolidadaClient", () => {
     // las del período elegido.
     const TODA_LA_CUENTA = [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")];
     const DEL_MES = [makeRow("r3", "3")];
+    /** La estadía `r${n}` con una factura «en proceso»: ya no es facturable. */
+    const enProceso = (n: string): CcAccountStayRow => ({
+      ...makeRow(`r${n}`, n, { facturable: false }),
+      estado: "en_proceso",
+    });
 
     /**
      * Cada carga queda en camino hasta que el test la contesta, en el orden que elija.
@@ -1102,6 +1117,58 @@ describe("ConsolidadaClient", () => {
       expect(screen.getByText(/Mostrando 3 de 3 estadías/)).toBeInTheDocument();
     });
 
+    it("una carga vieja CON período no fija el total de la cuenta: lo que trae es sólo su período", async () => {
+      const contestar = cargasEnFila();
+      renderClient();
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+      await contestar(0, TODA_LA_CUENTA);
+      await waitFor(() => expect(screen.getByText(/Mostrando 3 de 3 estadías/)).toBeInTheDocument());
+
+      // Dos cargas con período en fila, como al tipear una fecha: «Este mes» y, con esa
+      // en camino, «Mes anterior».
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByText("Mes anterior"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+
+      // Contesta primero la última y después la vieja, con otra cantidad de estadías.
+      await contestar(2, DEL_MES);
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+      await contestar(1, [makeRow("r1", "1"), makeRow("r2", "2")]);
+
+      // Si la vieja fijara el total, diría "1 de 2" y escondería la deuda que el período
+      // deja afuera.
+      expect(screen.getByText(/Mostrando 1 de 3 estadías de la cuenta/)).toBeInTheDocument();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+    });
+
+    it("una carga vieja sin rango que falla no deja el contador en «de 0»", async () => {
+      const contestar = cargasEnFila();
+      renderClient();
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+      await contestar(0, TODA_LA_CUENTA);
+      await waitFor(() => expect(screen.getByText(/Mostrando 3 de 3 estadías/)).toBeInTheDocument());
+
+      // «Este mes», «Todo» (sin rango) y otra vez «Este mes», las tres en fila.
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByText("Todo"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(4));
+
+      await contestar(3, DEL_MES);
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      // La vieja sin rango falla: no trae la cuenta, así que no dice que tiene 0 estadías.
+      await contestar(2, "falla");
+      await contestar(1, DEL_MES);
+      expect(screen.getByText(/Mostrando 1 de 3 estadías de la cuenta/)).toBeInTheDocument();
+      // Y su error tampoco pinta la lista: sigue la del período elegido.
+      expect(filaCheckbox("3")).toBeChecked();
+      expect(screen.queryByText(/No pudimos cargar la lista/)).not.toBeInTheDocument();
+    });
+
     // Una emisión incierta con dos cargas en fila: la recarga que sigue a la emisión y la
     // de un período elegido mientras esa sigue en camino. Sólo la última consume el "no
     // tildar nada" y decide qué aviso sale. Si la vieja lo consumiera, la última volvería a
@@ -1152,14 +1219,34 @@ describe("ConsolidadaClient", () => {
 
       await esperarSinNadaTildado();
       // El aviso es el de la lista del mes, que es la que quedó a la vista y sí se cargó.
+      // Las dos que se emitían no están, pero porque el período las deja afuera, no porque
+      // se hayan facturado: el aviso no concluye que la factura se generó.
       const aviso = await screen.findByLabelText(AVISO_INCIERTO);
       expect(aviso.textContent).toContain(
-        "ya no están en «Pendientes de facturar», la factura se generó"
+        "El período puesto deja afuera las estadías que ibas a facturar: elegí «Todo» para ver qué pasó, y no la emitas de nuevo hasta verlo."
       );
+      expect(aviso.textContent).not.toContain("se generó");
       expect(toast.error).toHaveBeenCalledWith(
         expect.stringContaining("Te dejamos la lista"),
         expect.anything()
       );
+      expect(toast.error).not.toHaveBeenCalledWith(
+        expect.stringContaining("se generó"),
+        expect.anything()
+      );
+
+      // Con «Todo», mientras carga no concluye nada; cuando llega la cuenta entera, dice
+      // en qué quedaron las dos.
+      fireEvent.click(screen.getByText("Todo"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(4));
+      expect(aviso.textContent).toContain("Estamos cargando la lista");
+      await contestar(3, [enProceso("1"), enProceso("2"), makeRow("r3", "3")]);
+      await waitFor(() =>
+        expect(aviso.textContent).toContain(
+          "Las 2 estadías que ibas a facturar ya tienen comprobante, así que la factura se generó"
+        )
+      );
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
     });
 
     it("emisión incierta y período elegido con la recarga en camino: contesta primero la vieja y después la del mes, y no queda nada tildado", async () => {
@@ -1176,8 +1263,9 @@ describe("ConsolidadaClient", () => {
       await esperarSinNadaTildado();
       const aviso = await screen.findByLabelText(AVISO_INCIERTO);
       expect(aviso.textContent).toContain(
-        "ya no están en «Pendientes de facturar», la factura se generó"
+        "El período puesto deja afuera las estadías que ibas a facturar: elegí «Todo» para ver qué pasó"
       );
+      expect(aviso.textContent).not.toContain("se generó");
       expect(toast.error).toHaveBeenCalledWith(
         expect.stringContaining("Te dejamos la lista"),
         expect.anything()
@@ -1209,6 +1297,44 @@ describe("ConsolidadaClient", () => {
         "tampoco pudimos volver a cargar la lista"
       );
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Emite las tres de TODA_LA_CUENTA, la llamada se corta y la recarga (sin período)
+     * contesta `recarga`. Devuelve el aviso fijo.
+     */
+    async function emisionInciertaDeLasTres(recarga: CcAccountStayRow[]) {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => Promise.resolve({ success: true, data: TODA_LA_CUENTA }))
+        .mockImplementationOnce(() => Promise.resolve({ success: true, data: recarga }));
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      return screen.findByLabelText(AVISO_INCIERTO);
+    }
+
+    it("emisión incierta: si de las que se emitían unas tienen comprobante y otras siguen pendientes, lo dice y no manda a volver a emitir", async () => {
+      const aviso = await emisionInciertaDeLasTres([
+        enProceso("1"),
+        makeRow("r2", "2"),
+        makeRow("r3", "3"),
+      ]);
+
+      expect(aviso.textContent).toContain(
+        "De las 3 estadías que ibas a facturar, 1 ya tiene comprobante y 2 siguen pendientes: no la emitas de nuevo sin antes fijarte en Facturación qué salió."
+      );
+      expect(aviso.textContent).not.toContain("volvé a tildar");
+    });
+
+    it("emisión incierta: si sin período una de las que se emitían no aparece en la cuenta, no concluye nada y manda a Facturación", async () => {
+      const aviso = await emisionInciertaDeLasTres([makeRow("r2", "2"), makeRow("r3", "3")]);
+
+      expect(aviso.textContent).toContain(
+        "Hay estadías que ibas a facturar que no aparecen en la lista de la cuenta: no la emitas de nuevo sin antes fijarte en Facturación si quedó emitida, pendiente o rechazada."
+      );
+      expect(aviso.textContent).not.toContain("se generó");
+      expect(aviso.textContent).not.toContain("«Todo»");
     });
 
     it("en producción muestra la banda PRODUCCIÓN", async () => {
@@ -1505,6 +1631,36 @@ describe("ConsolidadaClient", () => {
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalled());
       expect(payloadEmitido().detalle).toHaveLength(1);
       expect(payloadEmitido().detalle?.[0].reservationId).toBe("r1");
+    });
+
+    it("emisión incierta con más de una página: que las que se emitían no estén en la página a la vista no hace decir que la factura se generó", async () => {
+      const rows25 = Array.from({ length: 25 }, (_, i) =>
+        makeRow(`r${i + 1}`, `${i + 1}`, { amount: 1000 })
+      );
+      // La factura no se generó: la recarga trae las 25 todavía pendientes.
+      loadCcAccountStaysAction.mockImplementation(() =>
+        Promise.resolve({ success: true, data: rows25 })
+      );
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+
+      // Se emiten sólo la 21 y la 22, que están en la página 2.
+      fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
+      fireEvent.click(screen.getByText("Siguiente"));
+      fireEvent.click(fila("21"));
+      fireEvent.click(fila("22"));
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      // Mirando la página 1, las dos no se ven: el aviso igual dice que siguen pendientes.
+      fireEvent.click(screen.getByText("Anterior"));
+      expect(screen.queryByLabelText("Incluir estadía de habitación 21")).not.toBeInTheDocument();
+      expect(aviso.textContent).toContain(
+        "Las 2 estadías que ibas a facturar siguen pendientes de facturar (pueden estar en otra página de la lista): volvé a tildarlas y emitila."
+      );
+      expect(aviso.textContent).not.toContain("se generó");
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
     });
   });
 

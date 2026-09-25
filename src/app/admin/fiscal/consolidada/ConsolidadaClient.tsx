@@ -110,6 +110,86 @@ function listarFaltantes(campos: string[]): string {
   return `${campos.slice(0, -1).join(", ")} y ${campos[campos.length - 1]}`;
 }
 
+/**
+ * Texto del aviso fijo de una emisión con resultado incierto. No deja que quien lo lee
+ * deduzca qué salió de lo que falta en la lista: con un período puesto, o con la lista
+ * en varias páginas, una estadía que no se ve no quiere decir que se facturó. Busca cada
+ * estadía que se estaba emitiendo en la lista cargada entera (`rows`: sin el filtro de
+ * estado ni la página) y dice en qué quedó.
+ */
+function textoEmisionIncierta({
+  emitidas,
+  rows,
+  errorCarga,
+  loading,
+  rangoActivo,
+  variasPaginas,
+}: {
+  /** reservation_id de las estadías que se estaban emitiendo. */
+  emitidas: string[];
+  rows: CcAccountStayRow[];
+  errorCarga: boolean;
+  loading: boolean;
+  rangoActivo: boolean;
+  variasPaginas: boolean;
+}): string {
+  if (errorCarga) {
+    return "No sabemos si la última factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir.";
+  }
+  const inicio = "No sabemos si la última factura salió porque se cortó la comunicación.";
+  // Mientras carga, `rows` es la lista anterior (vacía, si la anterior falló): no se
+  // concluye nada de ella.
+  if (loading) {
+    return `${inicio} Estamos cargando la lista para ver qué pasó con lo que ibas a facturar: no la emitas de nuevo todavía.`;
+  }
+  const porId = new Map(rows.map((r) => [r.reservation_id, r]));
+  let conComprobante = 0;
+  let pendientes = 0;
+  let afuera = 0;
+  for (const reservationId of emitidas) {
+    const r = porId.get(reservationId);
+    if (!r) afuera++;
+    else if (r.facturable) pendientes++;
+    else conComprobante++;
+  }
+  const n = emitidas.length;
+  const una = n === 1;
+  if (afuera > 0) {
+    // Con un período puesto, lo más probable es que las deje afuera el período. Sin
+    // período la lista es la cuenta entera: no se sabe por qué faltan.
+    if (rangoActivo) {
+      const cuales = una ? "la estadía" : afuera === n ? "las estadías" : "algunas de las estadías";
+      return `${inicio} El período puesto deja afuera ${cuales} que ibas a facturar: elegí «Todo» para ver qué pasó, y no la emitas de nuevo hasta verlo.`;
+    }
+    const cuales = una
+      ? "La estadía que ibas a facturar no aparece"
+      : "Hay estadías que ibas a facturar que no aparecen";
+    return `${inicio} ${cuales} en la lista de la cuenta: no la emitas de nuevo sin antes fijarte en Facturación si quedó emitida, pendiente o rechazada.`;
+  }
+  if (pendientes === 0) {
+    // Tener comprobante sólo prueba que se generó, que puede haber quedado emitido,
+    // pendiente o rechazado: no se afirma que "salió".
+    const cuales = una
+      ? "La estadía que ibas a facturar ya tiene"
+      : `Las ${n} estadías que ibas a facturar ya tienen`;
+    return `${inicio} ${cuales} comprobante, así que la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada.`;
+  }
+  if (conComprobante === 0) {
+    const cuales = una
+      ? "La estadía que ibas a facturar sigue pendiente"
+      : `Las ${n} estadías que ibas a facturar siguen pendientes`;
+    const pagina = variasPaginas
+      ? ` (${una ? "puede" : "pueden"} estar en otra página de la lista)`
+      : "";
+    return `${inicio} ${cuales} de facturar${pagina}: volvé a ${una ? "tildarla" : "tildarlas"} y emitila.`;
+  }
+  return `${inicio} De las ${n} estadías que ibas a facturar, ${conComprobante} ya ${
+    conComprobante === 1 ? "tiene" : "tienen"
+  } comprobante y ${pendientes} ${
+    pendientes === 1 ? "sigue pendiente" : "siguen pendientes"
+  }: no la emitas de nuevo sin antes fijarte en Facturación qué salió.`;
+}
+
 export default function ConsolidadaClient({
   enabled,
   accounts,
@@ -135,10 +215,12 @@ export default function ConsolidadaClient({
   // se había dejado afuera a propósito. Es un ref porque lo lee `loadRows` y no se pinta.
   const sinTildarEnLaProximaCarga = useRef(false);
   const [emitting, setEmitting] = useState(false);
-  // La última emisión quedó sin respuesta: no se sabe si la factura salió. El toast se va
-  // solo, y quien factura puede estar atendiendo a alguien; este aviso queda arriba de la
-  // lista hasta la próxima emisión o hasta que lo cierren.
-  const [emisionIncierta, setEmisionIncierta] = useState(false);
+  // La última emisión quedó sin respuesta: no se sabe si la factura salió. Guarda las
+  // estadías (reservation_id) que se estaban emitiendo, para que el aviso diga en qué quedó
+  // cada una (ver textoEmisionIncierta); null = no hay aviso. El toast se va solo, y quien
+  // factura puede estar atendiendo a alguien; este aviso queda arriba de la lista hasta la
+  // próxima emisión o hasta que lo cierren.
+  const [emisionIncierta, setEmisionIncierta] = useState<string[] | null>(null);
   // Cuadro "Revisá antes de emitir" abierto. El botón de la barra sólo lo abre: a ARCA
   // se va recién desde "Confirmar y emitir en ARCA".
   const [revisando, setRevisando] = useState(false);
@@ -352,7 +434,7 @@ export default function ConsolidadaClient({
     // Un cuadro de revisión abierto era del cliente anterior, y el aviso de emisión
     // incierta habla de su lista.
     setRevisando(false);
-    setEmisionIncierta(false);
+    setEmisionIncierta(null);
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
@@ -376,6 +458,19 @@ export default function ConsolidadaClient({
     setPage,
     ...paginacion
   } = usePagination(visible, `${selectedKey}|${range.from}|${range.to}|${estadoFiltro}`);
+
+  // Lo que dice el aviso fijo de emisión incierta: sigue a la lista que se va cargando.
+  const textoIncierto =
+    emisionIncierta === null
+      ? null
+      : textoEmisionIncierta({
+          emitidas: emisionIncierta,
+          rows,
+          errorCarga,
+          loading,
+          rangoActivo,
+          variasPaginas: paginacion.totalPages > 1,
+        });
 
   // Cambiar el filtro de estado reordena `visible` (otra lista, no sólo otra
   // página de la misma). El índice del ancla quedaría apuntando a una fila
@@ -613,8 +708,9 @@ export default function ConsolidadaClient({
     }
     emisionEnCurso.current = true;
     // El aviso de una emisión incierta anterior queda viejo: si esta también se corta,
-    // vuelve a salir.
-    setEmisionIncierta(false);
+    // vuelve a salir, con las estadías de esta.
+    setEmisionIncierta(null);
+    const emitidas = selectedRows.map((r) => r.reservation_id);
 
     setEmitting(true);
     let result: Awaited<ReturnType<typeof emitConsolidatedInvoiceAction>> | null = null;
@@ -622,7 +718,7 @@ export default function ConsolidadaClient({
       result = await emitConsolidatedInvoiceAction({
         kind,
         clientId: id,
-        reservationIds: selectedRows.map((r) => r.reservation_id),
+        reservationIds: emitidas,
         // Una forma o la otra, nunca las dos: con un solo concepto, las líneas por
         // estadía no se imprimen, así que mandar sus textos sería guardar en el
         // comprobante algo que nadie eligió ni va a ver.
@@ -662,9 +758,10 @@ export default function ConsolidadaClient({
 
     if (result === null) {
       // No se reintenta solo: si la factura salió, emitirla de nuevo sería la segunda.
-      // La pregunta es qué salió, y se contesta con lo que queda en "Pendientes de
-      // facturar": lo facturado o "en proceso" deja de ser facturable y desaparece de ahí
-      // (en "Todas" podría quedar en otra página). Por eso se vuelve a ese filtro.
+      // Qué pasó con cada estadía no se deja deducir de lo que falta en la lista (con un
+      // período puesto o con varias páginas, que no se vea no quiere decir que se
+      // facturó): lo dice el aviso fijo, que las busca en la lista recargada. Se vuelve a
+      // "Pendientes de facturar", que es donde se tildan de nuevo las que siguen pendientes.
       setEstadoFiltro("pendientes");
       // La recarga vuelve a tildar todo lo pendiente: si la factura salió, lo que queda
       // tildado es justo lo que se había dejado afuera a propósito, con "Revisar y
@@ -675,11 +772,13 @@ export default function ConsolidadaClient({
       sinTildarEnLaProximaCarga.current = true;
       const recargada = await loadRows();
       // El aviso sale después de la recarga: sólo promete la lista si se pudo cargar.
-      // El toast se va solo; el aviso fijo arriba de la lista queda (ver emisionIncierta).
-      setEmisionIncierta(true);
+      // El toast se va solo; el aviso fijo arriba de la lista queda (ver emisionIncierta)
+      // y es el que dice qué pasó: el toast no concluye nada, porque su texto queda fijo y
+      // la lista puede cambiar (otro período, otra página) antes de que alguien lo lea.
+      setEmisionIncierta(emitidas);
       toast.error(
         recargada
-          ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar» y sin nada tildado. Si las estadías que ibas a facturar ya no están ahí, la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada. Si siguen ahí, volvé a tildarlas y emitila."
+          ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar», sin nada tildado. Antes de volver a emitir, leé el aviso de arriba de la lista."
           : "No sabemos si la factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir.",
         { duration: 15000 }
       );
@@ -737,8 +836,9 @@ export default function ConsolidadaClient({
       </section>
 
       {/* Emisión con resultado incierto: queda a la vista aunque el toast ya se haya ido.
-          El texto sigue a la lista: si no se pudo cargar, no se promete nada sobre ella. */}
-      {emisionIncierta && (
+          El texto sigue a la lista: dice en qué quedó cada estadía que se emitía y, si la
+          lista no se pudo cargar o está cargando, no concluye nada. */}
+      {textoIncierto !== null && (
         <div
           role="alert"
           aria-label="No sabemos si la factura salió"
@@ -746,18 +846,14 @@ export default function ConsolidadaClient({
         >
           <AlertTriangle size={18} className="text-rose-600 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1 space-y-2">
-            <p className="text-sm font-semibold text-rose-800">
-              {errorCarga
-                ? "No sabemos si la última factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir."
-                : "No sabemos si la última factura salió porque se cortó la comunicación. Si las estadías que ibas a facturar ya no están en «Pendientes de facturar», la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada. Si siguen ahí, volvé a tildarlas y emitila."}
-            </p>
+            <p className="text-sm font-semibold text-rose-800">{textoIncierto}</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
               <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
                 Ir a Facturación
               </Link>
               <button
                 type="button"
-                onClick={() => setEmisionIncierta(false)}
+                onClick={() => setEmisionIncierta(null)}
                 className="text-rose-700 underline hover:text-rose-900"
               >
                 Cerrar el aviso
