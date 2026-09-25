@@ -770,12 +770,17 @@ export default function ConsolidadaClient({
       // la próxima carga que ande, sea esta o un «Recargar» de más tarde.
       setPicked(new Set());
       sinTildarEnLaProximaCarga.current = true;
-      const recargada = await loadRows();
-      // El aviso sale después de la recarga: sólo promete la lista si se pudo cargar.
-      // El toast se va solo; el aviso fijo arriba de la lista queda (ver emisionIncierta)
-      // y es el que dice qué pasó: el toast no concluye nada, porque su texto queda fijo y
-      // la lista puede cambiar (otro período, otra página) antes de que alguien lo lea.
+      // El aviso fijo sale ya, sin esperar a la recarga: con la red lenta, quien factura
+      // no puede quedarse mirando «Cargando…» sin saber que la factura quedó en el aire.
+      // Su texto sigue al estado de la lista (ver textoEmisionIncierta): mientras carga
+      // dice que no se emita de nuevo todavía, si la carga falla lo dice, y con la lista a
+      // la vista dice en qué quedó cada estadía.
       setEmisionIncierta(emitidas);
+      const recargada = await loadRows();
+      // El toast sí sale después de la recarga: su texto queda fijo, así que sólo promete
+      // la lista si se pudo cargar. Se va solo; el que dice qué pasó es el aviso fijo, que
+      // queda arriba de la lista: el toast no concluye nada, porque la lista puede cambiar
+      // (otro período, otra página) antes de que alguien lo lea.
       toast.error(
         recargada
           ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar», sin nada tildado. Antes de volver a emitir, leé el aviso de arriba de la lista."

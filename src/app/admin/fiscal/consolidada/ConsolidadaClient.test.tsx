@@ -250,6 +250,20 @@ const payloadEmitido = () => emitConsolidatedInvoiceAction.mock.calls[0][0] as E
 
 /** El aviso fijo de una emisión con resultado incierto. */
 const AVISO_INCIERTO = "No sabemos si la factura salió";
+/** Lo que dice ese aviso mientras la lista se recarga: no concluye nada todavía. */
+const AVISO_CARGANDO =
+  "Estamos cargando la lista para ver qué pasó con lo que ibas a facturar: no la emitas de nuevo todavía.";
+
+/**
+ * El aviso fijo de la emisión incierta, con la recarga ya contestada. Sale apenas se corta
+ * la emisión, diciendo que la lista está cargando, y cambia de texto cuando llega la lista:
+ * sin esperar a eso, el test leería el texto de «cargando».
+ */
+async function avisoConLaListaCargada() {
+  const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+  await waitFor(() => expect(aviso.textContent).not.toContain(AVISO_CARGANDO));
+  return aviso;
+}
 
 // abrirCuadro() pasa al reloj falso; cada test arranca con el real.
 afterEach(() => {
@@ -697,7 +711,7 @@ describe("ConsolidadaClient", () => {
       await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
       // Recarga la lista: si salió, la estadía deja de figurar en «Pendientes de facturar».
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
-      // El aviso sale cuando terminó la recarga: recién ahí se sabe qué lista quedó a la vista.
+      // El toast sale cuando terminó la recarga: recién ahí se sabe qué lista quedó a la vista.
       await waitFor(() =>
         expect(toast.error).toHaveBeenCalledWith(
           expect.stringContaining("No sabemos si la factura salió"),
@@ -747,6 +761,60 @@ describe("ConsolidadaClient", () => {
 
       fireEvent.click(within(aviso).getByText("Cerrar el aviso"));
       expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument();
+    });
+
+    it("si la llamada se corta, el aviso fijo sale enseguida, sin esperar a la recarga: mientras la lista carga, dice que no se emita de nuevo todavía", async () => {
+      let responderRecarga: (value: unknown) => void = () => {};
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() =>
+          Promise.resolve({ success: true, data: [makeRow("r1", "1")] })
+        )
+        // La red anda lenta: la recarga queda en camino hasta que el test la contesta.
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              responderRecarga = resolve;
+            })
+        );
+      emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      // Con la recarga todavía en camino, el aviso ya está a la vista y no concluye nada de
+      // una lista que no llegó.
+      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Cargando…")).toBeInTheDocument();
+      expect(aviso.textContent).toContain(AVISO_CARGANDO);
+      expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
+        "href",
+        "/admin/fiscal"
+      );
+      // El toast todavía no salió: su texto depende de si la lista se pudo cargar.
+      expect(toast.error).not.toHaveBeenCalledWith(
+        expect.stringContaining(AVISO_INCIERTO),
+        expect.anything()
+      );
+
+      // Llega la lista: la estadía sigue pendiente, y el aviso pasa a decirlo.
+      await act(async () => {
+        responderRecarga({ success: true, data: [makeRow("r1", "1")] });
+      });
+      await waitFor(() =>
+        expect(aviso.textContent).toContain(
+          "La estadía que ibas a facturar sigue pendiente de facturar: volvé a tildarla y emitila."
+        )
+      );
+      expect(aviso.textContent).not.toContain(AVISO_CARGANDO);
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining("Te dejamos la lista"),
+          expect.anything()
+        )
+      );
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
     });
 
     it("el aviso de la emisión incierta se va con la próxima emisión", async () => {
@@ -811,7 +879,7 @@ describe("ConsolidadaClient", () => {
       );
       // Las tres que se emitían ya tienen comprobante: se generó (no se promete que salió,
       // puede haber quedado emitida, pendiente o rechazada).
-      expect((await screen.findByLabelText(AVISO_INCIERTO)).textContent).toContain(
+      expect((await avisoConLaListaCargada()).textContent).toContain(
         "Las 3 estadías que ibas a facturar ya tienen comprobante, así que la factura se generó: no la emitas de nuevo y fijate en Facturación si quedó emitida, pendiente o rechazada."
       );
       await waitFor(() =>
@@ -1252,18 +1320,24 @@ describe("ConsolidadaClient", () => {
     it("emisión incierta y período elegido con la recarga en camino: contesta primero la vieja y después la del mes, y no queda nada tildado", async () => {
       const contestar = await emisionInciertaConCargasEnFila();
 
-      // La vieja no consume el "no tildar nada" ni hace salir el aviso: la del mes sigue en
-      // camino.
+      // El aviso ya está desde que se cortó la emisión, diciendo que la lista carga. La vieja
+      // no consume el "no tildar nada" ni lo hace concluir nada: la del mes sigue en camino,
+      // y en la lista vieja las dos que se emitían figuran pendientes, cosa que el aviso no
+      // puede decir todavía.
+      const aviso = screen.getByLabelText(AVISO_INCIERTO);
+      expect(aviso.textContent).toContain(AVISO_CARGANDO);
       await contestar(1, TODA_LA_CUENTA);
       expect(screen.getByText("Cargando…")).toBeInTheDocument();
-      expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument();
+      expect(aviso.textContent).toContain(AVISO_CARGANDO);
+      expect(aviso.textContent).not.toContain("volvé a tildar");
 
       await contestar(2, DEL_MES);
 
       await esperarSinNadaTildado();
-      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
-      expect(aviso.textContent).toContain(
-        "El período puesto deja afuera las estadías que ibas a facturar: elegí «Todo» para ver qué pasó"
+      await waitFor(() =>
+        expect(aviso.textContent).toContain(
+          "El período puesto deja afuera las estadías que ibas a facturar: elegí «Todo» para ver qué pasó"
+        )
       );
       expect(aviso.textContent).not.toContain("se generó");
       expect(toast.error).toHaveBeenCalledWith(
@@ -1311,7 +1385,7 @@ describe("ConsolidadaClient", () => {
       renderClient();
       await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
       fireEvent.click(await confirmarListo(abrirCuadro()));
-      return screen.findByLabelText(AVISO_INCIERTO);
+      return avisoConLaListaCargada();
     }
 
     it("emisión incierta: si de las que se emitían unas tienen comprobante y otras siguen pendientes, lo dice y no manda a volver a emitir", async () => {
@@ -1652,7 +1726,7 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(fila("22"));
       fireEvent.click(await confirmarListo(abrirCuadro()));
 
-      const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+      const aviso = await avisoConLaListaCargada();
       // Mirando la página 1, las dos no se ven: el aviso igual dice que siguen pendientes.
       fireEvent.click(screen.getByText("Anterior"));
       expect(screen.queryByLabelText("Incluir estadía de habitación 21")).not.toBeInTheDocument();
