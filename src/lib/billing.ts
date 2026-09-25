@@ -4,6 +4,7 @@ import type {
   BillingControlCierre,
   BillingControlEstado,
   CcCobroEstado,
+  FacturacionModo,
   InvoiceReceptorInput,
   PaymentMethod,
 } from "./types";
@@ -85,6 +86,39 @@ export function letraDeReceptor(receptor: InvoiceReceptorInput): "A" | "B" {
 /** Paso al que lleva el SÍ del prompt (o el atajo cuando ya hay datos cargados). */
 export function stepAfterYes(prefillComplete: boolean): InvoiceStep {
   return prefillComplete ? "confirmar" : "tipo";
+}
+
+// ─── Cuenta corriente y modo de facturación ────────────────────────────────────
+// Una ficha con cuenta corriente en "Factura por cada check-out" factura cada
+// estadía fiada al cerrarla (o la deja sin factura) y nunca entra en la
+// consolidada. Las fichas nacían así porque "por_checkout" es el modo por defecto.
+// Lo comparten la ficha de la empresa y la del huésped.
+
+/**
+ * El modo de facturación que queda al tocar "Cuenta corriente" en la ficha.
+ *
+ * Al habilitarla, "por_checkout" pasa solo a "consolidada": lo fiado se junta en
+ * una factura. Cualquier otro caso deja el modo como estaba: "no_factura" es una
+ * decisión explícita que no se pisa, y deshabilitar la cuenta no toca nada.
+ */
+export function modoFacturacionAlCambiarCtaCte(
+  modoActual: FacturacionModo,
+  habilitada: boolean
+): FacturacionModo {
+  return habilitada && modoActual === "por_checkout" ? "consolidada" : modoActual;
+}
+
+/**
+ * Aviso para cuando la ficha queda con cuenta corriente y factura por check-out.
+ * No bloquea: puede ser a propósito, pero hay que saber qué pasa con lo fiado.
+ * null = no hay nada que avisar.
+ */
+export function avisoModoFacturacion(
+  habilitada: boolean,
+  modo: FacturacionModo
+): string | null {
+  if (!habilitada || modo !== "por_checkout") return null;
+  return "Con cuenta corriente y factura por check-out, cada estadía fiada se factura al cerrarla y no entra en la consolidada.";
 }
 
 /**
