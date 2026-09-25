@@ -1,6 +1,7 @@
 // Servidor HTTP del worker. n8n le manda el escaneo y recibe las paginas.
 //
 //   POST /procesar   body = bytes del PDF/imagen (cualquier Content-Type)
+//   POST /unir       body = { archivos: [{ nombre, pdf_b64 }] } -> { paginas, pdf_b64 }
 //   GET  /salud      -> { ok: true }
 //
 // Variables de entorno:
@@ -15,6 +16,7 @@ import { timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import { procesarEscaneo, ErrorEntrada } from "./procesar.mjs";
+import { unirPdfs, ErrorUnir } from "./unir.mjs";
 
 const HTTP_POR_ERROR = {
   archivo_vacio: 400,
@@ -62,9 +64,29 @@ export function crearServidor({ token = process.env.WORKER_TOKEN, maxMb = Number
     if (req.method === "GET" && url.pathname === "/salud") {
       return responder(res, 200, { ok: true });
     }
-    if (url.pathname !== "/procesar") return responder(res, 404, { error: "no_encontrado" });
+    if (url.pathname !== "/procesar" && url.pathname !== "/unir") return responder(res, 404, { error: "no_encontrado" });
     if (req.method !== "POST") return responder(res, 405, { error: "metodo_no_permitido" });
     if (!tokenValido(req, token)) return responder(res, 401, { error: "token_invalido" });
+
+    if (url.pathname === "/unir") {
+      try {
+        const cuerpo = await leerCuerpo(req, maxBytes);
+        let pedido;
+        try {
+          pedido = JSON.parse(cuerpo.toString("utf8"));
+        } catch {
+          return responder(res, 400, { error: "json_invalido" });
+        }
+        const r = await unirPdfs(pedido?.archivos);
+        console.log(`[unir] ${pedido.archivos.length} archivos, ${r.paginas} paginas`);
+        return responder(res, 200, r);
+      } catch (e) {
+        if (e.demasiadoGrande) return responder(res, 413, { error: "demasiado_grande", mensaje: `Maximo ${maxMb} MB.` });
+        if (e instanceof ErrorUnir) return responder(res, e.codigo === "sin_archivos" ? 400 : 422, { error: e.codigo, mensaje: e.message });
+        console.error("[unir] error inesperado", e);
+        return responder(res, 500, { error: "error_interno", mensaje: e.message });
+      }
+    }
 
     const inicio = Date.now();
     try {
