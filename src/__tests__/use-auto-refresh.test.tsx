@@ -14,8 +14,22 @@ import { shouldSkipRefresh, useAutoRefresh } from "@/app/admin/useAutoRefresh";
 
 const refresh = H.router.refresh;
 
-/** El pedido al servidor que hace el hook antes de recargar (por defecto, contesta 200). */
-const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<{ status: number }>>();
+/** Lo que mira el hook de la respuesta de `/admin/ping`. */
+type Respuesta = { status: number; type?: ResponseType; redirected?: boolean };
+
+/**
+ * La pregunta a `/admin/ping` que hace el hook antes de recargar. Por defecto contesta
+ * 204, como la ruta cuando el proxy leyó bien la sesión y el rol.
+ */
+const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Respuesta>>();
+
+/** Las cosas que cuentan como "la están usando" (mover el mouse, tocar, la rueda, una tecla). */
+const ACTIVIDAD = ["pointermove", "pointerdown", "touchstart", "wheel", "keydown"] as const;
+
+/** La recepcionista mueve el mouse, toca o aprieta una tecla sobre Hoy. */
+function usar(evento: (typeof ACTIVIDAD)[number] = "pointermove") {
+  document.body.dispatchEvent(new Event(evento, { bubbles: true }));
+}
 
 let tabOculta = false;
 let sinConexion = false;
@@ -62,7 +76,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   refresh.mockClear();
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue({ status: 200 });
+  fetchMock.mockResolvedValue({ status: 204 });
   vi.stubGlobal("fetch", fetchMock);
   tabOculta = false;
   sinConexion = false;
@@ -85,6 +99,8 @@ afterEach(() => {
   // en uno cambiaría lo que ve el siguiente.
   cleanup();
   document.body.innerHTML = "";
+  // Los espías de addEventListener/removeEventListener (solo los de vi.spyOn).
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -206,16 +222,62 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("antes de recargar le pregunta al servidor pidiendo el ícono, sin cuerpo y sin caché", async () => {
+  it("antes de recargar le pregunta a /admin/ping (no al ícono), sin cuerpo, sin caché y sin seguir redirecciones", async () => {
     renderHook(() => useAutoRefresh());
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url.startsWith("/favicon.ico?")).toBe(true);
+    expect(url).toBe("/admin/ping");
+    expect(url).not.toContain("favicon");
     expect(init?.method).toBe("HEAD");
     expect(init?.cache).toBe("no-store");
+    expect(init?.redirect).toBe("manual");
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("con 204 recarga, y la pregunta sale antes que la recarga", async () => {
+    renderHook(() => useAutoRefresh());
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.invocationCallOrder[0]).toBeLessThan(refresh.mock.invocationCallOrder[0]);
+  });
+
+  it("si el proxy redirige (sesión o rol que no se pudieron leer: opaqueredirect) no recarga y Hoy queda en el panel", async () => {
+    // Con Supabase caído, el proxy manda a /login o a /forbidden. Con `redirect: "manual"`
+    // el navegador no la sigue: llega una respuesta `opaqueredirect` con status 0.
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(refresh).not.toHaveBeenCalled();
+
+    // Cuando Supabase vuelve, el turno siguiente recarga.
+    fetchMock.mockResolvedValue({ status: 204 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("si la respuesta vino de una redirección seguida (redirected) tampoco recarga, aunque diga 200", async () => {
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockResolvedValue({ status: 200, redirected: true });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it.each([302, 307, 401, 403, 404])("si contesta %i (no es 2xx) no recarga", async (status) => {
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockResolvedValue({ status });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("con internet cortado y la red local arriba (el pedido falla) no refresca; cuando vuelve, sí", async () => {
@@ -230,7 +292,7 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(refresh).not.toHaveBeenCalled();
 
-    fetchMock.mockResolvedValue({ status: 200 });
+    fetchMock.mockResolvedValue({ status: 204 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -242,14 +304,6 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(refresh).not.toHaveBeenCalled();
-  });
-
-  it("un 404 del ícono no frena el refresco (el servidor está, aunque falte el archivo)", async () => {
-    renderHook(() => useAutoRefresh());
-    fetchMock.mockResolvedValue({ status: 404 });
-
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("si el servidor no contesta en 5 s, corta el pedido, no refresca y en el turno siguiente vuelve a probar", async () => {
@@ -276,7 +330,7 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     // Si el pedido colgado no se cortara, Hoy quedaría trabado: ninguna recarga más
     // saldría. Cuando el servidor vuelve, el turno siguiente pregunta y recarga.
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue({ status: 200 });
+    fetchMock.mockResolvedValue({ status: 204 });
     await vi.advanceTimersByTimeAsync(25_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -284,7 +338,7 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
 
   it("si mientras espera al servidor se abre un cuadro, no refresca", async () => {
     renderHook(() => useAutoRefresh());
-    let contestar: (r: { status: number }) => void = () => {};
+    let contestar: (r: Respuesta) => void = () => {};
     fetchMock.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -296,7 +350,7 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     abrirCuadroSinAriaModal();
-    contestar({ status: 200 });
+    contestar({ status: 204 });
     await alDia();
     expect(refresh).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(1);
@@ -402,6 +456,147 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(signal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
     await alDia();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("useAutoRefresh — no recarga mientras la están usando", () => {
+  it.each(ACTIVIDAD)(
+    "con %s hace 1 s no recarga; recarga apenas la pantalla queda quieta 2 s",
+    async (evento) => {
+      renderHook(() => useAutoRefresh());
+
+      await vi.advanceTimersByTimeAsync(29_000);
+      usar(evento);
+
+      // A los 30 s toca recargar, pero la tocaron hace 1 s: espera, sin preguntar al servidor.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(refresh).not.toHaveBeenCalled();
+
+      // Quieta 2 s: recarga enseguida, sin esperar al próximo turno de los 30 s.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+
+      // Después el intervalo sigue igual: la próxima, a los 60 s.
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("con actividad continua no recarga; cuando la dejan quieta 2 s, recarga una sola vez", async () => {
+    renderHook(() => useAutoRefresh());
+
+    // 70 s usándola (dos turnos de 30 s y una vuelta a la ventana en el medio).
+    for (let t = 0; t < 70_000; t += 500) {
+      usar(t % 2_000 === 0 ? "keydown" : "pointermove");
+      if (t === 40_000) window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    // El intervalo y una sola recarga esperando que la pantalla quede quieta.
+    expect(vi.getTimerCount()).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("sin actividad en los últimos 2 s sigue recargando a los 30 s", async () => {
+    renderHook(() => useAutoRefresh());
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    usar("pointermove");
+    usar("keydown");
+
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("si la usan mientras espera al servidor, no recarga; vuelve a preguntar y recarga cuando queda quieta", async () => {
+    renderHook(() => useAutoRefresh());
+    let contestar: (r: Respuesta) => void = () => {};
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          contestar = resolve;
+        })
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    usar("pointerdown");
+    contestar({ status: 204 });
+    await alDia();
+    expect(refresh).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValue({ status: 204 });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("al volver a la ventana con el mouse en movimiento, espera a que quede quieta", async () => {
+    renderHook(() => useAutoRefresh());
+
+    usar("pointermove");
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(refresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("escucha la actividad en window con listeners pasivos y al desmontar los saca todos", () => {
+    const agregar = vi.spyOn(window, "addEventListener");
+    const sacar = vi.spyOn(window, "removeEventListener");
+    const { unmount } = renderHook(() => useAutoRefresh());
+
+    const tipos = ACTIVIDAD as readonly string[];
+    const deActividad = agregar.mock.calls.filter(([tipo]) => tipos.includes(tipo));
+    expect(deActividad.map(([tipo]) => tipo).sort()).toEqual([...ACTIVIDAD].sort());
+    for (const [, , opciones] of deActividad) {
+      expect(opciones).toMatchObject({ passive: true });
+    }
+
+    unmount();
+    const enCaptura = (o: boolean | AddEventListenerOptions | EventListenerOptions | undefined) =>
+      typeof o === "boolean" ? o : Boolean(o?.capture);
+    for (const [tipo, listener, opciones] of agregar.mock.calls) {
+      const sacado = sacar.mock.calls.some(
+        ([t, l, o]) => t === tipo && l === listener && enCaptura(o) === enCaptura(opciones)
+      );
+      expect(sacado, `quedó escuchando ${tipo}`).toBe(true);
+    }
+  });
+
+  it("al desmontar con una recarga esperando que la pantalla quede quieta, no quedan timers ni recargas", async () => {
+    const { unmount } = renderHook(() => useAutoRefresh());
+
+    await vi.advanceTimersByTimeAsync(29_000);
+    usar("wheel");
+    await vi.advanceTimersByTimeAsync(1_000);
+    // El intervalo y la recarga que espera.
+    expect(vi.getTimerCount()).toBe(2);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    usar("pointermove");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
 });

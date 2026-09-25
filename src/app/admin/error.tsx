@@ -19,10 +19,10 @@ let manualRetryInFlight = false;
  * Next, en inglés. Reemplaza solo la página: el layout de `/admin` sigue montado, con el
  * menú y el cierre de sesión por inactividad.
  *
- * No cubre a Supabase caído entero. Ahí lo primero que falla es la lectura de la sesión o
- * del rol en el middleware (`src/lib/supabase/middleware.ts`), que manda a `/login` o a
- * `/forbidden` antes de llegar a la página, fuera del panel. Este cartel sale cuando la
- * sesión y el rol se leyeron bien y después falla una consulta de la página.
+ * Sale cuando la sesión y el rol se leyeron bien y después falla una consulta de la página.
+ * A Supabase caído entero no lo muestra este cartel: ahí el chequeo previo (`probeServer`,
+ * que pasa por el proxy) ve la redirección a `/login` o a `/forbidden` y la recarga no sale,
+ * así que Hoy (o este cartel) queda en pantalla, dentro del panel.
  *
  * No muestra el mensaje técnico del error: puede traer datos. Va a la consola, con el
  * digest para buscarlo en los registros del servidor.
@@ -67,9 +67,10 @@ export default function AdminError({
     });
   };
 
-  // El botón pregunta antes si el servidor contesta, igual que el reintento automático. Sin
-  // conexión, `router.refresh()` falla y Next recarga la página entera: Chrome cambiaría
-  // este cartel por su página de "Sin conexión" y se irían el menú y el reintento.
+  // El botón pasa por el mismo chequeo que el reintento automático (`/admin/ping`, por el
+  // proxy). Sin conexión, `router.refresh()` falla y Next recarga la página entera: Chrome
+  // cambiaría este cartel por su página de "Sin conexión" y se irían el menú y el reintento.
+  // Y sin sesión o sin Supabase, la recarga terminaría en `/login` o en `/forbidden`.
   const retryFromButton = () => {
     if (isPending) return;
     setNotice(null);
@@ -91,9 +92,9 @@ export default function AdminError({
   };
 
   // Reintenta sola cada 30 s y al volver a la pestaña, con las mismas pausas que Hoy:
-  // pestaña oculta, sin red o sin respuesta del servidor (así una recarga sin conexión no
-  // cambia este cartel por la página de error de Chrome), un cuadro abierto o un campo
-  // con el foco.
+  // pestaña oculta, sin red o si el chequeo da que no (así una recarga sin conexión no
+  // cambia este cartel por la página de error de Chrome), un cuadro abierto, un campo con
+  // el foco o alguien usando la pantalla (espera a que quede quieta 2 s).
   useAutoRefresh({ onRefresh: reload });
 
   return (
@@ -132,7 +133,7 @@ export default function AdminError({
         {notice && !isPending && (
           <p role="status" className="text-sm font-medium text-amber-700 text-center">
             {notice === "offline"
-              ? "Todavía no hay conexión. Lo vuelve a intentar sola."
+              ? `Sigue sin conexión. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
               : "Sigue sin andar. Probá de nuevo en un rato."}
           </p>
         )}

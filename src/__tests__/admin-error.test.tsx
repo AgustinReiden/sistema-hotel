@@ -13,8 +13,14 @@ import AdminError from "@/app/admin/error";
 const refresh = H.router.refresh;
 const reset = vi.fn();
 
-/** El pedido al servidor que hace el reintento automático antes de recargar (por defecto, 200). */
-const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<{ status: number }>>();
+/** Lo que mira el chequeo de la respuesta de `/admin/ping`. */
+type Respuesta = { status: number; type?: ResponseType; redirected?: boolean };
+
+/**
+ * La pregunta a `/admin/ping` que hacen el reintento automático y el botón antes de
+ * recargar. Por defecto contesta 204, como la ruta con la sesión y el rol leídos.
+ */
+const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Respuesta>>();
 
 let tabOculta = false;
 let sinConexion = false;
@@ -39,7 +45,7 @@ function servidorColgado() {
   );
 }
 
-const SIN_CONEXION = "Todavía no hay conexión. Lo vuelve a intentar sola.";
+const SIN_CONEXION = "Sigue sin conexión. Se vuelve a intentar sola en 30 s.";
 const SIGUE_SIN_ANDAR = "Sigue sin andar. Probá de nuevo en un rato.";
 
 function cambiarVisibilidad(oculta: boolean) {
@@ -71,7 +77,7 @@ beforeEach(() => {
   refresh.mockClear();
   reset.mockClear();
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue({ status: 200 });
+  fetchMock.mockResolvedValue({ status: 204 });
   vi.stubGlobal("fetch", fetchMock);
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   tabOculta = false;
@@ -136,11 +142,12 @@ describe("Pantalla de error de /admin — lo que ve la recepcionista", () => {
     mostrarPantallaDeError();
 
     fireEvent.click(botonReintentar());
-    // Todavía no recargó: antes pregunta, con el mismo pedido que el reintento automático.
+    // Todavía no recargó: antes pregunta, con el mismo chequeo que el reintento automático.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toMatch(/^\/favicon\.ico\?/);
+    expect(url).toBe("/admin/ping");
     expect(init?.method).toBe("HEAD");
+    expect(init?.redirect).toBe("manual");
     expect(refresh).not.toHaveBeenCalled();
     expect(reset).not.toHaveBeenCalled();
 
@@ -165,6 +172,20 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
     expect(boton(container).disabled).toBe(false);
     expect(botonReintentar()).toBeInTheDocument();
+  });
+
+  it("si el chequeo vuelve con una redirección del proxy (Supabase caído o sesión vencida), no recarga y avisa", async () => {
+    // Con `redirect: "manual"` la redirección a /login o a /forbidden llega como
+    // `opaqueredirect`: recargar sacaría la pantalla del panel.
+    mostrarPantallaDeError();
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
   });
 
   it("con un error 5xx del servidor (por ejemplo, durante un deploy) tampoco recarga", async () => {
@@ -213,7 +234,7 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
 
   it("mientras reintenta dice Reintentando…, no se puede volver a tocar y el ícono gira; después vuelve a Reintentar", async () => {
     const { container } = mostrarPantallaDeError();
-    let contestar: (r: { status: number }) => void = () => {};
+    let contestar: (r: Respuesta) => void = () => {};
     fetchMock.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -231,7 +252,7 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      contestar({ status: 200 });
+      contestar({ status: 204 });
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -350,10 +371,21 @@ describe("Pantalla de error de /admin — reintenta sola", () => {
     expect(refresh).not.toHaveBeenCalled();
     expect(reset).not.toHaveBeenCalled();
 
-    fetchMock.mockResolvedValue({ status: 200 });
+    fetchMock.mockResolvedValue({ status: 204 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el proxy redirige (la sesión o el rol no se pudieron leer), no reintenta sola", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/admin/ping");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
   });
 
   it("al desmontarse (la pantalla se recuperó) no quedan timers ni reintentos", async () => {
