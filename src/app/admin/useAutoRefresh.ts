@@ -21,6 +21,9 @@ const RETURN_GAP_MS = 2000;
  * falla y Next cambia Hoy por la página de error de Chrome. La ruta está dentro de `/admin`,
  * así que pasa por el proxy, que lee la sesión y el rol igual que la recarga: si Supabase
  * no contesta, el proxy redirige a `/login` o a `/forbidden` y la pregunta da que no.
+ * Ojo con la pantalla de mantenimiento (F4-7): al rol de mantenimiento el proxy lo manda de
+ * `/admin` a `/maintenance`, así que ahí la pregunta daría siempre que no. Necesita una
+ * ruta propia bajo `/maintenance`.
  */
 export const PING_URL = "/admin/ping";
 
