@@ -3163,9 +3163,9 @@ function normalizeShiftCreditCharge(
   };
 }
 
-async function getAuthUserEmail(userId: string): Promise<string | null> {
-  // Para mostrar quien abrio/cerro el turno. profiles tiene full_name pero no email,
-  // y auth.users no es accesible por defecto. Usamos la RPC via SQL si existe, si no, null.
+async function getProfileName(userId: string): Promise<string | null> {
+  // Para mostrar quién abrió/cerró el turno: el nombre del perfil (profiles.full_name).
+  // Se llamaba getAuthUserEmail, pero nunca devolvió un email; null si no tiene nombre.
   const supabase = await createClient();
   const { data } = await supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
   return (data as { full_name?: string } | null)?.full_name ?? null;
@@ -3254,9 +3254,9 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
   const totalIncome = payments.reduce((sum, p) => sum + p.amount, 0);
   const cashIncome = totalsByMethod.cash;
 
-  const [openedByEmail, closedByEmail] = await Promise.all([
-    getAuthUserEmail(shift.opened_by),
-    shift.closed_by ? getAuthUserEmail(shift.closed_by) : Promise.resolve(null),
+  const [openedByName, closedByName] = await Promise.all([
+    getProfileName(shift.opened_by),
+    shift.closed_by ? getProfileName(shift.closed_by) : Promise.resolve(null),
   ]);
 
   return {
@@ -3269,8 +3269,8 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
     creditCharged: Math.round((creditCharged + Number.EPSILON) * 100) / 100,
     creditCharges,
     payments,
-    openedByEmail,
-    closedByEmail,
+    openedByName,
+    closedByName,
   };
 }
 

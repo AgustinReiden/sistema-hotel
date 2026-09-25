@@ -26,12 +26,15 @@ export default async function AdminLayout({
     let role = "receptionist";
     const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, full_name')
         .eq('id', user.id)
         .single();
     if (profile?.role) {
         role = profile.role;
     }
+    // Con qué usuario se entró, para el "¿No sos vos?" del traspaso forzado. Si el perfil
+    // no tiene nombre cargado va el email: la salida tiene que estar igual.
+    const currentUserName: string = profile?.full_name?.trim() || userEmail;
     const openShift = await getActiveOpenShift().catch(() => null);
 
     // Traspaso de caja: si un recepcionista entra y la caja abierta la dejó OTRO usuario,
@@ -44,29 +47,39 @@ export default async function AdminLayout({
 
     if (forceHandover && openShift) {
         const summary = await getShiftSummary(openShift.id).catch(() => null);
+        // El cierre por inactividad va también acá, igual que en el panel: una PC olvidada
+        // en Hoy pasa sola a este bloqueo cuando otra recepcionista abre la caja, y sin esto
+        // la sesión de la que se fue no vencía nunca. Va primero en el fragmento, en el
+        // mismo lugar que en el panel: si cambia de lugar en el árbol, React lo desmonta y
+        // lo vuelve a montar al pasar de una rama a la otra, y los 30 minutos arrancan de
+        // cero sin que nadie haya tocado nada.
         return (
-            <ForcedShiftHandover
-                shiftId={openShift.id}
-                shiftNumber={openShift.shift_number}
-                openedByName={summary?.openedByEmail ?? null}
-                totalsByMethod={
-                    summary
-                        ? { ...summary.totalsByMethod, cash: 0 }
-                        : {
-                              cash: 0,
-                              credit_card: 0,
-                              debit_card: 0,
-                              bank_transfer: 0,
-                              mercado_pago: 0,
-                              vale_blanco: 0,
-                              cuenta_corriente: 0,
-                              other: 0,
-                          }
-                }
-                creditCharged={summary?.creditCharged ?? 0}
-                creditCharges={summary?.creditCharges ?? []}
-                checkoutsCount={summary?.checkoutsCount ?? 0}
-            />
+            <>
+                {role === "receptionist" && <IdleLogout />}
+                <ForcedShiftHandover
+                    shiftId={openShift.id}
+                    shiftNumber={openShift.shift_number}
+                    openedByName={summary?.openedByName ?? null}
+                    currentUserName={currentUserName}
+                    totalsByMethod={
+                        summary
+                            ? { ...summary.totalsByMethod, cash: 0 }
+                            : {
+                                  cash: 0,
+                                  credit_card: 0,
+                                  debit_card: 0,
+                                  bank_transfer: 0,
+                                  mercado_pago: 0,
+                                  vale_blanco: 0,
+                                  cuenta_corriente: 0,
+                                  other: 0,
+                              }
+                    }
+                    creditCharged={summary?.creditCharged ?? 0}
+                    creditCharges={summary?.creditCharges ?? []}
+                    checkoutsCount={summary?.checkoutsCount ?? 0}
+                />
+            </>
         );
     }
 
@@ -99,40 +112,47 @@ export default async function AdminLayout({
         // el panel. h-dvh y no h-screen porque 100vh mide el viewport con la barra de URL
         // retraída y taparía el pie del sidebar; md:min-h-0 es obligatorio porque si sobrevive
         // el min-h-screen, cuando 100vh > 100dvh gana el min-height y vuelve el problema.
-        <div data-admin-shell className="h-dvh bg-slate-50 flex flex-col md:flex-row overflow-hidden">
+        //
+        // IdleLogout va primero y fuera del shell, en el mismo lugar que en la rendición
+        // forzada (ver arriba): así, cuando un refresco pasa la PC de una rama a la otra,
+        // React conserva el componente y el conteo de inactividad sigue corriendo. No dibuja
+        // nada: el shell queda igual.
+        <>
             {role === "receptionist" && <IdleLogout />}
-            <MobileTopBar
-                role={role}
-                userEmail={userEmail}
-                hasOpenShift={!!openShift}
-                unbilledCount={unbilledCount}
-                remitosPendientes={remitosPendientes}
-            />
-            <Sidebar
-                role={role}
-                userEmail={userEmail}
-                hasOpenShift={!!openShift}
-                unbilledCount={unbilledCount}
-                remitosPendientes={remitosPendientes}
-            />
-            <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-                <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
-                {/* El que scrollea es este wrapper y no <main> para dejar el aviso de turno
-                    viejo FUERA del área scrolleable: adentro, cualquier página con h-full
-                    mediría h-full + el alto del banner y aparecería una segunda scrollbar
-                    inútil cada vez que hay un turno abierto hace rato. Es flex-col porque
-                    varias páginas devuelven un fragmento (<header shrink-0> + <div flex-1
-                    overflow-auto>) y dependen de que el padre sea columna flex.
-                    Vale para TODOS los tamaños, también el celular: mientras ahí scrolleaba
-                    la ventana, la barra de arriba y la de abajo se movían de lugar al
-                    scrollear, porque en iOS la barra de URL se contrae, el viewport cambia
-                    de alto y todo lo sticky/fixed se reacomoda. Con el alto fijo acá, esas
-                    dos barras dejan de ser fijas: son el marco, y el marco no scrollea. */}
-                <div data-admin-scroll className="flex-1 min-h-0 flex flex-col overflow-y-auto">
-                    {children}
-                </div>
-            </main>
-            <MobileTabBar hasOpenShift={!!openShift} />
-        </div>
+            <div data-admin-shell className="h-dvh bg-slate-50 flex flex-col md:flex-row overflow-hidden">
+                <MobileTopBar
+                    role={role}
+                    userEmail={userEmail}
+                    hasOpenShift={!!openShift}
+                    unbilledCount={unbilledCount}
+                    remitosPendientes={remitosPendientes}
+                />
+                <Sidebar
+                    role={role}
+                    userEmail={userEmail}
+                    hasOpenShift={!!openShift}
+                    unbilledCount={unbilledCount}
+                    remitosPendientes={remitosPendientes}
+                />
+                <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+                    <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
+                    {/* El que scrollea es este wrapper y no <main> para dejar el aviso de turno
+                        viejo FUERA del área scrolleable: adentro, cualquier página con h-full
+                        mediría h-full + el alto del banner y aparecería una segunda scrollbar
+                        inútil cada vez que hay un turno abierto hace rato. Es flex-col porque
+                        varias páginas devuelven un fragmento (<header shrink-0> + <div flex-1
+                        overflow-auto>) y dependen de que el padre sea columna flex.
+                        Vale para TODOS los tamaños, también el celular: mientras ahí scrolleaba
+                        la ventana, la barra de arriba y la de abajo se movían de lugar al
+                        scrollear, porque en iOS la barra de URL se contrae, el viewport cambia
+                        de alto y todo lo sticky/fixed se reacomoda. Con el alto fijo acá, esas
+                        dos barras dejan de ser fijas: son el marco, y el marco no scrollea. */}
+                    <div data-admin-scroll className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+                        {children}
+                    </div>
+                </main>
+                <MobileTabBar hasOpenShift={!!openShift} />
+            </div>
+        </>
     );
 }

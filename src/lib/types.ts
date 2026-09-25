@@ -843,8 +843,10 @@ export type ShiftSummary = {
   /** Las estadías detrás de `creditCharged`, una por línea. */
   creditCharges: ShiftCreditChargeRow[];
   payments: ShiftPaymentRow[];
-  openedByEmail: string | null;
-  closedByEmail: string | null;
+  /** Nombre (profiles.full_name) de quien abrió el turno; null si no tiene. */
+  openedByName: string | null;
+  /** Nombre (profiles.full_name) de quien lo cerró; null si sigue abierto o no tiene. */
+  closedByName: string | null;
 };
 
 export type CloseShiftPayload = { shiftId: string; actualCash: number; notes?: string };

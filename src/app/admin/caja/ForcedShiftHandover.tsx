@@ -7,6 +7,8 @@ type Props = {
   shiftId: string;
   shiftNumber: number;
   openedByName: string | null;
+  /** Con qué usuario se entró: si no es quien está frente a la caja, puede cerrar sesión. */
+  currentUserName: string;
   totalsByMethod: Record<PaymentMethod, number>;
   /** Fiado a cuenta corriente del turno que se está rindiendo. */
   creditCharged: number;
@@ -18,12 +20,14 @@ type Props = {
 /**
  * Bloqueo de traspaso de caja: cuando un recepcionista entra y hay una caja abierta por
  * OTRO usuario, debe rendirla (a ciegas) antes de poder operar. Al cerrarla, se abre su
- * propia caja y sigue trabajando (afterClose="reopen"). No es descartable.
+ * propia caja y sigue trabajando (afterClose="reopen"). No es descartable, pero dice con
+ * qué usuario se entró y deja cerrar sesión sin rendir ("¿No sos vos?").
  */
 export default function ForcedShiftHandover({
   shiftId,
   shiftNumber,
   openedByName,
+  currentUserName,
   totalsByMethod,
   creditCharged,
   creditCharges,
@@ -45,6 +49,7 @@ export default function ForcedShiftHandover({
         dismissable={false}
         context="handover"
         notice={`La caja abierta la dejó ${quien}. Rendila (efectivo a ciegas) antes de poder operar.`}
+        identity={{ name: currentUserName }}
       />
     </div>
   );

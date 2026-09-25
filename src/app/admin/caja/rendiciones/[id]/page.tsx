@@ -283,8 +283,8 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     creditCharges,
     checkoutsCount,
     payments,
-    openedByEmail,
-    closedByEmail,
+    openedByName,
+    closedByName,
   } = summary;
   // Medios fijos que siempre salen (aunque den 0) + los eventuales que tuvieron
   // movimiento. "Tarjeta" agrupa credito + debito.
@@ -307,8 +307,8 @@ export default async function ShiftReportPage({ params, searchParams }: PageProp
     shiftCode: formatShiftCode(shift.shift_number),
     openedAt: formatHotelDateTime(shift.opened_at, tz),
     closedAt: shift.closed_at ? formatHotelDateTime(shift.closed_at, tz) : "---",
-    openedBy: openedByEmail ?? null,
-    closedBy: closedByEmail ?? null,
+    openedBy: openedByName ?? null,
+    closedBy: closedByName ?? null,
     expectedCash: shift.expected_cash,
     actualCash: shift.actual_cash,
     discrepancy: shift.discrepancy,
