@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 import { useRouter } from "next/navigation";
 
 /** Cada cuánto se pone al día Hoy si nadie toca nada. */
@@ -87,6 +87,12 @@ type UseAutoRefreshOptions = {
   intervalMs?: number;
   /** true mientras la pantalla tiene algo propio abierto que no se quiere tocar. */
   paused?: boolean;
+  /**
+   * Qué hacer para ponerse al día en lugar de `router.refresh()`. La pantalla de error de
+   * `/admin` lo usa para reintentar (pedir la pantalla y volver a pintarla). Puede cambiar
+   * en cada render: se usa siempre el último, sin rearmar el intervalo.
+   */
+  onRefresh?: () => void;
 };
 
 /**
@@ -94,8 +100,8 @@ type UseAutoRefreshOptions = {
  * al volver a la pestaña (`visibilitychange`). Usa `router.refresh()`, que vuelve a
  * pedir los server components (el mismo patrón que la Caja). Cuándo no recarga lo decide
  * `shouldSkipRefresh`, y antes de recargar se comprueba que el servidor conteste. Es el
- * único hook de refresco del panel: lo usan Hoy y, más adelante, la pantalla de
- * mantenimiento.
+ * único hook de refresco del panel: lo usan Hoy, la pantalla de error de `/admin` (con
+ * `onRefresh`) y, más adelante, la pantalla de mantenimiento.
  *
  * Lo que NO puede hacer: frenar una recarga que ya salió. Si alguien abre un cuadro
  * mientras vuelve la respuesta (alrededor de un segundo, sobre todo justo al volver a la
@@ -104,8 +110,15 @@ type UseAutoRefreshOptions = {
 export function useAutoRefresh({
   intervalMs = AUTO_REFRESH_INTERVAL_MS,
   paused = false,
+  onRefresh,
 }: UseAutoRefreshOptions = {}): void {
   const router = useRouter();
+  // Lee el `onRefresh` y el router del último render sin ser dependencia del efecto: si
+  // lo fuera, un `onRefresh` nuevo en cada render reiniciaría la cuenta de los 30 s.
+  const doRefresh = useEffectEvent(() => {
+    if (onRefresh) onRefresh();
+    else router.refresh();
+  });
 
   useEffect(() => {
     if (paused) return;
@@ -126,7 +139,7 @@ export function useAutoRefresh({
       // Mientras se esperaba al servidor pudo abrirse un cuadro o tomar el foco un campo.
       if (disposed || !answers || shouldSkipRefresh(document)) return;
       lastRefreshAt = Date.now();
-      router.refresh();
+      doRefresh();
     };
     const onInterval = () => {
       void refresh();
@@ -154,5 +167,5 @@ export function useAutoRefresh({
       window.removeEventListener("focus", refreshOnReturn);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [intervalMs, paused, router]);
+  }, [intervalMs, paused]);
 }

@@ -129,6 +129,33 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("con onRefresh llama a eso y no a router.refresh (así reintenta la pantalla de error)", async () => {
+    const reintentar = vi.fn();
+    renderHook(() => useAutoRefresh({ onRefresh: reintentar }));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reintentar).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("si onRefresh cambia entre renders, usa el último y no rearma el intervalo", async () => {
+    const primero = vi.fn();
+    const segundo = vi.fn();
+    const { rerender } = renderHook(
+      ({ onRefresh }: { onRefresh: () => void }) => useAutoRefresh({ onRefresh }),
+      { initialProps: { onRefresh: primero } }
+    );
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    rerender({ onRefresh: segundo });
+
+    // Si el render hubiera rearmado el intervalo, la recarga saldría recién a los 50 s.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(primero).not.toHaveBeenCalled();
+    expect(segundo).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("con un cuadro abierto (aria-modal) no refresca; al cerrarlo vuelve a refrescar", async () => {
     renderHook(() => useAutoRefresh());
     const cuadro = document.createElement("div");
