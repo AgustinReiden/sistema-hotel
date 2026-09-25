@@ -46,7 +46,8 @@ function servidorColgado() {
 }
 
 const SIN_CONEXION = "Sigue sin conexión. Se vuelve a intentar sola en 30 s.";
-const SIGUE_SIN_ANDAR = "Sigue sin andar. Probá de nuevo en un rato.";
+/** Lo que dice el cartel nuevo cuando la recarga de "Reintentar" salió y volvió a fallar. */
+const NO_CARGA = "La conexión anda, pero la pantalla no carga. Avisale al encargado.";
 
 function cambiarVisibilidad(oculta: boolean) {
   tabOculta = oculta;
@@ -98,6 +99,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // La marca de un toque a "Reintentar" vive fuera del cartel y la apaga el próximo cartel
+  // que aparece. Se monta uno para que no pase al test siguiente.
+  render(<AdminError error={errorDeRecarga()} reset={reset} />);
+  cleanup();
   document.body.innerHTML = "";
   consoleError.mockRestore();
   vi.unstubAllGlobals();
@@ -108,8 +113,12 @@ describe("Pantalla de error de /admin — lo que ve la recepcionista", () => {
   it("muestra el cartel en voseo y el botón Reintentar, sin ningún texto en inglés", () => {
     const { container } = mostrarPantallaDeError();
 
-    expect(screen.getByText("No se pudo actualizar la pantalla.")).toBeInTheDocument();
-    expect(screen.getByText("Revisá la conexión y tocá Reintentar.")).toBeInTheDocument();
+    expect(screen.getByText("No se pudo cargar la pantalla.")).toBeInTheDocument();
+    // La causa puede ser la conexión o una consulta que falla: dice qué hacer en los dos casos.
+    expect(
+      screen.getByText("Fijate que haya internet y tocá Reintentar. Si sigue igual, avisale al encargado.")
+    ).toBeInTheDocument();
+    expect(container.textContent).not.toContain("Revisá la conexión");
     expect(botonReintentar()).toBeInTheDocument();
 
     // Lo que se lee en pantalla y lo que lee un lector de pantalla (aria-label, title).
@@ -271,47 +280,99 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     await alDiaEnPantalla();
     expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
 
-    fetchMock.mockImplementation(() => new Promise(() => {}));
+    // Un pedido que queda colgado y se corta al desmontar: si no terminara nunca, la
+    // transición del botón quedaría abierta y React dejaría "Reintentando…" en los carteles
+    // de los tests que corren después.
+    servidorColgado();
     fireEvent.click(botonReintentar());
     expect(screen.queryByText(SIN_CONEXION)).toBeNull();
   });
 
-  it("si la recarga vuelve a fallar, el cartel nuevo dice que sigue sin andar", async () => {
-    // Si la recarga vuelve a fallar, Next arma el cartel de nuevo desde cero con el error
-    // nuevo: el cartel nuevo se pinta antes de que se desmonte el viejo (key distinta).
+  it("si la recarga vuelve a fallar enseguida, el cartel nuevo dice que la conexión anda pero la pantalla no carga", async () => {
+    // Si el error llega junto con el resto de la respuesta, Next arma el cartel de nuevo
+    // desde cero con el error nuevo, en la misma pasada: el cartel nuevo se pinta antes de
+    // que se desmonte el viejo (key distinta).
     const { rerender } = render(<AdminError key="1" error={errorDeRecarga()} reset={reset} />);
-    expect(screen.queryByText(SIGUE_SIN_ANDAR)).toBeNull();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
 
     fireEvent.click(botonReintentar());
     await alDiaEnPantalla();
     expect(refresh).toHaveBeenCalledTimes(1);
 
     rerender(<AdminError key="2" error={errorDeRecarga()} reset={reset} />);
-    expect(screen.getByText(SIGUE_SIN_ANDAR)).toBeInTheDocument();
+    expect(screen.getByText(NO_CARGA)).toBeInTheDocument();
     expect(screen.queryByText(SIN_CONEXION)).toBeNull();
   });
 
-  it("un cartel que no viene de tocar Reintentar no dice que sigue sin andar (falló el reintento automático)", async () => {
+  it("si la recarga pasa por Cargando… y vuelve a fallar unos segundos después, el cartel nuevo también lo dice", async () => {
+    // El orden de siempre en Next 16.3: `admin/loading.tsx` está dentro de este cartel, así
+    // que al reintentar el cartel viejo se cambia por "Cargando…" (se desmonta) mientras
+    // llega la respuesta. Si una consulta de la página tarda en fallar (un timeout de
+    // Supabase), el cartel nuevo aparece segundos después, con el viejo ya desmontado.
+    const { unmount } = mostrarPantallaDeError();
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    mostrarPantallaDeError();
+    expect(screen.getByText(NO_CARGA)).toBeInTheDocument();
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+  });
+
+  it("el aviso sale una sola vez por toque: el cartel que viene después (por ejemplo, en otra pantalla del panel) ya no lo dice", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    unmount();
+
+    const segundo = mostrarPantallaDeError();
+    expect(screen.getByText(NO_CARGA)).toBeInTheDocument();
+    segundo.unmount();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    mostrarPantallaDeError();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+  });
+
+  it("un cartel que no viene de tocar Reintentar no dice que la pantalla no carga (falló el reintento automático)", async () => {
     const { rerender } = render(<AdminError key="1" error={errorDeRecarga()} reset={reset} />);
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
 
     rerender(<AdminError key="2" error={errorDeRecarga()} reset={reset} />);
-    expect(screen.queryByText(SIGUE_SIN_ANDAR)).toBeNull();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
   });
 
-  it("si el reintento salió bien, el próximo cartel (otro error, más tarde) no dice que sigue sin andar", async () => {
+  it("si el toque no llegó a recargar (sin conexión), el cartel siguiente no dice que la conexión anda", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(refresh).not.toHaveBeenCalled();
+    unmount();
+
+    mostrarPantallaDeError();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+  });
+
+  it("si el reintento salió bien, el próximo cartel (otro error, con la recarga siguiente de Hoy) no dice que la pantalla no carga", async () => {
     const { unmount } = mostrarPantallaDeError();
     fireEvent.click(botonReintentar());
     await alDiaEnPantalla();
     expect(refresh).toHaveBeenCalledTimes(1);
 
-    // Volvió la pantalla: el cartel se desmonta.
+    // Volvió la pantalla: el cartel se desmonta. Hoy tardó 2 s en cargar y su recarga
+    // siguiente sale 30 s después; si esa falla, aparece otro cartel.
     unmount();
+    await vi.advanceTimersByTimeAsync(2_000 + 30_000);
 
     mostrarPantallaDeError();
-    expect(screen.queryByText(SIGUE_SIN_ANDAR)).toBeNull();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
   });
 
   it("si la pantalla se recupera sola mientras el botón espera al servidor, corta el pedido y no recarga", async () => {

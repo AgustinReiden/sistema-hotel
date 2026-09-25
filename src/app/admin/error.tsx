@@ -2,16 +2,34 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, WifiOff } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { AUTO_REFRESH_INTERVAL_MS, probeServer, useAutoRefresh } from "./useAutoRefresh";
 
 /**
- * true desde que "Reintentar" manda a recargar hasta que se sabe cómo salió. Vive fuera
- * del cartel porque, si la recarga vuelve a fallar, Next arma el cartel de nuevo desde
- * cero: el cartel nuevo lo lee al aparecer para decir que sigue sin andar. Lo apaga el
- * cartel que se va (el viejo si volvió a fallar; este mismo si la pantalla volvió).
+ * Cuándo (`Date.now()`) "Reintentar" mandó a recargar, con la conexión y la sesión ya
+ * comprobadas; null si no hay un toque pendiente. Vive fuera del cartel porque, si la
+ * recarga vuelve a fallar, Next arma el cartel de nuevo desde cero: el cartel nuevo la lee
+ * al aparecer para decir que la conexión anda pero la pantalla no carga.
+ *
+ * El cartel viejo no la puede apagar al irse: `admin/loading.tsx` está dentro de este
+ * cartel, así que al reintentar Next lo cambia por "Cargando…" mientras llega la respuesta,
+ * y el cartel nuevo aparece recién después (segundos, si una consulta tarda en fallar). La
+ * apaga el cartel nuevo al aparecer. Si la pantalla volvió, no aparece ninguno: por eso la
+ * marca vale solo `MANUAL_RETRY_WINDOW_MS` desde el toque.
  */
-let manualRetryInFlight = false;
+let manualRetryAt: number | null = null;
+
+/**
+ * Hasta cuánto después del toque un cartel nuevo se toma como el resultado de ese toque.
+ * Cubre una consulta que tarda en fallar. Si la pantalla volvió, el error siguiente llega
+ * con la recarga de Hoy, 30 s después de que volvió: ya queda afuera.
+ */
+const MANUAL_RETRY_WINDOW_MS = AUTO_REFRESH_INTERVAL_MS;
+
+/** ¿Este cartel es el resultado de un toque a "Reintentar" que llegó a recargar? */
+function comesFromManualRetry(): boolean {
+  return manualRetryAt !== null && Date.now() - manualRetryAt < MANUAL_RETRY_WINDOW_MS;
+}
 
 /**
  * Pantalla de error de todo `/admin`: aparece cuando, en una recarga (por ejemplo, la de
@@ -37,9 +55,10 @@ export default function AdminError({
   const router = useRouter();
   // true mientras se reintenta (la pregunta al servidor y la recarga): el botón lo muestra.
   const [isPending, startTransition] = useTransition();
-  // Cómo salió el último toque de "Reintentar": sin conexión (no recargó) o volvió a fallar.
+  // Cómo salió el último toque de "Reintentar": sin conexión (no recargó) o recargó y la
+  // pantalla volvió a fallar.
   const [notice, setNotice] = useState<"offline" | "failed" | null>(() =>
-    manualRetryInFlight ? "failed" : null
+    comesFromManualRetry() ? "failed" : null
   );
   // La pregunta al servidor del botón, para cortarla si el cartel se va mientras espera.
   const probeRef = useRef<ReturnType<typeof probeServer> | null>(null);
@@ -48,18 +67,23 @@ export default function AdminError({
     console.error("[admin] no se pudo actualizar la pantalla:", error);
   }, [error]);
 
+  // Este cartel ya leyó la marca del toque: el que venga después no la vuelve a usar.
+  useEffect(() => {
+    manualRetryAt = null;
+  }, []);
+
   useEffect(
     () => () => {
       probeRef.current?.cancel();
       probeRef.current = null;
-      manualRetryInFlight = false;
     },
     []
   );
 
-  // Pide la pantalla de nuevo al servidor y la vuelve a pintar, en una sola transición:
-  // si sale bien, este cartel se va; si vuelve a fallar, Next arma uno nuevo. Es lo mismo
-  // que hace el `retry` que Next 16.3 le pasa a este archivo.
+  // Pide la pantalla de nuevo al servidor y la vuelve a pintar, en una sola transición.
+  // Es lo mismo que hace el `retry` que Next 16.3 le pasa a este archivo. Mientras llega la
+  // respuesta, Next cambia este cartel por "Cargando…" (`admin/loading.tsx`): si sale bien,
+  // vuelve la pantalla; si vuelve a fallar, Next arma un cartel nuevo.
   const reload = () => {
     startTransition(() => {
       router.refresh();
@@ -86,7 +110,7 @@ export default function AdminError({
         setNotice("offline");
         return;
       }
-      manualRetryInFlight = true;
+      manualRetryAt = Date.now();
       reload();
     });
   };
@@ -94,7 +118,8 @@ export default function AdminError({
   // Reintenta sola cada 30 s y al volver a la pestaña, con las mismas pausas que Hoy:
   // pestaña oculta, sin red o si el chequeo da que no (así una recarga sin conexión no
   // cambia este cartel por la página de error de Chrome), un cuadro abierto, un campo con
-  // el foco o alguien usando la pantalla (espera a que quede quieta 2 s).
+  // el foco o alguien usando la pantalla (espera a que quede quieta 2 s). Cada reintento
+  // cambia el cartel por "Cargando…" hasta que vuelve la respuesta (ver `reload`).
   useAutoRefresh({ onRefresh: reload });
 
   return (
@@ -105,11 +130,14 @@ export default function AdminError({
       >
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
-            <WifiOff size={22} aria-hidden="true" />
+            <AlertTriangle size={22} aria-hidden="true" />
           </div>
           <div className="space-y-1">
-            <h1 className="text-lg font-bold text-slate-800">No se pudo actualizar la pantalla.</h1>
-            <p className="text-sm text-slate-600">Revisá la conexión y tocá Reintentar.</p>
+            <h1 className="text-lg font-bold text-slate-800">No se pudo cargar la pantalla.</h1>
+            {/* La causa puede ser la conexión o una consulta que falla: dice qué hacer en los dos casos. */}
+            <p className="text-sm text-slate-600">
+              Fijate que haya internet y tocá Reintentar. Si sigue igual, avisale al encargado.
+            </p>
             <p className="text-xs text-slate-400">
               La pantalla lo vuelve a intentar sola cada {AUTO_REFRESH_INTERVAL_MS / 1000} segundos.
             </p>
@@ -130,11 +158,12 @@ export default function AdminError({
           {isPending ? "Reintentando…" : "Reintentar"}
         </button>
 
+        {/* "failed": el chequeo dio bien (conexión, sesión y rol) y la recarga igual falló. */}
         {notice && !isPending && (
           <p role="status" className="text-sm font-medium text-amber-700 text-center">
             {notice === "offline"
               ? `Sigue sin conexión. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
-              : "Sigue sin andar. Probá de nuevo en un rato."}
+              : "La conexión anda, pero la pantalla no carga. Avisale al encargado."}
           </p>
         )}
       </div>
