@@ -6,15 +6,19 @@ que imprime el sistema (`R-000158-DV`), lo archiva en Drive en
 Aparte, evalúa la firma con Gemini. El estado de cada remito se ve en el panel
 `/admin/remitos` del sistema, solo para el admin.
 
-**n8n no tiene la llave maestra de la base.** Llama como `anon` a seis funciones que exigen
+Desde la fase C (mig 124) también arma el **paquete**: el PDF con los remitos firmados de
+una factura consolidada, que el admin pide desde el panel.
+
+**n8n no tiene la llave maestra de la base.** Llama como `anon` a nueve funciones que exigen
 la clave de la integración en el encabezado `x-remitos-clave`; en la base queda solo su
 huella. La regla de la IA (umbral, intentos) vive en la base, no en n8n.
 
 **En marcha desde el 2026-09-22.** Se controlan los remitos del `R-000161` en adelante
 (`controlar_desde`) y cualquier remito anterior que se escanee.
 
-Diseños: [general](../../docs/plans/2026-09-17-remitos-firmados-design.md) e
-[integración con el sistema](../../docs/plans/2026-09-22-remitos-integracion-design.md).
+Diseños: [general](../../docs/plans/2026-09-17-remitos-firmados-design.md),
+[integración con el sistema](../../docs/plans/2026-09-22-remitos-integracion-design.md) y
+[fase C](../../docs/plans/2026-09-23-remitos-fase-c-design.md) (vencidos, aviso en la consolidada, paquete).
 
 ## Piezas
 
@@ -23,11 +27,11 @@ Diseños: [general](../../docs/plans/2026-09-17-remitos-firmados-design.md) e
 | `comun/codigo.mjs` | Formato del código `R-000123-96` (`T-` en las pruebas) y su dígito verificador (MOD 97, público). El sistema tiene una copia y un test que compara las dos. |
 | `comun/ticket-compacto.mjs` | Diseño del comprobante compacto con QR: estilos, lado del QR y opciones del dibujo. El sistema tiene una copia y un test que compara las dos. |
 | `generador/` | Genera comprobantes de prueba (`T-`) imprimibles (80 mm) con el diseño del sistema, para probar el worker. |
-| `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código. Sin estado, sin Google, sin base. |
+| `worker/` | Servicio HTTP: recibe el escaneo, separa los tickets (cartulina negra), devuelve cada uno con su código (`/procesar`). También une los PDF de un paquete (`/unir`). Sin estado, sin Google, sin base. |
 | `n8n/logica.mjs` | Reglas de la ingesta (qué archivar, qué mandar a revisar, versiones, qué registrar en la base). Puras y testeadas. |
 | `n8n/construir.mjs` | Arma los workflows de n8n incrustando `logica.mjs` en los nodos Code. |
 | `herramientas/` | `analizar-escaneo.mjs` corre el worker sobre un escaneo real y guarda cada recorte (diagnóstico de pruebas con papel). `comparar-workflow.mjs` confirma que un workflow importado a mano en n8n quedó igual al build. |
-| `test/` | `npm test` — 101 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
+| `test/` | `npm test` — 110 tests, incluida la separación de tickets en cualquier ángulo y la coherencia de los workflows. |
 
 `salida/` queda fuera de git: ahí van los datos reales, los PDF generados, la clave de la
 integración y los workflows armados (llevan ids, la URL de la base y datos de clientes).
@@ -92,6 +96,11 @@ de verdad (`R-`) los imprime el sistema; un `T-` que pase por la ingesta va a `_
 App aparte en Coolify (no en el contenedor del hotel ni en el de n8n), con `WORKER_TOKEN`
 de un secreto largo cualquiera. Sin Docker: `HOST=0.0.0.0 WORKER_TOKEN=... npm run worker`.
 
+Rutas: `POST /procesar` (el escaneo, para la Ingesta), `POST /unir` (`{ archivos: [{ nombre,
+pdf_b64 }] }` → `{ paginas, pdf_b64 }`, para los paquetes; si un archivo no es PDF, 422 y no
+devuelve nada) y `GET /salud`. Las dos primeras exigen `X-Worker-Token`. Un cambio en el
+worker se publica **redesplegando la app en Coolify**.
+
 ### 4. Credenciales en n8n (las creás vos)
 
 | Credencial | Tipo en n8n | Dato |
@@ -122,21 +131,22 @@ Si `Remitos` ya existe, no hace nada.
 
 | Clave | Qué es |
 |---|---|
-| `config_id`, `asegurar_carpeta_id`, `errores_id`, `ingesta_id`, `evaluar_firmas_id`, … | Ids de los workflows en n8n. |
+| `config_id`, `asegurar_carpeta_id`, `errores_id`, `ingesta_id`, `evaluar_firmas_id`, `paquetes_id`, … | Ids de los workflows en n8n. |
 | `config.worker_url` | URL del worker. |
 | `config.supabase_url` | URL del proyecto de Supabase de PROD. |
 | `config.supabase_anon_key` | La anon key (la misma `NEXT_PUBLIC_SUPABASE_ANON_KEY` del sistema): no es secreta, viaja en el navegador. |
 | `credenciales.{google,gemini,worker,supabase}` | `{ "id", "name" }` de cada credencial de n8n. |
 
 `node n8n/construir.mjs` arma los workflows en `salida/n8n/` y avisa si falta algo.
-`Remitos - Config` y `Errores` se actualizan por MCP; la Ingesta y *Evaluar firmas* se
-reimportan a mano dentro del mismo workflow (abrir, Ctrl+A, Delete, *Import from File*,
+`Remitos - Config` y `Errores` se actualizan por MCP; la Ingesta, *Evaluar firmas* y
+*Paquetes* se reimportan a mano dentro del mismo workflow (abrir, Ctrl+A, Delete, *Import from File*,
 Save) y se verifican con `herramientas/comparar-workflow.mjs`.
 
 ### 7. Configuración de cada workflow en n8n
 
 En *Settings* de cada workflow: **Execution order: v1** y, en `Remitos - Ingesta`,
-`Remitos - Evaluar firmas` y `Remitos - Vigilancia`, **Error workflow: Remitos - Errores**.
+`Remitos - Evaluar firmas`, `Remitos - Vigilancia` y `Remitos - Paquetes`, **Error workflow:
+Remitos - Errores**.
 
 ### 8. La clave de la integración
 
@@ -168,10 +178,11 @@ vuelven a coincidir.
 |---|---|---|
 | `Remitos - Ingesta` | Cada 5 min | Late en la base, toma el archivo más viejo de `_Entrada`, lo separa en tickets, le pregunta a la base qué remitos existen y de quién son, archiva cada uno en su carpeta y lo registra: lo archivado como escaneo del remito (queda "evaluando"), lo que va a revisar como pieza con su motivo. **No llama a Gemini**: una caída de Google nunca frena ni alarga el archivo. |
 | `Remitos - Evaluar firmas` | Cada 5 min | Late en la base, le pide hasta 5 escaneos pendientes y los evalúa de a una, con una pausa, mandándole a Gemini el PDF archivado. Lo que dice Gemini vuelve a la base, que decide el estado: firmado o sin firma si la IA está segura (umbral 95 %, se cambia desde el panel), y "a revisar" si no. |
+| `Remitos - Paquetes` | Cada minuto | Toma el pedido más viejo de la base, le pregunta a Drive por cada remito (que exista, no esté en la papelera ni se haya modificado), los baja, el worker los une y deja el PDF en `Remitos/<Cliente>/Paquetes/`. Si algo falla, el pedido queda en error con el motivo: nunca sale a medias. Sin pedidos, la corrida termina en la primera llamada a la base. |
 | `Remitos - Vigilancia` | Cada hora | Anota una alerta en `Errores` si la ingesta no corre o si `_Entrada` no se vacía, y la manda por WhatsApp si `aviso_numero` tiene un número (hoy está vacío). |
 | `Remitos - Config`, `Asegurar carpeta`, `Errores` | Los llaman los demás | Ajustes y carpetas por nombre; registro de ejecuciones caídas. |
 
-**Activos:** la Ingesta, *Evaluar firmas* y Vigilancia. `Config`, `Asegurar carpeta` y
+**Activos:** la Ingesta, *Evaluar firmas*, *Paquetes* y Vigilancia. `Config`, `Asegurar carpeta` y
 `Errores` quedan apagados: los llaman los demás y funcionan igual. `Instalación` queda
 apagado y no hace falta volver a correrlo.
 
@@ -183,6 +194,14 @@ apagado y no hace falta volver a correrlo.
 - **Re-escanear no cierra la pieza vieja.** El remito escaneado de nuevo se registra y se
   evalúa solo; la pieza se cierra con **Resuelta → "Ya se volvió a escanear bien"**. La nota
   solo es obligatoria para descartar ("No era un remito").
+- **Vencidos (mig 124):** un remito de un cargo creado desde "Alertar desde" (24/09/2026)
+  que a las 48 h del check-out no está firmado ni marcado "sin remito" aparece arriba, en
+  *Vencidos*, sin importar el mes elegido. Las horas y la fecha se cambian en *Ajustes*.
+- **Paquetes por factura (mig 124):** con un cliente elegido, lista sus consolidadas
+  vigentes con "N de M firmados". *Armar paquete* deja el pedido en la base; en uno o dos
+  minutos aparece *Descargar* (abre el PDF en Drive). Si se firma un remito después, el
+  renglón lo avisa y ofrece *Volver a armar*: el nuevo sale con `_v2`, `_v3`… y el anterior
+  queda en Drive.
 
 ### 11. Limpiar Drive y la planilla
 
@@ -234,6 +253,9 @@ mueve el original a `_Procesados` sin problema. Hay que tener en cuenta dos cosa
 | Gemini falla o está saturado | La ingesta no se entera. `Remitos - Evaluar firmas` prueba el modelo principal y, si falla, el de respaldo. Si fallan los dos por cuota (429), saturación (503) o red, el intento queda anotado como `error` (nunca "no firmado") con el mensaje real de Google, la corrida se corta y se sigue 5 minutos después. Con 5 intentos fallidos, el remito pasa a "a revisar". El panel avisa si hay remitos esperando la evaluación hace más de 2 horas. |
 | Se reinstala (carpetas y planilla nuevas) | Nada que tocar: `Remitos - Config` busca carpetas y planilla por nombre en cada corrida. Si falta algo o está repetido, la corrida falla con un mensaje claro. |
 | Dos corridas a la vez | Un turno en `Estado` lo impide; si una corrida muere, el turno vence a los 30 min. |
+| Paquete: un remito borrado, en la papelera o modificado en Drive después de archivarse | El pedido queda en error con el remito y el motivo ("R-000170: el archivo de Drive no está"); no se baja ni se sube nada. Se corrige el archivo (o se re-escanea) y se vuelve a pedir. |
+| Paquete: el worker no une (caído, o un archivo que no es PDF) | El pedido queda en error con lo que dijo el worker; se vuelve a pedir. |
+| Paquete: la corrida se cae a mitad (Drive se cae al bajar o al subir) | Queda en `Errores` y el pedido sigue "armando"; a los 30 minutos el panel deja volver a pedirlo. Puede quedar un PDF huérfano en `Paquetes/`, que se puede borrar. |
 
 ## Límites conocidos
 
