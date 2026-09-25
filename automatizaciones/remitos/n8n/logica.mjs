@@ -462,7 +462,35 @@ function cuerpoGeminiArchivo(b64, mimeType, nivelRazonamiento) {
   return cuerpo;
 }
 
+// --- Paquetes (mig 124) ---------------------------------------------------------------
+
+/**
+ * Lo que dijo Drive de cada archivo del paquete, en el mismo orden que los escaneos.
+ * Devuelve los problemas; vacio = se puede armar. Un archivo modificado despues de
+ * archivarse (con 10 min de margen por relojes) ya no es el que se evaluo.
+ */
+function verificarArchivosPaquete(escaneos, metadatos, margenMin = 10) {
+  const problemas = [];
+  escaneos.forEach((e, i) => {
+    const m = metadatos[i] || {};
+    const nombre = numeroVisibleR(e.numero);
+    const cod = Number(m.statusCode ?? 0);
+    if (cod === 404) problemas.push(`${nombre}: el archivo de Drive no está`);
+    else if (cod !== 200 || !m.body || !m.body.id) problemas.push(`${nombre}: Drive no contestó (${cod || "sin respuesta"})`);
+    else if (m.body.trashed) problemas.push(`${nombre}: el archivo está en la papelera de Drive`);
+    else if (Date.parse(m.body.modifiedTime) > Date.parse(e.archivado_at) + margenMin * 60000) {
+      problemas.push(`${nombre}: el archivo de Drive cambió después de archivarse`);
+    }
+  });
+  return problemas;
+}
+
+function nombrePaquete({ factura_texto, version }) {
+  return `Paquete ${factura_texto}${version > 1 ? `_v${version}` : ""}.pdf`;
+}
+
 export {
+  verificarArchivosPaquete, nombrePaquete,
   cortarCorrida, tipoErrorGemini, cuerpoGeminiArchivo,
   NOMBRES, armarConfig,
   COLUMNAS, filasAObjetos, objetoAFila, limpiarNombre, planificarLote, PROMPT_FIRMA, cuerpoGemini,
