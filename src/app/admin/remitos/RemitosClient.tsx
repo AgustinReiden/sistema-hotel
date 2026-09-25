@@ -30,6 +30,7 @@ import type {
   RemitoEstadoPersona,
   RemitoLookup,
   RemitoPanelRow,
+  RemitoPaqueteFactura,
   RemitoPieza,
   RemitosSalud,
 } from "@/lib/types";
@@ -40,12 +41,15 @@ import {
   resolveRemitoPiezaAction,
   saveRemitosAjustesAction,
 } from "./actions";
+import PaquetesSection from "./PaquetesSection";
 import VencidosSection from "./VencidosSection";
 
 type Props = {
   rows: RemitoPanelRow[];
   /** Remitos vencidos de cualquier mes (mig 124): no dependen del filtro. */
   vencidos?: RemitoPanelRow[];
+  /** Consolidadas del cliente elegido, con su paquete (mig 124). */
+  paquetes?: RemitoPaqueteFactura[];
   piezas: RemitoPieza[];
   salud: RemitosSalud;
   accounts: CtaCteAccount[];
@@ -105,7 +109,7 @@ function EnlaceEscaneo({ row }: { row: RemitoPanelRow }) {
   );
 }
 
-export default function RemitosClient({ rows, vencidos = [], piezas, salud, accounts, cliente, mes, nowMs, errores }: Props) {
+export default function RemitosClient({ rows, vencidos = [], paquetes = [], piezas, salud, accounts, cliente, mes, nowMs, errores }: Props) {
   const router = useRouter();
   const [clienteSel, setClienteSel] = useState(cliente);
   const [mesSel, setMesSel] = useState(mes);
@@ -414,6 +418,8 @@ export default function RemitosClient({ rows, vencidos = [], piezas, salud, acco
           </ul>
         )}
       </section>
+
+      <PaquetesSection facturas={paquetes} clienteElegido={cliente !== ""} nowMs={nowMs} />
 
       {marca && (
         <Modal

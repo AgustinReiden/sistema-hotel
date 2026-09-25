@@ -1,10 +1,17 @@
 import { redirect } from "next/navigation";
 import { Signature } from "lucide-react";
 
-import { getCtaCteAccounts, getCurrentUserRole, getRemitosSalud, listRemitoPiezas, listRemitos } from "@/lib/data";
+import {
+  getCtaCteAccounts,
+  getCurrentUserRole,
+  getRemitosSalud,
+  listRemitoPaquetes,
+  listRemitoPiezas,
+  listRemitos,
+} from "@/lib/data";
 import { esVencido, rangoDeMes } from "@/lib/remitos";
 import { hotelDateKey } from "@/lib/time";
-import type { CtaCteClientKind, RemitosSalud } from "@/lib/types";
+import type { CtaCteClientKind, RemitoPaqueteFactura, RemitosSalud } from "@/lib/types";
 import RemitosClient from "./RemitosClient";
 
 export const dynamic = "force-dynamic";
@@ -44,11 +51,14 @@ export default async function RemitosPage({
       return vacio;
     });
 
-  const [rows, piezas, salud, accounts] = await Promise.all([
+  const [rows, piezas, salud, accounts, paquetes] = await Promise.all([
     cargar(listRemitos(desde, hasta, clientKind, clientId), [], "los remitos"),
     cargar(listRemitoPiezas(false), [], "las piezas a revisar"),
     cargar(getRemitosSalud(), SALUD_VACIA, "el estado de la ingesta"),
     cargar(getCtaCteAccounts(), [], "los clientes"),
+    clientKind && clientId
+      ? cargar(listRemitoPaquetes(clientKind, clientId), [], "los paquetes")
+      : Promise.resolve([] as RemitoPaqueteFactura[]),
   ]);
 
   // Los vencidos no dependen del mes elegido. Solo se buscan si la salud dice que hay.
@@ -78,6 +88,7 @@ export default async function RemitosPage({
           <RemitosClient
             rows={rows}
             vencidos={vencidos}
+            paquetes={paquetes}
             piezas={piezas}
             salud={salud}
             accounts={accounts}
