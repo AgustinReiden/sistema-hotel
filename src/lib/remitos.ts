@@ -3,7 +3,7 @@
 
 import { interpretarCodigo, numeroVisible } from "./remito-codigo";
 import { hotelDateKey } from "./time";
-import type { RemitoEstado, RemitoEstadoPersona, RemitoPanelRow, RemitosSalud } from "./types";
+import type { RemitoEstado, RemitoEstadoPersona, RemitoPanelRow, RemitoPaqueteFactura, RemitosSalud } from "./types";
 
 export const REMITO_ESTADO_LABEL: Record<RemitoEstado, string> = {
   sin_escanear: "Sin escanear",
@@ -212,6 +212,34 @@ export function haceCuanto(iso: string, ahoraMs: number): string {
   const horas = Math.floor((ahoraMs - Date.parse(iso)) / 3_600_000);
   if (horas < 72) return `hace ${Math.max(0, horas)} h`;
   return haceDias(iso, ahoraMs);
+}
+
+// ─── Paquetes (mig 124) ────────────────────────────────────────────────────────
+
+const PAQUETE_TRABADO_MS = 30 * 60_000;
+
+export type EstadoPaquete = { puedeArmar: boolean; armando: boolean; texto: string | null };
+
+export function estadoPaquete(f: RemitoPaqueteFactura, ahoraMs: number): EstadoPaquete {
+  const hayFirmados = f.remitos_firmados > 0;
+  const p = f.paquete;
+  if (!p) return { puedeArmar: hayFirmados, armando: false, texto: null };
+  if (p.estado === "pedido") return { puedeArmar: false, armando: true, texto: null };
+  if (p.estado === "armando") {
+    const desde = Date.parse(p.armando_at ?? p.pedido_at);
+    if (ahoraMs - desde > PAQUETE_TRABADO_MS) {
+      return { puedeArmar: hayFirmados, armando: false, texto: "Se cortó a mitad de camino: volvé a pedirlo." };
+    }
+    return { puedeArmar: false, armando: true, texto: null };
+  }
+  if (p.estado === "error") {
+    return { puedeArmar: hayFirmados, armando: false, texto: `No se pudo armar: ${p.error ?? "error sin detalle"}` };
+  }
+  if (f.firmados_nuevos > 0) {
+    const n = f.firmados_nuevos;
+    return { puedeArmar: true, armando: false, texto: `Hay ${n} ${n === 1 ? "remito firmado nuevo" : "remitos firmados nuevos"}: volvé a armarlo.` };
+  }
+  return { puedeArmar: false, armando: false, texto: null };
 }
 
 /** "2026-09" → primer y último día del mes. */

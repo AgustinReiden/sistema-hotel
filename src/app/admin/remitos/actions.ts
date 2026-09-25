@@ -6,6 +6,7 @@ import {
   assignRemitoPieza,
   lookupRemito,
   markRemito,
+  requestRemitoPaquete,
   resolveRemitoPieza,
   saveRemitosAjustes,
   saveRemitosVencimiento,
@@ -107,5 +108,16 @@ export async function saveRemitosAjustesAction(
     return { success: true };
   } catch (error: unknown) {
     return { success: false, ...parseActionError(error, "No se pudieron guardar los ajustes.") };
+  }
+}
+
+export async function pedirPaqueteAction(invoiceId: string): Promise<ActionResult> {
+  try {
+    await assertRemitosAdmin();
+    await requestRemitoPaquete(invoiceId);
+    revalidatePath("/admin/remitos");
+    return { success: true };
+  } catch (error: unknown) {
+    return { success: false, ...parseActionError(error, "No se pudo pedir el paquete.") };
   }
 }

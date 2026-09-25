@@ -361,3 +361,32 @@ test("el pedido a Gemini con el PDF archivado usa el mismo prompt", () => {
   assert.equal(c.contents[0].parts[1].inlineData.data, "UERG");
   assert.equal(c.contents[0].parts[0].text, cuerpoGemini("x", "low").contents[0].parts[0].text);
 });
+
+import { verificarArchivosPaquete, nombrePaquete } from "../n8n/logica.mjs";
+
+test("paquete: Drive dice que todo está en orden", () => {
+  const esc = [{ numero: 163, drive_file_id: "a", archivado_at: "2026-09-25T12:00:00Z" }];
+  const meta = [{ statusCode: 200, body: { id: "a", trashed: false, modifiedTime: "2026-09-25T11:59:00Z" } }];
+  assert.deepEqual(verificarArchivosPaquete(esc, meta), []);
+});
+
+test("paquete: borrado, en la papelera, modificado o sin respuesta", () => {
+  const esc = [163, 164, 165, 166].map((numero) => ({ numero, drive_file_id: `f${numero}`, archivado_at: "2026-09-25T12:00:00Z" }));
+  const meta = [
+    { statusCode: 404, body: { error: { code: 404 } } },
+    { statusCode: 200, body: { id: "f164", trashed: true, modifiedTime: "2026-09-25T11:59:00Z" } },
+    { statusCode: 200, body: { id: "f165", trashed: false, modifiedTime: "2026-09-26T09:00:00Z" } },
+    { statusCode: 500, body: {} },
+  ];
+  assert.deepEqual(verificarArchivosPaquete(esc, meta), [
+    "R-000163: el archivo de Drive no está",
+    "R-000164: el archivo está en la papelera de Drive",
+    "R-000165: el archivo de Drive cambió después de archivarse",
+    "R-000166: Drive no contestó (500)",
+  ]);
+});
+
+test("paquete: nombre con la factura y la versión", () => {
+  assert.equal(nombrePaquete({ factura_texto: "FB 00008-00001234", version: 1 }), "Paquete FB 00008-00001234.pdf");
+  assert.equal(nombrePaquete({ factura_texto: "FB 00008-00001234", version: 2 }), "Paquete FB 00008-00001234_v2.pdf");
+});

@@ -55,3 +55,27 @@ test("ruta y metodo equivocados", async () => {
   assert.equal((await fetch(`${base}/otra`)).status, 404);
   assert.equal((await fetch(`${base}/procesar`)).status, 405);
 });
+
+test("unir: devuelve el PDF unido", async () => {
+  const { PDFDocument } = await import("pdf-lib");
+  const d = await PDFDocument.create();
+  d.addPage([100, 100]);
+  const b64 = Buffer.from(await d.save()).toString("base64");
+  const r = await fetch(`${base}/unir`, {
+    method: "POST",
+    headers: { "X-Worker-Token": TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ archivos: [{ nombre: "R-000001", pdf_b64: b64 }, { nombre: "R-000002", pdf_b64: b64 }] }),
+  });
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).paginas, 2);
+});
+
+test("unir: sin token 401 y con basura 422", async () => {
+  assert.equal((await fetch(`${base}/unir`, { method: "POST", body: "{}" })).status, 401);
+  const r = await fetch(`${base}/unir`, {
+    method: "POST", headers: { "X-Worker-Token": TOKEN },
+    body: JSON.stringify({ archivos: [{ nombre: "R-000009", pdf_b64: "aG9sYQ==" }] }),
+  });
+  assert.equal(r.status, 422);
+  assert.equal((await r.json()).error, "pdf_invalido");
+});

@@ -1,7 +1,9 @@
 # Remitos firmados: fase C (vencidos, aviso en la consolidada y paquete)
 
 Fecha: 2026-09-23
-Estado: aprobado por Agustín (brainstorming del 2026-09-23).
+Estado: aprobado por Agustín (brainstorming del 2026-09-23). Mig 124 aplicada en PROD el
+2026-09-25. C1 (vencidos) implementado (#145); C3 (paquetes) en su PR; C2 (aviso en la
+consolidada) espera a F0-1 del plan de UX.
 Antecedentes: [integración con el sistema](2026-09-22-remitos-integracion-design.md) (fases A y
 B, mig 116) y el [plan de reorden de UX](2026-09-23-reorden-ux-plan.md) (#135), con el que esto
 tiene que convivir.

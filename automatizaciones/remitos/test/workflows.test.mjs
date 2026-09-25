@@ -20,10 +20,27 @@ before(() => {
   workflows = readdirSync(dir).map((f) => ({ archivo: f, ...JSON.parse(readFileSync(join(dir, f), "utf8")) }));
 });
 
-test("se arman los siete workflows", () => {
+test("se arman los ocho workflows", () => {
   assert.deepEqual(workflows.map((w) => w.name).sort(), [
-    "Remitos - Asegurar carpeta", "Remitos - Config", "Remitos - Errores", "Remitos - Evaluar firmas", "Remitos - Ingesta", "Remitos - Instalación", "Remitos - Vigilancia",
+    "Remitos - Asegurar carpeta", "Remitos - Config", "Remitos - Errores", "Remitos - Evaluar firmas", "Remitos - Ingesta", "Remitos - Instalación", "Remitos - Paquetes", "Remitos - Vigilancia",
   ]);
+});
+
+test("paquetes: la base da el pedido, Drive se verifica antes de bajar, el worker une y la base se entera", () => {
+  const wf = workflows.find((w) => w.name === "Remitos - Paquetes");
+  const tipo = (n) => wf.nodes.find((x) => x.name === n);
+  const url = (n) => String(tipo(n).parameters.url);
+  assert.match(url("Tomar pedido (base)"), /rpc_remitos_paquete_tomar/);
+  assert.match(url("Listo (base)"), /rpc_remitos_paquete_listo/);
+  assert.match(url("Error (base)"), /rpc_remitos_paquete_error/);
+  assert.match(url("Error del worker (base)"), /rpc_remitos_paquete_error/);
+  assert.match(url("Unir (worker)"), /\/unir$/);
+  const siguiente = (n) => wf.connections[n].main.flat().map((d) => d.node);
+  assert.deepEqual(siguiente("Metadatos"), ["Verificar"]);
+  assert.deepEqual(wf.connections["¿Todo en orden?"].main[0].map((d) => d.node), ["Uno por archivo"]);
+  assert.deepEqual(wf.connections["¿Todo en orden?"].main[1].map((d) => d.node), ["Error (base)"]);
+  // Nada se baja si Drive dijo que algo falta.
+  assert.ok(!siguiente("Verificar").includes("Descargar"));
 });
 
 test("nombres de nodo unicos y conexiones a nodos que existen", () => {

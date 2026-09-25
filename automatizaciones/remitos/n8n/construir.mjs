@@ -787,6 +787,109 @@ return out;`, [x(7), F]),
 }
 
 // ================================================================================
+// 6) Paquetes: el PDF con los remitos firmados de una factura (mig 124). El admin lo
+//    pide en el panel; esto toma el pedido, verifica cada archivo en Drive, los baja,
+//    el worker los une y el resultado queda en Remitos/<Cliente>/Paquetes/.
+// ================================================================================
+
+function wfPaquetes() {
+  contador = 0;
+  const F = 300;
+  return {
+    name: "Remitos - Paquetes",
+    nodes: [
+      nodo("Cada minuto", "n8n-nodes-base.scheduleTrigger", 1.2,
+        { rule: { interval: [{ field: "minutes", minutesInterval: 1 }] } }, [x(0), F]),
+      configNodo([x(1), F]),
+      supa("Tomar pedido (base)", [x(2), F], "rpc_remitos_paquete_tomar", "={{ JSON.stringify({}) }}"),
+      codigo("¿Hay pedido?", `
+// Sin pedido, la base devuelve {} y la corrida termina aca.
+const p = $input.first().json;
+if (!p || !p.paquete_id) return [];
+return p.escaneos.map(json => ({ json }));`, [x(3), F], { conLogica: false }),
+      http("Metadatos", [x(4), F], {
+        url: `=${DRIVE}/{{ $json.drive_file_id }}`, query: { fields: "id,trashed,modifiedTime" }, auth: "google",
+        completa: true,
+      }),
+      codigo("Verificar", `
+const pedido = $('Tomar pedido (base)').first().json;
+const problemas = verificarArchivosPaquete(pedido.escaneos, $input.all().map(i => i.json));
+return [{ json: { paquete_id: pedido.paquete_id, ok: problemas.length === 0, problemas } }];`, [x(5), F]),
+      si("¿Todo en orden?", [x(6), F], "={{ $json.ok }}", OP.verdadero),
+      codigo("Uno por archivo", `return $('Tomar pedido (base)').first().json.escaneos.map(json => ({ json }));`, [x(7), F], { conLogica: false }),
+      http("Descargar", [x(8), F], {
+        url: `=${DRIVE}/{{ $json.drive_file_id }}`, query: { alt: "media" }, archivo: true, auth: "google",
+      }),
+      codigo("Pedido al worker", `
+const archivos = [];
+for (const [i] of $input.all().entries()) {
+  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');
+  archivos.push({ nombre: numeroVisibleR($('Uno por archivo').itemMatching(i).json.numero), pdf_b64: buf.toString('base64') });
+}
+return [{ json: { archivos } }];`, [x(9), F]),
+      http("Unir (worker)", [x(10), F], {
+        method: "POST", url: `={{ ${CFG("worker_url")} }}/unir`, json: "={{ JSON.stringify($json) }}",
+        auth: "worker", timeout: 120000, completa: true,
+      }),
+      si("¿Unió?", [x(11), F], "={{ String($json.statusCode) }}", OP.igual, "200"),
+      codigo("Carpeta del cliente", `
+const p = $('Tomar pedido (base)').first().json;
+return [{ json: { padre: $('Config').first().json.raiz_id, nombre: limpiarNombre(p.cliente) || 'SIN NOMBRE' } }];`, [x(12), F]),
+      llamarAsegurar("Carpeta cliente", [x(13), F]),
+      codigo("→ Paquetes", `return [{ json: { padre: $json.id, nombre: 'Paquetes' } }];`, [x(14), F], { conLogica: false }),
+      llamarAsegurar("Carpeta Paquetes", [x(15), F]),
+      codigo("Preparar subida", `
+const p = $('Tomar pedido (base)').first().json;
+const u = $('Unir (worker)').first().json.body;
+const nombre = nombrePaquete(p);
+return [{
+  json: { nombre, destino_id: $json.id, paginas: u.paginas },
+  binary: { data: { data: u.pdf_b64, mimeType: 'application/pdf', fileName: nombre, fileExtension: 'pdf' } },
+}];`, [x(16), F]),
+      http("Crear archivo", [x(17), F], {
+        method: "POST", url: `=${DRIVE}`, query: { fields: "id" }, auth: "google",
+        json: "={{ JSON.stringify({ name: $json.nombre, parents: [$json.destino_id], mimeType: 'application/pdf', description: 'Remitos firmados de ' + $('Tomar pedido (base)').first().json.factura_texto }) }}",
+      }),
+      codigo("Recuperar PDF", `return { json: $json, binary: $('Preparar subida').item.binary };`, [x(18), F], { cadaItem: true, conLogica: false }),
+      http("Subir contenido", [x(19), F], {
+        method: "PATCH", url: "=https://www.googleapis.com/upload/drive/v3/files/{{ $json.id }}",
+        query: { uploadType: "media", fields: "id,name,webViewLink" }, binario: true, auth: "google",
+      }),
+      supa("Listo (base)", [x(20), F], "rpc_remitos_paquete_listo",
+        "={{ JSON.stringify({ p_paquete_id: $('Tomar pedido (base)').first().json.paquete_id, p_drive_file_id: $json.id, p_drive_link: $json.webViewLink, p_paginas: $('Preparar subida').first().json.paginas }) }}"),
+      supa("Error (base)", [x(7), F + 200], "rpc_remitos_paquete_error",
+        "={{ JSON.stringify({ p_paquete_id: $json.paquete_id, p_error: $json.problemas.join(' · ') }) }}"),
+      supa("Error del worker (base)", [x(12), F + 200], "rpc_remitos_paquete_error",
+        "={{ JSON.stringify({ p_paquete_id: $('Tomar pedido (base)').first().json.paquete_id, p_error: 'El worker no pudo unir los PDF: ' + (($json.body && ($json.body.mensaje || $json.body.error)) || $json.statusCode) }) }}"),
+    ],
+    connections: conexiones([
+      ["Cada minuto", "Config"],
+      ["Config", "Tomar pedido (base)"],
+      ["Tomar pedido (base)", "¿Hay pedido?"],
+      ["¿Hay pedido?", "Metadatos"],
+      ["Metadatos", "Verificar"],
+      ["Verificar", "¿Todo en orden?"],
+      ["¿Todo en orden?", "Uno por archivo", 0],
+      ["¿Todo en orden?", "Error (base)", 1],
+      ["Uno por archivo", "Descargar"],
+      ["Descargar", "Pedido al worker"],
+      ["Pedido al worker", "Unir (worker)"],
+      ["Unir (worker)", "¿Unió?"],
+      ["¿Unió?", "Carpeta del cliente", 0],
+      ["¿Unió?", "Error del worker (base)", 1],
+      ["Carpeta del cliente", "Carpeta cliente"],
+      ["Carpeta cliente", "→ Paquetes"],
+      ["→ Paquetes", "Carpeta Paquetes"],
+      ["Carpeta Paquetes", "Preparar subida"],
+      ["Preparar subida", "Crear archivo"],
+      ["Crear archivo", "Recuperar PDF"],
+      ["Recuperar PDF", "Subir contenido"],
+      ["Subir contenido", "Listo (base)"],
+    ]),
+  };
+}
+
+// ================================================================================
 // 5) Instalacion: crea Remitos/{_Entrada,_Revisar,_Procesados} y la planilla con
 //    sus pestanas. Se corre UNA vez a mano. Si ya existe "Remitos", no hace nada.
 // ================================================================================
@@ -895,6 +998,7 @@ const workflows = {
   errores: wfErrores(),
   vigilancia: wfVigilancia(),
   "evaluar-firmas": wfEvaluarFirmas(),
+  paquetes: wfPaquetes(),
   instalacion: wfInstalacion(),
 };
 for (const [archivo, wf] of Object.entries(workflows)) {

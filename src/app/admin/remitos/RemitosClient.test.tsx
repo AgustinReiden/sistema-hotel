@@ -20,6 +20,7 @@ vi.mock("./actions", () => ({
   assignRemitoPiezaAction: (...a: unknown[]) => assignRemitoPiezaAction(...a),
   resolveRemitoPiezaAction: (...a: unknown[]) => resolveRemitoPiezaAction(...a),
   saveRemitosAjustesAction: (...a: unknown[]) => saveRemitosAjustesAction(...a),
+  pedirPaqueteAction: vi.fn(),
 }));
 
 const AHORA = Date.parse("2026-09-22T15:00:00Z");

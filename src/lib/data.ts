@@ -104,6 +104,8 @@ import type {
   RemitoEstadoPersona,
   RemitoLookup,
   RemitoPanelRow,
+  RemitoPaqueteEstado,
+  RemitoPaqueteFactura,
   RemitoPieza,
   RemitosSalud,
 } from "./types";
@@ -4919,5 +4921,47 @@ export async function saveRemitosVencimiento(horas: number, alertarDesde: string
     p_horas: horas,
     p_alertar_desde: alertarDesde,
   });
+  if (error) throw error;
+}
+
+/** Consolidadas vigentes del cliente con sus remitos, constancia y último paquete (mig 124). */
+export async function listRemitoPaquetes(kind: CtaCteClientKind, clientId: string): Promise<RemitoPaqueteFactura[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_remitos_paquetes", { p_client_kind: kind, p_client_id: clientId });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((f) => {
+    const k = f.constancia as Record<string, unknown> | null;
+    const p = f.paquete as Record<string, unknown> | null;
+    return {
+      invoice_id: String(f.invoice_id),
+      factura_texto: String(f.factura_texto ?? ""),
+      cbte_fch: strOrNull(f.cbte_fch),
+      imp_total: Number(f.imp_total) || 0,
+      remitos_total: Number(f.remitos_total) || 0,
+      remitos_firmados: Number(f.remitos_firmados) || 0,
+      constancia: k
+        ? { motivo: String(k.motivo), faltantes: Number(k.faltantes) || 0, usuario: strOrNull(k.usuario), created_at: String(k.created_at) }
+        : null,
+      paquete: p
+        ? {
+            id: String(p.id),
+            version: Number(p.version) || 1,
+            estado: p.estado as RemitoPaqueteEstado,
+            remitos: Number(p.remitos) || 0,
+            drive_link: strOrNull(p.drive_link),
+            error: strOrNull(p.error),
+            pedido_at: String(p.pedido_at),
+            armando_at: strOrNull(p.armando_at),
+            terminado_at: strOrNull(p.terminado_at),
+          }
+        : null,
+      firmados_nuevos: Number(f.firmados_nuevos) || 0,
+    };
+  });
+}
+
+export async function requestRemitoPaquete(invoiceId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("rpc_remitos_pedir_paquete", { p_invoice_id: invoiceId });
   if (error) throw error;
 }

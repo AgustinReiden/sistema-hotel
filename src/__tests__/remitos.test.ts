@@ -4,6 +4,7 @@ import {
   accionesRemito,
   avisosSalud,
   esVencido,
+  estadoPaquete,
   haceCuanto,
   haceDias,
   iaTexto,
@@ -19,7 +20,7 @@ import {
   textoVencidos,
 } from "@/lib/remitos";
 import { codigoRemito } from "@/lib/remito-codigo";
-import type { RemitoEstado, RemitoPanelRow, RemitosSalud } from "@/lib/types";
+import type { RemitoEstado, RemitoPanelRow, RemitoPaqueteEstado, RemitoPaqueteFactura, RemitosSalud } from "@/lib/types";
 
 const fila = (estado: RemitoEstado, extra: Partial<RemitoPanelRow> = {}): RemitoPanelRow => ({
   movimiento_id: `m-${estado}`, remito_numero: 158, created_at: "2026-09-20T12:00:00Z", amount: 50000,
@@ -146,5 +147,41 @@ describe("vencidos (mig 124)", () => {
     const r = resumirRemitos([fila("firmado"), fila("sin_escanear")]);
     expect(textoSemaforo(r, 1)).toBe("2 remitos: 1 firmado · 1 sin escanear · 1 vencido");
     expect(textoSemaforo(r)).toBe("2 remitos: 1 firmado · 1 sin escanear");
+  });
+});
+
+describe("paquetes", () => {
+  const AHORA = Date.parse("2026-10-01T15:00:00Z");
+  const base = (paquete: RemitoPaqueteFactura["paquete"], extra: Partial<RemitoPaqueteFactura> = {}): RemitoPaqueteFactura => ({
+    invoice_id: "i1", factura_texto: "FB 00008-00000010", cbte_fch: "2026-09-30", imp_total: 100,
+    remitos_total: 3, remitos_firmados: 2, constancia: null, paquete, firmados_nuevos: 0, ...extra,
+  });
+  const paq = (estado: RemitoPaqueteEstado, extra = {}) => ({
+    id: "p1", version: 1, estado, remitos: 2, drive_link: estado === "listo" ? "https://example.test/p" : null,
+    error: null, pedido_at: "2026-10-01T14:50:00Z", armando_at: "2026-10-01T14:51:00Z", terminado_at: null, ...extra,
+  });
+
+  it("sin paquete se puede armar; sin firmados no", () => {
+    expect(estadoPaquete(base(null), AHORA)).toEqual({ puedeArmar: true, armando: false, texto: null });
+    expect(estadoPaquete(base(null, { remitos_firmados: 0 }), AHORA).puedeArmar).toBe(false);
+  });
+
+  it("pedido o armando: esperar; trabado más de 30 min: se puede volver a pedir", () => {
+    expect(estadoPaquete(base(paq("armando")), AHORA)).toMatchObject({ puedeArmar: false, armando: true });
+    const trabado = paq("armando", { armando_at: "2026-10-01T14:00:00Z" });
+    expect(estadoPaquete(base(trabado), AHORA)).toMatchObject({ puedeArmar: true, armando: false, texto: "Se cortó a mitad de camino: volvé a pedirlo." });
+  });
+
+  it("listo con firmados nuevos: avisa y deja volver a armar", () => {
+    expect(estadoPaquete(base(paq("listo"), { firmados_nuevos: 1 }), AHORA)).toMatchObject({
+      puedeArmar: true, texto: "Hay 1 remito firmado nuevo: volvé a armarlo.",
+    });
+    expect(estadoPaquete(base(paq("listo")), AHORA)).toMatchObject({ puedeArmar: false, texto: null });
+  });
+
+  it("error: muestra el motivo y deja volver a pedir", () => {
+    expect(estadoPaquete(base(paq("error", { error: "R-000163: el archivo de Drive no está" })), AHORA)).toMatchObject({
+      puedeArmar: true, texto: "No se pudo armar: R-000163: el archivo de Drive no está",
+    });
   });
 });
