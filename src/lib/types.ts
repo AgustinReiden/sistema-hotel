@@ -1356,6 +1356,31 @@ export type RemitosSalud = {
   alertar_desde: string;
 };
 
+export type RemitoPaqueteEstado = "pedido" | "armando" | "listo" | "error";
+
+/** Una consolidada vigente con sus remitos, la constancia y el último paquete (mig 124). */
+export type RemitoPaqueteFactura = {
+  invoice_id: string;
+  factura_texto: string;
+  cbte_fch: string | null;
+  imp_total: number;
+  remitos_total: number;
+  remitos_firmados: number;
+  constancia: { motivo: string; faltantes: number; usuario: string | null; created_at: string } | null;
+  paquete: {
+    id: string;
+    version: number;
+    estado: RemitoPaqueteEstado;
+    remitos: number;
+    drive_link: string | null;
+    error: string | null;
+    pedido_at: string;
+    armando_at: string | null;
+    terminado_at: string | null;
+  } | null;
+  firmados_nuevos: number;
+};
+
 export type RemitoLookup =
   | { existe: false }
   | {
