@@ -1012,6 +1012,69 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(confirmar);
       expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
     });
+
+    it("si el receptor queda incompleto con el cuadro abierto, «Confirmar» se traba: la RPC completaría lo vacío con la ficha y saldría otra cosa que la del cuadro", async () => {
+      renderClient("ficticia");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("30123456781"));
+
+      const cuadro = abrirCuadro();
+      const confirmar = await confirmarListo(cuadro);
+
+      // El formulario de atrás sigue ahí: cada campo que se vacía traba «Confirmar».
+      const campos: [string, string][] = [
+        ["Condición frente al IVA", "responsable_inscripto"],
+        ["CUIT", "30123456781"],
+        ["Razón social", "Empresa Ficticia SA"],
+        ["Domicilio", "Calle Inventada 100"],
+      ];
+      for (const [campo, valor] of campos) {
+        fireEvent.change(screen.getByLabelText(campo), { target: { value: "" } });
+        expect(confirmar).toBeDisabled();
+        fireEvent.click(confirmar);
+        expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+        fireEvent.change(screen.getByLabelText(campo), { target: { value: valor } });
+        expect(confirmar).toBeEnabled();
+      }
+
+      // Completo de nuevo, se emite lo que muestra el cuadro.
+      fireEvent.click(confirmar);
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
+      expect(payloadEmitido()).toMatchObject({
+        condicionIva: "responsable_inscripto",
+        cuit: "30123456781",
+        razonSocial: "Empresa Ficticia SA",
+        domicilio: "Calle Inventada 100",
+      });
+    });
+
+    it("Tab y Shift+Tab no sacan el foco del cuadro: el formulario de atrás no se puede tocar con el teclado", async () => {
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+      const volver = within(cuadro).getByText("Volver").closest("button") as HTMLButtonElement;
+      expect(document.activeElement).toBe(volver);
+
+      // Mientras «Confirmar» espera, «Volver» es lo único enfocable: Tab no se va.
+      expect(fireEvent.keyDown(volver, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(volver);
+
+      const confirmar = await confirmarListo(cuadro);
+      // Shift+Tab desde el primero da la vuelta al último, y Tab desde el último, al primero.
+      expect(fireEvent.keyDown(volver, { key: "Tab", shiftKey: true })).toBe(false);
+      expect(document.activeElement).toBe(confirmar);
+      expect(fireEvent.keyDown(confirmar, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(volver);
+      // Adentro del cuadro, Tab sigue su curso normal.
+      expect(fireEvent.keyDown(volver, { key: "Tab" })).toBe(true);
+
+      // Si el foco quedó afuera, Tab lo trae de vuelta al cuadro.
+      const domicilio = screen.getByLabelText("Domicilio");
+      domicilio.focus();
+      expect(fireEvent.keyDown(domicilio, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(volver);
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+    });
   });
 
   // Decisión del 24/09 (misma regla que la mig 112 en el check-out): la ficha precarga la

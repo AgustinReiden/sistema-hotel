@@ -551,6 +551,15 @@ export default function ConsolidadaClient({
   /** "Confirmar y emitir en ARCA": recién acá se emite, y una sola vez. */
   const emitConfirmado = async () => {
     if (emitting || emisionEnCurso.current) return;
+    // Se revalida al emitir, como hace revisar() al abrir: el receptor pudo cambiar con el
+    // cuadro abierto. Y lo vacío no llega vacío a ARCA: la RPC lo completa con la ficha
+    // (mig 103), así que saldría otra letra, otro CUIT u otro nombre que los del cuadro.
+    // Se cierra el cuadro para que se vea la barra con lo que falta.
+    if (faltantesReceptor.length > 0) {
+      toast.error(faltantesReceptor[0].mensaje);
+      setRevisando(false);
+      return;
+    }
     emisionEnCurso.current = true;
     // El aviso de una emisión incierta anterior queda viejo: si esta también se corta,
     // vuelve a salir.
@@ -1175,6 +1184,9 @@ export default function ConsolidadaClient({
           puntoVenta={fiscal?.punto_venta ?? null}
           diasVto={fiscal?.dias_vto_cuenta_corriente ?? 30}
           emitting={emitting}
+          // Mismo criterio que el botón de la barra: con el receptor incompleto no se emite,
+          // aunque haya quedado incompleto recién con el cuadro abierto.
+          bloquearConfirmar={faltantesReceptor.length > 0}
           onConfirm={() => void emitConfirmado()}
           onCancel={() => setRevisando(false)}
         />

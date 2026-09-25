@@ -16,6 +16,10 @@ import type { FiscalEnvironment } from "@/lib/types";
  */
 export const CONFIRMAR_ESPERA_MS = 500;
 
+/** Lo que se puede enfocar con Tab adentro del cuadro. */
+const ENFOCABLES =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /** Con qué documento sale el receptor: CUIT (A, o B a exento) o DNI (B a consumidor final). */
 export type ConsolidadaDocumento =
   | { tipo: "CUIT"; numero: string }
@@ -55,7 +59,10 @@ type Props = {
    * para emitir igual.
    */
   avisos?: ReactNode;
-  /** Deshabilita "Confirmar" desde afuera (C2: mientras falte ese motivo). */
+  /**
+   * Deshabilita "Confirmar" desde afuera: con el receptor incompleto y, en C2, mientras
+   * falte ese motivo.
+   */
   bloquearConfirmar?: boolean;
 };
 
@@ -137,9 +144,38 @@ export default function ConsolidadaConfirmModal({
     volverRef.current?.focus({ preventScroll: true });
   }, []);
 
+  // Tab y Shift+Tab dan la vuelta adentro del cuadro. El fondo tapa el mouse, pero no el
+  // teclado: sin esto, el foco sale al formulario de atrás, y cambiar ahí la condición
+  // frente al IVA, el CUIT o la razón social cambia lo que se emite con el cuadro abierto.
+  const cuadroRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const cuadro = cuadroRef.current;
+      if (!cuadro) return;
+      const enfocables = Array.from(cuadro.querySelectorAll<HTMLElement>(ENFOCABLES));
+      if (enfocables.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const activo = document.activeElement;
+      const adentro = activo instanceof Node && cuadro.contains(activo);
+      const primero = enfocables[0];
+      const ultimo = enfocables[enfocables.length - 1];
+      const sale = !adentro || activo === (event.shiftKey ? primero : ultimo);
+      if (sale) {
+        event.preventDefault();
+        (event.shiftKey ? ultimo : primero).focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
       <div
+        ref={cuadroRef}
         role="dialog"
         aria-modal="true"
         aria-label="Revisá antes de emitir"
