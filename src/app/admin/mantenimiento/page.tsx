@@ -1,8 +1,10 @@
+import { redirect } from "next/navigation";
 import { BedDouble, CheckCircle2, KeyRound, Lock, Sparkles, Wrench } from "lucide-react";
 
 import {
   getActiveRoomsBrief,
   getCleaningLog,
+  getCurrentUserRole,
   getHotelSettings,
   listAdminAlerts,
 } from "@/lib/data";
@@ -101,6 +103,10 @@ type PageProps = {
 };
 
 export default async function MantenimientoAdminPage({ searchParams }: PageProps) {
+  // Sólo admin: los avisos de arriba (tarifas a autorizar, cierres de turno) son suyos.
+  const role = await getCurrentUserRole();
+  if (role !== "admin") redirect("/forbidden");
+
   const sp = await searchParams;
   const hotelSettings = await getHotelSettings().catch(() => null);
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";

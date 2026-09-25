@@ -66,3 +66,34 @@ describe("middleware: /admin/finances es sólo admin", () => {
     expect(await visit("/admin/finances")).toBe("/login");
   });
 });
+
+describe("middleware: Habitaciones, Categorías y Limpiezas son sólo admin", () => {
+  it("recepción no entra a las tres (ni con parámetros)", async () => {
+    loginAs("receptionist");
+    expect(await visit("/admin/rooms")).toBe("/forbidden");
+    expect(await visit("/admin/categorias")).toBe("/forbidden");
+    expect(await visit("/admin/mantenimiento")).toBe("/forbidden");
+    expect(await visit("/admin/mantenimiento?page=2")).toBe("/forbidden");
+    // Y /forbidden la devuelve a Hoy.
+    expect(await visit("/forbidden")).toBe("/admin");
+  });
+
+  it("el admin entra a las tres como hoy", async () => {
+    loginAs("admin");
+    expect(await visit("/admin/rooms")).toBeNull();
+    expect(await visit("/admin/categorias")).toBeNull();
+    expect(await visit("/admin/mantenimiento")).toBeNull();
+  });
+
+  it("mantenimiento sigue yendo a su pantalla", async () => {
+    loginAs("maintenance");
+    expect(await visit("/admin/rooms")).toBe("/maintenance");
+  });
+
+  it("recepción sigue entrando a Hoy, Caja y Facturación", async () => {
+    loginAs("receptionist");
+    expect(await visit("/admin")).toBeNull();
+    expect(await visit("/admin/caja")).toBeNull();
+    expect(await visit("/admin/fiscal")).toBeNull();
+  });
+});

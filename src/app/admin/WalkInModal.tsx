@@ -585,8 +585,7 @@ export default function WalkInModal({
 
           {isHalfDay && halfDayPrice <= 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-              Esta habitación no tiene precio de media estadía (siesta) configurado. Cargalo en
-              Categorías/Habitaciones antes de usar esta opción.
+              Avisale al administrador: falta el precio de medio día de esta habitación.
             </div>
           )}
 

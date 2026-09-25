@@ -1,16 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
-import { getRoomCategoriesWithUsage } from "@/lib/data";
+import { redirect } from "next/navigation";
+import { getCurrentUserRole, getRoomCategoriesWithUsage } from "@/lib/data";
 import CategoriesClientTable from "./CategoriesClientTable";
 
 export default async function CategoriesPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    let isAdmin = false;
-    if (user) {
-        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-        isAdmin = profile?.role === "admin";
-    }
+    // Sólo admin: acá se cargan los precios de la noche y del medio día.
+    const role = await getCurrentUserRole();
+    if (role !== "admin") redirect("/forbidden");
 
     const categories = await getRoomCategoriesWithUsage();
 
@@ -29,7 +24,7 @@ export default async function CategoriesPage() {
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <CategoriesClientTable initialCategories={categories} isAdmin={isAdmin} />
+                <CategoriesClientTable initialCategories={categories} isAdmin />
             </div>
         </div>
     );

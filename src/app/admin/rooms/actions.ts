@@ -6,8 +6,12 @@ import { createClient } from "@/lib/supabase/server";
 import { ActionResult, Room, RoomCategory } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
+// Sólo el admin: editar una habitación también reescribe su categoría (el precio), y
+// activarla o desactivarla la saca o la pone a la venta.
+const SOLO_ADMIN = "Solo el administrador puede modificar habitaciones y tarifas.";
+
 function canManageRooms(role: string | null | undefined): boolean {
-    return role === "admin" || role === "receptionist";
+    return role === "admin";
 }
 
 function normalizeCapacityFields(roomData: Partial<Room>) {
@@ -120,7 +124,7 @@ export async function updateRoomAction(roomId: number, roomData: Partial<Room>):
 
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (!canManageRooms(profile?.role)) {
-        return { success: false, error: "Permisos insuficientes para modificar habitaciones." };
+        return { success: false, error: SOLO_ADMIN };
     }
 
     const categoryResult = await upsertRoomCategory(roomData);
@@ -183,7 +187,7 @@ export async function createRoomAction(roomData: Partial<Room>): Promise<ActionR
 
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (!canManageRooms(profile?.role)) {
-        return { success: false, error: "Permisos insuficientes para crear habitaciones." };
+        return { success: false, error: SOLO_ADMIN };
     }
 
     const categoryResult = await upsertRoomCategory(roomData);
@@ -230,7 +234,7 @@ export async function deleteRoomAction(roomId: number): Promise<ActionResult> {
 
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (!canManageRooms(profile?.role)) {
-        return { success: false, error: "Permisos insuficientes para borrar habitaciones." };
+        return { success: false, error: SOLO_ADMIN };
     }
 
     const { error } = await supabase
@@ -267,7 +271,7 @@ export async function setRoomActiveAction(roomId: number, isActive: boolean): Pr
 
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (!canManageRooms(profile?.role)) {
-        return { success: false, error: "Permisos insuficientes para modificar habitaciones." };
+        return { success: false, error: SOLO_ADMIN };
     }
 
     if (!isActive) {

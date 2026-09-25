@@ -1,17 +1,12 @@
-import { getAllRooms, getRoomCategories } from "@/lib/data";
+import { redirect } from "next/navigation";
+import { getAllRooms, getCurrentUserRole, getRoomCategories } from "@/lib/data";
 import RoomsClientTable from "./RoomsClientTable";
-import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
 export default async function RoomsPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    let isAdmin = false;
-    if (user) {
-        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-        isAdmin = profile?.role === "admin";
-    }
+    // Sólo admin: acá se activan, desactivan y renombran habitaciones.
+    const role = await getCurrentUserRole();
+    if (role !== "admin") redirect("/forbidden");
 
     const [rooms, categories] = await Promise.all([
         getAllRooms(),
@@ -41,7 +36,7 @@ export default async function RoomsPage() {
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <RoomsClientTable initialRooms={rooms} initialCategories={categories} isAdmin={isAdmin} />
+                <RoomsClientTable initialRooms={rooms} initialCategories={categories} isAdmin />
             </div>
         </div>
     );

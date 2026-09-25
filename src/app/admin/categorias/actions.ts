@@ -5,8 +5,11 @@ import { parseActionError } from "@/lib/error-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult, RoomCategory } from "@/lib/types";
 
+// Sólo el admin: la categoría lleva el precio de la noche y el del medio día.
+const SOLO_ADMIN = "Solo el administrador puede modificar habitaciones y tarifas.";
+
 function canManageRoomCategories(role: string | null | undefined): boolean {
-    return role === "admin" || role === "receptionist";
+    return role === "admin";
 }
 
 function normalizeCategoryPayload(categoryData: Partial<RoomCategory>) {
@@ -56,7 +59,7 @@ async function ensureAuthorized() {
 
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     if (!canManageRoomCategories(profile?.role)) {
-        return { supabase, error: "Permisos insuficientes para gestionar categorias." };
+        return { supabase, error: SOLO_ADMIN };
     }
 
     return { supabase, error: null as string | null };

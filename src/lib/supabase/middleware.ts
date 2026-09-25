@@ -55,6 +55,12 @@ export async function updateSession(request: NextRequest) {
   // finances/actions.ts pero no pasa por acá: una server action se postea a la URL de
   // la pantalla que la llama (/admin, /admin/calendario...), no a /admin/finances.
   const isAdminOnlyFinancesPath = pathname.startsWith("/admin/finances");
+  // Habitaciones, categorías (los precios) y limpiezas: sólo admin. Las páginas también
+  // redirigen y las acciones de habitaciones y categorías rechazan a recepción.
+  const isAdminOnlyConfigPath =
+    pathname.startsWith("/admin/rooms") ||
+    pathname.startsWith("/admin/categorias") ||
+    pathname.startsWith("/admin/mantenimiento");
   const isForbiddenPath = pathname.startsWith("/forbidden");
   const isProtectedPath = isAdminPath || isMaintenancePath;
 
@@ -96,9 +102,14 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  // /admin/settings, facturación consolidada/control, remitos y finanzas — sólo admin
+  // /admin/settings, facturación consolidada/control, remitos, finanzas, habitaciones,
+  // categorías y limpiezas — sólo admin
   if (
-    (isSettingsPath || isAdminOnlyFiscalPath || isAdminOnlyRemitosPath || isAdminOnlyFinancesPath) &&
+    (isSettingsPath ||
+      isAdminOnlyFiscalPath ||
+      isAdminOnlyRemitosPath ||
+      isAdminOnlyFinancesPath ||
+      isAdminOnlyConfigPath) &&
     role !== "admin"
   ) {
     return NextResponse.redirect(new URL("/forbidden", request.url));
