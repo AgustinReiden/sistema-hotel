@@ -1,6 +1,6 @@
 # Auditoría adversarial del circuito de facturación fiscal
 
-**Fecha:** 2026-09-08 · **Base auditada:** PROD (`xoqxbtlpppsyzccljjxp`, Brasil)
+**Fecha:** 2026-09-08 · **Base auditada:** PROD (Brasil)
 **Alcance:** emisión fiscal de punta a punta, admin y recepcionista, con foco en cuenta corriente.
 **Postura:** asumir que el sistema está mal hasta probar lo contrario, y probarlo **ejecutando**.
 

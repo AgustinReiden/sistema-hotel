@@ -1,7 +1,24 @@
-// Host de Supabase (mismo patrón que images.remotePatterns): para el CSP.
+// Host de Supabase para el CSP y para images.remotePatterns. Sale SOLO de
+// NEXT_PUBLIC_SUPABASE_URL: el repo es público y el host del proyecto no se
+// escribe acá. Si la variable falta, ninguno de los dos suma un host de Supabase
+// y se avisa por consola.
+// Ojo: Next lee este archivo dos veces. En `next build` queda fijo el CSP (los
+// headers salen del build), y en `next start` se vuelve a leer para next/image
+// (remotePatterns se toma al arrancar). La variable tiene que estar en los dos
+// momentos: si falta al arrancar, las imágenes de Supabase que pasan por
+// next/image dejan de cargar aunque el build haya salido limpio.
 const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
-    : 'xoqxbtlpppsyzccljjxp.supabase.co';
+    : null;
+
+if (!supabaseHost) {
+    console.warn(
+        '[next.config] Falta NEXT_PUBLIC_SUPABASE_URL: el CSP y next/image quedan sin el host de Supabase. Definila en el entorno del build y también en el del arranque (next start).',
+    );
+}
+
+// Fuente del CSP para Supabase: vacía si no hay host.
+const supabaseSource = supabaseHost ? ` https://${supabaseHost}` : '';
 
 // Content-Security-Policy en modo SOLO REPORTE por ahora (auditoría B1): registra
 // violaciones en la consola sin romper nada. Cuando confirmemos que impresión, QR
@@ -13,9 +30,9 @@ const contentSecurityPolicy = [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: https://images.unsplash.com https://postimg.cc https://i.postimg.cc https://imgur.com https://i.imgur.com https://${supabaseHost}`,
+    `img-src 'self' data: https://images.unsplash.com https://postimg.cc https://i.postimg.cc https://imgur.com https://i.imgur.com${supabaseSource}`,
     "font-src 'self'",
-    `connect-src 'self' https://${supabaseHost}`,
+    `connect-src 'self'${supabaseSource}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -81,12 +98,8 @@ const nextConfig = {
                 protocol: 'https',
                 hostname: 'i.imgur.com',
             },
-            {
-                protocol: 'https',
-                hostname: process.env.NEXT_PUBLIC_SUPABASE_URL
-                    ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
-                    : 'xoqxbtlpppsyzccljjxp.supabase.co',
-            },
+            // Solo si la variable existe: un hostname null o vacío no se admite.
+            ...(supabaseHost ? [{ protocol: 'https', hostname: supabaseHost }] : []),
         ],
     },
 };
