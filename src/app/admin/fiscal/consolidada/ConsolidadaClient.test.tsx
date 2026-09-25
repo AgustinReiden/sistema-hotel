@@ -971,6 +971,73 @@ describe("ConsolidadaClient", () => {
       expect(within(abrirCuadro()).getByText(/^3 estadías/)).toBeInTheDocument();
     });
 
+    // Cambiar el período con la carga anterior todavía en camino deja dos cargas en fila
+    // (tipear una fecha dispara una por dígito). Sólo vale la última: la vieja no puede
+    // habilitar la barra ni pintar su lista, o el cuadro se abre con otras estadías que
+    // las del período elegido.
+    const TODA_LA_CUENTA = [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")];
+    const DEL_MES = [makeRow("r3", "3")];
+
+    /** Cada carga queda en camino hasta que el test la contesta, en el orden que elija. */
+    function cargasEnFila() {
+      const respuestas: ((value: unknown) => void)[] = [];
+      loadCcAccountStaysAction.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            respuestas.push(resolve);
+          })
+      );
+      return (n: number, data: CcAccountStayRow[]) =>
+        act(async () => {
+          respuestas[n]({ success: true, data });
+        });
+    }
+
+    it("si se cambia el período con la carga anterior en camino, la barra espera a la última: la vieja no habilita «Revisar y emitir» ni pinta su lista", async () => {
+      const contestar = cargasEnFila();
+      renderClient();
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() =>
+        expect(loadCcAccountStaysAction).toHaveBeenLastCalledWith(
+          "company",
+          "acme",
+          "2026-09-01",
+          "2026-09-16"
+        )
+      );
+
+      // Contesta la primera (la cuenta entera) y la del mes sigue en camino.
+      await contestar(0, TODA_LA_CUENTA);
+      expect(screen.getByText("Cargando…")).toBeInTheDocument();
+      expect(screen.queryByLabelText(BARRA)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+
+      await contestar(1, DEL_MES);
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+      expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      expect(screen.getByLabelText(BARRA).textContent).toContain(`1 estadía · Total $${plata(10000)}`);
+      expect(within(abrirCuadro()).getByText(/^1 estadía /)).toBeInTheDocument();
+    });
+
+    it("si la carga vieja contesta después de la última, no pisa la lista del período elegido", async () => {
+      const contestar = cargasEnFila();
+      renderClient();
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+
+      await contestar(1, DEL_MES);
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      await contestar(0, TODA_LA_CUENTA);
+      expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 2")).not.toBeInTheDocument();
+      expect(screen.getByLabelText(BARRA).textContent).toContain(`1 estadía · Total $${plata(10000)}`);
+    });
+
     it("en producción muestra la banda PRODUCCIÓN", async () => {
       renderClient("acme", "company", FISCAL_PROD);
       await screen.findByLabelText(BARRA);

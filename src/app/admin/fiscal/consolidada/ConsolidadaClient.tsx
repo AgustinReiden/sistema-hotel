@@ -145,6 +145,15 @@ export default function ConsolidadaClient({
   // Anti doble click de la emisión: el ref corta aunque el segundo click llegue antes
   // del render que deshabilita el botón.
   const emisionEnCurso = useRef(false);
+  // La última carga de la lista que se pidió. Cambiar el período (una fecha tipeada pide
+  // una carga por dígito), «Recargar» o la emisión arrancan otra sin esperar a la que
+  // está en camino, y pueden contestar en cualquier orden. Vale sólo la última: una
+  // respuesta vieja no pinta su lista ni apaga «Cargando…», porque eso habilitaba
+  // «Revisar y emitir» con estadías de otro período mientras la última seguía en camino.
+  // El número se sube antes de pedir nada, así una carga sabe si quedó vieja; la promesa
+  // es la de la última, para que la vieja conteste lo mismo que ella.
+  const numeroCarga = useRef(0);
+  const ultimaCarga = useRef<Promise<boolean> | null>(null);
 
   // Rango del listado. Vacío = "Todo", que es el default a propósito: el caso
   // normal sigue siendo "facturame todo lo que debe", y un rango puesto de
@@ -202,55 +211,69 @@ export default function ConsolidadaClient({
    * cortó la red, hubo un deploy con la pantalla abierta), la lista no puede quedar en
    * «Cargando…» con «Recargar» deshabilitado. La emisión con resultado incierto mira
    * lo que devuelve para no prometer una lista que no se cargó.
+   *
+   * Si mientras tanto se pidió otra carga, esta respuesta se descarta (ver ultimaCarga)
+   * y lo que devuelve es lo de esa otra, que es la lista que va a quedar a la vista.
    */
-  const loadRows = useCallback(async (): Promise<boolean> => {
-    setLastClickedIndex(null);
-    // La recarga vuelve a tildar todo lo pendiente (abajo): un cuadro de revisión
-    // abierto pasaría a decir otra cosa que lo que se revisó. Se cierra.
-    setRevisando(false);
-    setLoading(true);
-    setErrorCarga(false);
-    let result: Awaited<ReturnType<typeof loadCcAccountStaysAction>>;
-    try {
-      // Los vacíos van como undefined, no como "": el filtro por período es
-      // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
-      result = await loadCcAccountStaysAction(
-        kind,
-        id,
-        range.from || undefined,
-        range.to || undefined
-      );
-    } catch {
-      result = {
-        success: false,
-        error:
-          "No pudimos cargar la lista. Revisá la conexión y volvé a intentar; si sigue sin cargar, recargá la página.",
-      };
-    } finally {
+  const loadRows = useCallback((): Promise<boolean> => {
+    const numero = ++numeroCarga.current;
+    const promesa = (async (): Promise<boolean> => {
+      setLastClickedIndex(null);
+      // La recarga vuelve a tildar todo lo pendiente (abajo): un cuadro de revisión
+      // abierto pasaría a decir otra cosa que lo que se revisó. Se cierra.
+      setRevisando(false);
+      setLoading(true);
+      setErrorCarga(false);
+      let result: Awaited<ReturnType<typeof loadCcAccountStaysAction>>;
+      try {
+        // Los vacíos van como undefined, no como "": el filtro por período es
+        // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
+        result = await loadCcAccountStaysAction(
+          kind,
+          id,
+          range.from || undefined,
+          range.to || undefined
+        );
+      } catch {
+        result = {
+          success: false,
+          error:
+            "No pudimos cargar la lista. Revisá la conexión y volvé a intentar; si sigue sin cargar, recargá la página.",
+        };
+      }
+      // Llegó tarde: después de esta se pidió otra, que es la que manda. Esta no toca
+      // nada (ni «Cargando…», ni la lista, ni lo tildado, ni el aviso de emisión incierta)
+      // y contesta lo que conteste la última.
+      if (numero !== numeroCarga.current) return ultimaCarga.current ?? false;
       setLoading(false);
-    }
-    if (!result.success) {
-      toast.error(result.error);
-      setRows([]);
-      setPicked(new Set());
-      setErrorCarga(true);
-      return false;
-    }
-    const data = result.data ?? [];
-    setRows(data);
-    // Sin rango, lo que vino ES la cuenta entera: es la única carga que puede
-    // fijar el "de M" del contador.
-    if (!range.from && !range.to) setTotalStays(data.length);
-    // Por defecto se selecciona todo lo pendiente: el caso normal es
-    // "facturame todo lo que debe". Salvo la primera carga que anda después de una
-    // emisión incierta: ahí no se tilda nada y cada estadía se vuelve a elegir a mano.
-    if (sinTildarEnLaProximaCarga.current) {
-      sinTildarEnLaProximaCarga.current = false;
-      setPicked(new Set());
-    } else {
-      setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
-    }
-    return true;
+      // Se cierra también al terminar, no sólo al arrancar: la lista que sigue no es la
+      // que se revisó.
+      setRevisando(false);
+      if (!result.success) {
+        toast.error(result.error);
+        setRows([]);
+        setPicked(new Set());
+        setErrorCarga(true);
+        return false;
+      }
+      const data = result.data ?? [];
+      setRows(data);
+      // Sin rango, lo que vino ES la cuenta entera: es la única carga que puede
+      // fijar el "de M" del contador.
+      if (!range.from && !range.to) setTotalStays(data.length);
+      // Por defecto se selecciona todo lo pendiente: el caso normal es
+      // "facturame todo lo que debe". Salvo la primera carga que anda después de una
+      // emisión incierta: ahí no se tilda nada y cada estadía se vuelve a elegir a mano.
+      if (sinTildarEnLaProximaCarga.current) {
+        sinTildarEnLaProximaCarga.current = false;
+        setPicked(new Set());
+      } else {
+        setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
+      }
+      return true;
+    })();
+    ultimaCarga.current = promesa;
+    return promesa;
   }, [kind, id, range.from, range.to]);
 
   useEffect(() => {
