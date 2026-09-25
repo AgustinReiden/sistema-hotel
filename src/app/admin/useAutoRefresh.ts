@@ -82,6 +82,25 @@ async function serverAnswers(signal: AbortSignal): Promise<boolean> {
   }
 }
 
+/**
+ * Pregunta una vez si el servidor contesta, con el corte de `PROBE_TIMEOUT_MS`. `cancel`
+ * la corta antes (si la pantalla se desmonta mientras espera) y entonces `answers` da
+ * false. La usan el refresco automático y el botón "Reintentar" de la pantalla de error
+ * de `/admin`: así el botón tampoco recarga sin conexión.
+ */
+export function probeServer(): { answers: Promise<boolean>; cancel: () => void } {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  const answers = serverAnswers(controller.signal).finally(() => window.clearTimeout(timeout));
+  return {
+    answers,
+    cancel: () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    },
+  };
+}
+
 type UseAutoRefreshOptions = {
   /** Cada cuánto recarga (por defecto, 30 segundos). */
   intervalMs?: number;
@@ -126,15 +145,13 @@ export function useAutoRefresh({
     let disposed = false;
     let lastRefreshAt = -Infinity;
     // La consulta al servidor en curso: mientras no vuelve, no se arranca otra.
-    let probe: { controller: AbortController; timeout: number } | null = null;
+    let probe: ReturnType<typeof probeServer> | null = null;
 
     const refresh = async () => {
       if (probe || shouldSkipRefresh(document)) return;
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-      probe = { controller, timeout };
-      const answers = await serverAnswers(controller.signal);
-      window.clearTimeout(timeout);
+      const current = probeServer();
+      probe = current;
+      const answers = await current.answers;
       probe = null;
       // Mientras se esperaba al servidor pudo abrirse un cuadro o tomar el foco un campo.
       if (disposed || !answers || shouldSkipRefresh(document)) return;
@@ -159,8 +176,7 @@ export function useAutoRefresh({
     return () => {
       disposed = true;
       if (probe) {
-        window.clearTimeout(probe.timeout);
-        probe.controller.abort();
+        probe.cancel();
         probe = null;
       }
       window.clearInterval(interval);
