@@ -3,7 +3,7 @@ import { Layers } from "lucide-react";
 
 import {
   getCtaCteAccounts,
-  getCtaCteBillingProfiles,
+  getCtaCteBillingProfile,
   getCurrentUserRole,
   getFiscalSettings,
   getHotelSettings,
@@ -24,10 +24,19 @@ export default async function ConsolidadaPage({
     redirect("/forbidden");
   }
 
+  // A la consolidada se entra siempre con el cliente puesto: desde Control, Cuentas o
+  // la ficha, que mandan `kind` e `id`. Sin cliente no hay nada que revisar, así que
+  // se vuelve a Control en vez de abrir un selector vacío.
   const { kind, id } = await searchParams;
-  const [accounts, billingProfiles, settings, hotel] = await Promise.all([
+  const preselectKind: CtaCteClientKind | null =
+    kind === "company" || kind === "guest" ? kind : null;
+  const preselectId = id?.trim() || null;
+  if (!preselectKind || !preselectId) {
+    redirect("/admin/fiscal/control");
+  }
+
+  const [accounts, settings, hotel] = await Promise.all([
     getCtaCteAccounts(),
-    getCtaCteBillingProfiles(),
     getFiscalSettings().catch(() => null),
     // Sólo se usa para la zona horaria de los presets: si falla, la pantalla
     // tiene que seguir funcionando igual, no morirse por unos botones.
@@ -39,9 +48,17 @@ export default async function ConsolidadaPage({
   // después según la máquina de la recepción.
   const todayKey = hotelDateKey(new Date(), hotel?.timezone || undefined);
 
-  const preselectKind: CtaCteClientKind | null =
-    kind === "company" || kind === "guest" ? kind : null;
-  const preselectId = id && preselectKind ? id : null;
+  // Un id que no es de ningún cliente de cuenta corriente tampoco es un cliente puesto.
+  if (!accounts.some((a) => a.kind === preselectKind && a.id === preselectId)) {
+    redirect("/admin/fiscal/control");
+  }
+
+  // La ficha del cliente precarga el receptor, tenga o no la cuenta corriente prendida:
+  // la pantalla manda 'consumidor_final' si no ve una condición, así que una ficha que
+  // no llega haría salir B con DNI a un Responsable Inscripto. Se lee recién con el
+  // cliente validado, porque el id viene de la URL.
+  const profile = await getCtaCteBillingProfile(preselectKind, preselectId);
+  const billingProfiles = profile ? { [`${preselectKind}:${preselectId}`]: profile } : {};
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -75,6 +92,15 @@ export default async function ConsolidadaPage({
             preselectKind={preselectKind}
             preselectId={preselectId}
             todayKey={todayKey}
+            fiscal={
+              settings
+                ? {
+                    environment: settings.environment,
+                    punto_venta: settings.punto_venta,
+                    dias_vto_cuenta_corriente: settings.dias_vto_cuenta_corriente,
+                  }
+                : null
+            }
           />
         </div>
       </div>
