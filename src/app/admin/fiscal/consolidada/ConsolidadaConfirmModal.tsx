@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import Link from "next/link";
 import { AlertTriangle, FileText, Loader2 } from "lucide-react";
 
 import { formatCuit } from "@/lib/arca/amounts";
@@ -135,8 +136,8 @@ export default function ConsolidadaConfirmModal({
 }: Props) {
   // El servidor rechaza un DNI que no tenga 7 u 8 dígitos (P0022). Se avisa acá para no
   // llegar al rechazo con el cuadro ya confirmado. El DNI se vuelve a leer de la ficha
-  // cada vez que se abre el cuadro: corregido en Huéspedes, alcanza con cerrarlo y
-  // volver a abrirlo, sin recargar la página.
+  // cada vez que se abre el cuadro: corregido en Huéspedes (en otra pestaña), alcanza con
+  // cerrarlo y volver a abrirlo, sin recargar la página.
   const dniDigits = documento.tipo === "DNI" ? (documento.numero ?? "").replace(/\D/g, "") : "";
   const dniInvalido = documento.tipo === "DNI" && dniDigits.length !== 7 && dniDigits.length !== 8;
 
@@ -299,13 +300,24 @@ export default function ConsolidadaConfirmModal({
             </div>
           )}
 
+          {/* En otra pestaña: ir a Huéspedes desde el menú saca de la consolidada, y al
+              volver arranca de cero (vuelve a tildar todo lo pendiente y pierde los textos). */}
           {dniInvalido && (
             <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-xl p-3">
               <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
               <p className="text-xs font-semibold text-rose-800">
                 El DNI de la ficha del huésped ({dniDigits || "vacío"}) no sirve para facturar: tiene
-                que tener 7 u 8 dígitos. Corregilo en Huéspedes y volvé a abrir este cuadro: el
-                DNI se lee de nuevo cada vez que se abre.
+                que tener 7 u 8 dígitos. Corregilo en Huéspedes en otra pestaña y volvé a abrir este
+                cuadro: el DNI se lee de nuevo cada vez que se abre, y no perdés lo tildado ni lo
+                que escribiste.{" "}
+                <Link
+                  href="/admin/guests"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-bold text-rose-900"
+                >
+                  Abrir Huéspedes en otra pestaña
+                </Link>
               </p>
             </div>
           )}

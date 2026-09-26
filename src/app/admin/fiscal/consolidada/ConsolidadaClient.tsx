@@ -123,14 +123,45 @@ function estadiasTexto(n: number): string {
 }
 
 /**
- * La emisión volvió, pero la factura no quedó autorizada: pendiente, en verificación o
- * rechazada. El motivo (`userMessage` del emisor) va al aviso fijo de arriba de la lista,
- * no a un toast que se va solo a los 4 s sin que nadie lo haya leído.
+ * La emisión volvió sin la factura autorizada: pendiente, en verificación o rechazada. El
+ * motivo (`userMessage` del emisor) va al aviso fijo de arriba de la lista, no a un toast
+ * que se va solo a los 4 s sin que nadie lo haya leído.
  */
 type ResultadoSinAutorizar = {
-  /** El `userMessage` del emisor, terminado en punto. */
+  status: "pending" | "processing" | "rejected";
+  /** El `userMessage` del emisor, terminado en punto; vacío si no vino. */
   motivo: string;
 };
+
+/**
+ * Título y texto del aviso de una factura que volvió sin autorizar. Cada estado dice sólo
+ * lo que se sabe de él: en verificación ARCA no contestó a tiempo y pudo haberle dado el
+ * CAE (el emisor lo recupera después con FECompConsultar), y una pendiente todavía se
+ * reintenta. Sólo de la rechazada se sabe que no salió, y el aviso dice qué la destraba:
+ * mientras no se la descarte, sus estadías siguen atadas a ella («Factura en proceso») y
+ * no se pueden volver a facturar.
+ */
+function avisoSinAutorizar({ status, motivo }: ResultadoSinAutorizar): {
+  titulo: string;
+  texto: string;
+} {
+  if (status === "rejected") {
+    return {
+      titulo: "ARCA rechazó la factura",
+      texto: `${motivo || "ARCA rechazó la factura."} Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar.`,
+    };
+  }
+  if (status === "processing") {
+    return {
+      titulo: "Todavía no sabemos si ARCA la autorizó",
+      texto: motivo || "Quedó en verificación: fijate en Facturación en unos minutos.",
+    };
+  }
+  return {
+    titulo: "La factura quedó pendiente",
+    texto: motivo || "Revisala en Facturación.",
+  };
+}
 
 /** Nombre y DNI del huésped consumidor final que muestra el cuadro (ver revisar()). */
 type FichaAlRevisar = {
@@ -343,6 +374,15 @@ export default function ConsolidadaClient({
   const [cuit, setCuit] = useState(profile?.cuit ?? "");
   const [condicionIva, setCondicionIva] = useState<ReceptorCondicionCuit | "">(profile?.condicionIva ?? "");
   const [domicilio, setDomicilio] = useState(profile?.domicilio ?? "");
+
+  // Lo tildado y el receptor del último render. revisar() los vuelve a mirar después de
+  // leer la ficha del huésped: la lista y el receptor siguen andando mientras lee, y si
+  // cambiaron, lo que se pidió revisar ya no es lo que hay (ver revisar()).
+  const receptorClave = `${condicionIva}|${cuit}|${razonSocial}|${domicilio}`;
+  const vigenteAlRevisar = useRef({ picked, receptor: receptorClave });
+  useEffect(() => {
+    vigenteAlRevisar.current = { picked, receptor: receptorClave };
+  }, [picked, receptorClave]);
 
   // Detalle impreso: texto por estadía + nota al pie (mig 93). Los importes NO se
   // editan, salen del cargo de cuenta corriente.
@@ -590,8 +630,11 @@ export default function ConsolidadaClient({
 
   // El aviso fijo de arriba de la lista: la emisión incierta, o la factura que volvió sin
   // autorizar. No pueden estar los dos: cada emisión borra los dos antes de empezar.
+  const sinAutorizar = resultadoSinAutorizar !== null ? avisoSinAutorizar(resultadoSinAutorizar) : null;
   const avisoFijo: {
     titulo: string;
+    /** El título a la vista, arriba del texto; null si el texto ya arranca diciéndolo. */
+    encabezado: string | null;
     texto: string;
     /** Con la lista cargando, el de la emisión incierta todavía no concluyó nada. */
     cerrable: boolean;
@@ -600,14 +643,18 @@ export default function ConsolidadaClient({
     textoIncierto !== null
       ? {
           titulo: "No sabemos si la factura salió",
+          encabezado: null,
           texto: textoIncierto,
           cerrable: !loading,
           cerrar: () => setEmisionIncierta(null),
         }
-      : resultadoSinAutorizar !== null
+      : sinAutorizar !== null
         ? {
-            titulo: "La factura no quedó autorizada",
-            texto: `La factura no quedó autorizada. ${resultadoSinAutorizar.motivo}`,
+            // Un título por estado (ver avisoSinAutorizar): el mismo para los tres
+            // afirmaba que no había salido una factura que en verificación pudo salir.
+            titulo: sinAutorizar.titulo,
+            encabezado: sinAutorizar.titulo,
+            texto: sinAutorizar.texto,
             cerrable: true,
             cerrar: () => setResultadoSinAutorizar(null),
           }
@@ -641,6 +688,12 @@ export default function ConsolidadaClient({
         .sort((a, b) => a.fch_desde.localeCompare(b.fch_desde)),
     [rows, picked]
   );
+
+  // El cuadro no puede quedar pedido sin estar a la vista: sin nada tildado no se pinta, y
+  // aparecería solo al tildar algo más tarde, sin que nadie haya apretado el botón.
+  if (revisando && selectedRows.length === 0) {
+    setRevisando(false);
+  }
 
   const total = selectedRows.reduce((sum, r) => sum + r.amount, 0);
   // La empresa siempre se factura con CUIT. Un huésped, sólo si su ficha tiene
@@ -867,6 +920,8 @@ export default function ConsolidadaClient({
       // que pierde lo tildado y los textos. Se vuelven a leer cada vez que se abre.
       const cliente = selectedKey;
       const carga = numeroCarga.current;
+      const tildadas = picked;
+      const receptor = receptorClave;
       setReleyendo(true);
       let leida: Awaited<ReturnType<typeof loadGuestDocumentAction>> | null = null;
       try {
@@ -879,6 +934,18 @@ export default function ConsolidadaClient({
       // Mientras leía arrancó otra carga de la lista (otro cliente, otro período,
       // «Recargar»): lo tildado puede haber cambiado. No se abre; se vuelve a apretar.
       if (numeroCarga.current !== carga) return;
+      // Mientras leía, la lista y el receptor siguieron andando. Si cambió lo tildado o el
+      // receptor, lo que se pidió revisar ya no es lo que hay: no se abre, se avisa y se
+      // vuelve a apretar. Abrirlo igual dejaba el cuadro pedido sin nada tildado (no se
+      // pintaba, y aparecía solo al tildar algo más tarde) o lo abría con «Confirmar»
+      // trabado por un receptor incompleto, sin decir por qué.
+      const vigente = vigenteAlRevisar.current;
+      if (vigente.picked !== tildadas || vigente.receptor !== receptor) {
+        toast.info(
+          "Cambiaste lo tildado o el receptor mientras leíamos la ficha del huésped. Revisalo y volvé a apretar «Revisar y emitir»."
+        );
+        return;
+      }
       setFichaAlRevisar(
         leida?.success && leida.data
           ? { cliente, nombre: leida.data.fullName, dni: leida.data.documentId, releida: true }
@@ -1031,11 +1098,11 @@ export default function ConsolidadaClient({
       // de la lista, con el link a Facturación. Un toast se iba solo a los 4 s.
       const motivo = (outcome?.userMessage ?? "").trim();
       setResultadoSinAutorizar({
-        motivo: motivo
-          ? /[.!?)]$/.test(motivo)
-            ? motivo
-            : `${motivo}.`
-          : "Quedó pendiente. Revisala en Facturación.",
+        status:
+          outcome?.status === "rejected" || outcome?.status === "processing"
+            ? outcome.status
+            : "pending",
+        motivo: motivo ? (/[.!?)]$/.test(motivo) ? motivo : `${motivo}.`) : "",
       });
     } else {
       toast.warning(
@@ -1095,6 +1162,9 @@ export default function ConsolidadaClient({
         >
           <AlertTriangle size={18} className="text-rose-600 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1 space-y-2">
+            {avisoFijo.encabezado !== null && (
+              <p className="text-sm font-bold text-rose-900">{avisoFijo.encabezado}</p>
+            )}
             <p className="text-sm font-semibold text-rose-800">{avisoFijo.texto}</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
               <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
@@ -1527,11 +1597,22 @@ export default function ConsolidadaClient({
             </div>
           ) : (
             // El nombre y el DNI se vuelven a leer de la ficha cada vez que se abre el cuadro
-            // (revisar()): corregidos en Huéspedes, no hace falta recargar la página.
+            // (revisar()): corregidos en Huéspedes, no hace falta recargar la página. Pero en
+            // otra pestaña: ir desde el menú saca de la consolidada, y al volver arranca de
+            // cero (vuelve a tildar todo lo pendiente y se pierden los textos).
             <p className="text-sm text-slate-500">
               Se emite <strong>Factura B</strong> con el nombre y el DNI de la ficha del huésped:
               se vuelven a leer cada vez que abrís «Revisar y emitir». Si el DNI está mal,
-              corregilo en Huéspedes. Como consumidor final, no se guarda nada en la ficha.
+              corregilo en Huéspedes en otra pestaña, así no perdés lo tildado ni lo que
+              escribiste acá. Como consumidor final, no se guarda nada en la ficha.{" "}
+              <Link
+                href="/admin/guests"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-brand-700 hover:underline"
+              >
+                Abrir Huéspedes en otra pestaña
+              </Link>
             </p>
           )}
         </section>

@@ -1615,12 +1615,26 @@ describe("ConsolidadaClient", () => {
       expect(screen.getByText(/se vuelven a leer cada vez que abrís/)).toBeInTheDocument();
       expect(screen.queryByText(/recargá esta página/)).not.toBeInTheDocument();
 
+      // Corregirlo desde el menú saca de la consolidada, y al volver arranca de cero (se
+      // pierden lo tildado y los textos): la pantalla y el cuadro mandan a Huéspedes en
+      // otra pestaña, con un link que la abre.
+      expect(screen.getByText(/corregilo en Huéspedes en otra pestaña/)).toBeInTheDocument();
+      const linkPantalla = screen.getByText("Abrir Huéspedes en otra pestaña").closest("a");
+      expect(linkPantalla).toHaveAttribute("href", "/admin/guests");
+      expect(linkPantalla).toHaveAttribute("target", "_blank");
+
       const cuadro = await abrirCuadroHuesped();
 
       expect(within(cuadro).getByText(/no sirve para facturar/)).toBeInTheDocument();
       expect(
-        within(cuadro).getByText(/Corregilo en Huéspedes y volvé a abrir este cuadro/)
+        within(cuadro).getByText(
+          /Corregilo en Huéspedes en otra pestaña y volvé a abrir este cuadro/
+        )
       ).toBeInTheDocument();
+      const linkCuadro = within(cuadro).getByText("Abrir Huéspedes en otra pestaña").closest("a");
+      expect(linkCuadro).toHaveAttribute("href", "/admin/guests");
+      expect(linkCuadro).toHaveAttribute("target", "_blank");
+      expect(linkCuadro).toHaveAttribute("rel", expect.stringContaining("noopener"));
       // Pasada la espera anti doble toque, sigue deshabilitado: lo traba el DNI.
       await pasarEsperaConfirmar();
       const confirmar = botonConfirmar(cuadro);
@@ -2101,6 +2115,87 @@ describe("ConsolidadaClient", () => {
       expect(loadGuestDocumentAction).toHaveBeenCalledTimes(1);
       await waitFor(() => expect(botonRevisar()).toBeEnabled());
     });
+
+    /** La lectura de la ficha queda en camino hasta que el test la conteste. */
+    function fichaEnCamino() {
+      let responder: (value: unknown) => void = () => {};
+      loadGuestDocumentAction.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            responder = resolve;
+          })
+      );
+      return () =>
+        act(async () => {
+          responder({ success: true, data: { fullName: "Juan Prueba", documentId: "30123456" } });
+        });
+    }
+    const AVISO_CAMBIO = /Cambiaste lo tildado o el receptor mientras leíamos la ficha/;
+
+    it("si mientras se lee la ficha se destilda todo, el cuadro no se abre, y tildar después no lo abre solo", async () => {
+      vi.mocked(toast.info).mockClear();
+      const contestarFicha = fichaEnCamino();
+      loadCcAccountStaysAction.mockImplementation(() =>
+        lista([makeRow("r1", "1"), makeRow("r2", "2")])
+      );
+      renderClient("g-dni-ok", "guest");
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      fireEvent.click(screen.getByText(REVISAR));
+      // Mientras lee, la lista sigue andando: destildan todo.
+      fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
+      expect(filaCheckbox("1")).not.toBeChecked();
+      await contestarFicha();
+
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(AVISO_CAMBIO));
+
+      // Más tarde tildan una: el cuadro no aparece solo, hay que apretar el botón.
+      fireEvent.click(fila("1"));
+      expect(filaCheckbox("1")).toBeChecked();
+      await act(async () => {});
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+      // Con el botón, sí.
+      expect(await abrirCuadroHuesped()).toBeInTheDocument();
+    });
+
+    it("si mientras se lee la ficha se destilda una, el cuadro no se abre: lo tildado ya no es lo que se pidió revisar", async () => {
+      vi.mocked(toast.info).mockClear();
+      const contestarFicha = fichaEnCamino();
+      loadCcAccountStaysAction.mockImplementation(() =>
+        lista([makeRow("r1", "1"), makeRow("r2", "2")])
+      );
+      renderClient("g-dni-ok", "guest");
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      fireEvent.click(screen.getByText(REVISAR));
+      fireEvent.click(fila("1"));
+      await contestarFicha();
+
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(AVISO_CAMBIO));
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+    });
+
+    it("si mientras se lee la ficha cambia la condición frente al IVA, el cuadro no se abre con «Confirmar» trabado sin explicar por qué", async () => {
+      vi.mocked(toast.info).mockClear();
+      const contestarFicha = fichaEnCamino();
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(screen.getByText(REVISAR));
+      // Pasa a una condición con CUIT, y el CUIT queda vacío.
+      fireEvent.change(screen.getByLabelText("Condición frente al IVA"), {
+        target: { value: "responsable_inscripto" },
+      });
+      await contestarFicha();
+
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(AVISO_CAMBIO));
+      // La barra dice qué falta.
+      expect(screen.getByText(/Falta:/)).toBeInTheDocument();
+    });
   });
 
   describe("textos del receptor: no prometen guardar en la ficha lo que no se guarda", () => {
@@ -2342,7 +2437,7 @@ describe("ConsolidadaClient", () => {
   });
 
   describe("factura pendiente, en verificación o rechazada: aviso fijo, no un toast", () => {
-    const AVISO_NO_AUTORIZADA = "La factura no quedó autorizada";
+    const AVISO_PENDIENTE = "La factura quedó pendiente";
 
     beforeEach(() => {
       // Otros tests ya espiaron window.open: se limpian sus llamadas.
@@ -2351,15 +2446,32 @@ describe("ConsolidadaClient", () => {
       vi.mocked(toast.warning).mockClear();
     });
 
+    // Cada estado dice lo que se sabe de él. En verificación ARCA pudo haberle dado el CAE
+    // (el emisor lo recupera después), y una pendiente todavía se puede reintentar: sólo de
+    // la rechazada se sabe que no salió, y el aviso dice qué la destraba.
     it.each([
-      ["rechazada", "rejected", "ARCA rechazó la factura: el receptor no está activo."],
-      ["pendiente", "pending", "No se pudo emitir por conflicto de numeración. Reintentá desde Facturación."],
+      [
+        "rechazada",
+        "rejected",
+        "ARCA rechazó la factura: el receptor no está activo.",
+        "ARCA rechazó la factura",
+        "Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar.",
+      ],
+      [
+        "pendiente",
+        "pending",
+        "No se pudo emitir por conflicto de numeración. Reintentá desde Facturación.",
+        AVISO_PENDIENTE,
+        null,
+      ],
       [
         "en verificación",
         "processing",
         "ARCA no respondió a tiempo. La factura quedó en verificación — reintentá en unos minutos desde Facturación (no se va a duplicar).",
+        "Todavía no sabemos si ARCA la autorizó",
+        null,
       ],
-    ])("factura %s: el motivo queda arriba de la lista con el link a Facturación, hasta cerrarlo", async (_caso, status, motivo) => {
+    ])("factura %s: el motivo queda arriba de la lista con su título y el link a Facturación, hasta cerrarlo", async (_caso, status, motivo, titulo, siguientePaso) => {
       emitConsolidatedInvoiceAction.mockResolvedValueOnce({
         success: true,
         data: { status, invoiceId: "inv-9", userMessage: motivo, count: 1 },
@@ -2369,8 +2481,13 @@ describe("ConsolidadaClient", () => {
 
       fireEvent.click(await confirmarListo(abrirCuadro()));
 
-      const aviso = await screen.findByLabelText(AVISO_NO_AUTORIZADA);
+      const aviso = await screen.findByLabelText(titulo);
+      // El título se lee en el aviso, no sólo en el aria-label.
+      expect(within(aviso).getByText(titulo)).toBeInTheDocument();
       expect(aviso.textContent).toContain(motivo);
+      if (siguientePaso) expect(aviso.textContent).toContain(siguientePaso);
+      // No afirma algo que no se sabe: en verificación o pendiente pudo salir o salir después.
+      expect(aviso.textContent).not.toContain("no quedó autorizada");
       expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
         "href",
         "/admin/fiscal"
@@ -2385,10 +2502,28 @@ describe("ConsolidadaClient", () => {
       act(() => {
         vi.advanceTimersByTime(30000);
       });
-      expect(screen.getByLabelText(AVISO_NO_AUTORIZADA)).toBeInTheDocument();
+      expect(screen.getByLabelText(titulo)).toBeInTheDocument();
 
       fireEvent.click(within(aviso).getByText("Cerrar el aviso"));
-      expect(screen.queryByLabelText(AVISO_NO_AUTORIZADA)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(titulo)).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["rejected", "ARCA rechazó la factura", "ARCA rechazó la factura. Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar."],
+      ["processing", "Todavía no sabemos si ARCA la autorizó", "Quedó en verificación: fijate en Facturación en unos minutos."],
+      ["pending", AVISO_PENDIENTE, "Revisala en Facturación."],
+    ])("sin motivo del emisor, la factura %s dice igual qué hacer", async (status, titulo, texto) => {
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: { status, invoiceId: "inv-9", userMessage: "", count: 1 },
+      });
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      const aviso = await screen.findByLabelText(titulo);
+      expect(within(aviso).getByText(texto)).toBeInTheDocument();
     });
 
     it("el aviso se va con la próxima emisión", async () => {
@@ -2404,14 +2539,14 @@ describe("ConsolidadaClient", () => {
       renderClient();
       await screen.findByLabelText(BARRA);
       fireEvent.click(await confirmarListo(abrirCuadro()));
-      await screen.findByLabelText(AVISO_NO_AUTORIZADA);
+      await screen.findByLabelText(AVISO_PENDIENTE);
 
       // La estadía sigue pendiente en este mock: se vuelve a emitir y sale autorizada.
       await waitFor(() => expect(botonRevisar()).toBeEnabled());
       fireEvent.click(await confirmarListo(abrirCuadro()));
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(2));
       await waitFor(() =>
-        expect(screen.queryByLabelText(AVISO_NO_AUTORIZADA)).not.toBeInTheDocument()
+        expect(screen.queryByLabelText(AVISO_PENDIENTE)).not.toBeInTheDocument()
       );
     });
   });
