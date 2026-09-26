@@ -1,4 +1,4 @@
-import { cleanup, render, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const H = vi.hoisted(() => ({
@@ -679,12 +679,229 @@ describe("shouldSkipRefresh — cuándo no conviene recargar", () => {
   });
 });
 
+/** La zona del hotel en los tests del aviso de Hoy. */
+const TZ_HOTEL = "America/Argentina/Buenos_Aires";
+
+/** Lo que agrega el aviso cuando el chequeo recibe una redirección del proxy. */
+const AVISO_SESION =
+  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
+
+const sinActualizarDesde = (hora: string) => `Hoy no se actualiza desde las ${hora}.`;
+
+/** Cualquier versión del aviso, diga la hora que diga. */
+const avisoEnPantalla = () => screen.queryByText(/Hoy no se actualiza/);
+
+/** Mueve el reloj y deja que React pinte lo que cambió (act). */
+const avanzar = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+
 describe("AutoRefresh — lo que se monta en Hoy", () => {
-  it("no pinta nada y refresca cada 30 s", async () => {
-    const { container } = render(<AutoRefresh />);
+  it("mientras anda, no pinta nada y refresca cada 30 s", async () => {
+    const { container } = render(<AutoRefresh timezone={TZ_HOTEL} />);
     expect(container.innerHTML).toBe("");
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await avanzar(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
+  beforeEach(() => {
+    // Las 10:00 en el hotel (UTC-3).
+    vi.setSystemTime(new Date("2026-09-25T13:00:00.000Z"));
+  });
+
+  /**
+   * Cada chequeo sale a los 30, 60 y 90 s. El que queda colgado falla 5 s después, así
+   * que se mira a los 35, 65 y 95 s: ahí ya volvieron los tres.
+   */
+  it.each<[string, () => void]>([
+    ["internet cortado (el pedido falla)", () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch"))],
+    ["el servidor contesta 502", () => fetchMock.mockResolvedValue({ status: 502 })],
+    ["la ruta contesta 404", () => fetchMock.mockResolvedValue({ status: 404 })],
+    ["el servidor no contesta en 5 s", servidorColgado],
+    ["la PC sin red (ni se pregunta)", () => (sinConexion = true)],
+  ])(
+    "con %s: 1 o 2 chequeos fallidos no muestran nada; al 3.º aparece la línea con la hora del hotel",
+    async (_causa, caer) => {
+      render(<AutoRefresh timezone={TZ_HOTEL} />);
+      caer();
+
+      await avanzar(35_000);
+      expect(avisoEnPantalla()).toBeNull();
+
+      await avanzar(30_000);
+      expect(avisoEnPantalla()).toBeNull();
+
+      await avanzar(30_000);
+      expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+      // No es una redirección: no habla de la sesión.
+      expect(screen.queryByText(AVISO_SESION)).toBeNull();
+      expect(refresh).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["America/Argentina/Buenos_Aires", "10:00"],
+    ["America/Bogota", "08:00"],
+    ["Europe/Madrid", "15:00"],
+  ])("la hora sale en la zona del hotel (%s → %s), no en la de la PC", async (timezone, hora) => {
+    render(<AutoRefresh timezone={timezone} />);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await avanzar(90_000);
+    expect(screen.getByText(sinActualizarDesde(hora))).toBeInTheDocument();
+  });
+
+  it("la hora es la de la última vez que Hoy se puso al día, no la del primer chequeo que falló", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+
+    // Hasta las 10:05 anda: diez recargas, la última a las 10:05:00.
+    await avanzar(300_000);
+    expect(refresh).toHaveBeenCalledTimes(10);
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(90_000);
+    expect(screen.getByText(sinActualizarDesde("10:05"))).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalledTimes(10);
+  });
+
+  it.each<[string, Respuesta]>([
+    ["opaqueredirect (el proxy manda a /login o a /forbidden)", { status: 0, type: "opaqueredirect" }],
+    ["una redirección seguida (redirected)", { status: 200, redirected: true }],
+    ["un 302", { status: 302 }],
+    ["un 307", { status: 307 }],
+  ])(
+    "con %s, al 3.º chequeo la línea dice además que se cerró la sesión o el sistema no responde",
+    async (_causa, respuesta) => {
+      render(<AutoRefresh timezone={TZ_HOTEL} />);
+      fetchMock.mockResolvedValue(respuesta);
+
+      await avanzar(60_000);
+      expect(avisoEnPantalla()).toBeNull();
+      expect(screen.queryByText(AVISO_SESION)).toBeNull();
+
+      await avanzar(30_000);
+      expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+      expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+      expect(refresh).not.toHaveBeenCalled();
+    }
+  );
+
+  it("cuentan los 3 seguidos aunque cambie la causa; el texto de la sesión sale si el último fue una redirección", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(30_000);
+    fetchMock.mockResolvedValue({ status: 502 });
+    await avanzar(30_000);
+    expect(avisoEnPantalla()).toBeNull();
+
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+    await avanzar(30_000);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+    expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+
+    // El siguiente falla por la red: la línea sigue, sin lo de la sesión.
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(30_000);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+  });
+
+  it("la línea se va sola cuando un chequeo vuelve a andar, y Hoy se pone al día", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    await avanzar(90_000);
+    expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+
+    fetchMock.mockResolvedValue({ status: 204 });
+    await avanzar(30_000);
+    expect(avisoEnPantalla()).toBeNull();
+    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("un chequeo bueno en el medio vuelve a contar desde cero", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(60_000);
+    fetchMock.mockResolvedValue({ status: 204 });
+    await avanzar(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(60_000);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // El tercero seguido desde el que anduvo (10:01:30).
+    await avanzar(30_000);
+    expect(screen.getByText(sinActualizarDesde("10:01"))).toBeInTheDocument();
+  });
+
+  it("no cuenta como falla cuando no recarga a propósito (cuadro abierto, campo con el foco, pestaña oculta)", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { capa } = abrirCuadroSinAriaModal();
+    await avanzar(120_000);
+    capa.remove();
+
+    const campo = document.createElement("input");
+    document.body.appendChild(campo);
+    campo.focus();
+    await avanzar(120_000);
+    campo.blur();
+
+    cambiarVisibilidad(true);
+    await avanzar(120_000);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(avisoEnPantalla()).toBeNull();
+  });
+
+  it("es una sola línea chica en el flujo, que no tapa la grilla", async () => {
+    const { container } = render(<AutoRefresh timezone={TZ_HOTEL} />);
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    await avanzar(90_000);
+    const linea = container.firstElementChild as HTMLElement;
+    expect(linea.getAttribute("role")).toBe("status");
+    expect(linea.textContent).toBe(`${sinActualizarDesde("10:00")} ${AVISO_SESION}`);
+    // En el flujo (no fija ni encima de nada) y sin la capa de los cuadros, que frenaría el refresco.
+    expect(linea.className).not.toMatch(/\b(fixed|absolute|sticky)\b/);
+    expect(document.querySelector(".fixed.inset-0")).toBeNull();
+  });
+});
+
+describe("useAutoRefresh — lo que devuelve para el aviso", () => {
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-09-25T13:00:00.000Z"));
+  });
+
+  it("null mientras anda; después de 3 chequeos fallidos, desde cuándo no se actualiza y por qué", async () => {
+    const { result } = renderHook(() => useAutoRefresh());
+    const montado = Date.now();
+    expect(result.current).toBeNull();
+
+    fetchMock.mockResolvedValue({ status: 502 });
+    await avanzar(60_000);
+    expect(result.current).toBeNull();
+
+    await avanzar(30_000);
+    expect(result.current).toEqual({ since: montado, reason: "failed" });
+
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+    await avanzar(30_000);
+    expect(result.current).toEqual({ since: montado, reason: "redirect" });
+
+    fetchMock.mockResolvedValue({ status: 204 });
+    await avanzar(30_000);
+    expect(result.current).toBeNull();
   });
 });

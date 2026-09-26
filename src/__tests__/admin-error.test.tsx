@@ -48,6 +48,12 @@ function servidorColgado() {
 const SIN_CONEXION = "Sigue sin conexión. Se vuelve a intentar sola en 30 s.";
 /** Lo que dice el cartel nuevo cuando la recarga de "Reintentar" salió y volvió a fallar. */
 const NO_CARGA = "La conexión anda, pero la pantalla no carga. Avisale al encargado.";
+/**
+ * Lo que dice el cartel cuando el chequeo vuelve con una redirección del proxy: la sesión
+ * se cerró (por ejemplo, "Salir" en otro dispositivo) o Supabase no contesta.
+ */
+const SESION =
+  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
 
 function cambiarVisibilidad(oculta: boolean) {
   tabOculta = oculta;
@@ -183,21 +189,31 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     expect(botonReintentar()).toBeInTheDocument();
   });
 
-  it("si el chequeo vuelve con una redirección del proxy (Supabase caído o sesión vencida), no recarga y avisa", async () => {
-    // Con `redirect: "manual"` la redirección a /login o a /forbidden llega como
-    // `opaqueredirect`: recargar sacaría la pantalla del panel.
-    mostrarPantallaDeError();
-    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+  it.each<[string, Respuesta]>([
+    ["opaqueredirect", { status: 0, type: "opaqueredirect" }],
+    ["redirected", { status: 200, redirected: true }],
+    ["302", { status: 302 }],
+  ])(
+    "si el chequeo vuelve con una redirección del proxy (%s: sesión cerrada o Supabase caído), no recarga y dice que se cerró la sesión o el sistema no responde",
+    async (_tipo, respuesta) => {
+      // Con `redirect: "manual"` la redirección a /login o a /forbidden llega como
+      // `opaqueredirect`: recargar sacaría la pantalla del panel. "Sigue sin conexión" sería
+      // mentira (internet anda) y no dice cómo salir: F5 lleva a la pantalla de ingreso.
+      const { container } = mostrarPantallaDeError();
+      fetchMock.mockResolvedValue(respuesta);
 
-    fireEvent.click(botonReintentar());
-    await alDiaEnPantalla();
+      fireEvent.click(botonReintentar());
+      await alDiaEnPantalla();
 
-    expect(refresh).not.toHaveBeenCalled();
-    expect(reset).not.toHaveBeenCalled();
-    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
-  });
+      expect(refresh).not.toHaveBeenCalled();
+      expect(reset).not.toHaveBeenCalled();
+      expect(screen.getByText(SESION)).toBeInTheDocument();
+      expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+      expect(boton(container).disabled).toBe(false);
+    }
+  );
 
-  it("con un error 5xx del servidor (por ejemplo, durante un deploy) tampoco recarga", async () => {
+  it("con un error 5xx del servidor (por ejemplo, durante un deploy) tampoco recarga, y dice sin conexión (no lo de la sesión)", async () => {
     mostrarPantallaDeError();
     fetchMock.mockResolvedValue({ status: 502 });
 
@@ -207,6 +223,21 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     expect(refresh).not.toHaveBeenCalled();
     expect(reset).not.toHaveBeenCalled();
     expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+    expect(screen.queryByText(SESION)).toBeNull();
+  });
+
+  it("si después de la redirección el chequeo falla por la red, el aviso vuelve a decir sin conexión", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(screen.getByText(SESION)).toBeInTheDocument();
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+    expect(screen.queryByText(SESION)).toBeNull();
   });
 
   it("con la PC sin red no le pregunta al servidor ni recarga, y avisa", async () => {

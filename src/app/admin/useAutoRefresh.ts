@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 /** Cada cuánto se pone al día Hoy si nadie toca nada. */
@@ -31,6 +31,38 @@ export const PING_URL = "/admin/ping";
 const PROBE_TIMEOUT_MS = 5000;
 
 /**
+ * Chequeos fallidos seguidos (por cualquier causa) antes de avisar en pantalla que Hoy no
+ * se actualiza. Con uno o dos puede ser un corte de segundos: no vale la pena el aviso.
+ */
+export const FAILED_CHECKS_BEFORE_NOTICE = 3;
+
+/**
+ * Cómo salió el chequeo:
+ * - "ok": el panel contestó (2xx, sin redirección);
+ * - "redirect": el proxy redirigió (a `/login` o a `/forbidden`). Pasa con la sesión
+ *   cerrada (por ejemplo, "Salir" en otro dispositivo cierra la sesión en todos) o con
+ *   Supabase que no contesta: desde el navegador no se distinguen;
+ * - "failed": todo lo demás (sin red, internet cortado, más de `PROBE_TIMEOUT_MS`, un 5xx
+ *   durante un deploy, un 404 si la ruta no está).
+ */
+export type ProbeResult = "ok" | "redirect" | "failed";
+
+/**
+ * Lo que devuelve `useAutoRefresh` cuando lleva `FAILED_CHECKS_BEFORE_NOTICE` chequeos
+ * fallidos seguidos: desde cuándo (`Date.now()`) la pantalla no se pone al día y cómo
+ * salió el último chequeo.
+ */
+export type RefreshTrouble = { since: number; reason: Exclude<ProbeResult, "ok"> };
+
+/**
+ * Lo que dicen Hoy y la pantalla de error de `/admin` cuando el chequeo recibe una
+ * redirección. F5 lleva a la pantalla de ingreso; si el que no contesta es el sistema,
+ * tampoco anda: por eso "si sigue así".
+ */
+export const SESSION_CLOSED_NOTICE =
+  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
+
+/**
  * Si alguien movió el mouse, tocó la pantalla, usó la rueda o apretó una tecla hace menos
  * que esto, la recarga espera: al llegar, un aviso que aparece o una tarjeta que cambia de
  * alto corre la grilla, y el toque caería en otro botón. Se reintenta apenas la pantalla
@@ -59,7 +91,7 @@ const OVERLAY_SELECTOR = ".fixed.inset-0";
 /**
  * ¿Conviene NO recargar ahora? Sí cuando:
  * - la pestaña está oculta (nadie la mira: se pone al día al volver),
- * - la PC no tiene red (`navigator.onLine`; el corte de internet lo ve `serverAnswers`),
+ * - la PC no tiene red (`navigator.onLine`; el corte de internet lo ve `probeServer`),
  * - hay un cuadro abierto (`aria-modal="true"` o la capa `fixed inset-0`),
  * - el foco está en un campo (input, textarea, select o algo editable).
  *
@@ -70,8 +102,20 @@ const OVERLAY_SELECTOR = ".fixed.inset-0";
  * entera y se pierde lo que estaba cargado. Con un cuadro abierto, mejor esperar.
  */
 export function shouldSkipRefresh(doc: Document): boolean {
+  return isOffline(doc) || shouldWait(doc);
+}
+
+/** La PC no tiene red. */
+function isOffline(doc: Document): boolean {
+  return doc.defaultView?.navigator.onLine === false;
+}
+
+/**
+ * Lo de `shouldSkipRefresh` salvo la red: no se recarga a propósito, así que no cuenta
+ * como un chequeo fallido para el aviso de Hoy.
+ */
+function shouldWait(doc: Document): boolean {
   if (doc.hidden) return true;
-  if (doc.defaultView?.navigator.onLine === false) return true;
   if (doc.querySelector('[aria-modal="true"]')) return true;
   if (doc.querySelector(OVERLAY_SELECTOR)) return true;
 
@@ -83,17 +127,18 @@ export function shouldSkipRefresh(doc: Document): boolean {
 }
 
 /**
- * ¿Está el panel? Solo si `/admin/ping` contesta 2xx sin redirección. No, si el pedido
- * falla (internet cortado, servidor apagado, más de `PROBE_TIMEOUT_MS`), si contesta otra
- * cosa (el 502 del proxy durante un deploy, un 404 si la ruta no está) o si el proxy
- * redirige a `/login` o a `/forbidden` (Supabase caído, sesión o rol que no se pudieron
- * leer, sesión vencida).
+ * ¿Está el panel? "ok" solo si `/admin/ping` contesta 2xx sin redirección. "redirect" si
+ * el proxy redirige a `/login` o a `/forbidden` (sesión cerrada o vencida, Supabase caído,
+ * sesión o rol que no se pudieron leer). "failed" si el pedido falla (internet cortado,
+ * servidor apagado, más de `PROBE_TIMEOUT_MS`) o si contesta otra cosa (el 502 del proxy
+ * durante un deploy, un 404 si la ruta no está).
  *
  * `redirect: "manual"`: el navegador no sigue la redirección y la devuelve como
- * `opaqueredirect`; `redirected` cubre a uno que la siguiera igual. HEAD y `no-store`:
- * sin cuerpo y sin leerlo de la caché del navegador.
+ * `opaqueredirect`; `redirected` cubre a uno que la siguiera igual, y un 3xx a la vista, a
+ * uno que la devolviera tal cual. HEAD y `no-store`: sin cuerpo y sin leerlo de la caché
+ * del navegador.
  */
-async function serverAnswers(signal: AbortSignal): Promise<boolean> {
+async function askServer(signal: AbortSignal): Promise<ProbeResult> {
   try {
     const res = await fetch(PING_URL, {
       method: "HEAD",
@@ -101,25 +146,27 @@ async function serverAnswers(signal: AbortSignal): Promise<boolean> {
       redirect: "manual",
       signal,
     });
-    if (res.type === "opaqueredirect" || res.redirected) return false;
-    return res.status >= 200 && res.status < 300;
+    if (res.type === "opaqueredirect" || res.redirected) return "redirect";
+    if (res.status >= 300 && res.status < 400) return "redirect";
+    return res.status >= 200 && res.status < 300 ? "ok" : "failed";
   } catch {
-    return false;
+    return "failed";
   }
 }
 
 /**
  * El chequeo antes de recargar: pregunta una vez si el panel contesta, con el corte de
  * `PROBE_TIMEOUT_MS`. `cancel` la corta antes (si la pantalla se desmonta mientras espera)
- * y entonces `answers` da false. La usan el refresco automático y el botón "Reintentar" de
- * la pantalla de error de `/admin`: así el botón tampoco recarga sin conexión ni sin sesión.
+ * y entonces `result` da "failed". La usan el refresco automático y el botón "Reintentar"
+ * de la pantalla de error de `/admin`: así el botón tampoco recarga sin conexión ni sin
+ * sesión, y puede decir cuál de las dos es.
  */
-export function probeServer(): { answers: Promise<boolean>; cancel: () => void } {
+export function probeServer(): { result: Promise<ProbeResult>; cancel: () => void } {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-  const answers = serverAnswers(controller.signal).finally(() => window.clearTimeout(timeout));
+  const result = askServer(controller.signal).finally(() => window.clearTimeout(timeout));
   return {
-    answers,
+    result,
     cancel: () => {
       window.clearTimeout(timeout);
       controller.abort();
@@ -154,6 +201,13 @@ type UseAutoRefreshOptions = {
  * Es el único hook de refresco del panel: lo usan Hoy, la pantalla de error de `/admin`
  * (con `onRefresh`) y, más adelante, la pantalla de mantenimiento.
  *
+ * Devuelve null mientras anda. Con `FAILED_CHECKS_BEFORE_NOTICE` chequeos fallidos
+ * seguidos (sin red en la PC cuenta como uno), devuelve desde cuándo la pantalla no se
+ * pone al día (la última recarga, o cuando se montó) y cómo salió el último chequeo, para
+ * que la pantalla lo avise. Vuelve a null con el primer chequeo que anda. No recargar a
+ * propósito (pestaña oculta, cuadro abierto, un campo con el foco, alguien usándola) no
+ * cuenta como falla.
+ *
  * Lo que NO puede hacer: frenar una recarga que ya salió. Si alguien abre un cuadro
  * mientras vuelve la respuesta (alrededor de un segundo, sobre todo justo al volver a la
  * pestaña), el cuadro recibe los datos nuevos. Eso se resuelve en el cuadro, no acá.
@@ -162,8 +216,13 @@ export function useAutoRefresh({
   intervalMs = AUTO_REFRESH_INTERVAL_MS,
   paused = false,
   onRefresh,
-}: UseAutoRefreshOptions = {}): void {
+}: UseAutoRefreshOptions = {}): RefreshTrouble | null {
   const router = useRouter();
+  const [trouble, setTrouble] = useState<RefreshTrouble | null>(null);
+  // Fuera del efecto: no vuelven a cero si el efecto se rearma (por ejemplo, con `paused`).
+  const failedChecksRef = useRef(0);
+  // Cuándo se puso al día la pantalla por última vez (null hasta que se monta).
+  const lastUpdatedAtRef = useRef<number | null>(null);
   // Lee el `onRefresh` y el router del último render sin ser dependencia del efecto: si
   // lo fuera, un `onRefresh` nuevo en cada render reiniciaría la cuenta de los 30 s.
   const doRefresh = useEffectEvent(() => {
@@ -172,6 +231,8 @@ export function useAutoRefresh({
   });
 
   useEffect(() => {
+    // Lo que se ve al montar es de recién: cuenta como puesta al día.
+    if (lastUpdatedAtRef.current === null) lastUpdatedAtRef.current = Date.now();
     if (paused) return;
 
     let disposed = false;
@@ -184,6 +245,21 @@ export function useAutoRefresh({
 
     const inUse = () => Date.now() - lastActivityAt < ACTIVITY_QUIET_MS;
 
+    // Anota cómo salió un chequeo. Solo toca el estado cuando cambia lo que se muestra.
+    const noteCheck = (result: ProbeResult) => {
+      if (result === "ok") {
+        if (failedChecksRef.current >= FAILED_CHECKS_BEFORE_NOTICE) setTrouble(null);
+        failedChecksRef.current = 0;
+        return;
+      }
+      failedChecksRef.current += 1;
+      if (failedChecksRef.current < FAILED_CHECKS_BEFORE_NOTICE) return;
+      const since = lastUpdatedAtRef.current ?? Date.now();
+      setTrouble((prev) =>
+        prev?.since === since && prev.reason === result ? prev : { since, reason: result }
+      );
+    };
+
     const refreshWhenQuiet = () => {
       if (quietTimer !== null) return;
       const wait = Math.max(0, lastActivityAt + ACTIVITY_QUIET_MS - Date.now());
@@ -194,23 +270,32 @@ export function useAutoRefresh({
     };
 
     const refresh = async () => {
-      if (probe || shouldSkipRefresh(document)) return;
+      if (probe || shouldWait(document)) return;
       if (inUse()) {
         refreshWhenQuiet();
         return;
       }
+      // Sin red en la PC no se le pregunta al servidor, pero es un chequeo que falló: la
+      // pantalla tampoco se pone al día.
+      if (isOffline(document)) {
+        noteCheck("failed");
+        return;
+      }
       const current = probeServer();
       probe = current;
-      const answers = await current.answers;
+      const result = await current.result;
       probe = null;
+      if (disposed) return;
+      noteCheck(result);
       // Mientras se esperaba al servidor pudo abrirse un cuadro o tomar el foco un campo.
-      if (disposed || !answers || shouldSkipRefresh(document)) return;
+      if (result !== "ok" || shouldSkipRefresh(document)) return;
       // O pudieron empezar a usarla: se pregunta de nuevo cuando quede quieta.
       if (inUse()) {
         refreshWhenQuiet();
         return;
       }
       lastRefreshAt = Date.now();
+      lastUpdatedAtRef.current = lastRefreshAt;
       doRefresh();
     };
     const onActivity = () => {
@@ -252,4 +337,6 @@ export function useAutoRefresh({
       }
     };
   }, [intervalMs, paused]);
+
+  return trouble;
 }

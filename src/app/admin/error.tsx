@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { AUTO_REFRESH_INTERVAL_MS, probeServer, useAutoRefresh } from "./useAutoRefresh";
+import {
+  AUTO_REFRESH_INTERVAL_MS,
+  probeServer,
+  SESSION_CLOSED_NOTICE,
+  useAutoRefresh,
+  type ProbeResult,
+} from "./useAutoRefresh";
 
 /**
  * Cuándo (`Date.now()`) "Reintentar" mandó a recargar, con la conexión y la sesión ya
@@ -40,7 +46,9 @@ function comesFromManualRetry(): boolean {
  * Sale cuando la sesión y el rol se leyeron bien y después falla una consulta de la página.
  * A Supabase caído entero no lo muestra este cartel: ahí el chequeo previo (`probeServer`,
  * que pasa por el proxy) ve la redirección a `/login` o a `/forbidden` y la recarga no sale,
- * así que Hoy (o este cartel) queda en pantalla, dentro del panel.
+ * así que Hoy (o este cartel) queda en pantalla, dentro del panel. Lo mismo con la sesión
+ * cerrada desde otro dispositivo. Hoy lo avisa a los 3 chequeos fallidos (`AutoRefresh`);
+ * este cartel, al tocar "Reintentar".
  *
  * No muestra el mensaje técnico del error: puede traer datos. Va a la consola, con el
  * digest para buscarlo en los registros del servidor.
@@ -55,9 +63,10 @@ export default function AdminError({
   const router = useRouter();
   // true mientras se reintenta (la pregunta al servidor y la recarga): el botón lo muestra.
   const [isPending, startTransition] = useTransition();
-  // Cómo salió el último toque de "Reintentar": sin conexión (no recargó) o recargó y la
-  // pantalla volvió a fallar.
-  const [notice, setNotice] = useState<"offline" | "failed" | null>(() =>
+  // Cómo salió el último toque de "Reintentar": sin conexión (no recargó), con la sesión
+  // cerrada o el sistema sin contestar (el chequeo recibió una redirección: no recargó) o
+  // recargó y la pantalla volvió a fallar.
+  const [notice, setNotice] = useState<"offline" | "session" | "failed" | null>(() =>
     comesFromManualRetry() ? "failed" : null
   );
   // La pregunta al servidor del botón, para cortarla si el cartel se va mientras espera.
@@ -94,20 +103,22 @@ export default function AdminError({
   // El botón pasa por el mismo chequeo que el reintento automático (`/admin/ping`, por el
   // proxy). Sin conexión, `router.refresh()` falla y Next recarga la página entera: Chrome
   // cambiaría este cartel por su página de "Sin conexión" y se irían el menú y el reintento.
-  // Y sin sesión o sin Supabase, la recarga terminaría en `/login` o en `/forbidden`.
+  // Y sin sesión o sin Supabase, la recarga terminaría en `/login` o en `/forbidden`: ahí
+  // el aviso no dice "sin conexión" (internet anda) sino cómo volver a entrar ("Salir" en
+  // otro dispositivo cierra la sesión en todos).
   const retryFromButton = () => {
     if (isPending) return;
     setNotice(null);
     startTransition(async () => {
-      let answers = false;
+      let result: ProbeResult = "failed";
       if (navigator.onLine !== false) {
         const current = probeServer();
         probeRef.current = current;
-        answers = await current.answers;
+        result = await current.result;
         if (probeRef.current === current) probeRef.current = null;
       }
-      if (!answers) {
-        setNotice("offline");
+      if (result !== "ok") {
+        setNotice(result === "redirect" ? "session" : "offline");
         return;
       }
       manualRetryAt = Date.now();
@@ -163,7 +174,9 @@ export default function AdminError({
           <p role="status" className="text-sm font-medium text-amber-700 text-center">
             {notice === "offline"
               ? `Sigue sin conexión. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
-              : "La conexión anda, pero la pantalla no carga. Avisale al encargado."}
+              : notice === "session"
+                ? SESSION_CLOSED_NOTICE
+                : "La conexión anda, pero la pantalla no carga. Avisale al encargado."}
           </p>
         )}
       </div>
