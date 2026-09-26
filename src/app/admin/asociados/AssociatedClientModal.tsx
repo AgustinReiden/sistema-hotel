@@ -309,11 +309,15 @@ export default function AssociatedClientModal({
                 <option value="consolidada">Factura consolidada (la emite el admin)</option>
                 <option value="no_factura">No se factura</option>
               </select>
-              {/* En una ficha consolidada solo lo fiado espera a la consolidada: lo que se
-                  cobra en caja se factura en el check-out (RoomCard ofrece la factura). */}
+              {/* En una ficha consolidada, si la estadía se cierra en caja RoomCard ofrece la
+                  factura en el check-out; si se cierra a cuenta corriente no la ofrece y la
+                  consolidada suma solo los cargos (lo fiado). No prometer que lo cobrado en
+                  caja se factura siempre: una seña en caja con el saldo fiado no entra. */}
               <p className="text-[11px] text-slate-500 mt-1">
                 Consolidada: las estadías a cuenta corriente se juntan en una sola factura
-                desde Control de facturación. Lo cobrado en caja se factura en el check-out.
+                desde Control de facturación. Si la estadía se cierra en caja, la factura se
+                ofrece en el check-out; si se cierra a cuenta corriente, la consolidada factura
+                solo lo fiado.
               </p>
               {/* Un solo role="status" siempre montado: el lector de pantalla anuncia el
                   cambio de contenido de una región que ya existía, no una que aparece. */}

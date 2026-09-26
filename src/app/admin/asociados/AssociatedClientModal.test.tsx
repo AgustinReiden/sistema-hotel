@@ -350,9 +350,11 @@ describe("AssociatedClientModal: la consolidada de una empresa pide CUIT", () =>
   });
 });
 
-// En una ficha consolidada solo lo fiado espera a la consolidada: lo cobrado en caja
-// se factura en el check-out. El texto fijo de Facturación no puede decir lo contrario
-// de la nota verde que sale justo abajo.
+// En una ficha consolidada, si la estadía se cierra en caja la factura se ofrece en el
+// check-out; si se cierra a cuenta corriente, la consolidada factura solo lo fiado. El
+// texto fijo de Facturación no puede decir lo contrario de la nota verde de abajo, ni
+// prometer que lo cobrado en caja siempre se factura: una seña cobrada en caja con el
+// saldo fiado no entra en la consolidada ni se ofrece en ese check-out.
 describe("AssociatedClientModal: el texto de Facturación y cómo se anuncian la nota y el aviso", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -365,9 +367,11 @@ describe("AssociatedClientModal: el texto de Facturación y cómo se anuncian la
     fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
 
     expect(container.textContent).not.toMatch(/no se factura\w* al cerrar/i);
+    // Tampoco promete que lo cobrado en caja se factura siempre en el check-out.
+    expect(container.textContent).not.toMatch(/cobrado en caja se factura/i);
     expect(
       screen.getByText(
-        "Consolidada: las estadías a cuenta corriente se juntan en una sola factura desde Control de facturación. Lo cobrado en caja se factura en el check-out."
+        "Consolidada: las estadías a cuenta corriente se juntan en una sola factura desde Control de facturación. Si la estadía se cierra en caja, la factura se ofrece en el check-out; si se cierra a cuenta corriente, la consolidada factura solo lo fiado."
       )
     ).toBeTruthy();
   });
