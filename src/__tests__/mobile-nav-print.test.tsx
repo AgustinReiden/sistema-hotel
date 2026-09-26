@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/admin/comprobante-cc/1" }));
@@ -17,7 +17,14 @@ describe("barras del panel en el celular, al imprimir", () => {
         <MobileTabBar hasOpenShift />
       </>
     );
-    expect(screen.getByRole("banner")).toHaveClass("print:hidden");
-    expect(screen.getByRole("navigation", { name: "Accesos de recepción" })).toHaveClass("print:hidden");
+    // Por etiqueta y atributo, no con getByRole sobre toda la pantalla: getByRole calcula
+    // el rol de cada elemento y llama a getComputedStyle de jsdom por cada ancestro, y con
+    // la suite entera en paralelo este test solo tardaba cerca de un segundo (PR #131).
+    const barras = document.body.querySelectorAll("header");
+    expect(barras).toHaveLength(1);
+    expect(barras[0]).toHaveClass("print:hidden");
+    const accesos = document.body.querySelectorAll('nav[aria-label="Accesos de recepción"]');
+    expect(accesos).toHaveLength(1);
+    expect(accesos[0]).toHaveClass("print:hidden");
   });
 });
