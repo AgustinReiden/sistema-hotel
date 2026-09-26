@@ -23,7 +23,7 @@ function one<T>(rel: RelationOne<T>): T | null {
 
 type PageProps = {
   params: Promise<{ movementId: string }>;
-  searchParams: Promise<{ autoprint?: string }>;
+  searchParams: Promise<{ autoprint?: string; reimpresion?: string }>;
 };
 
 /** Sólo el número, para el título. Cacheado por request: no duplica la consulta. */
@@ -65,6 +65,10 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
   const { movementId } = await params;
   const sp = await searchParams;
   const autoPrint = sp.autoprint === "1";
+  // La Caja lo reimprime con ?reimpresion=1 si el papel no salió. Solo suma la
+  // leyenda: número y QR son los mismos, así la Ingesta de remitos firmados lo sigue
+  // reconociendo como el mismo remito.
+  const reimpresion = sp.reimpresion === "1";
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -126,6 +130,7 @@ export default async function AccountVoucherPage({ params, searchParams }: PageP
         {/* Sin nombre ni dirección del hotel: sólo gastaban papel (pedido de Agustín,
             2026-09-22). El remito arranca en el tipo de comprobante. */}
         <p className="tipo">COMPROBANTE CTA. CTE.</p>
+        {reimpresion && <p className="tipo">REIMPRESIÓN</p>}
         <hr />
         {/* QR al costado del número, no arriba: el bloque ocupa lo que mide el QR
             y el ticket sale más corto que el de antes sin QR (pedido de Agustín). */}
