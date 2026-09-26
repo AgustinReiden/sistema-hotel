@@ -70,15 +70,55 @@ export const SESSION_CLOSED_NOTICE =
   "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
 
 /**
- * Si alguien movió el mouse, tocó la pantalla, usó la rueda o apretó una tecla hace menos
- * que esto, la recarga espera: al llegar, un aviso que aparece o una tarjeta que cambia de
- * alto corre la grilla, y el toque caería en otro botón. Se reintenta apenas la pantalla
- * queda quieta este tiempo, sin esperar al próximo turno.
+ * Si alguien movió el mouse, tocó la pantalla, usó la rueda, apretó una tecla o la pantalla
+ * se estuvo desplazando hace menos que esto, la recarga espera: al llegar, un aviso que
+ * aparece o una tarjeta que cambia de alto corre la grilla, y el toque caería en otro botón.
+ * Se reintenta apenas la pantalla queda quieta este tiempo, sin esperar al próximo turno.
  */
 const ACTIVITY_QUIET_MS = 2000;
 
-/** Lo que cuenta como "la están usando". */
-const ACTIVITY_EVENTS = ["pointermove", "pointerdown", "touchstart", "wheel", "keydown"] as const;
+/**
+ * Lo que cuenta como "la están usando". `touchmove` y `scroll` cubren el desplazamiento:
+ * cuando el navegador toma el deslizamiento del dedo manda `pointercancel` y deja de mandar
+ * pointer events, y mientras se arrastra la barra con el mouse tampoco llegan `pointermove`.
+ * `scroll` sigue llegando durante todo el desplazamiento, también con el impulso después de
+ * soltar el dedo. El panel se desplaza en un div interno, donde `scroll` no burbujea: por
+ * eso los listeners van en captura, como en `IdleLogout`.
+ */
+const ACTIVITY_EVENTS = [
+  "pointermove",
+  "pointerdown",
+  "touchstart",
+  "touchmove",
+  "wheel",
+  "scroll",
+  "keydown",
+] as const;
+
+/**
+ * Si el puntero quedó apoyado sobre algo que se aprieta (un botón, un enlace), la pantalla
+ * cuenta como en uso hasta este tiempo después del último movimiento, no solo 2 s: quien lee
+ * la tarjeta con el mouse ya sobre "Cobrar Medio Dia" está por hacer clic, y si la grilla se
+ * corre en ese momento el clic cae en el botón de otra habitación. Tiene tope para que un
+ * mouse que quedó olvidado sobre un botón no frene el refresco para siempre.
+ */
+const POINTER_ON_CONTROL_HOLD_MS = 10000;
+
+/** Lo que se aprieta, con el puntero encima. */
+const CONTROL_UNDER_POINTER_SELECTOR = [
+  "button:hover",
+  "a:hover",
+  '[role="button"]:hover',
+  "input:hover",
+  "select:hover",
+  "label:hover",
+  "summary:hover",
+].join(", ");
+
+/** ¿El puntero está apoyado sobre algo que se aprieta? */
+function pointerOnControl(doc: Document): boolean {
+  return doc.querySelector(CONTROL_UNDER_POINTER_SELECTOR) !== null;
+}
 
 /**
  * Pasivos: no frenan el scroll ni el toque. En captura: los ve aunque un cuadro corte la
@@ -200,7 +240,8 @@ type UseAutoRefreshOptions = {
  * pedir los server components (el mismo patrón que la Caja). Antes de cada recarga:
  * - `shouldSkipRefresh` decide si no conviene (pestaña oculta, sin red, cuadro abierto,
  *   foco en un campo): se saltea hasta el próximo turno;
- * - si la están usando (actividad en los últimos `ACTIVITY_QUIET_MS`), espera y recarga
+ * - si la están usando (actividad en los últimos `ACTIVITY_QUIET_MS`, o en los últimos
+ *   `POINTER_ON_CONTROL_HOLD_MS` si el puntero quedó sobre un botón), espera y recarga
  *   apenas la pantalla queda quieta. Los "`intervalMs` como máximo" valen mientras nadie
  *   la usa;
  * - `probeServer` comprueba que el panel conteste, pasando por el proxy. Si no, no recarga
@@ -214,9 +255,9 @@ type UseAutoRefreshOptions = {
  * que la pantalla lo avise. Vuelve a null con el primer chequeo que anda. No recargar a
  * propósito (pestaña oculta, cuadro abierto, un campo con el foco, alguien usándola) no
  * cuenta como falla. Lo devuelto cambia (aparece, se va o cambia de causa) recién cuando
- * la pantalla queda quieta `ACTIVITY_QUIET_MS`, igual que la recarga: el chequeo puede
- * volver hasta `PROBE_TIMEOUT_MS` después de salir, y si en ese rato la empezaron a usar,
- * la línea del aviso correría la grilla bajo el toque.
+ * la pantalla queda quieta, igual que la recarga: el chequeo puede volver hasta
+ * `PROBE_TIMEOUT_MS` después de salir, y si en ese rato la empezaron a usar, la línea del
+ * aviso correría la grilla bajo el toque.
  *
  * Lo que NO puede hacer: frenar una recarga que ya salió. Si alguien abre un cuadro
  * mientras vuelve la respuesta (alrededor de un segundo, sobre todo justo al volver a la
@@ -260,7 +301,13 @@ export function useAutoRefresh({
     // El cambio de lo que devuelve el hook que espera a que la pantalla quede quieta.
     let showTimer: number | null = null;
 
-    const inUse = () => Date.now() - lastActivityAt < ACTIVITY_QUIET_MS;
+    // Cuánto falta para que la pantalla cuente como quieta (0 si ya lo está): 2 s desde la
+    // última actividad, o `POINTER_ON_CONTROL_HOLD_MS` si el puntero quedó sobre un botón.
+    const untilQuiet = () => {
+      const hold = pointerOnControl(document) ? POINTER_ON_CONTROL_HOLD_MS : ACTIVITY_QUIET_MS;
+      return Math.max(0, lastActivityAt + hold - Date.now());
+    };
+    const inUse = () => untilQuiet() > 0;
 
     // Muestra lo que dejó el último chequeo (la línea de Hoy aparece, se va o cambia de
     // causa) con la pantalla quieta, como la recarga: si la están usando, espera a que quede
@@ -268,11 +315,10 @@ export function useAutoRefresh({
     const showWhenQuiet = () => {
       if (pendingTroubleRef.current === undefined || showTimer !== null) return;
       if (inUse()) {
-        const wait = Math.max(0, lastActivityAt + ACTIVITY_QUIET_MS - Date.now());
         showTimer = window.setTimeout(() => {
           showTimer = null;
           showWhenQuiet();
-        }, wait);
+        }, untilQuiet());
         return;
       }
       const next = pendingTroubleRef.current;
@@ -300,11 +346,10 @@ export function useAutoRefresh({
 
     const refreshWhenQuiet = () => {
       if (quietTimer !== null) return;
-      const wait = Math.max(0, lastActivityAt + ACTIVITY_QUIET_MS - Date.now());
       quietTimer = window.setTimeout(() => {
         quietTimer = null;
         void refresh();
-      }, wait);
+      }, untilQuiet());
     };
 
     const refresh = async () => {

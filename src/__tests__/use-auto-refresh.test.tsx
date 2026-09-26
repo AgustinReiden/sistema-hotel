@@ -23,12 +23,35 @@ type Respuesta = { status: number; type?: ResponseType; redirected?: boolean };
  */
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Respuesta>>();
 
-/** Las cosas que cuentan como "la están usando" (mover el mouse, tocar, la rueda, una tecla). */
-const ACTIVIDAD = ["pointermove", "pointerdown", "touchstart", "wheel", "keydown"] as const;
+/**
+ * Las cosas que cuentan como "la están usando" (mover el mouse, tocar, deslizar el dedo, la
+ * rueda, desplazar la pantalla, una tecla).
+ */
+const ACTIVIDAD = [
+  "pointermove",
+  "pointerdown",
+  "touchstart",
+  "touchmove",
+  "wheel",
+  "scroll",
+  "keydown",
+] as const;
 
 /** La recepcionista mueve el mouse, toca o aprieta una tecla sobre Hoy. */
 function usar(evento: (typeof ACTIVIDAD)[number] = "pointermove") {
   document.body.dispatchEvent(new Event(evento, { bubbles: true }));
+}
+
+/**
+ * Deja el puntero apoyado sobre `el` (jsdom no sabe dónde está el puntero: `:hover` nunca
+ * coincide). Lo que está "debajo" es `el`, si el selector lo incluye sin el `:hover`.
+ */
+function apoyarMouseSobre(el: Element) {
+  const original = document.querySelector.bind(document);
+  vi.spyOn(document, "querySelector").mockImplementation(((selector: string) => {
+    if (!selector.includes(":hover")) return original(selector);
+    return el.isConnected && el.matches(selector.replaceAll(":hover", "")) ? el : null;
+  }) as typeof document.querySelector);
 }
 
 let tabOculta = false;
@@ -580,6 +603,151 @@ describe("useAutoRefresh — no recarga mientras la están usando", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["touchmove", "scroll"] as const)(
+    "con %s cada 500 ms durante 5 s no pregunta ni recarga hasta 2 s después del último",
+    async (evento) => {
+      // Desliza la lista de habitaciones con el dedo o arrastra la barra con el mouse: el
+      // navegador toma el desplazamiento y ya no manda pointer events.
+      renderHook(() => useAutoRefresh());
+      // El panel se desplaza en un div interno, donde `scroll` no burbujea.
+      const lista = document.createElement("div");
+      document.body.appendChild(lista);
+
+      await vi.advanceTimersByTimeAsync(27_000);
+      for (let t = 0; t <= 5_000; t += 500) {
+        lista.dispatchEvent(new Event(evento, { bubbles: evento !== "scroll" }));
+        if (t < 5_000) await vi.advanceTimersByTimeAsync(500);
+      }
+      // El turno de los 30 s pasó mientras se desplazaba; el último, a los 32 s.
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+
+      // A los 34 s lleva 2 s quieta.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("el desplazamiento con impulso después de soltar el dedo también cuenta: recarga 2 s después del último scroll", async () => {
+    renderHook(() => useAutoRefresh());
+    const lista = document.createElement("div");
+    document.body.appendChild(lista);
+
+    // A los 27 s toca la lista y la desliza 2 s; a los 29 s suelta el dedo con impulso.
+    await vi.advanceTimersByTimeAsync(27_000);
+    usar("touchstart");
+    for (let t = 0; t < 2_000; t += 250) {
+      lista.dispatchEvent(new Event("touchmove", { bubbles: true }));
+      lista.dispatchEvent(new Event("scroll"));
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    // Sigue desplazándose sola 3 s más: solo llega scroll.
+    for (let t = 0; t < 3_000; t += 250) {
+      lista.dispatchEvent(new Event("scroll"));
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    // A los 32 s: el último scroll fue a los 31,75 s.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_749);
+    expect(refresh).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("con el mouse apoyado sobre un botón espera 10 s desde el último movimiento; olvidado ahí, no frena el refresco", async () => {
+    renderHook(() => useAutoRefresh());
+    const cobrar = document.createElement("button");
+    cobrar.textContent = "Cobrar Medio Dia";
+    document.body.appendChild(cobrar);
+
+    // A los 27 s lleva el mouse hasta el botón y lo deja quieto ahí mientras lee la tarjeta.
+    await vi.advanceTimersByTimeAsync(27_000);
+    usar("pointermove");
+    apoyarMouseSobre(cobrar);
+
+    // A los 30 s lleva 3 s quieto, pero sobre el botón: está por hacer clic, no recarga.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(6_999);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+
+    // A los 37 s lleva 10 s quieto sobre el botón: se lo toma como olvidado y recarga.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Y el intervalo sigue aunque el mouse siga ahí.
+    await vi.advanceTimersByTimeAsync(23_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("después de un clic con el mouse sobre el botón, vuelve a esperar 10 s", async () => {
+    renderHook(() => useAutoRefresh());
+    const marcarLista = document.createElement("button");
+    marcarLista.textContent = "Marcar Lista";
+    document.body.appendChild(marcarLista);
+    apoyarMouseSobre(marcarLista);
+
+    // Hace clic a los 25 s y deja el mouse ahí.
+    await vi.advanceTimersByTimeAsync(25_000);
+    usar("pointerdown");
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(refresh).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("con el mouse quieto sobre algo que no se aprieta (el fondo de la tarjeta), 2 s alcanzan", async () => {
+    renderHook(() => useAutoRefresh());
+    const tarjeta = document.createElement("div");
+    tarjeta.textContent = "Habitación 4";
+    document.body.appendChild(tarjeta);
+
+    await vi.advanceTimersByTimeAsync(27_000);
+    usar("pointermove");
+    apoyarMouseSobre(tarjeta);
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["un enlace", () => Object.assign(document.createElement("a"), { href: "/admin/calendario" })],
+    ["un [role=button]", () => {
+      const el = document.createElement("div");
+      el.setAttribute("role", "button");
+      return el;
+    }],
+    ["un checkbox", () => Object.assign(document.createElement("input"), { type: "checkbox" })],
+    ["un select", () => document.createElement("select")],
+  ])("con el mouse quieto sobre %s también espera 10 s", async (_que, crear) => {
+    renderHook(() => useAutoRefresh());
+    const el = crear();
+    document.body.appendChild(el);
+
+    await vi.advanceTimersByTimeAsync(27_000);
+    usar("pointermove");
+    apoyarMouseSobre(el);
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(refresh).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("escucha la actividad en window con listeners pasivos y al desmontar los saca todos", () => {
     const agregar = vi.spyOn(window, "addEventListener");
     const sacar = vi.spyOn(window, "removeEventListener");
@@ -938,6 +1106,33 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     await avanzar(1);
     expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("si el mouse queda apoyado sobre un botón mientras vuelve el 3.º chequeo, la línea espera 10 s desde el último movimiento", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    servidorColgado();
+    const marcarLista = document.createElement("button");
+    marcarLista.textContent = "Marcar Lista";
+    document.body.appendChild(marcarLista);
+
+    await avanzar(90_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // A los 94 s lleva el mouse hasta "Marcar Lista" y lo deja ahí; a los 95 s vence el chequeo.
+    await avanzar(4_000);
+    usar("pointermove");
+    apoyarMouseSobre(marcarLista);
+    await avanzar(1_000);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // 2 s quieto no alcanzan: está por hacer clic.
+    await avanzar(8_999);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // A los 104 s lleva 10 s quieto sobre el botón.
+    await avanzar(1);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
     expect(refresh).not.toHaveBeenCalled();
   });
 
