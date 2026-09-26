@@ -18,9 +18,11 @@ vi.mock("sonner", () => ({
 
 const loadCcAccountStaysAction = vi.fn();
 const emitConsolidatedInvoiceAction = vi.fn();
+const loadGuestDocumentAction = vi.fn();
 vi.mock("./actions", () => ({
   loadCcAccountStaysAction: (...args: unknown[]) => loadCcAccountStaysAction(...args),
   emitConsolidatedInvoiceAction: (...args: unknown[]) => emitConsolidatedInvoiceAction(...args),
+  loadGuestDocumentAction: (...args: unknown[]) => loadGuestDocumentAction(...args),
 }));
 
 // Para los tests de page.tsx: el redirect de Next corta la ejecución tirando un error,
@@ -32,13 +34,15 @@ vi.mock("next/navigation", () => ({
   redirect: (url: string) => redirect(url),
 }));
 const getCurrentUserRole = vi.fn();
-const getCtaCteAccounts = vi.fn();
+// Sólo la consulta puntual del cliente de la URL: si page.tsx volviera a leer la lista
+// entera de cuentas (getCtaCteAccounts), el mock no la tiene y la página no abre.
+const getCtaCteAccount = vi.fn();
 const getCtaCteBillingProfile = vi.fn();
 const getFiscalSettings = vi.fn();
 const getHotelSettings = vi.fn();
 vi.mock("@/lib/data", () => ({
   getCurrentUserRole: () => getCurrentUserRole(),
-  getCtaCteAccounts: () => getCtaCteAccounts(),
+  getCtaCteAccount: (...args: unknown[]) => getCtaCteAccount(...args),
   getCtaCteBillingProfile: (...args: unknown[]) => getCtaCteBillingProfile(...args),
   getFiscalSettings: () => getFiscalSettings(),
   getHotelSettings: () => getHotelSettings(),
@@ -211,6 +215,24 @@ function abrirCuadro() {
   return screen.getByLabelText(CUADRO);
 }
 
+/**
+ * Como abrirCuadro(), para un huésped consumidor final: antes de abrir, el cuadro vuelve
+ * a leer el nombre y el DNI de la ficha (loadGuestDocumentAction), así que aparece
+ * recién cuando esa lectura contesta.
+ */
+async function abrirCuadroHuesped() {
+  if (!vi.isFakeTimers()) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+  }
+  fireEvent.click(screen.getByText(REVISAR));
+  const cuadro = await screen.findByLabelText(CUADRO);
+  // El cuadro se abrió cuando contestó la lectura, fuera del act() del click: se dejan
+  // correr sus efectos (la espera de «Confirmar» arranca en uno) antes de adelantar el
+  // reloj en confirmarListo().
+  await act(async () => {});
+  return cuadro;
+}
+
 /** El botón "Confirmar y emitir en ARCA" del cuadro. */
 const botonConfirmar = (cuadro: HTMLElement) =>
   within(cuadro).getByText(CONFIRMAR).closest("button") as HTMLButtonElement;
@@ -283,6 +305,17 @@ describe("ConsolidadaClient", () => {
     emitConsolidatedInvoiceAction.mockResolvedValue({
       success: true,
       data: { status: "authorized", invoiceId: "inv-1", numero: "0003-00000001", count: 1 },
+    });
+    // La ficha del huésped que el cuadro vuelve a leer: por defecto, la misma que la
+    // cuenta que se leyó al abrir la página.
+    loadGuestDocumentAction.mockReset();
+    loadGuestDocumentAction.mockImplementation((guestId: string) => {
+      const cuenta = accounts.find((a) => a.kind === "guest" && a.id === guestId);
+      return Promise.resolve(
+        cuenta
+          ? { success: true, data: { fullName: cuenta.name, documentId: cuenta.document_id } }
+          : { success: false, error: "No se encontró el huésped." }
+      );
     });
   });
 
@@ -1163,13 +1196,14 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(botonRevisar());
       expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
 
-      // La recarga vuelve a tildar todo lo pendiente: recién ahí se puede revisar, y el
-      // cuadro dice lo que va de verdad.
+      // Recién con la lista recargada se puede revisar, y el cuadro dice lo que va de
+      // verdad: lo pendiente menos la hab. 2, que se destildó a mano y la recarga respeta.
       await act(async () => {
         responderRecarga({ success: true, data: filas });
       });
       await waitFor(() => expect(botonRevisar()).toBeEnabled());
-      expect(within(abrirCuadro()).getByText(/^3 estadías/)).toBeInTheDocument();
+      expect(filaCheckbox("2")).not.toBeChecked();
+      expect(within(abrirCuadro()).getByText(/^2 estadías/)).toBeInTheDocument();
     });
 
     // Cambiar el período con la carga anterior todavía en camino deja dos cargas en fila
@@ -1562,7 +1596,7 @@ describe("ConsolidadaClient", () => {
       renderClient("g-dni-ok", "guest");
       await screen.findByLabelText(BARRA);
 
-      const cuadro = abrirCuadro();
+      const cuadro = await abrirCuadroHuesped();
 
       expect(within(cuadro).getByText("Factura B")).toBeInTheDocument();
       expect(within(cuadro).getByText("Juan Prueba")).toBeInTheDocument();
@@ -1574,17 +1608,17 @@ describe("ConsolidadaClient", () => {
     it("un huésped con DNI inválido ve el aviso y no puede confirmar", async () => {
       renderClient("g-dni-mal", "guest");
       await screen.findByLabelText(BARRA);
-      // El DNI se lee al abrir la página: corregido en Huéspedes, esta pantalla no se entera
-      // hasta que se recarga. Lo dice antes de abrir el cuadro y adentro del cuadro.
-      expect(
-        screen.getByText(/corregilo en Huéspedes y después recargá esta página/)
-      ).toBeInTheDocument();
+      // El DNI se vuelve a leer cada vez que se abre el cuadro: corregido en Huéspedes, no
+      // hace falta recargar la página (que pierde lo tildado y los textos). Lo dice antes
+      // de abrir el cuadro y adentro del cuadro.
+      expect(screen.getByText(/se vuelven a leer cada vez que abrís/)).toBeInTheDocument();
+      expect(screen.queryByText(/recargá esta página/)).not.toBeInTheDocument();
 
-      const cuadro = abrirCuadro();
+      const cuadro = await abrirCuadroHuesped();
 
       expect(within(cuadro).getByText(/no sirve para facturar/)).toBeInTheDocument();
       expect(
-        within(cuadro).getByText(/Corregilo en Huéspedes y después recargá esta página/)
+        within(cuadro).getByText(/Corregilo en Huéspedes y volvé a abrir este cuadro/)
       ).toBeInTheDocument();
       // Pasada la espera anti doble toque, sigue deshabilitado: lo traba el DNI.
       await pasarEsperaConfirmar();
@@ -1674,7 +1708,7 @@ describe("ConsolidadaClient", () => {
       // La pantalla arranca con la condición de la ficha; el que factura elige consumidor final.
       fireEvent.change(screen.getByLabelText("Condición frente al IVA"), { target: { value: "" } });
 
-      const cuadro = abrirCuadro();
+      const cuadro = await abrirCuadroHuesped();
       expect(within(cuadro).getByText("Factura B")).toBeInTheDocument();
       expect(within(cuadro).getByText("Pedro Prueba")).toBeInTheDocument();
       expect(within(cuadro).getByText("DNI 30123457")).toBeInTheDocument();
@@ -1694,7 +1728,7 @@ describe("ConsolidadaClient", () => {
       renderClient("g-dni-ok", "guest");
       await screen.findByLabelText(BARRA);
 
-      fireEvent.click(await confirmarListo(abrirCuadro()));
+      fireEvent.click(await confirmarListo(await abrirCuadroHuesped()));
 
       await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1));
       const payload = payloadEmitido();
@@ -1785,7 +1819,9 @@ describe("ConsolidadaClient", () => {
       );
       renderClient();
 
-      await screen.findByText(/ya están cubiertas/);
+      // Con una sola estadía, en singular (antes decía «las 1 de esta cuenta ya están
+      // cubiertas»).
+      await screen.findByText(/la única de esta cuenta ya está cubierta/);
       expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByText("Ver todas"));
@@ -1963,13 +1999,531 @@ describe("ConsolidadaClient", () => {
       expect(screen.getByLabelText("Texto del concepto único")).toHaveValue("Alojamiento");
     });
   });
+
+  // Lo que F0-1 (#140) dejó en Pendientes, resuelto en H1.
+
+  /** Respuesta de la carga de la lista. */
+  const lista = (data: CcAccountStayRow[]) => Promise.resolve({ success: true, data });
+  /** La estadía `r${n}` con una factura «en proceso»: ya no es facturable. */
+  const facturada = (n: string): CcAccountStayRow => ({
+    ...makeRow(`r${n}`, n, { facturable: false }),
+    estado: "en_proceso",
+  });
+  const lineaDe = (habitacion: string) =>
+    screen.getByLabelText(`Descripción de la estadía de habitación ${habitacion}`);
+  const campoNota = () => screen.getByLabelText(/Nota al pie/);
+  const campoConcepto = () => screen.getByLabelText("Texto del concepto único");
+
+  describe("el cuadro vuelve a leer el nombre y el DNI del huésped al abrirse", () => {
+    it("con el DNI corregido en Huéspedes y la consolidada abierta, «Revisar y emitir» muestra el DNI y el nombre nuevos sin recargar la página", async () => {
+      renderClient("g-dni-mal", "guest");
+      await waitFor(() => expect(filaCheckbox("5")).toBeChecked());
+      // Algo cargado en la pantalla, que recargar la página perdería.
+      fireEvent.change(campoNota(), { target: { value: "Orden de compra 7" } });
+
+      // Con la consolidada abierta, corrigen el DNI (y el nombre) en Huéspedes.
+      loadGuestDocumentAction.mockResolvedValueOnce({
+        success: true,
+        data: { fullName: "Ana María Prueba", documentId: "30123458" },
+      });
+      const cuadro = await abrirCuadroHuesped();
+
+      expect(loadGuestDocumentAction).toHaveBeenCalledWith("g-dni-mal");
+      expect(within(cuadro).getByText("Ana María Prueba")).toBeInTheDocument();
+      expect(within(cuadro).getByText("DNI 30123458")).toBeInTheDocument();
+      expect(within(cuadro).queryByText(/no sirve para facturar/)).not.toBeInTheDocument();
+      expect(within(cuadro).queryByText(/No pudimos volver a leer/)).not.toBeInTheDocument();
+      await confirmarListo(cuadro);
+      // No se recargó nada: la lista es la de antes y la nota sigue.
+      expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(1);
+      expect(campoNota()).toHaveValue("Orden de compra 7");
+    });
+
+    it.each([
+      ["no contesta", () => loadGuestDocumentAction.mockRejectedValueOnce(new Error("Failed to fetch"))],
+      [
+        "contesta con error",
+        () =>
+          loadGuestDocumentAction.mockResolvedValueOnce({
+            success: false,
+            error: "No se pudo leer la ficha del huésped.",
+          }),
+      ],
+    ])("si la lectura de la ficha %s, el cuadro abre igual con el DNI que había y lo avisa", async (_caso, preparar) => {
+      preparar();
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = await abrirCuadroHuesped();
+
+      expect(within(cuadro).getByText("Juan Prueba")).toBeInTheDocument();
+      expect(within(cuadro).getByText("DNI 30123456")).toBeInTheDocument();
+      expect(
+        within(cuadro).getByText(/No pudimos volver a leer la ficha del huésped/)
+      ).toBeInTheDocument();
+      await confirmarListo(cuadro);
+    });
+
+    it("una empresa, o un huésped que se factura con CUIT, no lee la ficha: el receptor es el de la pantalla", async () => {
+      const { unmount } = renderClient("ficticia");
+      await screen.findByLabelText(BARRA);
+      fireEvent.click(within(abrirCuadro()).getByText("Volver"));
+      unmount();
+
+      renderClient("g-ri", "guest");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563"));
+      expect(within(abrirCuadro()).getByText("CUIT 20-30123456-3")).toBeInTheDocument();
+      expect(loadGuestDocumentAction).not.toHaveBeenCalled();
+    });
+
+    it("si la lista se recarga mientras se lee la ficha, el cuadro no se abre: lo tildado puede haber cambiado", async () => {
+      let responderFicha: (value: unknown) => void = () => {};
+      loadGuestDocumentAction.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            responderFicha = resolve;
+          })
+      );
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(screen.getByText(REVISAR));
+      // Mientras lee, el botón no pide otra lectura.
+      expect(botonRevisar()).toBeDisabled();
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        responderFicha({ success: true, data: { fullName: "Juan Prueba", documentId: "30123456" } });
+      });
+
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(loadGuestDocumentAction).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+    });
+  });
+
+  describe("textos del receptor: no prometen guardar en la ficha lo que no se guarda", () => {
+    const PROMESA_VIEJA = /queda guardad|Si la cambiás acá/;
+
+    it("empresa: dice que se completa sólo lo que le faltaba a la ficha, y que la razón social no se guarda", async () => {
+      const { container } = renderClient("ficticia");
+      await screen.findByLabelText(BARRA);
+
+      expect(container.textContent).not.toMatch(PROMESA_VIEJA);
+      expect(
+        screen.getByText(
+          "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT válido, condición frente al IVA o domicilio, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("huésped que se factura con CUIT: lo mismo, con los datos de su ficha y la edición en Huéspedes", async () => {
+      const { container } = renderClient("g-ri", "guest");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563"));
+
+      expect(container.textContent).not.toMatch(PROMESA_VIEJA);
+      expect(
+        screen.getByText(
+          "Sale precargada de la ficha del huésped. Lo que elijas acá vale para esta factura; si la ficha no tenía condición y elegís una con CUIT, se completa. Para cambiar la de la ficha, editala en Huéspedes."
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT, condición frente al IVA o domicilio fiscal, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("huésped consumidor final: dice que no se guarda nada en la ficha", async () => {
+      const { container } = renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      expect(container.textContent).not.toMatch(PROMESA_VIEJA);
+      expect(
+        screen.getByText(/Como consumidor final, no se guarda nada en la ficha\./)
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("lo que se destilda a mano sigue destildado en cada recarga", () => {
+    const tres = () => [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")];
+    const LINEA_SELECCION = /de la selección/;
+
+    it("después de «Recargar» la destildada sigue destildada, y una estadía nueva entra tildada, sin aviso", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista(tres()))
+        .mockImplementationOnce(() => lista([...tres(), makeRow("r4", "4")]));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      fireEvent.click(fila("2"));
+      fireEvent.click(screen.getByTitle("Recargar"));
+
+      await waitFor(() => expect(filaCheckbox("4")).toBeChecked());
+      expect(filaCheckbox("1")).toBeChecked();
+      expect(filaCheckbox("2")).not.toBeChecked();
+      expect(filaCheckbox("3")).toBeChecked();
+      expect(screen.queryByText(LINEA_SELECCION)).not.toBeInTheDocument();
+    });
+
+    it("después de un error conocido de emisión, la recarga respeta lo destildado", async () => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      loadCcAccountStaysAction.mockImplementation(() => lista(tres()));
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: false,
+        error: "ARCA no respondió. Probá de nuevo en unos minutos.",
+      });
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      fireEvent.click(fila("3"));
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      expect(filaCheckbox("1")).toBeChecked();
+      expect(filaCheckbox("3")).not.toBeChecked();
+      expect(within(abrirCuadro()).getByText(/^2 estadías/)).toBeInTheDocument();
+    });
+
+    it("cambiar de período y volver a «Todo» tampoco vuelve a tildar lo destildado", async () => {
+      loadCcAccountStaysAction.mockImplementation(() => lista(tres()));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      fireEvent.click(fila("2"));
+      fireEvent.click(screen.getByText("Este mes"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+      expect(filaCheckbox("2")).not.toBeChecked();
+
+      fireEvent.click(screen.getByText("Todo"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+      expect(filaCheckbox("2")).not.toBeChecked();
+    });
+
+    it("«Seleccionar todo» y «Deseleccionar todo» también cuentan como elegir a mano", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista(tres()))
+        .mockImplementationOnce(() => lista(tres()))
+        .mockImplementationOnce(() => lista([...tres(), makeRow("r4", "4")]));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      // Destildada y vuelta a tildar con «Seleccionar todo»: la recarga la deja tildada.
+      fireEvent.click(fila("2"));
+      fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
+      expect(filaCheckbox("2")).toBeChecked();
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      // «Deseleccionar todo»: la recarga no vuelve a tildar ninguna, salvo la nueva.
+      fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
+      expect(filaCheckbox("1")).not.toBeChecked();
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() => expect(filaCheckbox("4")).toBeChecked());
+      expect(filaCheckbox("1")).not.toBeChecked();
+      expect(filaCheckbox("2")).not.toBeChecked();
+      expect(filaCheckbox("3")).not.toBeChecked();
+    });
+
+    it("si al recargar una estadía que estaba tildada ya no está pendiente, lo avisa en una línea", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista(tres()))
+        // Mientras tanto, otra persona facturó la hab. 3.
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), makeRow("r2", "2"), facturada("3")]));
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      // La hab. 2 se destilda a mano: esa no es "otra razón" y no cuenta en el aviso.
+      fireEvent.click(fila("2"));
+      fireEvent.click(screen.getByTitle("Recargar"));
+
+      expect(
+        await screen.findByText(
+          "Al recargar, 1 estadía que tenías tildada ya no está pendiente y salió de la selección."
+        )
+      ).toBeInTheDocument();
+      expect(filaCheckbox("1")).toBeChecked();
+      expect(filaCheckbox("2")).not.toBeChecked();
+      expect(screen.queryByLabelText("Incluir estadía de habitación 3")).not.toBeInTheDocument();
+      expect(screen.getByLabelText(BARRA).textContent).toContain(`1 estadía · Total $${plata(10000)}`);
+    });
+  });
+
+  describe("después de una factura autorizada, la siguiente del mismo cliente arranca de cero", () => {
+    beforeEach(() => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      vi.mocked(window.open).mockClear();
+    });
+
+    it("sin nota, sin «Un solo concepto» y sin textos editados; con un error, en cambio, queda todo como estaba", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), makeRow("r2", "2")]))
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), makeRow("r2", "2")]))
+        .mockImplementationOnce(() => lista([facturada("1"), makeRow("r2", "2")]));
+      emitConsolidatedInvoiceAction
+        .mockResolvedValueOnce({
+          success: false,
+          error: "ARCA no respondió. Probá de nuevo en unos minutos.",
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { status: "authorized", invoiceId: "inv-1", numero: "0003-00000001", count: 1 },
+        });
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+      // La línea de la hab. 2 se edita y después se la deja para otra factura.
+      fireEvent.change(lineaDe("2"), { target: { value: "Salón" } });
+      fireEvent.click(fila("2"));
+      fireEvent.change(lineaDe("1"), { target: { value: "Convención anual" } });
+      fireEvent.change(campoNota(), { target: { value: "Orden de compra 4512" } });
+      fireEvent.click(screen.getByText("Un solo concepto"));
+      fireEvent.change(campoConcepto(), { target: { value: "Servicios de alojamiento" } });
+
+      // Con un error, todo queda como estaba: se reintenta con lo mismo.
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith("ARCA no respondió. Probá de nuevo en unos minutos.")
+      );
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      expect(campoNota()).toHaveValue("Orden de compra 4512");
+      expect(campoConcepto()).toHaveValue("Servicios de alojamiento");
+      fireEvent.click(screen.getByText("Detallado"));
+      expect(lineaDe("1")).toHaveValue("Convención anual");
+      fireEvent.click(screen.getByText("Un solo concepto"));
+
+      // Autorizada: sale con lo cargado...
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await waitFor(() => expect(window.open).toHaveBeenCalled());
+      expect(emitConsolidatedInvoiceAction.mock.calls[1][0]).toMatchObject({
+        conceptoUnico: "Servicios de alojamiento",
+        nota: "Orden de compra 4512",
+      });
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+
+      // ...y la siguiente arranca de cero. La hab. 2 se había dejado afuera a mano: sigue
+      // sin tildar hasta que alguien la tilde.
+      await waitFor(() => expect(filaCheckbox("2")).not.toBeChecked());
+      fireEvent.click(fila("2"));
+      expect(screen.getByText("Detallado")).toHaveAttribute("aria-pressed", "true");
+      expect(campoNota()).toHaveValue("");
+      expect(lineaDe("2")).toHaveValue("Hab. 2 - 01/09/2026 al 03/09/2026");
+      fireEvent.click(screen.getByText("Un solo concepto"));
+      expect(campoConcepto()).toHaveValue("Alojamiento");
+      // La hab. 1 salió de la selección porque se facturó: no es un aviso.
+      expect(screen.queryByText(/de la selección/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("debajo de «Detallado» dice lo mismo que el cuadro: cuántas líneas llevan texto escrito a mano", async () => {
+    loadCcAccountStaysAction.mockImplementation(() =>
+      lista([makeRow("r1", "1"), makeRow("r2", "2")])
+    );
+    renderClient();
+    await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+
+    expect(
+      screen.getByText("Detalle: una línea por estadía, con su habitación y sus fechas.")
+    ).toBeInTheDocument();
+
+    fireEvent.change(lineaDe("1"), { target: { value: "Convención anual" } });
+    const frase =
+      "Detalle: una línea por estadía. Una sale con el texto que escribiste en «Detalle del comprobante»; las demás, con su habitación y sus fechas.";
+    expect(screen.getByText(frase)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Sale una línea por estadía, con su habitación y sus fechas.")
+    ).not.toBeInTheDocument();
+    expect(within(abrirCuadro()).getByText(/^Detalle:/).textContent).toBe(frase);
+  });
+
+  describe("factura pendiente, en verificación o rechazada: aviso fijo, no un toast", () => {
+    const AVISO_NO_AUTORIZADA = "La factura no quedó autorizada";
+
+    beforeEach(() => {
+      // Otros tests ya espiaron window.open: se limpian sus llamadas.
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      vi.mocked(window.open).mockClear();
+      vi.mocked(toast.warning).mockClear();
+    });
+
+    it.each([
+      ["rechazada", "rejected", "ARCA rechazó la factura: el receptor no está activo."],
+      ["pendiente", "pending", "No se pudo emitir por conflicto de numeración. Reintentá desde Facturación."],
+      [
+        "en verificación",
+        "processing",
+        "ARCA no respondió a tiempo. La factura quedó en verificación — reintentá en unos minutos desde Facturación (no se va a duplicar).",
+      ],
+    ])("factura %s: el motivo queda arriba de la lista con el link a Facturación, hasta cerrarlo", async (_caso, status, motivo) => {
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: { status, invoiceId: "inv-9", userMessage: motivo, count: 1 },
+      });
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+
+      const aviso = await screen.findByLabelText(AVISO_NO_AUTORIZADA);
+      expect(aviso.textContent).toContain(motivo);
+      expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
+        "href",
+        "/admin/fiscal"
+      );
+      expect(toast.warning).not.toHaveBeenCalled();
+      expect(window.open).not.toHaveBeenCalled();
+      // Se lleva el foco, como el de la emisión incierta: queda a la vista.
+      await waitFor(() => expect(document.activeElement).toBe(aviso));
+
+      // No se va solo: pasa la recarga y el tiempo de cualquier toast, y sigue ahí.
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      act(() => {
+        vi.advanceTimersByTime(30000);
+      });
+      expect(screen.getByLabelText(AVISO_NO_AUTORIZADA)).toBeInTheDocument();
+
+      fireEvent.click(within(aviso).getByText("Cerrar el aviso"));
+      expect(screen.queryByLabelText(AVISO_NO_AUTORIZADA)).not.toBeInTheDocument();
+    });
+
+    it("el aviso se va con la próxima emisión", async () => {
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: {
+          status: "pending",
+          invoiceId: "inv-9",
+          userMessage: "No se pudo emitir por conflicto de numeración. Reintentá desde Facturación.",
+          count: 1,
+        },
+      });
+      renderClient();
+      await screen.findByLabelText(BARRA);
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await screen.findByLabelText(AVISO_NO_AUTORIZADA);
+
+      // La estadía sigue pendiente en este mock: se vuelve a emitir y sale autorizada.
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await waitFor(() => expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(screen.queryByLabelText(AVISO_NO_AUTORIZADA)).not.toBeInTheDocument()
+      );
+    });
+  });
+
+  describe("cuadro: Escape, foco y botones al pie", () => {
+    beforeEach(() => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+    });
+
+    it("Escape y «Volver» cierran sin emitir y devuelven el foco a «Revisar y emitir»; mientras emite, Escape no cierra", async () => {
+      let responder: (value: unknown) => void = () => {};
+      emitConsolidatedInvoiceAction.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            responder = resolve;
+          })
+      );
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      fireEvent.keyDown(abrirCuadro(), { key: "Escape" });
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(botonRevisar());
+
+      fireEvent.click(within(abrirCuadro()).getByText("Volver"));
+      expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(botonRevisar());
+      expect(emitConsolidatedInvoiceAction).not.toHaveBeenCalled();
+
+      // Emitiendo: Escape no hace nada (el cuadro dice «no cierres esta ventana»).
+      const cuadro = abrirCuadro();
+      fireEvent.click(await confirmarListo(cuadro));
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(cuadro, { key: "Escape" });
+      expect(screen.getByLabelText(CUADRO)).toBeInTheDocument();
+
+      await act(async () => {
+        responder({
+          success: true,
+          data: { status: "authorized", invoiceId: "inv-1", numero: "0003-00000001", count: 1 },
+        });
+      });
+      await waitFor(() => expect(screen.queryByLabelText(CUADRO)).not.toBeInTheDocument());
+    });
+
+    it("en un celular chico, el título queda arriba y los botones fijos al pie mientras se desplaza el cuadro", async () => {
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = abrirCuadro();
+
+      const pie = within(cuadro).getByText("Volver").closest(".sticky");
+      expect(pie).toHaveClass("bottom-0");
+      expect(pie).toContainElement(botonConfirmar(cuadro));
+      expect(within(cuadro).getByText(CUADRO).closest(".sticky")).toHaveClass("top-0");
+    });
+  });
+
+  describe("singular y plural", () => {
+    beforeEach(() => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      vi.mocked(toast.success).mockClear();
+    });
+
+    it("con una sola estadía: «1 de 1 estadía» y «emitida (1 estadía)»", async () => {
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      expect(screen.getByText(/Mostrando 1 de 1 estadía de la cuenta\./)).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Factura A 0003-00000001 emitida (1 estadía).")
+      );
+    });
+
+    it("con dos: «2 de 2 estadías» y «emitida (2 estadías)»", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        lista([makeRow("r1", "1"), makeRow("r2", "2")])
+      );
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: { status: "authorized", invoiceId: "inv-2", numero: "0003-00000002", count: 2 },
+      });
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      expect(screen.getByText(/Mostrando 2 de 2 estadías de la cuenta\./)).toBeInTheDocument();
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Factura A 0003-00000002 emitida (2 estadías).")
+      );
+    });
+
+    it("una sola ya cubierta: «1 ya cubierta»", async () => {
+      loadCcAccountStaysAction.mockImplementation(() =>
+        lista([makeRow("r1", "1"), makeRow("r2", "2", { facturable: false })])
+      );
+      renderClient();
+      await screen.findByLabelText(BARRA);
+
+      expect(screen.getByText("1 sin facturar · 1 ya cubierta")).toBeInTheDocument();
+    });
+  });
 });
 
 describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", () => {
   beforeEach(() => {
     redirect.mockClear();
     getCurrentUserRole.mockResolvedValue("admin");
-    getCtaCteAccounts.mockResolvedValue(accounts);
+    getCtaCteAccount.mockReset();
+    getCtaCteAccount.mockImplementation((kind: string, id: string) =>
+      Promise.resolve(accounts.find((a) => a.kind === kind && a.id === id) ?? null)
+    );
     getCtaCteBillingProfile.mockReset();
     getCtaCteBillingProfile.mockImplementation((kind: string, id: string) =>
       Promise.resolve(billingProfiles[`${kind}:${id}`] ?? null)
@@ -1997,7 +2551,8 @@ describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", ()
     );
   });
 
-  const abrir = (params: { kind?: string; id?: string }) =>
+  // Un parámetro repetido en la URL (`?id=a&id=b`) llega como lista, no como texto.
+  const abrir = (params: { kind?: string | string[]; id?: string | string[] }) =>
     ConsolidadaPage({ searchParams: Promise.resolve(params) });
 
   it.each([
@@ -2011,6 +2566,44 @@ describe("page.tsx: a la consolidada se entra siempre con el cliente puesto", ()
     expect(redirect).toHaveBeenCalledWith("/admin/fiscal/control");
     // El id de la URL recién va a la base con el cliente validado.
     expect(getCtaCteBillingProfile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["el id", { kind: "company", id: ["acme", "acme"] }],
+    ["el kind", { kind: ["company", "company"], id: "acme" }],
+  ])("con %s repetido en la URL, lleva a Control en lugar de romperse", async (_caso, params) => {
+    await expect(abrir(params)).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledWith("/admin/fiscal/control");
+    expect(getCtaCteAccount).not.toHaveBeenCalled();
+    expect(getCtaCteBillingProfile).not.toHaveBeenCalled();
+  });
+
+  it("recepción va a /forbidden aunque la URL no traiga cliente: el rol se mira antes que los parámetros", async () => {
+    getCurrentUserRole.mockResolvedValue("receptionist");
+
+    await expect(abrir({})).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledTimes(1);
+    expect(redirect).toHaveBeenCalledWith("/forbidden");
+    expect(getCtaCteAccount).not.toHaveBeenCalled();
+  });
+
+  it("el cliente se valida con una consulta puntual por su id, no con la lista entera de cuentas", async () => {
+    render(await abrir({ kind: "guest", id: "g1" }));
+
+    expect(getCtaCteAccount).toHaveBeenCalledTimes(1);
+    expect(getCtaCteAccount).toHaveBeenCalledWith("guest", "g1");
+    expect(redirect).not.toHaveBeenCalled();
+    expect(screen.getByText("Juan Perez")).toBeInTheDocument();
+    expect(screen.getByText(`Huésped · saldo $${plata(5000)}`)).toBeInTheDocument();
+  });
+
+  it("si no se puede leer el cliente, la página no abre en lugar de mandar a Control como si no fuera de cuenta corriente", async () => {
+    getCtaCteAccount.mockRejectedValue(new Error("no se pudo leer el cliente"));
+
+    await expect(abrir({ kind: "company", id: "acme" })).rejects.toThrow(
+      "no se pudo leer el cliente"
+    );
+    expect(redirect).not.toHaveBeenCalled();
   });
 
   it("con cliente, abre la pantalla con su nombre y el cuadro lleva el ambiente, el punto de venta y el plazo", async () => {

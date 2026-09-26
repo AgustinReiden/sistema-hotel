@@ -471,6 +471,69 @@ export async function getCtaCteAccounts(): Promise<CtaCteAccount[]> {
   return accounts.sort((a, b) => b.balance - a.balance || a.name.localeCompare(b.name, "es-AR"));
 }
 
+/** Forma de un uuid. Un id de la URL que no la tiene no es de ningún cliente. */
+const UUID_FORMA = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * UN cliente de cuenta corriente, con su saldo: con el que abre la factura consolidada
+ * (el id viene de la URL). Mismo criterio que getCtaCteAccounts (la cuenta corriente
+ * prendida, o algún movimiento aunque después se la hayan apagado), pero con dos
+ * consultas por id en lugar de la lista entera, que además ignora los errores de las
+ * consultas de empresas y de huéspedes: con una de esas caída, un cliente válido se
+ * leía como "no es de cuenta corriente". Acá un error de lectura se tira. Null si el
+ * cliente no existe o no es de cuenta corriente.
+ */
+export async function getCtaCteAccount(
+  kind: CtaCteClientKind,
+  id: string
+): Promise<CtaCteAccount | null> {
+  // Sin esto, un id mal formado llega a la base como error de sintaxis y la página se
+  // cae en lugar de volver a Control.
+  if (!UUID_FORMA.test(id)) return null;
+
+  const supabase = await createClient();
+  const [clienteRes, movRes] = await Promise.all([
+    kind === "company"
+      ? supabase
+          .from("associated_clients")
+          .select("id, display_name, document_id, cuenta_corriente_habilitada")
+          .eq("id", id)
+          .maybeSingle()
+      : supabase
+          .from("guests")
+          .select("id, full_name, document_id, cuenta_corriente_habilitada")
+          .eq("id", id)
+          .maybeSingle(),
+    // Cada movimiento es de un solo cliente (cc_mov_one_client, mig 64).
+    supabase
+      .from("cuenta_corriente_movimientos")
+      .select("tipo, amount")
+      .eq(kind === "company" ? "associated_client_id" : "guest_id", id),
+  ]);
+  if (clienteRes.error) throw clienteRes.error;
+  if (movRes.error) throw movRes.error;
+
+  const cliente = clienteRes.data as {
+    id: string;
+    display_name?: string;
+    full_name?: string;
+    document_id: string | null;
+    cuenta_corriente_habilitada: boolean | null;
+  } | null;
+  if (!cliente) return null;
+  const movs = (movRes.data ?? []) as Pick<CcMovRow, "tipo" | "amount">[];
+  if (!cliente.cuenta_corriente_habilitada && movs.length === 0) return null;
+
+  const saldo = movs.reduce((sum, m) => sum + signedMovement(m.tipo, Number(m.amount) || 0), 0);
+  return {
+    kind,
+    id: cliente.id,
+    name: (kind === "company" ? cliente.display_name : cliente.full_name) ?? "",
+    document_id: cliente.document_id ?? null,
+    balance: Math.round((saldo + Number.EPSILON) * 100) / 100,
+  };
+}
+
 /** Movimientos de la cuenta de un cliente (para la ficha), ordenados del más reciente. */
 export async function getCtaCteMovements(
   kind: CtaCteClientKind,
