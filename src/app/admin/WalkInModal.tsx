@@ -8,6 +8,7 @@ import ClientSearch from "./ClientSearch";
 import CompanyPassengerSelector from "./CompanyPassengerSelector";
 import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
+import NumberStepper from "./NumberStepper";
 import { searchGuestsAction } from "./actions";
 import { isEarlyMorning } from "@/lib/arrivals";
 import {
@@ -15,6 +16,7 @@ import {
   calculateWalkInPriceBreakdown,
   resolveEffectiveDiscountPercent,
 } from "@/lib/pricing";
+import { dayLabel, nochesYSalida } from "@/lib/stepper";
 import { addDaysToDateKey, hotelDateKey } from "@/lib/time";
 import type {
   AssignWalkInPayload,
@@ -43,12 +45,6 @@ type WalkInModalProps = {
 };
 
 type ReservationMode = "person" | "company";
-
-// "2026-09-21" → "21/09".
-function dayLabel(dateKey: string): string {
-  const [, month, day] = dateKey.split("-");
-  return `${day}/${month}`;
-}
 
 const inputClass =
   "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
@@ -224,6 +220,11 @@ export default function WalkInModal({
     departureKey === todayKey
       ? `Sale hoy a las ${checkOutLabel}`
       : `Sale el ${dayLabel(departureKey)} a las ${checkOutLabel}`;
+  // El botón final repite las noches y el día de salida: un "13 en vez de 3" se ve
+  // antes de confirmar. Sin el reloj del hotel no se sabe el día, van solo las noches.
+  const submitLabel = isHalfDay
+    ? "Asignar · medio día"
+    : `Asignar · ${nochesYSalida(nights, knowsHotelClock ? departureKeyFor(sellsLastNight) : null)}`;
 
   const personComplete =
     Boolean(clientFirstName.trim()) && Boolean(clientLastName.trim()) && Boolean(clientDni.trim());
@@ -545,36 +546,24 @@ export default function WalkInModal({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {!isHalfDay && (
-              <div>
-                <label htmlFor="nights" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Cantidad de Noches
-                </label>
-                <input
-                  id="nights"
-                  type="number"
-                  min="1"
-                  required
-                  value={nights}
-                  onChange={(e) => setNights(parseInt(e.target.value, 10) || 1)}
-                  className={inputClass}
-                />
-              </div>
-            )}
-            <div>
-              <label htmlFor="guestCount" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Cantidad de pasajeros
-              </label>
-              <input
-                id="guestCount"
-                type="number"
-                min="1"
-                max="20"
-                value={guestCount}
-                onChange={(e) => setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                className={inputClass}
+              <NumberStepper
+                id="nights"
+                label="Cantidad de noches"
+                value={nights}
+                onChange={setNights}
+                min={1}
+                max={30}
               />
-              <p className="text-xs text-slate-500 mt-1">Opcional (default 1).</p>
-            </div>
+            )}
+            <NumberStepper
+              id="guestCount"
+              label="Cantidad de pasajeros"
+              value={guestCount}
+              onChange={setGuestCount}
+              min={1}
+              max={20}
+              hint="Opcional (default 1)."
+            />
           </div>
 
           <GuestRegistryFields
@@ -637,7 +626,7 @@ export default function WalkInModal({
               disabled={isSubmitting || (isHalfDay && halfDayPrice <= 0) || !clientComplete}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
-              {isSubmitting ? "Asignando..." : "Asignar"}
+              {isSubmitting ? "Asignando..." : submitLabel}
             </button>
           </div>
         </form>
