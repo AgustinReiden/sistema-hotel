@@ -214,13 +214,15 @@ describe("RoomCard: check-out a cuenta corriente y el remito", () => {
       )
     ).toBeTruthy();
     expect(screen.getByText(/Falta el remito: el navegador bloqueó la ventana/)).toBeTruthy();
-    // Recepción no entra a Cuenta Corriente: el cuadro dice quién lo reimprime si se
-    // cierra, y el botón de cerrar dice que el papel no sale.
+    // Recepción no entra a Cuenta Corriente, pero lo reimprime desde Caja mientras el
+    // turno siga abierto: el cuadro dice dónde, y el botón de cerrar dice que el papel
+    // no sale.
     expect(
       screen.getByText(
-        /Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente/
+        /Si lo cerrás sin imprimir, lo podés reimprimir desde Caja mientras el turno siga abierto; después, solo un administrador desde la ficha del cliente/
       )
     ).toBeTruthy();
+    expect(screen.queryByText(/lo tiene que reimprimir un administrador/)).toBeNull();
     expect(screen.getByText("Cerrar sin imprimir")).toBeTruthy();
 
     // Vuelve a bloquear: el cuadro sigue ahí y avisa qué hacer.
