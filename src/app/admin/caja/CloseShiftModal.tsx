@@ -32,7 +32,7 @@ import {
   reportShiftConflictAction,
 } from "./actions";
 import { handleExtendReservation } from "@/app/admin/actions";
-import { logout } from "@/app/login/actions";
+import { logout, logoutEverywhere } from "@/app/login/actions";
 import ExportCsvButton from "./ExportCsvButton";
 import ParsedAmountHint, { UNREADABLE_AMOUNT_MESSAGE } from "@/app/admin/ParsedAmountHint";
 import { formatAmount, formatAmountForInput, parseArMoney } from "@/lib/format";
@@ -53,7 +53,8 @@ type Props = {
   checkoutsCount: number;
   /**
    * Qué hacer al apretar "Listo" tras cerrar:
-   *  - "logout": recepción cerró su propia caja al fin de turno → cierra sesión.
+   *  - "logout": recepción cerró su propia caja al fin de turno → cierra sesión en todos
+   *    sus dispositivos.
    *  - "reopen": recepción cerró una caja ajena (rendición forzada) → abre la suya y sigue.
    *  - "refresh": admin → sólo refresca (comportamiento actual).
    */
@@ -331,8 +332,10 @@ export default function CloseShiftModal({
   const handleFinish = async () => {
     if (afterClose === "logout") {
       // Fin de turno de recepción: cerrar sesión (el próximo arranca con login propio).
+      // En todos sus dispositivos, no solo en este: una sesión suya olvidada en otra PC
+      // o en el celular caería en la rendición forzada de la caja que abre la siguiente.
       setFinishing(true);
-      await logout();
+      await logoutEverywhere();
       return;
     }
     if (afterClose === "reopen") {

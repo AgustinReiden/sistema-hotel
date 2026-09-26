@@ -18,8 +18,10 @@ vi.mock("@/app/admin/actions", () => ({
 }));
 
 const logout = vi.fn();
+const logoutEverywhere = vi.fn();
 vi.mock("@/app/login/actions", () => ({
   logout: (...args: unknown[]) => logout(...args),
+  logoutEverywhere: (...args: unknown[]) => logoutEverywhere(...args),
 }));
 
 const getCloseShiftBlockersAction = vi.fn();
@@ -377,5 +379,64 @@ describe("ForcedShiftHandover — el traspaso tal como lo arma el layout", () =>
 
     expect(screen.getByText(/La caja abierta la dejó otro usuario\./)).toBeInTheDocument();
     expect(screen.getByText("Juan Prueba")).toBeInTheDocument();
+  });
+});
+
+describe("CloseShiftModal — Listo después de cerrar la caja", () => {
+  beforeEach(() => {
+    getCloseShiftBlockersAction.mockReset();
+    getCloseShiftBlockersAction.mockResolvedValue({
+      success: true,
+      data: { blockers: [], occupied_alerts_count: 0, unbilled_count: 0 },
+    });
+    closeShiftAction.mockReset();
+    closeShiftAction.mockResolvedValue({
+      success: true,
+      data: { expected_cash: 43700, actual_cash: 43700, discrepancy: 0, shouldLogout: false },
+    });
+    logout.mockReset();
+    logoutEverywhere.mockReset();
+    // Al cerrar se abre el comprobante en otra ventana: jsdom no la implementa.
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  async function cerrarCaja(afterClose: "logout" | "reopen") {
+    render(
+      <CloseShiftModal
+        isOpen
+        onClose={() => {}}
+        shiftId="s1"
+        shiftNumber={1}
+        totalsByMethod={totalsByMethod}
+        creditCharged={0}
+        creditCharges={[]}
+        checkoutsCount={0}
+        afterClose={afterClose}
+      />
+    );
+    const input = (await screen.findByLabelText("Efectivo declarado ($)")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "43.700" } });
+    fireEvent.submit(input.closest("form")!);
+    fireEvent.click(screen.getByText("Confirmar"));
+    await screen.findByText("Caja cerrada");
+  }
+
+  it("al fin de turno de recepción cierra la sesión en todos lados, no solo en esta PC", async () => {
+    await cerrarCaja("logout");
+
+    fireEvent.click(screen.getByText("Listo"));
+
+    await waitFor(() => expect(logoutEverywhere).toHaveBeenCalledTimes(1));
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("en la rendición forzada no cierra ninguna sesión: abre la caja propia", async () => {
+    await cerrarCaja("reopen");
+
+    fireEvent.click(screen.getByText("Listo"));
+
+    await waitFor(() => expect(screen.getByText("Listo").closest("button")).toBeDisabled());
+    expect(logoutEverywhere).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
   });
 });

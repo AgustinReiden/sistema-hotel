@@ -6,7 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * `signOut()` de Supabase usa alcance global por defecto: cierra la sesión del usuario
  * en todos sus dispositivos (la PC de recepción, el celular, la otra PC). Con
  * `{ scope: 'local' }` se cierra solo esta. "Salir", el cierre por inactividad y
- * "Cerrar sesión" del traspaso forzado usan esta misma acción.
+ * "Cerrar sesión" del traspaso forzado usan `logout()`.
+ *
+ * El cuarto camino, "Listo" después de rendir la caja propia al fin de turno, sigue
+ * cerrando en todos lados (`logoutEverywhere()`): la recepcionista se va, y una sesión
+ * suya que quedó abierta en otra PC o en el celular no puede terminar rindiendo la caja
+ * que abre la siguiente.
  */
 
 const H = vi.hoisted(() => ({
@@ -35,7 +40,7 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-import { logout } from "@/app/login/actions";
+import { logout, logoutEverywhere } from "@/app/login/actions";
 
 describe("logout", () => {
   beforeEach(() => {
@@ -62,6 +67,31 @@ describe("logout", () => {
 
     await expect(logout()).rejects.toThrow("redirect /login");
 
+    expect(H.calls).toEqual(["signOut", "redirect /login"]);
+  });
+});
+
+describe("logoutEverywhere (Listo al fin de turno)", () => {
+  beforeEach(() => {
+    H.calls = [];
+    H.signOut.mockReset();
+    H.signOutError = null;
+  });
+
+  it("cierra la sesión en todos los dispositivos, como antes", async () => {
+    await expect(logoutEverywhere()).rejects.toThrow("redirect /login");
+
+    expect(H.signOut).toHaveBeenCalledTimes(1);
+    expect(H.signOut).toHaveBeenCalledWith({ scope: "global" });
+  });
+
+  it("después de cerrar la sesión lleva al login, también si Supabase devuelve un error", async () => {
+    await expect(logoutEverywhere()).rejects.toThrow("redirect /login");
+    expect(H.calls).toEqual(["signOut", "redirect /login"]);
+
+    H.calls = [];
+    H.signOutError = { message: "Auth session missing!" };
+    await expect(logoutEverywhere()).rejects.toThrow("redirect /login");
     expect(H.calls).toEqual(["signOut", "redirect /login"]);
   });
 });

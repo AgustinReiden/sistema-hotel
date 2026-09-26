@@ -43,7 +43,21 @@ export async function logout() {
     const supabase = await createClient();
     // Solo este dispositivo. Sin scope, Supabase cierra la sesión del usuario en todos
     // lados (la otra PC, el celular). "Salir", el cierre por inactividad y "Cerrar
-    // sesión" del traspaso forzado pasan todos por acá.
+    // sesión" del traspaso forzado pasan todos por acá. El "Listo" de fin de turno
+    // usa logoutEverywhere().
     await supabase.auth.signOut({ scope: 'local' });
+    redirect('/login');
+}
+
+/**
+ * Fin de turno de recepción: "Listo" después de rendir la caja propia. Cierra la
+ * sesión en todos los dispositivos, como hacía `logout()` antes de pasar a solo este.
+ * La recepcionista se va: si le quedara una sesión abierta en otra PC o en el celular,
+ * cuando la siguiente abre su caja esa sesión caería en la rendición forzada y podría
+ * cerrarle la caja a ciegas a nombre de quien ya se fue.
+ */
+export async function logoutEverywhere() {
+    const supabase = await createClient();
+    await supabase.auth.signOut({ scope: 'global' });
     redirect('/login');
 }
