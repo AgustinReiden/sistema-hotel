@@ -47,7 +47,7 @@ function empresa(patch: Partial<AssociatedClient> = {}): AssociatedClient {
 function montar(initialClient: AssociatedClient | null = null) {
   const onSubmit = vi.fn().mockResolvedValue({ success: true });
   const onClose = vi.fn();
-  render(
+  const { container } = render(
     <AssociatedClientModal
       isOpen
       onClose={onClose}
@@ -56,7 +56,7 @@ function montar(initialClient: AssociatedClient | null = null) {
       title={initialClient ? "Editar empresa" : "Nueva empresa"}
     />
   );
-  return { onSubmit, onClose };
+  return { onSubmit, onClose, container };
 }
 
 const cuentaCorriente = () => screen.getByLabelText("Cuenta corriente") as HTMLSelectElement;
@@ -65,6 +65,16 @@ const cargarDocumento = (valor: string) =>
   fireEvent.change(screen.getByLabelText("DNI o CUIT"), { target: { value: valor } });
 /** El recuadro de una nota o un aviso: el color vive en su clase (emerald o amber). */
 const recuadro = (texto: RegExp) => screen.getByText(texto).closest("p") as HTMLElement;
+/**
+ * El contenedor que anuncia la nota o el aviso de Facturación. Tiene que ser uno
+ * solo y estar siempre montado: el lector de pantalla anuncia los cambios de un
+ * role="status" que ya existía, no los de uno que aparece con el texto adentro.
+ */
+const estadoFacturacion = (container: HTMLElement) => {
+  const estados = container.querySelectorAll('[role="status"]');
+  expect(estados).toHaveLength(1);
+  return estados[0] as HTMLElement;
+};
 
 describe("AssociatedClientModal: cuenta corriente y modo de facturación", () => {
   beforeEach(() => {
@@ -337,5 +347,102 @@ describe("AssociatedClientModal: la consolidada de una empresa pide CUIT", () =>
     montar(empresa({ document_id: DNI_FICTICIO, facturacion_modo: "consolidada" }));
 
     expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+  });
+});
+
+// En una ficha consolidada solo lo fiado espera a la consolidada: lo cobrado en caja
+// se factura en el check-out. El texto fijo de Facturación no puede decir lo contrario
+// de la nota verde que sale justo abajo.
+describe("AssociatedClientModal: el texto de Facturación y cómo se anuncian la nota y el aviso", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    H.findCompaniesByDocumentAction.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it("ningún texto de la ficha dice que las estadías no se facturan al cerrar", () => {
+    const { container } = montar();
+    cargarDocumento(CUIT_FICTICIO);
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(container.textContent).not.toMatch(/no se factura\w* al cerrar/i);
+    expect(
+      screen.getByText(
+        "Consolidada: las estadías a cuenta corriente se juntan en una sola factura desde Control de facturación. Lo cobrado en caja se factura en el check-out."
+      )
+    ).toBeTruthy();
+  });
+
+  it("crear: una empresa nueva en No y 'por cada check-out' pasa a Consolidada con la nota al poner Sí, y se crea así", async () => {
+    const { onSubmit } = montar();
+    expect(screen.getByText("Nueva empresa")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Nombre de la Empresa / Convenio"), {
+      target: { value: "Empresa Ficticia SA" },
+    });
+    cargarDocumento(CUIT_FICTICIO);
+    expect(cuentaCorriente().value).toBe("no");
+    expect(facturacion().value).toBe("por_checkout");
+
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(facturacion().value).toBe("consolidada");
+    expect(screen.getByText(NOTA)).toBeTruthy();
+    expect(screen.queryByText(AVISO)).toBeNull();
+    expect(screen.queryByText(NOTA_CUIT)).toBeNull();
+
+    fireEvent.click(screen.getByText("Crear Empresa / Convenio"));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      displayName: "Empresa Ficticia SA",
+      documentId: CUIT_FICTICIO,
+      cuentaCorrienteHabilitada: true,
+      facturacionModo: "consolidada",
+    });
+  });
+
+  it("el aviso sale en ámbar y la nota en verde", () => {
+    montar();
+    cargarDocumento(CUIT_FICTICIO);
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+
+    expect(recuadro(NOTA).className).toContain("emerald");
+    expect(recuadro(NOTA).className).not.toContain("amber");
+
+    fireEvent.change(facturacion(), { target: { value: "por_checkout" } });
+
+    expect(recuadro(AVISO).className).toContain("amber");
+    expect(recuadro(AVISO).className).not.toContain("emerald");
+  });
+
+  it("la nota y los avisos salen en un solo contenedor role=status que está siempre montado", () => {
+    const { container } = montar();
+    cargarDocumento(CUIT_FICTICIO);
+
+    // Sin nada que decir, el contenedor ya está y está vacío.
+    const estado = estadoFacturacion(container);
+    expect(estado.textContent).toBe("");
+
+    // Sí: la nota verde entra en el mismo contenedor.
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toMatch(NOTA);
+
+    // Por cada check-out: el aviso ámbar reemplaza a la nota, en el mismo contenedor.
+    fireEvent.change(facturacion(), { target: { value: "por_checkout" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toMatch(AVISO);
+    expect(estado.textContent).not.toMatch(NOTA);
+
+    // Con un DNI y Consolidada a mano: el pedido del CUIT, también ahí.
+    cargarDocumento(DNI_FICTICIO);
+    fireEvent.change(facturacion(), { target: { value: "consolidada" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toMatch(NOTA_CUIT);
+    expect(estado.textContent).not.toMatch(AVISO);
+
+    // Cuenta corriente = No: no queda nada que decir, pero el contenedor sigue.
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toBe("");
   });
 });
