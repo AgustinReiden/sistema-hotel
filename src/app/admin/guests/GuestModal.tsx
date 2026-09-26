@@ -258,27 +258,25 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
                 <p className="text-[11px] text-slate-500 mt-1">
                   Consolidada: las estadías a cuenta corriente se juntan en una sola factura.
                 </p>
-                {mostrarNotaConsolidada && (
-                  <p
-                    role="status"
-                    className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
-                  >
-                    <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
-                    <span>
-                      Pasó a Factura consolidada: lo fiado se junta en una factura. Si este huésped
-                      quiere factura en cada check-out, cambialo acá.
-                    </span>
-                  </p>
-                )}
-                {avisoFacturacion && (
-                  <p
-                    role="status"
-                    className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-                  >
-                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                    <span>{avisoFacturacion}</span>
-                  </p>
-                )}
+                {/* Un solo role="status" siempre montado: el lector de pantalla anuncia el
+                    cambio de contenido de una región que ya existía, no una que aparece. */}
+                <div role="status" aria-live="polite">
+                  {mostrarNotaConsolidada && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+                      <span>
+                        Pasó a Factura consolidada: lo fiado se junta en una factura. Si este huésped
+                        quiere factura en cada check-out, cambialo acá.
+                      </span>
+                    </p>
+                  )}
+                  {avisoFacturacion && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                      <span>{avisoFacturacion}</span>
+                    </p>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Localidad</label>
