@@ -20,8 +20,11 @@ import ClientSearch from "./ClientSearch";
 import DateTimePickerField from "./DateTimePickerField";
 import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
+import NumberStepper from "./NumberStepper";
 import { fetchAvailableRoomsAction, searchGuestsAction } from "./actions";
 import { calculateReservationPriceBreakdown, resolveEffectiveDiscountPercent } from "@/lib/pricing";
+import { nochesYSalida } from "@/lib/stepper";
+import { hotelDateKey } from "@/lib/time";
 import type {
   AssociatedClient,
   CreateReservationPayload,
@@ -620,28 +623,15 @@ export default function NewReservationModal({
             />
           </div>
 
-          <div>
-            <label htmlFor="guestCount" className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Cantidad de pasajeros
-            </label>
-            <input
-              id="guestCount"
-              type="number"
-              min={1}
-              max={20}
-              value={form.guestCount}
-              onChange={(e) =>
-                setForm((current) => ({
-                  ...current,
-                  guestCount: Math.max(1, parseInt(e.target.value, 10) || 1),
-                }))
-              }
-              className="w-full md:w-40 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              Opcional. No afecta el precio (se calcula por habitacion).
-            </p>
-          </div>
+          <NumberStepper
+            id="guestCount"
+            label="Cantidad de pasajeros"
+            value={form.guestCount}
+            onChange={(guestCount) => setForm((current) => ({ ...current, guestCount }))}
+            min={1}
+            max={20}
+            hint="Opcional. No afecta el precio (se calcula por habitacion)."
+          />
 
           {form.mode === "person" && (
             <GuestRegistryFields
@@ -701,7 +691,12 @@ export default function NewReservationModal({
               disabled={isSubmitting || form.roomId === "" || !clientComplete}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
-              {isSubmitting ? "Creando..." : "Crear Reserva"}
+              {/* Con precio a la vista, el botón repite las noches y el día de salida. */}
+              {isSubmitting
+                ? "Creando..."
+                : pricePreview
+                  ? `Crear reserva · ${nochesYSalida(pricePreview.nights, hotelDateKey(new Date(form.checkOut)))}`
+                  : "Crear reserva"}
             </button>
           </div>
         </form>
