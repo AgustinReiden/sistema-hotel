@@ -33,10 +33,27 @@ describe("CreditChargesList", () => {
     render(<CreditChargesList charges={[fiado]} />);
 
     expect(screen.getByText("Remito R-000017")).toBeTruthy();
-    expect(screen.getByText(/Empresa Ficticia SA/)).toBeTruthy();
-    expect(screen.getByText("(Hab. 4)")).toBeTruthy();
+    expect(screen.getByText("Empresa Ficticia SA")).toBeTruthy();
+    expect(screen.getByText("Hab. 4")).toBeTruthy();
     expect(screen.getByText("$80.000,00")).toBeTruthy();
     expect(screen.getByLabelText("Reimprimir remito de Empresa Ficticia SA")).toBeTruthy();
+  });
+
+  it("va en dos renglones: el cliente con el monto arriba, y la habitación, el remito y el botón abajo", () => {
+    // La tarjeta es angosta: si el monto y el botón iban al lado del nombre, el
+    // nombre y la habitación quedaban cortados y no se sabía de quién era cada remito.
+    render(<CreditChargesList charges={[fiado]} />);
+
+    const renglonCliente = screen.getByText("Empresa Ficticia SA").parentElement as HTMLElement;
+    expect(renglonCliente.textContent).toBe("Empresa Ficticia SA$80.000,00");
+
+    const boton = screen.getByLabelText("Reimprimir remito de Empresa Ficticia SA");
+    const renglonRemito = boton.parentElement as HTMLElement;
+    expect(renglonCliente.contains(boton)).toBe(false);
+    expect(renglonRemito.textContent).toContain("Hab. 4");
+    expect(renglonRemito.textContent).toContain("Remito R-000017");
+    // Si no entra al lado del remito, el botón baja en vez de apretar el texto.
+    expect(renglonRemito.className).toContain("flex-wrap");
   });
 
   it("Reimprimir abre el mismo remito con la leyenda de reimpresión", () => {
@@ -78,7 +95,10 @@ describe("CreditChargesList", () => {
     );
 
     expect(screen.queryByText(/^Remito R-/)).toBeNull();
-    fireEvent.click(screen.getByLabelText("Reimprimir remito de Juan Prueba"));
+    // Sin número no queda un separador colgando después de la habitación.
+    const boton = screen.getByLabelText("Reimprimir remito de Juan Prueba");
+    expect((boton.parentElement as HTMLElement).textContent).toBe("Hab. 4Reimprimir");
+    fireEvent.click(boton);
     expect(open).toHaveBeenCalledWith(
       "/admin/comprobante-cc/mov-2?autoprint=1&reimpresion=1",
       "comprobante-cc-mov-2",
