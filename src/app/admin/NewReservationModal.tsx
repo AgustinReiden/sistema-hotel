@@ -630,7 +630,7 @@ export default function NewReservationModal({
             onChange={(guestCount) => setForm((current) => ({ ...current, guestCount }))}
             min={1}
             max={20}
-            hint="Opcional. No afecta el precio (se calcula por habitacion)."
+            hint="Opcional. No afecta el precio (se calcula por habitación)."
           />
 
           {form.mode === "person" && (
