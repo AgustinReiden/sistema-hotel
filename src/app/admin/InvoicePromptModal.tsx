@@ -180,7 +180,23 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const emitPending = async () => {
     if (emitting || !pending) return; // anti doble click
     setEmitting(true);
-    const result = await emitInvoiceForReservationAction(data.reservationId, pending);
+    let result: Awaited<ReturnType<typeof emitInvoiceForReservationAction>>;
+    try {
+      result = await emitInvoiceForReservationAction(data.reservationId, pending);
+    } catch {
+      // No volvió respuesta (red cortada, o el servidor no contestó mientras esperaba
+      // a ARCA): pudo haber salido o no. Se avisa y se cierra igual. Trabado en
+      // "Emitiendo…" no había salida, y el recibo del check-out espera este cierre.
+      setEmitting(false);
+      toast.warning("No sabemos si la factura salió porque se cortó la comunicación.", {
+        description: startAtTipo
+          ? "Antes de volver a emitirla, fijate en Facturación si quedó emitida, pendiente o rechazada."
+          : "Si no salió, le queda al administrador para revisar en Facturación.",
+        duration: 12000,
+      });
+      onClose();
+      return;
+    }
     setEmitting(false);
 
     if (!result.success) {
@@ -193,15 +209,26 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
 
   /**
    * "No facturar" queda REGISTRADO (mig 80): el playero no puede cambiarlo después,
-   * sólo el administrador. Por eso se confirma antes. Si el registro falla, igual
-   * se cierra: el check-out ya está hecho y no se traba por esto.
+   * sólo el administrador. Por eso se confirma antes. Si el registro falla, o no
+   * vuelve respuesta, igual se cierra: el check-out ya está hecho y no se traba por
+   * esto (y el recibo del check-out espera este cierre).
    */
   const confirmNo = async () => {
     if (emitting) return;
     setEmitting(true);
-    const result = await declineInvoiceAction(data.reservationId);
+    try {
+      const result = await declineInvoiceAction(data.reservationId);
+      if (!result.success) toast.error(result.error);
+    } catch {
+      toast.warning(
+        "No sabemos si quedó registrado el «no facturar» porque se cortó la comunicación.",
+        {
+          description: "Si no quedó, la estadía le queda al administrador en Por facturar.",
+          duration: 12000,
+        }
+      );
+    }
     setEmitting(false);
-    if (!result.success) toast.error(result.error);
     onClose();
   };
 

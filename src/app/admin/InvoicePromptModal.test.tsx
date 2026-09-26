@@ -189,3 +189,82 @@ describe("InvoicePromptModal: salir sin decidir", () => {
     expect(screen.queryByText(SALIR)).toBeNull();
   });
 });
+
+describe("InvoicePromptModal: si la emisión o el «no facturar» no vuelven (red cortada)", () => {
+  const sinRed = () => new TypeError("Failed to fetch");
+  const FACTURA_INCIERTA = "No sabemos si la factura salió porque se cortó la comunicación.";
+  const NO_FACTURAR_INCIERTO =
+    "No sabemos si quedó registrado el «no facturar» porque se cortó la comunicación.";
+
+  beforeEach(() => {
+    H.declineInvoiceAction.mockReset();
+    H.emitInvoiceForReservationAction.mockReset();
+    H.toast.success.mockReset();
+    H.toast.error.mockReset();
+    H.toast.warning.mockReset();
+    vi.stubGlobal("open", vi.fn().mockReturnValue({} as Window));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** SÍ → Consumidor Final → Continuar → Confirmar y emitir. */
+  function emitirConsumidorFinal() {
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(screen.getByText("Consumidor Final"));
+    fireEvent.click(screen.getByText("Continuar"));
+    fireEvent.click(screen.getByText("Confirmar y emitir"));
+  }
+
+  it("emitir: avisa que no sabemos si salió y cierra, así no queda trabado y sale el recibo que esperaba", async () => {
+    H.emitInvoiceForReservationAction.mockRejectedValue(sinRed());
+    const { onClose } = abrir(datos());
+
+    emitirConsumidorFinal();
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(H.toast.warning).toHaveBeenCalledWith(
+      FACTURA_INCIERTA,
+      expect.objectContaining({
+        description: "Si no salió, le queda al administrador para revisar en Facturación.",
+      })
+    );
+    // No hay factura que imprimir: no se sabe si existe.
+    expect(window.open).not.toHaveBeenCalled();
+  });
+
+  it("emitir desde Facturación (startAtTipo): el aviso le dice al admin que revise antes de volver a emitir", async () => {
+    H.emitInvoiceForReservationAction.mockRejectedValue(sinRed());
+    const { onClose } = abrir(datos(), { startAtTipo: true });
+
+    fireEvent.click(screen.getByText("Consumidor Final"));
+    fireEvent.click(screen.getByText("Continuar"));
+    fireEvent.click(screen.getByText("Confirmar y emitir"));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(H.toast.warning).toHaveBeenCalledWith(
+      FACTURA_INCIERTA,
+      expect.objectContaining({
+        description:
+          "Antes de volver a emitirla, fijate en Facturación si quedó emitida, pendiente o rechazada.",
+      })
+    );
+  });
+
+  it("«No facturar»: avisa que no sabemos si quedó registrado y cierra igual", async () => {
+    H.declineInvoiceAction.mockRejectedValue(sinRed());
+    const { onClose } = abrir(datos());
+
+    fireEvent.click(screen.getByText("NO"));
+    fireEvent.click(screen.getByText("No facturar"));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(H.toast.warning).toHaveBeenCalledWith(
+      NO_FACTURAR_INCIERTO,
+      expect.objectContaining({
+        description: "Si no quedó, la estadía le queda al administrador en Por facturar.",
+      })
+    );
+  });
+});

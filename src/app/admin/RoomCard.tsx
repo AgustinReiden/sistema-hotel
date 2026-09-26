@@ -189,14 +189,16 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   const defaultPaymentMethod: PaymentMethod | undefined =
     room.billedToCompany && room.accountCreditEnabled ? "cuenta_corriente" : undefined;
   /**
-   * A nombre de quién queda lo fiado: la empresa de la reserva, o el huésped. El
-   * nombre de la empresa sale del contexto de facturación de la reserva (la ficha,
-   * activa o no), el mismo que imprime el remito; no de la lista de empresas
-   * activas: con la empresa desactivada, "Queda a cuenta de" nombraba al pasajero.
+   * A nombre de quién queda lo fiado: la empresa de la reserva, o el huésped. De la
+   * empresa, el nombre de la ficha: es el que imprime el remito, y dos áreas de la
+   * misma empresa son dos cuentas con la misma razón social (mig 94). La lista trae
+   * solo las activas: con la empresa desactivada, el nombre sale del contexto de
+   * facturación de la reserva, que no filtra por activas (sin esto, "Queda a cuenta
+   * de" nombraba al pasajero). Ahí es la razón social si la ficha la tiene.
    */
-  const accountHolderName = room.billedToCompany
-    ? room.invoicePrefill.razonSocial || room.client
-    : room.client;
+  const accountHolderName =
+    reservationCompany?.display_name ||
+    (room.billedToCompany ? room.invoicePrefill.razonSocial || room.client : room.client);
 
   const cerrarCuadros = () => {
     setIsWalkInModalOpen(false);

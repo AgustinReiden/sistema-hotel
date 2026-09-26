@@ -392,6 +392,41 @@ describe("RoomCard: check-out a cuenta corriente y el remito", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/Queda a cuenta de Juan Prueba/)).toBeNull();
   });
+
+  it("con la empresa activa, lo fiado queda con el nombre de la cuenta, el que imprime el remito, y no con la razón social", async () => {
+    vi.stubGlobal("open", vi.fn().mockReturnValue(null));
+    // Dos áreas de la misma empresa son dos cuentas (mig 94): comparten la razón
+    // social y se distinguen por el nombre de la ficha, que es el que va en el remito.
+    const area: AssociatedClient = {
+      ...empresa,
+      display_name: "Ficticia Obras",
+      razon_social: "Empresa Ficticia SA",
+    };
+    abrir(habitacion(), { associatedClients: [area] });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+
+    expect(
+      screen.getByText(
+        "Queda a cuenta de Ficticia Obras. Sale el remito para que firme el pasajero."
+      )
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Cargar a la cuenta y cerrar"));
+
+    await waitFor(() =>
+      expect(H.toast.success).toHaveBeenCalledWith(
+        "Check-out hecho. Queda a cuenta de Ficticia Obras."
+      )
+    );
+    // El remito bloqueado dice el mismo nombre.
+    await waitFor(() =>
+      expect(
+        screen.getByText("El check-out quedó hecho y la estadía quedó a cuenta de Ficticia Obras.")
+      ).toBeTruthy()
+    );
+    expect(screen.queryByText(/a cuenta de Empresa Ficticia SA/)).toBeNull();
+  });
 });
 
 describe("RoomCard: el recibo sale después de decidir la factura", () => {
@@ -501,6 +536,30 @@ describe("RoomCard: el recibo sale después de decidir la factura", () => {
       "comprobante-mov-1",
       "width=420,height=720"
     );
+  });
+
+  it("a cuenta corriente en la consolidada, con fiscal prendido, no hay pregunta y el remito sale enseguida", async () => {
+    H.handleCheckOut.mockResolvedValue({
+      success: true,
+      data: { paymentId: null, movementId: "mov-1" },
+    });
+    const open = vi.fn().mockReturnValue({} as Window);
+    vi.stubGlobal("open", open);
+    // La habitación de la empresa se factura en la consolidada (el valor por defecto).
+    abrir(habitacion(), { fiscalEnabled: true });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByText("Cargar a la cuenta y cerrar"));
+
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "/admin/comprobante-cc/mov-1?autoprint=1",
+        "comprobante-mov-1",
+        "width=420,height=720"
+      )
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Cerrar la pregunta de factura")).toBeNull();
   });
 
   it("si al cerrar la pregunta el navegador bloquea el recibo, queda el cuadro para imprimirlo", async () => {
@@ -755,6 +814,23 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     expect(H.handleCheckOut).toHaveBeenCalledTimes(1);
 
     // Se va solo con «Entendido».
+    fireEvent.click(screen.getByText("Entendido"));
+    expect(screen.queryByText(AVISO_INCIERTO)).toBeNull();
+  });
+
+  it("el aviso sobrevive a que Hoy se actualice con la reserva cambiada, que es lo que pide esperar", async () => {
+    H.handleCheckOut.mockRejectedValue(sinRed());
+    const { actualizar } = abrir(particular({ paidAmount: 80000 }));
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByText("Confirmar"));
+    await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+
+    // El check-out sí había entrado: Hoy trae la habitación sin reserva, y eso cierra
+    // los cuadros de la tarjeta. El aviso no es uno de ellos.
+    actualizar(cerrada());
+
+    expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy();
     fireEvent.click(screen.getByText("Entendido"));
     expect(screen.queryByText(AVISO_INCIERTO)).toBeNull();
   });
