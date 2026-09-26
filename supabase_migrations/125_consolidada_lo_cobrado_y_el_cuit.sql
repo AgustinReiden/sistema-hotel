@@ -40,7 +40,12 @@
 -- ACL, y el REVOKE y GRANT de abajo repiten los de la 112 y la 103.
 --
 -- VUELTA ATRAS. Recrear las dos funciones como estan en la 112 y la 103. El CUIT
--- que se haya guardado en alguna ficha queda (es el de una factura emitida).
+-- que se haya guardado en alguna ficha queda: es el CUIT con que se armo el
+-- borrador de una consolidada, aunque ARCA la haya rechazado o se haya descartado.
+--
+-- OJO CON EL CUIT. Se completa solo si la ficha no tenia uno valido. Si ya tiene
+-- uno valido, aunque sea el equivocado, corregirlo en la consolidada no llega a la
+-- ficha: se corrige en Empresas.
 --
 -- Aplicar via select public.exec_ddl($mig125$ ... $mig125$) SIN BEGIN y SIN COMMIT.
 -- ─────────────────────────────────────────────────────────────────────────────
