@@ -817,6 +817,129 @@ describe("ConsolidadaClient", () => {
       expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
     });
 
+    describe("emisión incierta con la red lenta (la recarga queda en camino)", () => {
+      /** La recarga posterior a la emisión cortada queda en camino hasta que el test la contesta. */
+      function recargaLenta() {
+        const recarga: { responder: (value: unknown) => void } = { responder: () => {} };
+        loadCcAccountStaysAction
+          .mockImplementationOnce(() =>
+            Promise.resolve({ success: true, data: [makeRow("r1", "1")] })
+          )
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                recarga.responder = resolve;
+              })
+          );
+        emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+        return recarga;
+      }
+
+      const TOAST_SIN_PANTALLA =
+        "No sabemos si la factura consolidada salió porque se cortó la comunicación. Antes de volver a emitirla, fijate en Facturación si quedó emitida, pendiente o rechazada.";
+
+      it("mientras la lista carga, el aviso no se puede cerrar: cuando sale el toast que manda a leerlo, sigue ahí con lo que concluyó", async () => {
+        const recarga = recargaLenta();
+        renderClient();
+        await screen.findByLabelText(BARRA);
+
+        fireEvent.click(await confirmarListo(abrirCuadro()));
+
+        const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+        expect(screen.getByText("Cargando…")).toBeInTheDocument();
+        expect(aviso.textContent).toContain(AVISO_CARGANDO);
+        // Cerrado ahora, lo que va a decir cuando llegue la lista no se vería nunca.
+        expect(within(aviso).queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+
+        await act(async () => {
+          recarga.responder({ success: true, data: [makeRow("r1", "1")] });
+        });
+        await waitFor(() =>
+          expect(toast.error).toHaveBeenCalledWith(
+            expect.stringContaining("Antes de volver a emitir, leé el aviso de arriba de la lista."),
+            expect.anything()
+          )
+        );
+        // El aviso al que manda el toast está a la vista y ya dice en qué quedó la estadía.
+        await waitFor(() =>
+          expect(screen.getByLabelText(AVISO_INCIERTO).textContent).toContain(
+            "La estadía que ibas a facturar sigue pendiente de facturar: volvé a tildarla y emitila."
+          )
+        );
+        // Recién ahora se puede cerrar.
+        fireEvent.click(within(screen.getByLabelText(AVISO_INCIERTO)).getByText("Cerrar el aviso"));
+        expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument();
+      });
+
+      it("el aviso se lleva el foco apenas aparece, así queda a la vista aunque la pantalla esté scrolleada hasta el receptor", async () => {
+        const recarga = recargaLenta();
+        renderClient();
+        await screen.findByLabelText(BARRA);
+
+        fireEvent.click(await confirmarListo(abrirCuadro()));
+
+        const aviso = await screen.findByLabelText(AVISO_INCIERTO);
+        // Con la recarga todavía en camino: no espera a la lista ni al toast.
+        expect(screen.getByText("Cargando…")).toBeInTheDocument();
+        await waitFor(() => expect(document.activeElement).toBe(aviso));
+
+        await act(async () => {
+          recarga.responder({ success: true, data: [makeRow("r1", "1")] });
+        });
+      });
+
+      it("si se van de la pantalla con la recarga en camino (por ejemplo con «Ir a Facturación»), el toast no habla de la lista ni del aviso", async () => {
+        const recarga = recargaLenta();
+        const { unmount } = renderClient();
+        await screen.findByLabelText(BARRA);
+
+        fireEvent.click(await confirmarListo(abrirCuadro()));
+        await screen.findByLabelText(AVISO_INCIERTO);
+
+        unmount();
+        await act(async () => {
+          recarga.responder({ success: true, data: [makeRow("r1", "1")] });
+        });
+
+        await waitFor(() =>
+          expect(toast.error).toHaveBeenCalledWith(TOAST_SIN_PANTALLA, expect.anything())
+        );
+        expect(toast.error).not.toHaveBeenCalledWith(
+          expect.stringContaining("la lista"),
+          expect.anything()
+        );
+        expect(toast.error).not.toHaveBeenCalledWith(
+          expect.stringContaining("aviso"),
+          expect.anything()
+        );
+      });
+
+      it("si la URL pasa a otro cliente con la recarga en camino, el toast tampoco manda al aviso, que era del cliente anterior", async () => {
+        const recarga = recargaLenta();
+        const { rerender } = renderClient();
+        await screen.findByLabelText(BARRA);
+
+        fireEvent.click(await confirmarListo(abrirCuadro()));
+        await screen.findByLabelText(AVISO_INCIERTO);
+
+        rerender(clientElement("ficticia"));
+        await waitFor(() =>
+          expect(screen.queryByLabelText(AVISO_INCIERTO)).not.toBeInTheDocument()
+        );
+        await act(async () => {
+          recarga.responder({ success: true, data: [makeRow("r1", "1")] });
+        });
+
+        await waitFor(() =>
+          expect(toast.error).toHaveBeenCalledWith(TOAST_SIN_PANTALLA, expect.anything())
+        );
+        expect(toast.error).not.toHaveBeenCalledWith(
+          expect.stringContaining("leé el aviso"),
+          expect.anything()
+        );
+      });
+    });
+
     it("el aviso de la emisión incierta se va con la próxima emisión", async () => {
       emitConsolidatedInvoiceAction.mockRejectedValueOnce(new Error("Failed to fetch"));
       renderClient();

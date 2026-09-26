@@ -241,6 +241,16 @@ export default function ConsolidadaClient({
   const clienteUltimaCarga = useRef<string | null>(null);
   // Número de la carga sin rango que fijó el total: una más vieja no lo pisa.
   const totalFijadoPor = useRef(0);
+  // La pantalla sigue abierta. Después de una emisión incierta la recarga de la lista
+  // contesta aunque quien factura ya se haya ido (por ejemplo con «Ir a Facturación» del
+  // aviso): el toast de después no puede hablar de una lista ni de un aviso que no están.
+  const montado = useRef(false);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
 
   // Rango del listado. Vacío = "Todo", que es el default a propósito: el caso
   // normal sigue siendo "facturame todo lo que debe", y un rango puesto de
@@ -471,6 +481,15 @@ export default function ConsolidadaClient({
           rangoActivo,
           variasPaginas: paginacion.totalPages > 1,
         });
+
+  // El aviso se lleva el foco apenas aparece, y el foco lo trae a la vista: va arriba de
+  // todo, y en un celular scrolleado hasta el receptor quedaba fuera de la pantalla toda
+  // la recarga (el toast recién sale cuando termina). Además, el cuadro que se cerró se
+  // llevó el botón que tenía el foco.
+  const avisoInciertoRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (emisionIncierta !== null) avisoInciertoRef.current?.focus();
+  }, [emisionIncierta]);
 
   // Cambiar el filtro de estado reordena `visible` (otra lista, no sólo otra
   // página de la misma). El índice del ancla quedaría apuntando a una fila
@@ -711,6 +730,7 @@ export default function ConsolidadaClient({
     // vuelve a salir, con las estadías de esta.
     setEmisionIncierta(null);
     const emitidas = selectedRows.map((r) => r.reservation_id);
+    const cliente = selectedKey;
 
     setEmitting(true);
     let result: Awaited<ReturnType<typeof emitConsolidatedInvoiceAction>> | null = null;
@@ -774,19 +794,29 @@ export default function ConsolidadaClient({
       // no puede quedarse mirando «Cargando…» sin saber que la factura quedó en el aire.
       // Su texto sigue al estado de la lista (ver textoEmisionIncierta): mientras carga
       // dice que no se emita de nuevo todavía, si la carga falla lo dice, y con la lista a
-      // la vista dice en qué quedó cada estadía.
+      // la vista dice en qué quedó cada estadía. Mientras carga no se puede cerrar: el
+      // toast de abajo manda a leerlo, y tiene que seguir ahí con lo que concluyó.
       setEmisionIncierta(emitidas);
       const recargada = await loadRows();
       // El toast sí sale después de la recarga: su texto queda fijo, así que sólo promete
       // la lista si se pudo cargar. Se va solo; el que dice qué pasó es el aviso fijo, que
       // queda arriba de la lista: el toast no concluye nada, porque la lista puede cambiar
       // (otro período, otra página) antes de que alguien lo lea.
-      toast.error(
-        recargada
-          ? "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar», sin nada tildado. Antes de volver a emitir, leé el aviso de arriba de la lista."
-          : "No sabemos si la factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir.",
-        { duration: 15000 }
-      );
+      let mensaje: string;
+      if (!montado.current || clienteUltimaCarga.current !== cliente) {
+        // Mientras recargaba se fueron de la pantalla (por ejemplo con «Ir a Facturación»
+        // del aviso), o la URL pasó a otro cliente: ya no hay lista ni aviso a los que
+        // mandar, así que el toast dice sólo qué hacer.
+        mensaje =
+          "No sabemos si la factura consolidada salió porque se cortó la comunicación. Antes de volver a emitirla, fijate en Facturación si quedó emitida, pendiente o rechazada.";
+      } else if (recargada) {
+        mensaje =
+          "No sabemos si la factura salió porque se cortó la comunicación. Te dejamos la lista en «Pendientes de facturar», sin nada tildado. Antes de volver a emitir, leé el aviso de arriba de la lista.";
+      } else {
+        mensaje =
+          "No sabemos si la factura salió porque se cortó la comunicación, y tampoco pudimos volver a cargar la lista. No la emitas de nuevo todavía: cuando vuelva la conexión, cargá la lista otra vez y fijate en Facturación si salió antes de volver a emitir.";
+      }
+      toast.error(mensaje, { duration: 15000 });
       return;
     }
 
@@ -845,9 +875,11 @@ export default function ConsolidadaClient({
           lista no se pudo cargar o está cargando, no concluye nada. */}
       {textoIncierto !== null && (
         <div
+          ref={avisoInciertoRef}
+          tabIndex={-1}
           role="alert"
           aria-label="No sabemos si la factura salió"
-          className="flex items-start gap-3 bg-rose-50 border border-rose-200 rounded-2xl p-4"
+          className="flex items-start gap-3 bg-rose-50 border border-rose-200 rounded-2xl p-4 outline-none"
         >
           <AlertTriangle size={18} className="text-rose-600 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1 space-y-2">
@@ -856,13 +888,18 @@ export default function ConsolidadaClient({
               <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
                 Ir a Facturación
               </Link>
-              <button
-                type="button"
-                onClick={() => setEmisionIncierta(null)}
-                className="text-rose-700 underline hover:text-rose-900"
-              >
-                Cerrar el aviso
-              </button>
+              {/* Con la lista cargando, el aviso todavía no dice en qué quedó cada estadía:
+                  cerrado ahí, esa conclusión no se vería nunca, y el toast que sale al
+                  terminar la recarga manda a leerlo. */}
+              {!loading && (
+                <button
+                  type="button"
+                  onClick={() => setEmisionIncierta(null)}
+                  className="text-rose-700 underline hover:text-rose-900"
+                >
+                  Cerrar el aviso
+                </button>
+              )}
             </div>
           </div>
         </div>
