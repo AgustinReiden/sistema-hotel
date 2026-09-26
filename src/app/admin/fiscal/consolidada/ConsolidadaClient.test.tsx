@@ -2079,6 +2079,38 @@ describe("ConsolidadaClient", () => {
       await confirmarListo(cuadro);
     });
 
+    it("si la lectura de la ficha falla, el aviso dice qué hacer y el nombre y el DNI salen en ámbar", async () => {
+      loadGuestDocumentAction.mockRejectedValueOnce(new Error("Failed to fetch"));
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = await abrirCuadroHuesped();
+
+      // El cuadro es la confirmación de algo que no tiene vuelta: si puede estar mostrando
+      // otro receptor que el que sale, tiene que decir cómo ver el de verdad.
+      expect(
+        within(cuadro).getByText(
+          "No pudimos volver a leer la ficha del huésped: el nombre y el DNI son los de cuando abriste la página, y se emite con los que tenga la ficha ahora. Antes de confirmar, tocá «Volver» y abrí de nuevo «Revisar y emitir» para ver los datos actuales."
+        )
+      ).toBeInTheDocument();
+      expect(within(cuadro).getByText("Juan Prueba")).toHaveClass("text-amber-700");
+      expect(within(cuadro).getByText("DNI 30123456")).toHaveClass("text-amber-700");
+    });
+
+    it("con la ficha releída, el nombre y el DNI no salen en ámbar", async () => {
+      loadGuestDocumentAction.mockResolvedValueOnce({
+        success: true,
+        data: { fullName: "Juan Prueba", documentId: "30123456" },
+      });
+      renderClient("g-dni-ok", "guest");
+      await screen.findByLabelText(BARRA);
+
+      const cuadro = await abrirCuadroHuesped();
+
+      expect(within(cuadro).getByText("Juan Prueba")).not.toHaveClass("text-amber-700");
+      expect(within(cuadro).getByText("DNI 30123456")).not.toHaveClass("text-amber-700");
+    });
+
     it("una empresa, o un huésped que se factura con CUIT, no lee la ficha: el receptor es el de la pantalla", async () => {
       const { unmount } = renderClient("ficticia");
       await screen.findByLabelText(BARRA);
@@ -2201,16 +2233,55 @@ describe("ConsolidadaClient", () => {
   describe("textos del receptor: no prometen guardar en la ficha lo que no se guarda", () => {
     const PROMESA_VIEJA = /queda guardad|Si la cambiás acá/;
 
+    const TEXTO_EMPRESA =
+      "Se precargan de la ficha. Lo que cargues acá vale para esta factura. En la ficha se completan el CUIT, si no tenía uno válido, y la condición frente al IVA y el domicilio, si estaban vacíos; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios.";
+    const AVISO_SIN_CONDICION =
+      "La ficha no trae una condición con CUIT: está vacía o dice Consumidor Final. La que elijas vale para esta factura. Si estaba vacía, se guarda en la ficha; si dice Consumidor Final, no: cambiala en Empresas / Convenios.";
+
     it("empresa: dice que se completa sólo lo que le faltaba a la ficha, y que la razón social no se guarda", async () => {
       const { container } = renderClient("ficticia");
       await screen.findByLabelText(BARRA);
 
       expect(container.textContent).not.toMatch(PROMESA_VIEJA);
-      expect(
-        screen.getByText(
-          "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT válido, condición frente al IVA o domicilio, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas."
-        )
-      ).toBeInTheDocument();
+      expect(screen.getByText(TEXTO_EMPRESA)).toBeInTheDocument();
+      // La ficha trae su condición: no hay nada que aclarar debajo del select.
+      expect(screen.queryByText(AVISO_SIN_CONDICION)).not.toBeInTheDocument();
+    });
+
+    it("empresa con la ficha en Consumidor Final: la condición sale en «Elegí…» y avisa que elegirla acá no cambia la ficha", async () => {
+      // AssociatedClientModal ofrece Consumidor Final; la precarga lo muestra vacío porque
+      // no sirve para la consolidada, y la RPC completa la condición sólo si estaba vacía
+      // (COALESCE): la ficha sigue en Consumidor Final aunque se emita con otra.
+      const { container } = render(
+        <ConsolidadaClient
+          enabled
+          accounts={accounts}
+          billingProfiles={{
+            ...billingProfiles,
+            "company:ficticia": {
+              ...billingProfiles["company:ficticia"],
+              condicionIva: "",
+              complete: false,
+            },
+          }}
+          preselectKind="company"
+          preselectId="ficticia"
+          todayKey="2026-09-16"
+          fiscal={FISCAL_PROD}
+        />
+      );
+      await screen.findByLabelText(BARRA);
+
+      expect(screen.getByLabelText("Condición frente al IVA")).toHaveValue("");
+      expect(screen.getByText(AVISO_SIN_CONDICION)).toBeInTheDocument();
+      // Ni el texto general promete completar "la condición" a secas.
+      expect(container.textContent).not.toMatch(/no tenía CUIT válido, condición frente al IVA/);
+
+      // Elegida una condición, el aviso sigue: habla de la ficha, no de lo elegido.
+      fireEvent.change(screen.getByLabelText("Condición frente al IVA"), {
+        target: { value: "responsable_inscripto" },
+      });
+      expect(screen.getByText(AVISO_SIN_CONDICION)).toBeInTheDocument();
     });
 
     it("huésped que se factura con CUIT: lo mismo, con los datos de su ficha y la edición en Huéspedes", async () => {

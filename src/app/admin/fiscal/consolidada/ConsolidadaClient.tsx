@@ -1572,6 +1572,18 @@ export default function ConsolidadaClient({
                     <option value="monotributo">Monotributo</option>
                     <option value="exento">IVA Sujeto Exento</option>
                   </select>
+                  {/* La precarga deja vacía una condición que no sirve para la consolidada:
+                      la ficha puede no tener ninguna o decir Consumidor Final (Empresas /
+                      Convenios lo ofrece). La RPC la completa sólo si estaba vacía (COALESCE):
+                      en Consumidor Final queda igual aunque se emita con otra. Se mira la
+                      precarga (`profile`), no lo elegido: habla de la ficha. */}
+                  {!profile?.condicionIva && (
+                    <p className="text-[11px] text-amber-700 mt-1">
+                      La ficha no trae una condición con CUIT: está vacía o dice Consumidor
+                      Final. La que elijas vale para esta factura. Si estaba vacía, se guarda en
+                      la ficha; si dice Consumidor Final, no: cambiala en Empresas / Convenios.
+                    </p>
+                  )}
                 </div>
               )}
               <div>
@@ -1588,10 +1600,11 @@ export default function ConsolidadaClient({
               </div>
               {/* La RPC completa en la ficha sólo lo que le faltaba: la condición y el
                   domicilio si estaban vacíos, y el CUIT de la empresa si no tenía uno válido
-                  (mig 125; en el huésped, si no tenía). La razón social nunca. */}
+                  (mig 125; en el huésped, si no tenía). La razón social nunca. Una condición
+                  en Consumidor Final no está vacía: ver el aviso debajo del select. */}
               <p className="md:col-span-2 text-[11px] text-slate-500">
                 {isCompany
-                  ? "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT válido, condición frente al IVA o domicilio, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas."
+                  ? "Se precargan de la ficha. Lo que cargues acá vale para esta factura. En la ficha se completan el CUIT, si no tenía uno válido, y la condición frente al IVA y el domicilio, si estaban vacíos; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios."
                   : "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT, condición frente al IVA o domicilio fiscal, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes."}
               </p>
             </div>

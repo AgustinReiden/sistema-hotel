@@ -140,6 +140,9 @@ export default function ConsolidadaConfirmModal({
   // cerrarlo y volver a abrirlo, sin recargar la página.
   const dniDigits = documento.tipo === "DNI" ? (documento.numero ?? "").replace(/\D/g, "") : "";
   const dniInvalido = documento.tipo === "DNI" && dniDigits.length !== 7 && dniDigits.length !== 8;
+  // Si no se pudo releer la ficha, el nombre y el DNI de acá pueden no ser los que salen
+  // (la RPC usa los de la ficha): van en ámbar y el aviso dice cómo ver los de verdad.
+  const sinReleer = documento.tipo === "DNI" && documentoSinReleer === true;
 
   // El cuadro se monta al abrirse: "Confirmar" arranca deshabilitado y se habilita pasada
   // la espera (ver CONFIRMAR_ESPERA_MS).
@@ -258,18 +261,26 @@ export default function ConsolidadaConfirmModal({
             )}
 
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mt-3">A nombre de</p>
-            <p className="text-lg font-bold text-slate-800 leading-tight break-words">
+            <p
+              className={`text-lg font-bold leading-tight break-words ${
+                sinReleer ? "text-amber-700" : "text-slate-800"
+              }`}
+            >
               {receptorNombre || "—"}
             </p>
-            <p className="text-xs text-slate-500 font-mono mt-1">
+            <p
+              className={`text-xs font-mono mt-1 ${sinReleer ? "text-amber-700" : "text-slate-500"}`}
+            >
               {documento.tipo === "CUIT"
                 ? `CUIT ${formatCuit(documento.numero)}`
                 : `DNI ${dniDigits || "(sin cargar)"}`}
             </p>
-            {documento.tipo === "DNI" && documentoSinReleer && (
+            {sinReleer && (
               <p className="text-[11px] font-semibold text-amber-700 mt-0.5">
                 No pudimos volver a leer la ficha del huésped: el nombre y el DNI son los de
-                cuando abriste la página. Se emite con los que tenga la ficha.
+                cuando abriste la página, y se emite con los que tenga la ficha ahora. Antes de
+                confirmar, tocá «Volver» y abrí de nuevo «Revisar y emitir» para ver los datos
+                actuales.
               </p>
             )}
             <p className="text-xs text-slate-500">{condicionIvaLabel}</p>
