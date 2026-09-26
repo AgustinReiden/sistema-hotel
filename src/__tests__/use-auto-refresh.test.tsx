@@ -959,6 +959,51 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     expect(refresh).toHaveBeenCalledTimes(10);
   });
 
+  it.each<[string, () => void]>([
+    ["se corta internet", () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch"))],
+    [
+      "la sesión se cerró en otro dispositivo",
+      () => fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" }),
+    ],
+  ])(
+    "al volver a Hoy con Atrás (Next la saca de su caché) y %s, la hora es la de los datos (renderedAt), no la de volver",
+    async (_causa, caer) => {
+      // La página se armó a las 10:00; la recepcionista se fue a Solicitudes y vuelve con
+      // Atrás a las 10:15: Next muestra la página guardada, con los datos de las 10:00.
+      const armada = Date.now();
+      vi.setSystemTime(new Date("2026-09-25T13:15:00.000Z"));
+      render(<AutoRefresh timezone={TZ_HOTEL} renderedAt={armada} />);
+      caer();
+
+      await avanzar(90_000);
+      expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+      expect(refresh).not.toHaveBeenCalled();
+    }
+  );
+
+  it("con renderedAt, la hora es la de la última página que llegó, no la de la última recarga que se pidió", async () => {
+    const { rerender } = render(<AutoRefresh timezone={TZ_HOTEL} renderedAt={Date.now()} />);
+
+    // La 6.ª recarga se pide a las 10:03:00 y la página que trae se arma en ese momento.
+    await avanzar(180_000);
+    expect(refresh).toHaveBeenCalledTimes(6);
+    const armada = Date.now();
+
+    // Llega un segundo después, con su hora.
+    await avanzar(1_000);
+    rerender(<AutoRefresh timezone={TZ_HOTEL} renderedAt={armada} />);
+
+    // Las 4 recargas siguientes se piden (10:03:30 a 10:05:00, sin correrse por la hora
+    // nueva), pero ninguna llega.
+    await avanzar(119_000);
+    expect(refresh).toHaveBeenCalledTimes(10);
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(90_000);
+    expect(screen.getByText(sinActualizarDesde("10:03"))).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalledTimes(10);
+  });
+
   it.each<[string, Respuesta]>([
     ["opaqueredirect (el proxy manda a /login o a /forbidden)", { status: 0, type: "opaqueredirect" }],
     ["una redirección seguida (redirected)", { status: 200, redirected: true }],
@@ -1234,5 +1279,18 @@ describe("useAutoRefresh — lo que devuelve para el aviso", () => {
     fetchMock.mockResolvedValue({ status: 204 });
     await avanzar(30_000);
     expect(result.current).toBeNull();
+  });
+
+  it("con renderedAt, since es esa hora: ni la de montar ni la de una recarga que se pidió y no llegó", async () => {
+    const armada = Date.now() - 15 * 60_000;
+    const { result } = renderHook(() => useAutoRefresh({ renderedAt: armada }));
+
+    // Un chequeo anda y se pide la recarga, pero la página nueva no llega.
+    await avanzar(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockResolvedValue({ status: 502 });
+    await avanzar(90_000);
+    expect(result.current).toEqual({ since: armada, reason: "failed" });
   });
 });

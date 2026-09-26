@@ -211,8 +211,9 @@ export default async function Dashboard() {
   return (
     <>
       {/* Si la mucama marca una limpia u otra PC hace un check-out, Hoy lo muestra solo.
-          Si no puede ponerse al día, avisa desde qué hora (del hotel) no se actualiza. */}
-      <AutoRefresh timezone={hotelSettings.timezone} />
+          Si no puede ponerse al día, avisa desde qué hora (del hotel) no se actualiza: la de
+          este render, que viaja con la página (con Atrás, Next la muestra de su caché). */}
+      <AutoRefresh timezone={hotelSettings.timezone} renderedAt={now.getTime()} />
       <PageHeader
         title={`Vista Global: ${formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}`}
         badge={

@@ -14,9 +14,19 @@ import { SESSION_CLOSED_NOTICE, useAutoRefresh } from "./useAutoRefresh";
  * a entrar. Corre la pantalla una línea y no tapa nada. Se va sola con el primer chequeo
  * que anda. Aparece, se va o cambia recién cuando la pantalla lleva 2 s quieta (lo decide
  * el hook): así no corre la grilla justo cuando alguien va a tocar un botón.
+ *
+ * `renderedAt` es cuándo armó el servidor la página (`Date.now()`): la hora de la línea es
+ * la de los datos que se ven, también cuando se vuelve a Hoy con Atrás y Next la saca de su
+ * caché (ver `renderedAt` en `useAutoRefresh`).
  */
-export default function AutoRefresh({ timezone }: { timezone: string }) {
-  const trouble = useAutoRefresh();
+export default function AutoRefresh({
+  timezone,
+  renderedAt,
+}: {
+  timezone: string;
+  renderedAt?: number;
+}) {
+  const trouble = useAutoRefresh({ renderedAt });
   if (!trouble) return null;
 
   // "HH:MM" en 24 hs y en la zona del hotel, no la de la PC. `formatHotelTime` no sirve:

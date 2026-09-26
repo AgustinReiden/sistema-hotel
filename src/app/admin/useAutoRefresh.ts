@@ -232,6 +232,14 @@ type UseAutoRefreshOptions = {
    * en cada render: se usa siempre el último, sin rearmar el intervalo.
    */
   onRefresh?: () => void;
+  /**
+   * Cuándo armó el servidor lo que se ve (`Date.now()` del render de la página). Es la hora
+   * que da el aviso: con Atrás o Adelante, Next vuelve a mostrar la página de su caché, con
+   * los datos de la última vez que se pidió, y la hora de montar diría otra cosa. Viaja con
+   * la página, así que cada recarga que llega trae la suya. Sin esto, la pantalla cuenta
+   * como puesta al día al montarse y en cada recarga que se pide.
+   */
+  renderedAt?: number;
 };
 
 /**
@@ -251,7 +259,8 @@ type UseAutoRefreshOptions = {
  *
  * Devuelve null mientras anda. Con `FAILED_CHECKS_BEFORE_NOTICE` chequeos fallidos
  * seguidos (sin red en la PC cuenta como uno), devuelve desde cuándo la pantalla no se
- * pone al día (la última recarga, o cuando se montó) y cómo salió el último chequeo, para
+ * pone al día (`renderedAt` si se lo pasan; si no, la última recarga o cuando se montó) y
+ * cómo salió el último chequeo, para
  * que la pantalla lo avise. Vuelve a null con el primer chequeo que anda. No recargar a
  * propósito (pestaña oculta, cuadro abierto, un campo con el foco, alguien usándola) no
  * cuenta como falla. Lo devuelto cambia (aparece, se va o cambia de causa) recién cuando
@@ -267,6 +276,7 @@ export function useAutoRefresh({
   intervalMs = AUTO_REFRESH_INTERVAL_MS,
   paused = false,
   onRefresh,
+  renderedAt,
 }: UseAutoRefreshOptions = {}): RefreshTrouble | null {
   const router = useRouter();
   const [trouble, setTrouble] = useState<RefreshTrouble | null>(null);
@@ -274,19 +284,29 @@ export function useAutoRefresh({
   const failedChecksRef = useRef(0);
   // Cuándo se puso al día la pantalla por última vez (null hasta que se monta).
   const lastUpdatedAtRef = useRef<number | null>(null);
+  // Con `renderedAt`, la hora la trae la página: al montarse (también la que Next saca de
+  // su caché con Atrás) y con cada recarga que llega. Va antes del efecto de abajo, que la
+  // lee al montarse.
+  useEffect(() => {
+    if (renderedAt !== undefined) lastUpdatedAtRef.current = renderedAt;
+  }, [renderedAt]);
   // Lo que tiene que devolver el hook según el último chequeo, mientras espera a que la
   // pantalla quede quieta para mostrarse (undefined: no hay nada esperando). Fuera del
   // efecto para que no se pierda si el efecto se rearma: se muestra con el chequeo siguiente.
   const pendingTroubleRef = useRef<RefreshTrouble | null | undefined>(undefined);
-  // Lee el `onRefresh` y el router del último render sin ser dependencia del efecto: si
-  // lo fuera, un `onRefresh` nuevo en cada render reiniciaría la cuenta de los 30 s.
-  const doRefresh = useEffectEvent(() => {
+  // Lee el `onRefresh`, el router y `renderedAt` del último render sin ser dependencias del
+  // efecto: si lo fueran, un `onRefresh` nuevo en cada render (o la hora nueva que trae cada
+  // recarga) reiniciaría la cuenta de los 30 s.
+  const doRefresh = useEffectEvent((requestedAt: number) => {
+    // Sin `renderedAt`, la pantalla cuenta como puesta al día cuando se pide la recarga.
+    // Con `renderedAt`, cuando llega: la página nueva trae su hora.
+    if (renderedAt === undefined) lastUpdatedAtRef.current = requestedAt;
     if (onRefresh) onRefresh();
     else router.refresh();
   });
 
   useEffect(() => {
-    // Lo que se ve al montar es de recién: cuenta como puesta al día.
+    // Sin `renderedAt`, lo que se ve al montar se toma como de recién.
     if (lastUpdatedAtRef.current === null) lastUpdatedAtRef.current = Date.now();
     if (paused) return;
 
@@ -380,8 +400,7 @@ export function useAutoRefresh({
         return;
       }
       lastCheckAt = Date.now();
-      lastUpdatedAtRef.current = lastCheckAt;
-      doRefresh();
+      doRefresh(lastCheckAt);
     };
     const onActivity = () => {
       lastActivityAt = Date.now();
