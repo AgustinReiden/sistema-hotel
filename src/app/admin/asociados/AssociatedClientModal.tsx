@@ -309,43 +309,40 @@ export default function AssociatedClientModal({
                 <option value="consolidada">Factura consolidada (la emite el admin)</option>
                 <option value="no_factura">No se factura</option>
               </select>
+              {/* En una ficha consolidada solo lo fiado espera a la consolidada: lo que se
+                  cobra en caja se factura en el check-out (RoomCard ofrece la factura). */}
               <p className="text-[11px] text-slate-500 mt-1">
-                Consolidada: las estadías no se facturan al cerrar; se juntan en una sola factura
-                desde Control de facturación.
+                Consolidada: las estadías a cuenta corriente se juntan en una sola factura
+                desde Control de facturación. Lo cobrado en caja se factura en el check-out.
               </p>
-              {notaPideCuit && (
-                <p
-                  role="status"
-                  className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-                >
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                  <span>
-                    La consolidada de una empresa pide CUIT: cargalo en DNI o CUIT o elegí
-                    Factura por cada check-out.
-                  </span>
-                </p>
-              )}
-              {mostrarNotaConsolidada && !notaPideCuit && (
-                <p
-                  role="status"
-                  className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"
-                >
-                  <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
-                  <span>
-                    Pasó a Factura consolidada: lo fiado se junta en una factura. Si esta empresa
-                    quiere factura en cada check-out, cambialo acá.
-                  </span>
-                </p>
-              )}
-              {avisoFacturacion && (
-                <p
-                  role="status"
-                  className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-                >
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                  <span>{avisoFacturacion}</span>
-                </p>
-              )}
+              {/* Un solo role="status" siempre montado: el lector de pantalla anuncia el
+                  cambio de contenido de una región que ya existía, no una que aparece. */}
+              <div role="status" aria-live="polite">
+                {notaPideCuit && (
+                  <p className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      La consolidada de una empresa pide CUIT: cargalo en DNI o CUIT o elegí
+                      Factura por cada check-out.
+                    </span>
+                  </p>
+                )}
+                {mostrarNotaConsolidada && !notaPideCuit && (
+                  <p className="mt-2 flex items-start gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                    <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      Pasó a Factura consolidada: lo fiado se junta en una factura. Si esta empresa
+                      quiere factura en cada check-out, cambialo acá.
+                    </span>
+                  </p>
+                )}
+                {avisoFacturacion && (
+                  <p className="mt-2 flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>{avisoFacturacion}</span>
+                  </p>
+                )}
+              </div>
             </div>
 
             <div>
