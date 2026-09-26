@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import OccupiedRoomAlertBanner from "./OccupiedRoomAlertBanner";
 import type { AssignWalkInPayload, RoomOccupancyAlert } from "@/lib/types";
@@ -111,6 +111,12 @@ beforeEach(() => {
   H.toast.success.mockReset();
   H.toast.warning.mockReset();
   H.toast.error.mockReset();
+  // La estadía que falta asociar se guarda en la pestaña: cada test arranca sin nada.
+  window.sessionStorage.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 /** Carga la estadía desde el aviso abierto y la acción contesta que el aviso quedó sin cerrar. */
@@ -287,5 +293,152 @@ describe("OccupiedRoomAlertBanner", () => {
     await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
     expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
     expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+  });
+});
+
+/**
+ * Pedido de Agustín (26/09): la estadía que falta asociar al aviso no se pierde si la
+ * pantalla se vuelve a armar de cero. Pasa si una recarga de Hoy termina en la pantalla de
+ * error y vuelve, con un deploy (Next recarga la página entera) o con F5 en la misma
+ * pestaña. En los tests, eso es desmontar el aviso y montarlo de nuevo.
+ */
+describe("OccupiedRoomAlertBanner — la estadía sin asociar sobrevive a que la pantalla se vuelva a armar", () => {
+  it("después de volver a armarse, sigue ofreciendo cerrar el aviso contra la misma estadía", async () => {
+    H.closeOccupancyAlertAction.mockResolvedValue({ success: true });
+    const primera = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+    primera.unmount();
+
+    renderBanner([abierta], true);
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+    expect(screen.queryByText("Cargar la estadía")).not.toBeInTheDocument();
+    expect(screen.getByText(/La estadía ya está cargada; falta cerrar el aviso/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
+    expect(H.closeOccupancyAlertAction).toHaveBeenCalledWith(10, "r-1");
+    expect(H.regularizeOccupiedRoomAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el cierre falla, sigue guardada: otra vuelta a armarse la vuelve a ofrecer", async () => {
+    H.closeOccupancyAlertAction.mockResolvedValue({ success: false, error: "No se pudo." });
+    const primera = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+    await waitFor(() => expect(H.toast.error).toHaveBeenCalled());
+    primera.unmount();
+
+    renderBanner([abierta], true);
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+  });
+
+  it("cuando el aviso se cierra, la olvida: al volver a armarse ya no ofrece cerrarlo", async () => {
+    H.closeOccupancyAlertAction.mockResolvedValue({ success: true });
+    const primera = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
+    primera.unmount();
+
+    // Aunque la lista todavía lo traiga abierto (la recarga de la acción no llegó).
+    renderBanner([abierta], true);
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+  });
+
+  it("cuando el aviso llega resuelto (lo cerró otro admin, por ejemplo desde Mantenimiento), la olvida", async () => {
+    const { rerender, unmount } = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    rerender(
+      <OccupiedRoomAlertBanner
+        alerts={[{ ...abierta, resolved_at: "2026-09-23T15:00:00.000Z", decision: "regularizada" }]}
+        pricingByRoomId={pricingByRoomId}
+        associatedClients={[]}
+        timezone={TZ}
+        isAdmin
+      />
+    );
+    unmount();
+
+    renderBanner([abierta], true);
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+  });
+
+  it("si la lista de avisos vino vacía (no se pudo leer), no la olvida", async () => {
+    const { rerender, unmount } = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    // La página deja la lista vacía si falla la lectura de los avisos: no es que se resolvió.
+    rerender(
+      <OccupiedRoomAlertBanner
+        alerts={[]}
+        pricingByRoomId={pricingByRoomId}
+        associatedClients={[]}
+        timezone={TZ}
+        isAdmin
+      />
+    );
+    unmount();
+
+    renderBanner([abierta], true);
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+  });
+
+  it("no se la aplica a otro aviso", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+    primera.unmount();
+
+    renderBanner([alerta({ alert_id: 20 })], true);
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+  });
+
+  it("a recepción no le ofrece cerrarlo aunque esté guardada (decidir es del admin)", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+    primera.unmount();
+
+    renderBanner([abierta], false);
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    expect(screen.getByText("Lo resuelve el administrador")).toBeInTheDocument();
+  });
+
+  it("si lo guardado en la pestaña está roto, lo ignora y ofrece cargar la estadía", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+    primera.unmount();
+    for (let i = 0; i < window.sessionStorage.length; i++) {
+      const clave = window.sessionStorage.key(i);
+      if (clave) window.sessionStorage.setItem(clave, "{roto");
+    }
+
+    renderBanner([abierta], true);
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+  });
+
+  it("si la pestaña no deja guardar (almacenamiento bloqueado), funciona como antes mientras no se vuelva a armar", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    H.closeOccupancyAlertAction.mockResolvedValue({ success: true });
+    renderBanner([abierta], true);
+
+    await cargarConAvisoSinCerrar();
+    expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
+    expect(H.closeOccupancyAlertAction).toHaveBeenCalledWith(10, "r-1");
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
   });
 });
