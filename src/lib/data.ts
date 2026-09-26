@@ -3139,6 +3139,7 @@ type CreditChargeWithReservationRow = {
   amount: number | string;
   created_at: string;
   reservation_id: string | null;
+  remito_numero: number | string | null;
   reservations:
     | { client_name: string; rooms: { room_number: string }[] | { room_number: string } | null }
     | { client_name: string; rooms: { room_number: string }[] | { room_number: string } | null }[]
@@ -3160,6 +3161,7 @@ function normalizeShiftCreditCharge(
     reservation_id: row.reservation_id,
     client_name: reservation?.client_name ?? "Desconocido",
     room_number: room?.room_number ?? null,
+    remito_numero: numeroONull(row.remito_numero),
   };
 }
 
@@ -3215,11 +3217,12 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
   // pasa por `payments` (por eso no toca el arqueo), pero sin mostrarlo la rendición
   // esconde plata vendida. Se trae el detalle (quién y qué habitación) y no solo el
   // total: en el cierre, un número sin nombre no se puede contrastar contra nada.
+  // El número de remito va para que la Caja lo muestre y lo deje reimprimir.
   const { data: creditData, error: creditError } = await supabase
     .from("cuenta_corriente_movimientos")
     .select(
       `
-      id, amount, created_at, reservation_id,
+      id, amount, created_at, reservation_id, remito_numero,
       reservations!inner ( checkout_cash_shift_id, client_name, rooms ( room_number ) )
       `
     )
