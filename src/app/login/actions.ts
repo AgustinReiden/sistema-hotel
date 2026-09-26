@@ -45,6 +45,11 @@ export async function logout() {
     // lados (la otra PC, el celular). "Salir", el cierre por inactividad y "Cerrar
     // sesión" del traspaso forzado pasan todos por acá. El "Listo" de fin de turno
     // usa logoutEverywhere().
+    // Ojo en recepción: si se sale por acá sin haber tocado ese "Listo" (sin rendir la
+    // caja, o rendida pero sin "Listo"), las otras sesiones del mismo usuario siguen
+    // abiertas. Cuando la siguiente abre su caja, esas sesiones caen en la rendición
+    // forzada de la caja nueva ("Entraste como…") y quien tenga ese dispositivo podría
+    // rendirla a ciegas a nombre de quien se fue.
     await supabase.auth.signOut({ scope: 'local' });
     redirect('/login');
 }
@@ -54,7 +59,8 @@ export async function logout() {
  * sesión en todos los dispositivos, como hacía `logout()` antes de pasar a solo este.
  * La recepcionista se va: si le quedara una sesión abierta en otra PC o en el celular,
  * cuando la siguiente abre su caja esa sesión caería en la rendición forzada y podría
- * cerrarle la caja a ciegas a nombre de quien ya se fue.
+ * cerrarle la caja a ciegas a nombre de quien ya se fue. Protege solo este camino: los
+ * que pasan por `logout()` dejan ese riesgo abierto (ver el comentario de arriba).
  */
 export async function logoutEverywhere() {
     const supabase = await createClient();

@@ -11,7 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * El cuarto camino, "Listo" después de rendir la caja propia al fin de turno, sigue
  * cerrando en todos lados (`logoutEverywhere()`): la recepcionista se va, y una sesión
  * suya que quedó abierta en otra PC o en el celular no puede terminar rindiendo la caja
- * que abre la siguiente.
+ * que abre la siguiente. Los otros tres caminos no cubren ese riesgo: si la recepcionista
+ * se va por ahí sin tocar "Listo", sus otras sesiones siguen abiertas.
  */
 
 const H = vi.hoisted(() => ({
