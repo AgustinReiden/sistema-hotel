@@ -41,6 +41,9 @@ export async function login(formData: FormData) {
 
 export async function logout() {
     const supabase = await createClient();
-    await supabase.auth.signOut();
+    // Solo este dispositivo. Sin scope, Supabase cierra la sesión del usuario en todos
+    // lados (la otra PC, el celular). "Salir", el cierre por inactividad y "Cerrar
+    // sesión" del traspaso forzado pasan todos por acá.
+    await supabase.auth.signOut({ scope: 'local' });
     redirect('/login');
 }
