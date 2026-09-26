@@ -54,6 +54,11 @@ interface PaymentModalProps {
   /** A nombre de quién queda lo fiado (la empresa). Si no llega, se usa clientName. */
   accountHolderName?: string | null;
   onSuccess?: () => void;
+  /**
+   * Cobro del check-out: lo hace el padre. El recibo también lo abre el padre (la
+   * tarjeta de la habitación), porque si después sale la pregunta de factura, el
+   * recibo espera a que se decida: abierto antes, la tapaba.
+   */
   onSubmitPayment?: (payload: {
     amount: number;
     paymentMethod: PaymentMethod;
@@ -176,9 +181,10 @@ export default function PaymentModal({
             ? `Check-out hecho. Queda a cuenta de ${holderName}.`
             : "Pago registrado y check-out realizado."
       );
-      // Abrir recibo imprimible (si el RPC devolvió payment_id)
+      // Pago suelto: abrir el recibo imprimible (si el RPC devolvió payment_id). En el
+      // check-out lo abre el padre, después de la pregunta de factura.
       const paymentId = (result.data as { paymentId?: string | null } | undefined)?.paymentId;
-      if (paymentId) {
+      if (paymentId && !isCheckoutMode) {
         openReceipt(paymentId);
       }
       onSuccess?.();
@@ -205,7 +211,14 @@ export default function PaymentModal({
               <DollarSign size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">{isCheckoutMode ? "Cobrar y Finalizar" : "Cargar Pago"}</h2>
+              {/* Fiar no es cobrar: con Cta. Cte. el título lo dice, como el rótulo y el botón. */}
+              <h2 className="text-xl font-bold text-slate-800">
+                {!isCheckoutMode
+                  ? "Cargar Pago"
+                  : isAccountCredit
+                    ? "Finalizar a cuenta corriente"
+                    : "Cobrar y Finalizar"}
+              </h2>
               <p className="text-slate-500 text-sm font-medium">{clientName}</p>
             </div>
           </div>
@@ -215,17 +228,19 @@ export default function PaymentModal({
         </div>
 
         <div className="p-6">
-          <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl flex items-center justify-between mb-6 gap-4">
-            <div>
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Total Estadia</p>
+          {/* En un celular (360 px) las tres cifras no entran en una fila: van en
+              renglones, rótulo a la izquierda y monto a la derecha. Desde sm, en fila. */}
+          <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-6">
+            <div className="flex items-baseline justify-between gap-3 sm:block">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider sm:mb-1">Total Estadía</p>
               <p className="text-lg font-bold text-slate-800">${numericTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
             </div>
-            <div className="text-right">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Pagado Prev.</p>
+            <div className="flex items-baseline justify-between gap-3 sm:block sm:text-right">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider sm:mb-1">Pagado Prev.</p>
               <p className="text-lg font-bold text-emerald-600">${numericPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
             </div>
-            <div className="text-right">
-              <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-1">Restante</p>
+            <div className="flex items-baseline justify-between gap-3 sm:block sm:text-right">
+              <p className="text-xs font-bold text-amber-600 uppercase tracking-wider sm:mb-1">Restante</p>
               <p className="text-xl font-bold text-amber-600">${debt.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
             </div>
           </div>
@@ -295,9 +310,11 @@ export default function PaymentModal({
               />
               {amountEditable && <ParsedAmountHint value={amount} />}
               <p className="mt-2 text-xs text-slate-500">
-                {isCheckoutMode
-                  ? "El check-out solo permite cobrar el saldo exacto pendiente."
-                  : "Puedes registrar un pago parcial o total para esta reserva."}
+                {!isCheckoutMode
+                  ? "Puedes registrar un pago parcial o total para esta reserva."
+                  : isAccountCredit
+                    ? "Se carga a la cuenta el saldo exacto pendiente."
+                    : "El check-out solo permite cobrar el saldo exacto pendiente."}
               </p>
             </div>
 
