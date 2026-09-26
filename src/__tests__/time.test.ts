@@ -8,7 +8,7 @@ import {
   formatHotelWeekdayDate,
   hotelDateKey,
 } from "@/lib/time";
-import { conIcuDeChrome } from "./icu-chrome";
+import { conIcuCambiado, conIcuDeChrome, septiembreSinT } from "./icu-chrome";
 
 const TZ = "America/Argentina/Tucuman";
 
@@ -63,19 +63,72 @@ describe("formatHotelTime y formatHotelDateTime (no dependen del ICU)", () => {
   });
 });
 
-// Los demás helpers ya daban igual en Node y en Chrome: esto los deja atados.
-describe("helpers de fecha corta (iguales en Node y en Chrome)", () => {
-  it("formatHotelShortDateTime, formatHotelShortDate y formatHotelWeekdayDate", async () => {
-    const iso = "2026-09-26T17:30:00Z";
-    const formatear = () => [
-      formatHotelShortDateTime(iso, TZ),
-      formatHotelShortDate(iso, TZ),
-      formatHotelWeekdayDate(iso, TZ),
-    ];
+// Posible #418 en Hoy (el aviso de pieza ocupada) y en toda pantalla que dibuje una fecha
+// corta desde un componente de cliente: el mes abreviado lo escribía el ICU, y el Node del
+// servidor y el Chrome de la recepción no tienen por qué traer los mismos nombres.
+describe("formatHotelShortDateTime y formatHotelShortDate (no dependen del ICU)", () => {
+  it("escriben la fecha corta que ya se veía", () => {
+    const meses = Array.from({ length: 12 }, (_, i) =>
+      formatHotelShortDate(`2026-${String(i + 1).padStart(2, "0")}-15T15:00:00Z`, TZ)
+    );
+    expect(meses).toEqual([
+      "15 ene 26",
+      "15 feb 26",
+      "15 mar 26",
+      "15 abr 26",
+      "15 may 26",
+      "15 jun 26",
+      "15 jul 26",
+      "15 ago 26",
+      "15 sept 26",
+      "15 oct 26",
+      "15 nov 26",
+      "15 dic 26",
+    ]);
+    expect(formatHotelShortDateTime("2026-09-26T17:30:00Z", TZ)).toBe("26 sept 14:30");
+  });
+
+  it("toman el día y la hora de la zona del hotel, con la medianoche como 00", () => {
+    // 03:05 UTC = 00:05 en Tucumán; 02:59 UTC del 1/10 todavía es el 30/09 a las 23:59.
+    expect(formatHotelShortDateTime("2026-09-26T03:05:00Z", TZ)).toBe("26 sept 00:05");
+    expect(formatHotelShortDateTime("2026-10-01T02:59:00Z", TZ)).toBe("30 sept 23:59");
+    expect(formatHotelShortDate("2027-01-01T02:59:00Z", TZ)).toBe("31 dic 26");
+  });
+
+  it("dan lo mismo con el ICU de Chrome y con uno que abrevia distinto el mes", async () => {
+    const horarios = ["2026-09-26T17:30:00Z", "2026-09-01T03:05:00Z", "2026-12-31T23:45:00Z"];
+    const formatear = () =>
+      horarios.flatMap((iso) => [formatHotelShortDateTime(iso, TZ), formatHotelShortDate(iso, TZ)]);
 
     const enNode = formatear();
     expect(await conIcuDeChrome(formatear)).toEqual(enNode);
-    enNode.forEach((texto) => expect(texto).not.toMatch(/[\xa0\u{202f}]/u));
+    expect(await conIcuCambiado(septiembreSinT, formatear)).toEqual(enNode);
+    expect(enNode).toEqual([
+      "26 sept 14:30",
+      "26 sept 26",
+      "01 sept 00:05",
+      "01 sept 26",
+      "31 dic 20:45",
+      "31 dic 26",
+    ]);
+  });
+
+  it("sin fecha, o con una que no se puede leer, muestran la raya", () => {
+    expect(formatHotelShortDateTime(null, TZ)).toBe("—");
+    expect(formatHotelShortDate(undefined, TZ)).toBe("—");
+    expect(formatHotelShortDateTime("no es una fecha", TZ)).toBe("—");
+    expect(formatHotelShortDate("no es una fecha", TZ)).toBe("—");
+  });
+});
+
+// formatHotelWeekdayDate sigue escribiendo el mes y el día de la semana con el ICU: hoy se
+// usa solo en el servidor (el título de Hoy), donde no puede dar un #418.
+describe("formatHotelWeekdayDate (igual en Node y en Chrome)", () => {
+  it("no cambia con el ICU de Chrome", async () => {
+    const formatear = () => formatHotelWeekdayDate("2026-09-26T17:30:00Z", TZ);
+    const enNode = formatear();
+    expect(await conIcuDeChrome(formatear)).toBe(enNode);
+    expect(enNode).not.toMatch(/[\xa0\u{202f}]/u);
   });
 });
 

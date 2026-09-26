@@ -5,7 +5,9 @@
 // el servidor (Node) y otra en el navegador al hidratar, y cada uno trae su propio ICU.
 // Si el texto no da exactamente igual, React tira el HTML del servidor y redibuja todo
 // (error #418). Por eso la hora de 12 h se arma a mano: el ICU de Node escribe "p.",
-// espacio duro (U+00A0), "m.", y el de Chrome "p. m." con espacio común.
+// espacio duro (U+00A0), "m.", y el de Chrome "p. m." con espacio común. Y el mes
+// abreviado sale de una tabla: cada versión del ICU trae sus propios nombres ("sept" o
+// "sep"), y el Node del servidor y el Chrome de la recepción no tienen por qué coincidir.
 
 export const DEFAULT_TZ = "America/Argentina/Tucuman";
 
@@ -50,24 +52,38 @@ export function formatHotelDate(iso: string | null | undefined, timezone?: strin
   });
 }
 
-// Formato corto tipo "25 jun 13:00" en la zona del hotel. Se arma con formatToParts
-// para evitar comas/puntos que mete el locale y para forzar 24 hs.
+// Los meses abreviados que ya se veían en es-AR, sin el punto. De una tabla y no del ICU:
+// ver el comentario de arriba.
+const MESES_CORTOS = [
+  "ene",
+  "feb",
+  "mar",
+  "abr",
+  "may",
+  "jun",
+  "jul",
+  "ago",
+  "sept",
+  "oct",
+  "nov",
+  "dic",
+];
+
+// Día, mes abreviado y año de la fecha en la zona del hotel: "26", "sept", "2026".
+function hotelShortDateParts(iso: string, timezone?: string) {
+  const [year, month, day] = hotelDateKey(iso, timezone).split("-");
+  return { day, month: MESES_CORTOS[Number(month) - 1], year };
+}
+
+// Formato corto tipo "25 jun 13:00" en la zona del hotel, 24 hs y sin las comas ni los
+// puntos que mete el locale. Da lo mismo en el servidor y en el navegador.
 export function formatHotelShortDateTime(
   iso: string | null | undefined,
   timezone?: string
 ): string {
-  if (!iso) return "—";
-  const parts = new Intl.DateTimeFormat("es-AR", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: timezone || DEFAULT_TZ,
-  }).formatToParts(new Date(iso));
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const month = get("month").replace(".", "");
-  return `${get("day")} ${month} ${get("hour")}:${get("minute")}`;
+  if (!iso || !isValidInstant(iso)) return "—";
+  const { day, month } = hotelShortDateParts(iso, timezone);
+  return `${day} ${month} ${hotelTimeKey(iso, timezone)}`;
 }
 
 // Fecha con día de semana en la zona del hotel, tipo "lunes, 06 jul". Se arma con
@@ -139,18 +155,13 @@ export function addDaysToDateKey(dateKey: string, days: number): string {
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
 }
 
-// Fecha corta tipo "25 jun 26" en la zona del hotel.
+// Fecha corta tipo "25 jun 26" en la zona del hotel. Como la de arriba, da lo mismo en
+// el servidor y en el navegador.
 export function formatHotelShortDate(
   iso: string | null | undefined,
   timezone?: string
 ): string {
-  if (!iso) return "—";
-  const parts = new Intl.DateTimeFormat("es-AR", {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    timeZone: timezone || DEFAULT_TZ,
-  }).formatToParts(new Date(iso));
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${get("day")} ${get("month").replace(".", "")} ${get("year")}`;
+  if (!iso || !isValidInstant(iso)) return "—";
+  const { day, month, year } = hotelShortDateParts(iso, timezone);
+  return `${day} ${month} ${year.slice(-2)}`;
 }
