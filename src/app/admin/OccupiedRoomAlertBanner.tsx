@@ -87,6 +87,17 @@ function guardarPendiente(alertId: number, reservationId: string | null) {
   pendientesListeners.forEach((listener) => listener());
 }
 
+/**
+ * El código con el que la base rechaza el cierre porque la estadía guardada ya no sirve
+ * para cerrarlo (`rpc_regularize_occupied_room`, mig 106): ya salió (no está con el huésped
+ * adentro) o es de otra habitación (la cambiaron). Reintentar no lo arregla.
+ */
+const ESTADIA_YA_NO_SIRVE_CODE = "22023";
+
+/** Lo que se dice cuando pasa eso: por qué no se cierra y que no la vuelvan a cargar. */
+const ESTADIA_YA_NO_SIRVE =
+  "Esa estadía ya salió o cambió de habitación, así que este aviso no se puede cerrar desde acá. Ya está cargada: no la vuelvas a cargar.";
+
 type Props = {
   alerts: RoomOccupancyAlert[];
   /** Precio y número por id de habitación, para precargar el modal. */
@@ -135,8 +146,14 @@ type Props = {
  * se cierra, desde acá o porque llega resuelto; no cuando la lista viene vacía (la Home
  * la deja vacía si no pudo leer los avisos). En otra pestaña o en otra PC no está; si
  * igual la vuelven a cargar, no la duplica mientras la primera siga adentro
- * (`reservations_no_active_overlap` rechaza dos estadías en la misma pieza y horario),
- * y el aviso se cierra desde Mantenimiento con una nota.
+ * (`reservations_no_active_overlap` rechaza dos estadías en la misma pieza y horario).
+ *
+ * SI LA ESTADÍA GUARDADA YA SALIÓ O CAMBIÓ DE HABITACIÓN, la base rechaza el cierre
+ * (`ESTADIA_YA_NO_SIRVE_CODE`) y reintentar no lo arregla: la fila lo dice, saca el botón
+ * y sigue sin ofrecer "Cargar la estadía" (ya está cargada: volver a cargarla la cobraría
+ * dos veces). Lo guardado no se olvida por eso, justamente para no volver a ofrecerla.
+ * Cerrar el aviso sin cargar la estadía pide una nota (mig 105), y Mantenimiento todavía
+ * no la pide: ese camino queda pendiente, fuera de esta pantalla.
  *
  * Se eligió guardar y no frenar la recarga de Hoy mientras haya uno sin cerrar: frenarla
  * dejaría Hoy sin ponerse al día (y sin la línea que lo avisa) todo el tiempo que el
@@ -164,6 +181,8 @@ export default function OccupiedRoomAlertBanner({
     [guardados, enPantalla]
   );
   const [closingId, setClosingId] = useState<number | null>(null);
+  // Avisos cuya estadía guardada ya no sirve para cerrarlos (ver arriba): sin botón.
+  const [sinCierre, setSinCierre] = useState<number[]>([]);
 
   const abiertas = useMemo(() => alerts.filter((a) => a.resolved_at === null), [alerts]);
   const cerradas = useMemo(() => alerts.filter((a) => a.resolved_at !== null), [alerts]);
@@ -217,6 +236,11 @@ export default function OccupiedRoomAlertBanner({
     try {
       const result = await closeOccupancyAlertAction(alertId, reservationId);
       if (!result.success) {
+        if (result.code === ESTADIA_YA_NO_SIRVE_CODE) {
+          setSinCierre((prev) => (prev.includes(alertId) ? prev : [...prev, alertId]));
+          toast.error(ESTADIA_YA_NO_SIRVE, { duration: 12000 });
+          return;
+        }
         toast.error(result.error);
         return;
       }
@@ -259,6 +283,7 @@ export default function OccupiedRoomAlertBanner({
           <ul className="space-y-2">
             {abiertas.map((a) => {
               const pendiente = isAdmin ? pendientes[a.alert_id] : undefined;
+              const noSeCierraDesdeAca = pendiente !== undefined && sinCierre.includes(a.alert_id);
               return (
                 <li
                   key={a.alert_id}
@@ -279,11 +304,17 @@ export default function OccupiedRoomAlertBanner({
                     </p>
                     {pendiente && (
                       <p className="text-xs font-bold text-amber-700 mt-0.5">
-                        La estadía ya está cargada; falta cerrar el aviso. No la vuelvas a cargar.
+                        {noSeCierraDesdeAca
+                          ? ESTADIA_YA_NO_SIRVE
+                          : "La estadía ya está cargada; falta cerrar el aviso. No la vuelvas a cargar."}
                       </p>
                     )}
                   </div>
-                  {pendiente ? (
+                  {noSeCierraDesdeAca ? (
+                    <span className="shrink-0 text-xs font-bold text-amber-800 bg-amber-100 rounded-lg px-3 py-1.5">
+                      Ya está cargada
+                    </span>
+                  ) : pendiente ? (
                     <button
                       type="button"
                       onClick={() => closeAlert(a.alert_id, pendiente)}
