@@ -139,23 +139,62 @@ describe("NumberStepper", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it("lo que se pasa del rango queda en el límite al salir del campo", () => {
+  it("lo que se pasa del máximo queda en el límite al tipearlo, no recién al salir", () => {
     const onChange = vi.fn();
     render(<Controlado inicial={3} onChange={onChange} />);
 
     enfocar();
     fireEvent.change(campo(), { target: { value: "45" } });
-    // Fuera de rango todavía no se manda: puede ser que siga escribiendo.
-    expect(onChange).not.toHaveBeenCalled();
-    salir();
+    // El formulario ya tiene el 30 antes de que el click en el botón final saque el foco.
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith(30);
     expect(campo().value).toBe("30");
+    expect(screen.getByText("Máximo 30.")).toBeInTheDocument();
+
+    // Salir del campo no cambia nada más.
+    salir();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(campo().value).toBe("30");
+
+    // El aviso se va con lo siguiente que se tipea.
+    enfocar();
+    fireEvent.change(campo(), { target: { value: "4" } });
+    expect(onChange).toHaveBeenLastCalledWith(4);
+    expect(screen.queryByText("Máximo 30.")).toBeNull();
+  });
+
+  it("un número bajo el mínimo no pasa a 1: al salir vuelve el último válido", () => {
+    const onChange = vi.fn();
+    render(<Controlado inicial={3} onChange={onChange} />);
 
     enfocar();
     fireEvent.change(campo(), { target: { value: "0" } });
+    expect(campo().value).toBe("0");
     salir();
-    expect(onChange).toHaveBeenLastCalledWith(1);
-    expect(campo().value).toBe("1");
+    expect(campo().value).toBe("3");
+    expect(onChange).not.toHaveBeenCalled();
+
+    // Un 0 adelante no molesta: "05" es 5.
+    enfocar();
+    fireEvent.change(campo(), { target: { value: "0" } });
+    fireEvent.change(campo(), { target: { value: "05" } });
+    expect(onChange).toHaveBeenLastCalledWith(5);
+    salir();
+    expect(campo().value).toBe("5");
+  });
+
+  it("salir del campo nunca cambia el valor que ya tenía el formulario", () => {
+    const onChange = vi.fn();
+    render(<Controlado inicial={3} onChange={onChange} />);
+
+    for (const tipeado of ["", "0", "00", "45", "7"]) {
+      enfocar();
+      fireEvent.change(campo(), { target: { value: tipeado } });
+      const antes = onChange.mock.calls.length;
+      salir();
+      // El blur que provoca el click en el botón final no manda nada nuevo.
+      expect(onChange.mock.calls.length).toBe(antes);
+    }
   });
 
   it("no entran más de dos dígitos", () => {
@@ -168,7 +207,7 @@ describe("NumberStepper", () => {
     expect(onChange).toHaveBeenLastCalledWith(12);
   });
 
-  it("Enter con un número fuera de rango lo ajusta y no manda el formulario", () => {
+  it("Enter después de un número que se pasó del máximo no manda el formulario: hace falta otro Enter", () => {
     const onChange = vi.fn();
     render(<Controlado inicial={3} onChange={onChange} />);
 
@@ -178,6 +217,23 @@ describe("NumberStepper", () => {
     expect(siguio).toBe(false);
     expect(onChange).toHaveBeenLastCalledWith(30);
     expect(campo().value).toBe("30");
+
+    // El segundo Enter ya confirma el 30 que está a la vista.
+    expect(fireEvent.keyDown(campo(), { key: "Enter" })).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("Enter con el campo vacío o en 0 vuelve el último válido y no manda el formulario", () => {
+    const onChange = vi.fn();
+    render(<Controlado inicial={3} onChange={onChange} />);
+
+    for (const tipeado of ["", "0"]) {
+      enfocar();
+      fireEvent.change(campo(), { target: { value: tipeado } });
+      expect(fireEvent.keyDown(campo(), { key: "Enter" })).toBe(false);
+      expect(campo().value).toBe("3");
+    }
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("Enter con un número válido deja que el formulario siga", () => {

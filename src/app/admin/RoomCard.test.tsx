@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RoomCard from "./RoomCard";
@@ -281,5 +281,37 @@ describe("RoomCard: ampliar la reserva", () => {
 
     fireEvent.click(screen.getByText("Ampliar 2 noches · sale el 27/09"));
     await waitFor(() => expect(handleExtendReservation).toHaveBeenCalledWith("res-1", 2));
+  });
+
+  it("un número que se pasa de 30 queda en 30 al tipearlo, y se amplía lo que decía el botón", async () => {
+    const { handleExtendReservation } = await import("./actions");
+    vi.mocked(handleExtendReservation).mockClear();
+    vi.mocked(handleExtendReservation).mockResolvedValue({
+      success: true,
+      data: { halfDayRemoved: false, halfDayAmount: 0 },
+    });
+    // Sale el 25/09 a las 10:00.
+    abrir(
+      habitacion({
+        check_in_target: "2026-09-24T17:00:00.000Z",
+        check_out_target: "2026-09-25T13:00:00.000Z",
+      })
+    );
+
+    fireEvent.click(screen.getByText("Ampliar Reserva"));
+    const campo = screen.getByLabelText("Noches adicionales") as HTMLInputElement;
+    // Quería 4 y se le escapó un 5.
+    act(() => campo.focus());
+    fireEvent.change(campo, { target: { value: "4" } });
+    fireEvent.change(campo, { target: { value: "45" } });
+    expect(campo.value).toBe("30");
+    const boton = screen.getByText("Ampliar 30 noches · sale el 25/10");
+
+    // En el navegador el mousedown sobre el botón saca el foco del campo antes del click.
+    act(() => campo.blur());
+    expect(boton.textContent).toBe("Ampliar 30 noches · sale el 25/10");
+    fireEvent.click(boton);
+    await waitFor(() => expect(handleExtendReservation).toHaveBeenCalledWith("res-1", 30));
+    expect(handleExtendReservation).toHaveBeenCalledTimes(1);
   });
 });

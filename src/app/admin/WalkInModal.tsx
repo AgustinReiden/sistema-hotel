@@ -562,7 +562,7 @@ export default function WalkInModal({
               onChange={setGuestCount}
               min={1}
               max={20}
-              hint="Opcional (default 1)."
+              hint="Opcional. Si no lo cambiás, queda en 1."
             />
           </div>
 

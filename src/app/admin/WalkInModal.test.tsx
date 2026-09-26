@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import WalkInModal from "./WalkInModal";
@@ -114,10 +114,67 @@ describe("WalkInModal: el botón final dice noches y salida", () => {
     abrir();
 
     const pasajeros = screen.getByLabelText("Cantidad de pasajeros") as HTMLInputElement;
+    expect(screen.getByText("Opcional. Si no lo cambiás, queda en 1.")).toBeInTheDocument();
     act(() => pasajeros.focus());
     fireEvent.change(pasajeros, { target: { value: "25" } });
+    // Queda en 20 mientras se tipea, no recién al salir del campo.
+    expect(pasajeros.value).toBe("20");
+    expect(screen.getByText("Máximo 20.")).toBeInTheDocument();
     act(() => pasajeros.blur());
     expect(pasajeros.value).toBe("20");
     expect(screen.getByLabelText("Cantidad de pasajeros: sumar 1")).toBeDisabled();
+  });
+});
+
+describe("WalkInModal: se asignan las noches que decía el botón", () => {
+  /** Nombre, apellido y DNI: sin eso el botón no manda. */
+  function cargarHuesped(container: HTMLElement) {
+    fireEvent.change(container.querySelector("#clientFirstName")!, { target: { value: "Juan" } });
+    fireEvent.change(container.querySelector("#clientLastName")!, { target: { value: "Prueba" } });
+    fireEvent.change(container.querySelector("#clientDni")!, { target: { value: "30123456" } });
+  }
+
+  it("un número que se pasa de 30 queda en 30 al tipearlo: el botón lo dice antes del click y se asignan 30", async () => {
+    // 23/09 a las 18:00 en Tucumán.
+    vi.setSystemTime(new Date("2026-09-23T21:00:00.000Z"));
+    const onSubmit = vi.fn().mockResolvedValue({ success: true });
+    const { container } = abrir({ onSubmit });
+    cargarHuesped(container);
+
+    // Quería 3 y se le escapó un 9.
+    act(() => noches().focus());
+    fireEvent.change(noches(), { target: { value: "3" } });
+    fireEvent.change(noches(), { target: { value: "39" } });
+    expect(noches().value).toBe("30");
+    expect(screen.getByText("Máximo 30.")).toBeInTheDocument();
+    const boton = screen.getByText("Asignar · 30 noches · sale el 23/10");
+
+    // En el navegador el mousedown sobre el botón saca el foco del campo antes del click.
+    act(() => noches().blur());
+    expect(boton).toHaveTextContent("Asignar · 30 noches · sale el 23/10");
+    fireEvent.click(boton);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ nights: 30 });
+  });
+
+  it("un 0 no se asigna como 1: al salir vuelven las noches que decía el botón", async () => {
+    vi.setSystemTime(new Date("2026-09-23T21:00:00.000Z"));
+    const onSubmit = vi.fn().mockResolvedValue({ success: true });
+    const { container } = abrir({ onSubmit });
+    cargarHuesped(container);
+    tipearNoches("3");
+
+    act(() => noches().focus());
+    fireEvent.change(noches(), { target: { value: "0" } });
+    const boton = screen.getByText("Asignar · 3 noches · sale el 26/09");
+
+    act(() => noches().blur());
+    expect(noches().value).toBe("3");
+    expect(boton).toHaveTextContent("Asignar · 3 noches · sale el 26/09");
+    fireEvent.click(boton);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ nights: 3 });
   });
 });
