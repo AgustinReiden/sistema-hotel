@@ -10,7 +10,7 @@ const H = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ useRouter: () => H.router }));
 
 import AutoRefresh from "@/app/admin/AutoRefresh";
-import { shouldSkipRefresh, useAutoRefresh } from "@/app/admin/useAutoRefresh";
+import { resetSeenPages, shouldSkipRefresh, useAutoRefresh } from "@/app/admin/useAutoRefresh";
 
 const refresh = H.router.refresh;
 
@@ -97,6 +97,9 @@ function servidorColgado() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  // El registro de páginas vistas vive en el módulo, como en la pestaña: sin esto, una
+  // página de un test se tomaría como "ya vista" en el siguiente.
+  resetSeenPages();
   refresh.mockClear();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ status: 204 });
@@ -458,6 +461,53 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
+
+  /**
+   * Los dos avisos de volver, en el orden que los mande el navegador. `volverALaPestaña`
+   * deja la pestaña visible; el primer aviso llega con eso y el segundo, más tarde.
+   */
+  const avisosDeVolver: [string, () => void, () => void][] = [
+    [
+      "visibilitychange y después focus",
+      () => cambiarVisibilidad(false),
+      () => window.dispatchEvent(new Event("focus")),
+    ],
+    [
+      "focus y después visibilitychange",
+      () => {
+        tabOculta = false;
+        window.dispatchEvent(new Event("focus"));
+      },
+      () => document.dispatchEvent(new Event("visibilitychange")),
+    ],
+  ];
+
+  it.each(avisosDeVolver)(
+    "margen de 2 s entre los dos avisos (%s): hasta 1,999 s después el segundo no pregunta; a los 2 s, sí",
+    async (_orden, primero, segundo) => {
+      renderHook(() => useAutoRefresh());
+      cambiarVisibilidad(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      primero();
+      await alDia();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      segundo();
+      await alDia();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+
+      // Pasado el margen, otro aviso es otra vuelta: pregunta y recarga.
+      await vi.advanceTimersByTimeAsync(1);
+      segundo();
+      await alDia();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("una recarga por volver a la ventana no demora la del intervalo (30 s como máximo)", async () => {
     renderHook(() => useAutoRefresh());
@@ -876,6 +926,10 @@ const TZ_HOTEL = "America/Argentina/Buenos_Aires";
 const AVISO_SESION =
   "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
 
+/** Lo que agrega el aviso cuando la causa no es la sesión (pedido de Agustín del 26/09). */
+const AVISO_RED =
+  "Fijate que haya internet. No hace falta recargar: se pone al día sola cuando vuelve.";
+
 const sinActualizarDesde = (hora: string) => `Hoy no se actualiza desde las ${hora}.`;
 
 /** Cualquier versión del aviso, diga la hora que diga. */
@@ -928,8 +982,10 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
 
       await avanzar(30_000);
       expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
-      // No es una redirección: no habla de la sesión.
+      // No es una redirección: no habla de la sesión, dice qué hacer (fijarse en internet
+      // y no recargar, que se pone al día sola).
       expect(screen.queryByText(AVISO_SESION)).toBeNull();
+      expect(screen.getByText(AVISO_RED)).toBeInTheDocument();
       expect(refresh).not.toHaveBeenCalled();
     }
   );
@@ -968,14 +1024,21 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
   ])(
     "al volver a Hoy con Atrás (Next la saca de su caché) y %s, la hora es la de los datos (renderedAt), no la de volver",
     async (_causa, caer) => {
-      // La página se armó a las 10:00; la recepcionista se fue a Solicitudes y vuelve con
-      // Atrás a las 10:15: Next muestra la página guardada, con los datos de las 10:00.
+      // La página se armó y se vio a las 10:00; la recepcionista se fue a Solicitudes y
+      // vuelve con Atrás a las 10:15: Next muestra la página guardada, con los datos de
+      // las 10:00.
       const armada = Date.now();
+      render(<AutoRefresh timezone={TZ_HOTEL} renderedAt={armada} />).unmount();
       vi.setSystemTime(new Date("2026-09-25T13:15:00.000Z"));
-      render(<AutoRefresh timezone={TZ_HOTEL} renderedAt={armada} />);
       caer();
+      render(<AutoRefresh timezone={TZ_HOTEL} renderedAt={armada} />);
 
-      await avanzar(90_000);
+      // Al volver se pone al día enseguida: ese chequeo falla y es el 1.º. El 3.º, a los 60 s.
+      await avanzar(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await avanzar(59_000);
+      expect(avisoEnPantalla()).toBeNull();
+      await avanzar(1_000);
       expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
       expect(refresh).not.toHaveBeenCalled();
     }
@@ -1022,6 +1085,8 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
       await avanzar(30_000);
       expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
       expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+      // Con la sesión, internet anda: no manda a revisarlo ni dice que se arregla sola.
+      expect(screen.queryByText(AVISO_RED)).toBeNull();
       expect(refresh).not.toHaveBeenCalled();
     }
   );
@@ -1039,12 +1104,14 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     await avanzar(30_000);
     expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
     expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+    expect(screen.queryByText(AVISO_RED)).toBeNull();
 
-    // El siguiente falla por la red: la línea sigue, sin lo de la sesión.
+    // El siguiente falla por la red: la línea sigue, sin lo de la sesión y con qué hacer.
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     await avanzar(30_000);
     expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
     expect(screen.queryByText(AVISO_SESION)).toBeNull();
+    expect(screen.getByText(AVISO_RED)).toBeInTheDocument();
   });
 
   it("la línea se va sola cuando un chequeo vuelve a andar, y Hoy se pone al día", async () => {
@@ -1241,14 +1308,21 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
   });
 
-  it("es una sola línea chica en el flujo, que no tapa la grilla", async () => {
+  it.each<[string, () => void, string]>([
+    [
+      "la sesión",
+      () => fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" }),
+      AVISO_SESION,
+    ],
+    ["la red", () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch")), AVISO_RED],
+  ])("es una sola línea chica en el flujo, que no tapa la grilla (causa: %s)", async (_causa, caer, queHacer) => {
     const { container } = render(<AutoRefresh timezone={TZ_HOTEL} />);
-    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+    caer();
 
     await avanzar(90_000);
     const linea = container.firstElementChild as HTMLElement;
     expect(linea.getAttribute("role")).toBe("status");
-    expect(linea.textContent).toBe(`${sinActualizarDesde("10:00")} ${AVISO_SESION}`);
+    expect(linea.textContent).toBe(`${sinActualizarDesde("10:00")} ${queHacer}`);
     // En el flujo (no fija ni encima de nada) y sin la capa de los cuadros, que frenaría el refresco.
     expect(linea.className).not.toMatch(/\b(fixed|absolute|sticky)\b/);
     expect(document.querySelector(".fixed.inset-0")).toBeNull();
@@ -1292,5 +1366,184 @@ describe("useAutoRefresh — lo que devuelve para el aviso", () => {
     fetchMock.mockResolvedValue({ status: 502 });
     await avanzar(90_000);
     expect(result.current).toEqual({ since: armada, reason: "failed" });
+  });
+});
+
+describe("useAutoRefresh — al volver con Atrás o Adelante (Next muestra la página de su caché)", () => {
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-09-25T13:00:00.000Z"));
+  });
+
+  /** Hoy, montada con la página que armó el servidor en `renderedAt`. */
+  const montarHoy = (renderedAt: number) =>
+    render(<AutoRefresh timezone={TZ_HOTEL} renderedAt={renderedAt} />);
+
+  /**
+   * La recepcionista se va de Hoy (se desmonta) y vuelve `ms` después con Atrás: Next monta
+   * la página que tenía guardada, con el mismo `renderedAt`. Mientras está en otra pantalla,
+   * Hoy no corre: solo pasa el reloj de la PC.
+   */
+  function irseYVolver(hoy: { unmount: () => void }, renderedAt: number, ms: number) {
+    hoy.unmount();
+    vi.setSystemTime(Date.now() + ms);
+    return montarHoy(renderedAt);
+  }
+
+  it("una página que se ve por primera vez no pregunta al montarse: espera el turno de 30 s", async () => {
+    montarHoy(Date.now());
+    await alDia();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await avanzar(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("al volver a una página vista hace más de 30 s, se pone al día enseguida (pregunta y recarga)", async () => {
+    const armada = Date.now();
+    const hoy = montarHoy(armada);
+
+    irseYVolver(hoy, armada, 5 * 60_000);
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Después sigue el turno de siempre.
+    await avanzar(30_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("si vuelve antes de los 30 s, no pregunta al montarse: esos datos son de hace menos de un turno", async () => {
+    const armada = Date.now();
+    const hoy = montarHoy(armada);
+
+    irseYVolver(hoy, armada, 20_000);
+    await alDia();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await avanzar(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("la página que trajo una recarga cuenta desde que llegó, no desde que se montó Hoy", async () => {
+    const hoy = montarHoy(Date.now());
+
+    // La recarga de los 30 s trae una página nueva, que llega un segundo después.
+    await avanzar(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    const nueva = Date.now();
+    await avanzar(1_000);
+    hoy.rerender(<AutoRefresh timezone={TZ_HOTEL} renderedAt={nueva} />);
+
+    // Se va y vuelve 20 s después: la de la caché es la que llegó hace 20 s (Hoy se montó
+    // hace 51 s, pero esos datos no son de entonces).
+    const vuelta = irseYVolver(hoy, nueva, 20_000);
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Se va otra vez y vuelve 20 s después: ya son 40 s desde que llegó. Se pone al día.
+    irseYVolver(vuelta, nueva, 20_000);
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["atrasado una hora", -60 * 60_000],
+    ["adelantado una hora", 60 * 60_000],
+  ])(
+    "no compara el reloj del servidor con el de la PC (servidor %s): cuenta desde que la PC vio la página",
+    async (_desfase, ms) => {
+      const armada = Date.now() + ms;
+      const hoy = montarHoy(armada);
+      await alDia();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // 10 s en la PC: todavía no.
+      const vuelta = irseYVolver(hoy, armada, 10_000);
+      await alDia();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // 35 s en la PC desde que la vio: se pone al día.
+      irseYVolver(vuelta, armada, 25_000);
+      await alDia();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each<[string, () => void]>([
+    [
+      "un cuadro abierto",
+      () => {
+        abrirCuadroSinAriaModal();
+      },
+    ],
+    [
+      "el foco en un campo",
+      () => {
+        const campo = document.createElement("input");
+        document.body.appendChild(campo);
+        campo.focus();
+      },
+    ],
+    ["la pestaña oculta", () => (tabOculta = true)],
+  ])("respeta las mismas pausas que volver a la pestaña: con %s no pregunta ni recarga", async (_pausa, pausar) => {
+    const armada = Date.now();
+    const hoy = montarHoy(armada);
+
+    pausar();
+    irseYVolver(hoy, armada, 5 * 60_000);
+    await alDia();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("con paused al volver, no pregunta ni recarga", async () => {
+    const armada = Date.now();
+    renderHook(() => useAutoRefresh({ renderedAt: armada })).unmount();
+
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    renderHook(() => useAutoRefresh({ renderedAt: armada, paused: true }));
+    await alDia();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("si la usan mientras vuelve ese chequeo, recarga recién cuando la pantalla queda quieta 2 s", async () => {
+    const armada = Date.now();
+    const hoy = montarHoy(armada);
+
+    let contestar: (respuesta: Respuesta) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Respuesta>((resolve) => {
+          contestar = resolve;
+        })
+    );
+    irseYVolver(hoy, armada, 5 * 60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    usar();
+    await act(async () => {
+      contestar({ status: 204 });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    await avanzar(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("si justo después vuelve a la ventana (focus), pregunta una sola vez", async () => {
+    const armada = Date.now();
+    const hoy = montarHoy(armada);
+
+    irseYVolver(hoy, armada, 5 * 60_000);
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

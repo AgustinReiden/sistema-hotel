@@ -29,6 +29,40 @@ const RETURN_GAP_MS = 2000;
  */
 export const PING_URL = "/admin/ping";
 
+/**
+ * Las páginas que ya se vieron en esta pestaña: el `renderedAt` de cada una y cuándo la vio
+ * la PC por primera vez (con el reloj de la PC). Con Atrás o Adelante, Next vuelve a montar
+ * la página que tenía guardada, con los datos y el `renderedAt` de entonces: si ese
+ * `renderedAt` ya está acá, es una vuelta, y si la PC lo vio hace más de un turno, esos datos
+ * son viejos. `renderedAt` solo se usa para reconocer la página: nunca se compara la hora del
+ * servidor con la de la PC (pueden no coincidir).
+ *
+ * Vive en el módulo, así que dura lo que la pestaña (un F5 lo vacía, pero después de un F5
+ * la página llega nueva del servidor). Hoy anota una página cada 30 s mientras está a la
+ * vista: `SEEN_PAGES_LIMIT` cubre más de 16 horas seguidas y son solo números. Una página
+ * que se cayó del registro cuenta como nueva: espera el turno, como antes.
+ */
+const firstSeenByRenderedAt = new Map<number, number>();
+const SEEN_PAGES_LIMIT = 2000;
+
+/** Anota la página si es nueva y devuelve cuándo la vio la PC por primera vez. */
+function rememberPage(renderedAt: number, now: number): number {
+  const seenAt = firstSeenByRenderedAt.get(renderedAt);
+  if (seenAt !== undefined) return seenAt;
+  firstSeenByRenderedAt.set(renderedAt, now);
+  if (firstSeenByRenderedAt.size > SEEN_PAGES_LIMIT) {
+    // Un Map recorre en el orden en que se anotó: la primera es la más vieja.
+    const oldest = firstSeenByRenderedAt.keys().next().value;
+    if (oldest !== undefined) firstSeenByRenderedAt.delete(oldest);
+  }
+  return now;
+}
+
+/** Vacía el registro de páginas vistas. Lo usan los tests: cada uno arranca de cero. */
+export function resetSeenPages(): void {
+  firstSeenByRenderedAt.clear();
+}
+
 /** Si el servidor no contesta en este tiempo, se lo da por caído hasta el próximo turno. */
 const PROBE_TIMEOUT_MS = 5000;
 
@@ -238,13 +272,18 @@ type UseAutoRefreshOptions = {
    * los datos de la última vez que se pidió, y la hora de montar diría otra cosa. Viaja con
    * la página, así que cada recarga que llega trae la suya. Sin esto, la pantalla cuenta
    * como puesta al día al montarse y en cada recarga que se pide.
+   *
+   * También sirve para reconocer esa vuelta: si al montarse la página ya se había visto en
+   * esta pestaña hace más de `intervalMs` (con el reloj de la PC), se pone al día enseguida,
+   * como al volver a la pestaña, en lugar de esperar el primer turno.
    */
   renderedAt?: number;
 };
 
 /**
- * Pone al día la pantalla sola: cada `intervalMs`, al volver a la ventana (`focus`) y
- * al volver a la pestaña (`visibilitychange`). Usa `router.refresh()`, que vuelve a
+ * Pone al día la pantalla sola: cada `intervalMs`, al volver a la ventana (`focus`), al
+ * volver a la pestaña (`visibilitychange`) y al volver con Atrás o Adelante a una página
+ * vieja (con `renderedAt`: ver `rememberPage`). Usa `router.refresh()`, que vuelve a
  * pedir los server components (el mismo patrón que la Caja). Antes de cada recarga:
  * - `shouldSkipRefresh` decide si no conviene (pestaña oculta, sin red, cuadro abierto,
  *   foco en un campo): se saltea hasta el próximo turno;
@@ -294,6 +333,9 @@ export function useAutoRefresh({
   // pantalla quede quieta para mostrarse (undefined: no hay nada esperando). Fuera del
   // efecto para que no se pierda si el efecto se rearma: se muestra con el chequeo siguiente.
   const pendingTroubleRef = useRef<RefreshTrouble | null | undefined>(undefined);
+  // Ponerse al día como al volver a la pestaña (`refreshOnReturn` del efecto de abajo). Es
+  // null mientras el refresco está pausado: con `paused`, una vuelta con Atrás no pregunta.
+  const refreshOnReturnRef = useRef<(() => void) | null>(null);
   // Lee el `onRefresh`, el router y `renderedAt` del último render sin ser dependencias del
   // efecto: si lo fueran, un `onRefresh` nuevo en cada render (o la hora nueva que trae cada
   // recarga) reiniciaría la cuenta de los 30 s.
@@ -424,8 +466,10 @@ export function useAutoRefresh({
     for (const type of ACTIVITY_EVENTS) {
       window.addEventListener(type, onActivity, ACTIVITY_LISTENER_OPTIONS);
     }
+    refreshOnReturnRef.current = refreshOnReturn;
     return () => {
       disposed = true;
+      refreshOnReturnRef.current = null;
       if (probe) {
         probe.cancel();
         probe = null;
@@ -446,6 +490,25 @@ export function useAutoRefresh({
       }
     };
   }, [intervalMs, paused]);
+
+  // ¿La página que se ve es una vuelta con Atrás o Adelante a datos viejos? Mira el registro
+  // de páginas vistas (y anota la página si es nueva) con el reloj de la PC. Lee
+  // `intervalMs` del último render sin ser dependencia.
+  const onPageShown = useEffectEvent((shownRenderedAt: number) => {
+    const now = Date.now();
+    if (now - rememberPage(shownRenderedAt, now) > intervalMs) {
+      // Lo mismo que al volver a la pestaña: respeta la pestaña oculta, un cuadro abierto,
+      // un campo con el foco, la actividad y el chequeo, y un `focus` justo después no
+      // pregunta de nuevo.
+      refreshOnReturnRef.current?.();
+    }
+  });
+  // Va después del efecto de arriba: al montarse, `refreshOnReturn` ya está armado. Corre
+  // al montarse (la vuelta con Atrás monta la página de nuevo) y con cada página que llega
+  // (se anota desde ese momento).
+  useEffect(() => {
+    if (renderedAt !== undefined) onPageShown(renderedAt);
+  }, [renderedAt]);
 
   return trouble;
 }
