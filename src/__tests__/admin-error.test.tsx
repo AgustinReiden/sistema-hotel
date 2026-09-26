@@ -1,0 +1,499 @@
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+
+const H = vi.hoisted(() => ({
+  // Un solo objeto, como el router de Next (ver use-auto-refresh.test.tsx).
+  router: { refresh: vi.fn() },
+}));
+
+vi.mock("next/navigation", () => ({ useRouter: () => H.router }));
+
+import AdminError from "@/app/admin/error";
+
+const refresh = H.router.refresh;
+const reset = vi.fn();
+
+/** Lo que mira el chequeo de la respuesta de `/admin/ping`. */
+type Respuesta = { status: number; type?: ResponseType; redirected?: boolean };
+
+/**
+ * La pregunta a `/admin/ping` que hacen el reintento automático y el botón antes de
+ * recargar. Por defecto contesta 204, como la ruta con la sesión y el rol leídos.
+ */
+const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Respuesta>>();
+
+let tabOculta = false;
+let sinConexion = false;
+let consoleError: MockInstance<typeof console.error>;
+
+/** Deja correr lo que quedó esperando la respuesta del servidor, sin mover el reloj. */
+const alDia = () => vi.advanceTimersByTimeAsync(0);
+
+/** Lo mismo, dejando que el cartel se vuelva a pintar con lo que cambió (act). */
+const alDiaEnPantalla = () =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+/** Un servidor que no contesta: el pedido queda colgado hasta que alguien lo corta. */
+function servidorColgado() {
+  fetchMock.mockImplementation(
+    (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("abortado")));
+      })
+  );
+}
+
+const SIN_CONEXION = "Sigue sin conexión. Se vuelve a intentar sola en 30 s.";
+/** Lo que dice el cartel nuevo cuando la recarga de "Reintentar" salió y volvió a fallar. */
+const NO_CARGA = "La conexión anda, pero la pantalla no carga. Avisale al encargado.";
+/**
+ * Lo que dice el cartel cuando el chequeo vuelve con una redirección del proxy: la sesión
+ * se cerró (por ejemplo, "Salir" en otro dispositivo) o Supabase no contesta.
+ */
+const SESION =
+  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
+
+function cambiarVisibilidad(oculta: boolean) {
+  tabOculta = oculta;
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+/**
+ * Lo que le llega a la pantalla cuando falla una recarga de Hoy. El mensaje puede traer
+ * datos (nombres, montos, lo que devolvió Supabase): no se muestra.
+ */
+function errorDeRecarga() {
+  return Object.assign(new Error("no se pudo leer la reserva de Juan Prueba"), {
+    digest: "987654321",
+  });
+}
+
+function mostrarPantallaDeError() {
+  return render(<AdminError error={errorDeRecarga()} reset={reset} />);
+}
+
+const botonReintentar = () => screen.getByText("Reintentar", { selector: "button" });
+
+/** El botón, diga lo que diga ("Reintentar" o "Reintentando…"). */
+const boton = (container: HTMLElement) => container.querySelector("button") as HTMLButtonElement;
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  refresh.mockClear();
+  reset.mockClear();
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue({ status: 204 });
+  vi.stubGlobal("fetch", fetchMock);
+  consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  tabOculta = false;
+  sinConexion = false;
+  Object.defineProperty(document, "hidden", {
+    configurable: true,
+    get: () => tabOculta,
+  });
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => (tabOculta ? "hidden" : "visible"),
+  });
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => !sinConexion,
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  // La marca de un toque a "Reintentar" vive fuera del cartel y la apaga el próximo cartel
+  // que aparece. Se monta uno para que no pase al test siguiente.
+  render(<AdminError error={errorDeRecarga()} reset={reset} />);
+  cleanup();
+  document.body.innerHTML = "";
+  consoleError.mockRestore();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe("Pantalla de error de /admin — lo que ve la recepcionista", () => {
+  it("muestra el cartel en voseo y el botón Reintentar, sin ningún texto en inglés", () => {
+    const { container } = mostrarPantallaDeError();
+
+    expect(screen.getByText("No se pudo cargar la pantalla.")).toBeInTheDocument();
+    // La causa puede ser la conexión o una consulta que falla: dice qué hacer en los dos casos.
+    expect(
+      screen.getByText("Fijate que haya internet y tocá Reintentar. Si sigue igual, avisale al encargado.")
+    ).toBeInTheDocument();
+    expect(container.textContent).not.toContain("Revisá la conexión");
+    expect(botonReintentar()).toBeInTheDocument();
+
+    // Lo que se lee en pantalla y lo que lee un lector de pantalla (aria-label, title).
+    const etiquetas = Array.from(container.querySelectorAll("[aria-label], [title]")).map(
+      (el) => `${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""}`
+    );
+    const todo = [container.textContent ?? "", ...etiquetas].join(" ");
+    for (const ingles of [
+      /something went wrong/i,
+      /try again/i,
+      /reload/i,
+      /couldn.t load/i,
+      /application error/i,
+      /\berror\b/i,
+      /digest/i,
+    ]) {
+      expect(todo).not.toMatch(ingles);
+    }
+  });
+
+  it("no muestra el mensaje técnico ni el digest (pueden traer datos): van a la consola", () => {
+    const { container } = mostrarPantallaDeError();
+
+    expect(container.textContent).not.toContain("Juan Prueba");
+    expect(container.textContent).not.toContain("987654321");
+    expect(consoleError).toHaveBeenCalled();
+  });
+
+  it("Reintentar primero pregunta al servidor y, si contesta, vuelve a pedir la pantalla (router.refresh) y la vuelve a pintar (reset)", async () => {
+    mostrarPantallaDeError();
+
+    fireEvent.click(botonReintentar());
+    // Todavía no recargó: antes pregunta, con el mismo chequeo que el reintento automático.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/admin/ping");
+    expect(init?.method).toBe("HEAD");
+    expect(init?.redirect).toBe("manual");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+
+    await alDiaEnPantalla();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+    // El mismo orden que el retry de Next: primero se pide la pantalla nueva.
+    expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(reset.mock.invocationCallOrder[0]);
+  });
+});
+
+describe("Pantalla de error de /admin — el botón Reintentar", () => {
+  it("si el servidor no contesta, no recarga (no cambia el cartel por la página de error de Chrome) y avisa que lo vuelve a intentar sola", async () => {
+    const { container } = mostrarPantallaDeError();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+    expect(boton(container).disabled).toBe(false);
+    expect(botonReintentar()).toBeInTheDocument();
+  });
+
+  it.each<[string, Respuesta]>([
+    ["opaqueredirect", { status: 0, type: "opaqueredirect" }],
+    ["redirected", { status: 200, redirected: true }],
+    ["302", { status: 302 }],
+  ])(
+    "si el chequeo vuelve con una redirección del proxy (%s: sesión cerrada o Supabase caído), no recarga y dice que se cerró la sesión o el sistema no responde",
+    async (_tipo, respuesta) => {
+      // Con `redirect: "manual"` la redirección a /login o a /forbidden llega como
+      // `opaqueredirect`: recargar sacaría la pantalla del panel. "Sigue sin conexión" sería
+      // mentira (internet anda) y no dice cómo salir: F5 lleva a la pantalla de ingreso.
+      const { container } = mostrarPantallaDeError();
+      fetchMock.mockResolvedValue(respuesta);
+
+      fireEvent.click(botonReintentar());
+      await alDiaEnPantalla();
+
+      expect(refresh).not.toHaveBeenCalled();
+      expect(reset).not.toHaveBeenCalled();
+      expect(screen.getByText(SESION)).toBeInTheDocument();
+      expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+      expect(boton(container).disabled).toBe(false);
+    }
+  );
+
+  it("con un error 5xx del servidor (por ejemplo, durante un deploy) tampoco recarga, y dice sin conexión (no lo de la sesión)", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockResolvedValue({ status: 502 });
+
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+    expect(screen.queryByText(SESION)).toBeNull();
+  });
+
+  it("si después de la redirección el chequeo falla por la red, el aviso vuelve a decir sin conexión", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(screen.getByText(SESION)).toBeInTheDocument();
+
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+    expect(screen.queryByText(SESION)).toBeNull();
+  });
+
+  it("con la PC sin red no le pregunta al servidor ni recarga, y avisa", async () => {
+    mostrarPantallaDeError();
+    sinConexion = true;
+
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+  });
+
+  it("si el servidor no contesta en 5 s, corta el pedido, no recarga y avisa", async () => {
+    mostrarPantallaDeError();
+    servidorColgado();
+
+    fireEvent.click(botonReintentar());
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+    // Solo queda el reintento automático.
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("mientras reintenta dice Reintentando…, no se puede volver a tocar y el ícono gira; después vuelve a Reintentar", async () => {
+    const { container } = mostrarPantallaDeError();
+    let contestar: (r: Respuesta) => void = () => {};
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          contestar = resolve;
+        })
+    );
+
+    fireEvent.click(botonReintentar());
+
+    expect(boton(container).textContent).toContain("Reintentando…");
+    expect(boton(container).disabled).toBe(true);
+    expect(boton(container).querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
+    // Tocarlo de nuevo no manda otro pedido.
+    fireEvent.click(boton(container));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      contestar({ status: 204 });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+    // Con `reset` de mentira el cartel queda: el botón vuelve a estar listo.
+    expect(boton(container).textContent).toContain("Reintentar");
+    expect(boton(container).textContent).not.toContain("Reintentando");
+    expect(boton(container).disabled).toBe(false);
+    expect(boton(container).querySelector("svg")?.getAttribute("class")).not.toContain("animate-spin");
+  });
+
+  it("al tocarlo de nuevo se va el aviso de antes mientras prueba", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
+
+    // Un pedido que queda colgado y se corta al desmontar: si no terminara nunca, la
+    // transición del botón quedaría abierta y React dejaría "Reintentando…" en los carteles
+    // de los tests que corren después.
+    servidorColgado();
+    fireEvent.click(botonReintentar());
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+  });
+
+  it("si la recarga vuelve a fallar enseguida, el cartel nuevo dice que la conexión anda pero la pantalla no carga", async () => {
+    // Si el error llega junto con el resto de la respuesta, Next arma el cartel de nuevo
+    // desde cero con el error nuevo, en la misma pasada: el cartel nuevo se pinta antes de
+    // que se desmonte el viejo (key distinta).
+    const { rerender } = render(<AdminError key="1" error={errorDeRecarga()} reset={reset} />);
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    rerender(<AdminError key="2" error={errorDeRecarga()} reset={reset} />);
+    expect(screen.getByText(NO_CARGA)).toBeInTheDocument();
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+  });
+
+  it("si la recarga pasa por Cargando… y vuelve a fallar unos segundos después, el cartel nuevo también lo dice", async () => {
+    // El orden de siempre en Next 16.3: `admin/loading.tsx` está dentro de este cartel, así
+    // que al reintentar el cartel viejo se cambia por "Cargando…" (se desmonta) mientras
+    // llega la respuesta. Si una consulta de la página tarda en fallar (un timeout de
+    // Supabase), el cartel nuevo aparece segundos después, con el viejo ya desmontado.
+    const { unmount } = mostrarPantallaDeError();
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    mostrarPantallaDeError();
+    expect(screen.getByText(NO_CARGA)).toBeInTheDocument();
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+  });
+
+  it("el aviso sale una sola vez por toque: el cartel que viene después (por ejemplo, en otra pantalla del panel) ya no lo dice", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    unmount();
+
+    const segundo = mostrarPantallaDeError();
+    expect(screen.getByText(NO_CARGA)).toBeInTheDocument();
+    segundo.unmount();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    mostrarPantallaDeError();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+  });
+
+  it("un cartel que no viene de tocar Reintentar no dice que la pantalla no carga (falló el reintento automático)", async () => {
+    const { rerender } = render(<AdminError key="1" error={errorDeRecarga()} reset={reset} />);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    rerender(<AdminError key="2" error={errorDeRecarga()} reset={reset} />);
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+  });
+
+  it("si el toque no llegó a recargar (sin conexión), el cartel siguiente no dice que la conexión anda", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(refresh).not.toHaveBeenCalled();
+    unmount();
+
+    mostrarPantallaDeError();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+  });
+
+  it("si el reintento salió bien, el próximo cartel (otro error, con la recarga siguiente de Hoy) no dice que la pantalla no carga", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Volvió la pantalla: el cartel se desmonta. Hoy tardó 2 s en cargar y su recarga
+    // siguiente sale 30 s después; si esa falla, aparece otro cartel.
+    unmount();
+    await vi.advanceTimersByTimeAsync(2_000 + 30_000);
+
+    mostrarPantallaDeError();
+    expect(screen.queryByText(NO_CARGA)).toBeNull();
+  });
+
+  it("si la pantalla se recupera sola mientras el botón espera al servidor, corta el pedido y no recarga", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    servidorColgado();
+
+    fireEvent.click(botonReintentar());
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    await alDia();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+  });
+});
+
+describe("Pantalla de error de /admin — reintenta sola", () => {
+  it("a los 30 s reintenta sola, y a los 60 s otra vez", async () => {
+    mostrarPantallaDeError();
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(reset).toHaveBeenCalledTimes(2);
+  });
+
+  it("con la pestaña oculta no reintenta; al volver a verla reintenta enseguida", async () => {
+    mostrarPantallaDeError();
+
+    cambiarVisibilidad(true);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+
+    cambiarVisibilidad(false);
+    await alDia();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el servidor no contesta, no reintenta sola (no cambia el cartel por la página de error de Chrome)", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValue({ status: 204 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el proxy redirige (la sesión o el rol no se pudieron leer), no reintenta sola", async () => {
+    mostrarPantallaDeError();
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/admin/ping");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("al desmontarse (la pantalla se recuperó) no quedan timers ni reintentos", async () => {
+    const { unmount } = mostrarPantallaDeError();
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    window.dispatchEvent(new Event("focus"));
+    cambiarVisibilidad(true);
+    cambiarVisibilidad(false);
+    await alDia();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+  });
+});

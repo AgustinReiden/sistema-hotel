@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { CheckCircle2, DoorOpen, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,6 +11,81 @@ import { formatHotelShortDateTime } from "@/lib/time";
 import type { AssignWalkInPayload, AssociatedClient, RoomOccupancyAlert } from "@/lib/types";
 
 type RoomPricing = { roomNumber: string; basePrice: number; halfDayPrice: number };
+
+/** Aviso -> estadía que ya se cargó y quedó sin cerrar. */
+type Pendientes = Record<number, string>;
+
+/**
+ * Dónde se guarda, en la pestaña, la estadía que falta asociar a cada aviso: un objeto
+ * `{ [id del aviso]: id de la estadía }`. sessionStorage y no el estado del componente
+ * solo, porque el estado se pierde cuando la pantalla se vuelve a armar de cero: una
+ * recarga de Hoy que termina en la pantalla de error (`admin/error.tsx` reemplaza la
+ * página y, al volver, la monta de nuevo), un deploy (Next recarga la página entera) o un
+ * F5. sessionStorage sobrevive a las tres en la misma pestaña y se borra sola al cerrarla.
+ */
+const PENDIENTES_KEY = "hotelsync:avisos-ocupada-sin-cerrar";
+
+/** Quién está mostrando lo guardado, para avisarle cuando cambia. */
+const pendientesListeners = new Set<() => void>();
+
+function subscribePendientes(listener: () => void) {
+  pendientesListeners.add(listener);
+  return () => {
+    pendientesListeners.delete(listener);
+  };
+}
+
+/** Lo guardado, tal cual (un texto: React lo compara por valor). null si no hay o no anda. */
+function leerPendientesGuardados(): string | null {
+  try {
+    return window.sessionStorage.getItem(PENDIENTES_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Lo guardado, ya leído. Lo que no tiene la forma esperada se ignora. */
+function parsePendientes(raw: string | null): Pendientes {
+  if (!raw) return {};
+  try {
+    const data: unknown = JSON.parse(raw);
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return {};
+    const pendientes: Pendientes = {};
+    for (const [alertId, reservationId] of Object.entries(data)) {
+      const id = Number(alertId);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      if (typeof reservationId !== "string" || reservationId.length === 0) continue;
+      pendientes[id] = reservationId;
+    }
+    return pendientes;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Cambia lo guardado para un aviso (null lo olvida). Si la pestaña no deja guardar, no pasa
+ * nada: el estado del componente lo sigue mostrando, como antes, hasta que se vuelva a armar.
+ */
+function guardarPendiente(alertId: number, reservationId: string | null) {
+  const pendientes = parsePendientes(leerPendientesGuardados());
+  if (reservationId === null) {
+    if (!(alertId in pendientes)) return;
+    delete pendientes[alertId];
+  } else {
+    pendientes[alertId] = reservationId;
+  }
+  try {
+    if (Object.keys(pendientes).length === 0) {
+      window.sessionStorage.removeItem(PENDIENTES_KEY);
+    } else {
+      window.sessionStorage.setItem(PENDIENTES_KEY, JSON.stringify(pendientes));
+    }
+  } catch {
+    return;
+  }
+  pendientesListeners.forEach((listener) => listener());
+}
 
 type Props = {
   alerts: RoomOccupancyAlert[];
@@ -42,7 +117,8 @@ type Props = {
  * SI LA ESTADÍA ENTRÓ Y EL AVISO NO SE CERRÓ (`alertPendiente`), la fila cambia
  * "Cargar la estadía" por "Cerrar el aviso", que reintenta SOLO el cierre contra la
  * reserva que devolvió la carga. Esa reserva se guarda en el estado de este
- * componente y NO se busca en la base, a propósito:
+ * componente y en la pestaña (sessionStorage, `PENDIENTES_KEY`), y NO se busca en la
+ * base, a propósito:
  *  - Es la única de la que se SABE que es la de este aviso. Buscar "la que está
  *    adentro en esa pieza desde la noche anterior" es adivinar, y la RPC no ataja
  *    el error: acepta cualquier estadía en curso de esa habitación. Si se adivina
@@ -52,10 +128,19 @@ type Props = {
  *    no se encuentra.
  *  - El reintento es en el momento, con el aviso a la vista, y el estado sobrevive
  *    al `revalidatePath` de la acción (Next renueva los props sin desmontar).
- * Lo que no sobrevive es un F5 o irse de la Home, y por eso el toast ya no dice
- * "refrescá". Si igual pasa, volver a cargarla no la duplica mientras la primera
- * siga adentro (`reservations_no_active_overlap` rechaza dos estadías en la misma
- * pieza y horario), y el aviso se cierra desde Mantenimiento con una nota.
+ * El estado solo no sobrevive a que la pantalla se vuelva a armar de cero: una recarga
+ * de Hoy (cada 30 s) que termina en la pantalla de error, un deploy, un F5 o irse de la
+ * Home. Por eso también va a la pestaña (pedido de Agustín del 26/09): al volver, la
+ * fila sigue diciendo "Cerrar el aviso" con la misma estadía. Se borra cuando el aviso
+ * se cierra, desde acá o porque llega resuelto; no cuando la lista viene vacía (la Home
+ * la deja vacía si no pudo leer los avisos). En otra pestaña o en otra PC no está; si
+ * igual la vuelven a cargar, no la duplica mientras la primera siga adentro
+ * (`reservations_no_active_overlap` rechaza dos estadías en la misma pieza y horario),
+ * y el aviso se cierra desde Mantenimiento con una nota.
+ *
+ * Se eligió guardar y no frenar la recarga de Hoy mientras haya uno sin cerrar: frenarla
+ * dejaría Hoy sin ponerse al día (y sin la línea que lo avisa) todo el tiempo que el
+ * cierre siga fallando, y no cubre un deploy, un F5 ni irse de la Home.
  */
 export default function OccupiedRoomAlertBanner({
   alerts,
@@ -65,12 +150,29 @@ export default function OccupiedRoomAlertBanner({
   isAdmin,
 }: Props) {
   const [target, setTarget] = useState<RoomOccupancyAlert | null>(null);
-  // Aviso -> estadía que ya se cargó y quedó sin cerrar. Ver el comentario de arriba.
-  const [pendientes, setPendientes] = useState<Record<number, string>>({});
+  // Aviso -> estadía que ya se cargó y quedó sin cerrar. Ver el comentario de arriba. Lo
+  // de la pestaña (en el servidor no hay: la fila se pinta sin eso y se completa al
+  // hidratar) más lo de esta pantalla, que alcanza si la pestaña no deja guardar.
+  const guardados = useSyncExternalStore(
+    subscribePendientes,
+    leerPendientesGuardados,
+    () => null
+  );
+  const [enPantalla, setEnPantalla] = useState<Pendientes>({});
+  const pendientes = useMemo(
+    () => ({ ...parsePendientes(guardados), ...enPantalla }),
+    [guardados, enPantalla]
+  );
   const [closingId, setClosingId] = useState<number | null>(null);
 
   const abiertas = useMemo(() => alerts.filter((a) => a.resolved_at === null), [alerts]);
   const cerradas = useMemo(() => alerts.filter((a) => a.resolved_at !== null), [alerts]);
+
+  // Un aviso que llega resuelto (lo cerró otro admin, o el cierre de acá se hizo pero la
+  // respuesta no llegó) ya no tiene nada que asociar: se olvida de la pestaña.
+  useEffect(() => {
+    for (const a of cerradas) guardarPendiente(a.alert_id, null);
+  }, [cerradas]);
 
   if (alerts.length === 0) return null;
 
@@ -98,7 +200,8 @@ export default function OccupiedRoomAlertBanner({
     setTarget(null);
     if (result.data?.alertPendiente) {
       const { reservationId } = result.data;
-      setPendientes((prev) => ({ ...prev, [alertId]: reservationId }));
+      setEnPantalla((prev) => ({ ...prev, [alertId]: reservationId }));
+      guardarPendiente(alertId, reservationId);
       toast.warning(
         "La estadía quedó cargada, pero el aviso no se pudo cerrar. Tocá «Cerrar el aviso» para intentar de nuevo: no la vuelvas a cargar.",
         { duration: 12000 }
@@ -117,11 +220,12 @@ export default function OccupiedRoomAlertBanner({
         toast.error(result.error);
         return;
       }
-      setPendientes((prev) => {
+      setEnPantalla((prev) => {
         const next = { ...prev };
         delete next[alertId];
         return next;
       });
+      guardarPendiente(alertId, null);
       toast.success("Aviso cerrado. La estadía ya estaba cargada: cobrala en el check-out.");
     } catch {
       toast.error("No se pudo cerrar el aviso. La estadía sigue cargada: probá de nuevo.");
