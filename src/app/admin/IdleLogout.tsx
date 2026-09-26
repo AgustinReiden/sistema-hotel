@@ -31,16 +31,25 @@ export default function IdleLogout() {
       if (document.visibilityState === "visible") arm();
     };
 
+    // Lo que hace una persona: mover el mouse o el dedo, tocar, hacer clic, la rueda, una
+    // tecla. `scroll` NO: también lo dispara la pantalla sola, por ejemplo cuando Hoy se
+    // pone al día cada 30 s y cambia el alto de algo arriba de la grilla; con eso la sesión
+    // de una PC abandonada en Hoy no se cerraba nunca. Quien lee una lista la desplaza con la
+    // rueda (`wheel`), el dedo (`touchmove`), el teclado (`keydown`) o arrastrando la barra
+    // (`pointerdown`), así que ese uso sigue contando.
     const events: (keyof WindowEventMap)[] = [
+      "pointermove",
+      "pointerdown",
       "mousemove",
-      "keydown",
-      "touchstart",
-      "scroll",
       "click",
+      "wheel",
+      "touchstart",
+      "touchmove",
+      "keydown",
     ];
     // capture: true porque desde que el panel scrollea en un div interno y no en la ventana,
-    // el evento "scroll" no burbujea; sin esto, leer una lista con la rueda deja de contar
-    // como actividad y la sesión se cierra sola a los 30 minutos. Tiene que ser el MISMO
+    // la rueda y el dedo empiezan en un elemento de adentro y un cuadro puede cortar la
+    // propagación; en captura la ventana los ve igual. Tiene que ser el MISMO
     // objeto de opciones en el removeEventListener o el listener no se desregistra.
     const listenerOpts: AddEventListenerOptions = { passive: true, capture: true };
     events.forEach((e) => window.addEventListener(e, onActivity, listenerOpts));
