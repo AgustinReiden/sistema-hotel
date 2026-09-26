@@ -219,6 +219,27 @@ describe("PaymentModal: Cta. Cte. en el check-out de una empresa con cuenta", ()
     expect(screen.queryByText("Cta. Cte.")).toBeNull();
   });
 
+  it("con Cta. Cte. elegida, el título y la ayuda dejan de hablar de cobrar", () => {
+    abrirCheckout({
+      defaultMethod: "cuenta_corriente",
+      accountCreditEnabled: true,
+      accountHolderName: "Empresa Ficticia SA",
+    });
+
+    expect(screen.getByText("Finalizar a cuenta corriente")).toBeTruthy();
+    expect(screen.getByText("Se carga a la cuenta el saldo exacto pendiente.")).toBeTruthy();
+    // Nada en el cuadro dice "cobrar": fiar no es cobrar.
+    expect(screen.queryByText(/cobr/i)).toBeNull();
+
+    // Si el pasajero paga de su bolsillo, vuelve a ser un cobro.
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    expect(screen.getByText("Cobrar y Finalizar")).toBeTruthy();
+    expect(
+      screen.getByText("El check-out solo permite cobrar el saldo exacto pendiente.")
+    ).toBeTruthy();
+    expect(screen.queryByText("Finalizar a cuenta corriente")).toBeNull();
+  });
+
   it("fuera del check-out, aunque venga el defaultMethod, no se ofrece ni se marca Cta. Cte.", () => {
     const { container } = render(
       <PaymentModal
@@ -235,5 +256,63 @@ describe("PaymentModal: Cta. Cte. en el check-out de una empresa con cuenta", ()
 
     expect(marcados(container)).toEqual([]);
     expect(screen.queryByText("Cta. Cte.")).toBeNull();
+  });
+});
+
+describe("PaymentModal: el recibo", () => {
+  beforeEach(() => {
+    H.registerPaymentAction.mockReset();
+    H.toast.success.mockReset();
+    H.toast.error.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("en el check-out no abre el recibo aunque haya paymentId: lo abre la tarjeta, después de la factura", async () => {
+    const open = vi.fn().mockReturnValue({} as Window);
+    vi.stubGlobal("open", open);
+    const { onSubmitPayment } = abrirCheckout();
+    onSubmitPayment.mockResolvedValue({ success: true, data: { paymentId: "pay-1" } });
+
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar y Cerrar"));
+
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalledTimes(1));
+    expect(onSubmitPayment).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("en el pago suelto sí abre el recibo", async () => {
+    const open = vi.fn().mockReturnValue({} as Window);
+    vi.stubGlobal("open", open);
+    H.registerPaymentAction.mockResolvedValue({ success: true, data: { paymentId: "pay-1" } });
+    abrirPagoSuelto();
+
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(open.mock.calls[0][0]).toContain("/admin/recibo/");
+    expect(open).toHaveBeenCalledWith(
+      "/admin/recibo/pay-1?autoprint=1&copy=original",
+      "recibo-pay-1",
+      "width=420,height=720"
+    );
+  });
+});
+
+describe("PaymentModal: en un celular", () => {
+  it("Total, Pagado y Restante van en renglones y no en una fila que no entra en 360 px", () => {
+    abrirCheckout();
+
+    // jsdom no mide anchos: se comprueba que el resumen vaya en columna (un renglón por
+    // cifra) y recién en pantallas anchas pase a fila (antes era siempre una fila).
+    const resumen = screen.getByText("Restante").closest(".flex-col");
+    expect(resumen).not.toBeNull();
+    expect(resumen?.classList.contains("sm:flex-row")).toBe(true);
+    expect(resumen?.contains(screen.getByText("Total Estadía"))).toBe(true);
+    expect(resumen?.contains(screen.getByText("Pagado Prev."))).toBe(true);
   });
 });
