@@ -12,7 +12,8 @@ import { SESSION_CLOSED_NOTICE, useAutoRefresh } from "./useAutoRefresh";
  * una línea chica, en el flujo, arriba del encabezado: "Hoy no se actualiza desde las
  * HH:MM." (la hora del hotel) y, si el último chequeo recibió una redirección, cómo volver
  * a entrar. Corre la pantalla una línea y no tapa nada. Se va sola con el primer chequeo
- * que anda.
+ * que anda. Aparece, se va o cambia recién cuando la pantalla lleva 2 s quieta (lo decide
+ * el hook): así no corre la grilla justo cuando alguien va a tocar un botón.
  */
 export default function AutoRefresh({ timezone }: { timezone: string }) {
   const trouble = useAutoRefresh();

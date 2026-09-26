@@ -8,7 +8,9 @@ export const AUTO_REFRESH_INTERVAL_MS = 30000;
 
 /**
  * Al volver a la pestaña llegan dos avisos casi juntos (`visibilitychange` y `focus`).
- * Sin este margen serían dos recargas seguidas de todo el tablero contra Supabase.
+ * Sin este margen serían dos recargas seguidas de todo el tablero contra Supabase, o,
+ * sin red, dos chequeos fallidos de una vez (el aviso de Hoy saldría antes de tiempo).
+ * Se cuenta desde el último chequeo, haya andado o no, o desde la última recarga.
  * Solo frena esos avisos: la recarga del intervalo nunca se saltea por una reciente,
  * así un cambio aparece en `intervalMs` como máximo.
  */
@@ -53,6 +55,11 @@ export type ProbeResult = "ok" | "redirect" | "failed";
  * salió el último chequeo.
  */
 export type RefreshTrouble = { since: number; reason: Exclude<ProbeResult, "ok"> };
+
+/** ¿Dicen lo mismo? Así un chequeo que no cambia nada no vuelve a pintar la línea. */
+function sameTrouble(a: RefreshTrouble | null, b: RefreshTrouble | null): boolean {
+  return a === b || (a !== null && b !== null && a.since === b.since && a.reason === b.reason);
+}
 
 /**
  * Lo que dicen Hoy y la pantalla de error de `/admin` cuando el chequeo recibe una
@@ -206,7 +213,10 @@ type UseAutoRefreshOptions = {
  * pone al día (la última recarga, o cuando se montó) y cómo salió el último chequeo, para
  * que la pantalla lo avise. Vuelve a null con el primer chequeo que anda. No recargar a
  * propósito (pestaña oculta, cuadro abierto, un campo con el foco, alguien usándola) no
- * cuenta como falla.
+ * cuenta como falla. Lo devuelto cambia (aparece, se va o cambia de causa) recién cuando
+ * la pantalla queda quieta `ACTIVITY_QUIET_MS`, igual que la recarga: el chequeo puede
+ * volver hasta `PROBE_TIMEOUT_MS` después de salir, y si en ese rato la empezaron a usar,
+ * la línea del aviso correría la grilla bajo el toque.
  *
  * Lo que NO puede hacer: frenar una recarga que ya salió. Si alguien abre un cuadro
  * mientras vuelve la respuesta (alrededor de un segundo, sobre todo justo al volver a la
@@ -223,6 +233,10 @@ export function useAutoRefresh({
   const failedChecksRef = useRef(0);
   // Cuándo se puso al día la pantalla por última vez (null hasta que se monta).
   const lastUpdatedAtRef = useRef<number | null>(null);
+  // Lo que tiene que devolver el hook según el último chequeo, mientras espera a que la
+  // pantalla quede quieta para mostrarse (undefined: no hay nada esperando). Fuera del
+  // efecto para que no se pierda si el efecto se rearma: se muestra con el chequeo siguiente.
+  const pendingTroubleRef = useRef<RefreshTrouble | null | undefined>(undefined);
   // Lee el `onRefresh` y el router del último render sin ser dependencia del efecto: si
   // lo fuera, un `onRefresh` nuevo en cada render reiniciaría la cuenta de los 30 s.
   const doRefresh = useEffectEvent(() => {
@@ -236,28 +250,52 @@ export function useAutoRefresh({
     if (paused) return;
 
     let disposed = false;
-    let lastRefreshAt = -Infinity;
+    // Cuándo salió el último chequeo (haya andado o no) o la última recarga.
+    let lastCheckAt = -Infinity;
     let lastActivityAt = -Infinity;
     // La consulta al servidor en curso: mientras no vuelve, no se arranca otra.
     let probe: ReturnType<typeof probeServer> | null = null;
     // La recarga que espera a que la pantalla quede quieta: hay una sola a la vez.
     let quietTimer: number | null = null;
+    // El cambio de lo que devuelve el hook que espera a que la pantalla quede quieta.
+    let showTimer: number | null = null;
 
     const inUse = () => Date.now() - lastActivityAt < ACTIVITY_QUIET_MS;
 
-    // Anota cómo salió un chequeo. Solo toca el estado cuando cambia lo que se muestra.
-    const noteCheck = (result: ProbeResult) => {
-      if (result === "ok") {
-        if (failedChecksRef.current >= FAILED_CHECKS_BEFORE_NOTICE) setTrouble(null);
-        failedChecksRef.current = 0;
+    // Muestra lo que dejó el último chequeo (la línea de Hoy aparece, se va o cambia de
+    // causa) con la pantalla quieta, como la recarga: si la están usando, espera a que quede
+    // quieta. Solo toca el estado cuando cambia lo que se muestra.
+    const showWhenQuiet = () => {
+      if (pendingTroubleRef.current === undefined || showTimer !== null) return;
+      if (inUse()) {
+        const wait = Math.max(0, lastActivityAt + ACTIVITY_QUIET_MS - Date.now());
+        showTimer = window.setTimeout(() => {
+          showTimer = null;
+          showWhenQuiet();
+        }, wait);
         return;
       }
-      failedChecksRef.current += 1;
-      if (failedChecksRef.current < FAILED_CHECKS_BEFORE_NOTICE) return;
-      const since = lastUpdatedAtRef.current ?? Date.now();
-      setTrouble((prev) =>
-        prev?.since === since && prev.reason === result ? prev : { since, reason: result }
-      );
+      const next = pendingTroubleRef.current;
+      pendingTroubleRef.current = undefined;
+      setTrouble((prev) => (sameTrouble(prev, next) ? prev : next));
+    };
+
+    // Anota cómo salió un chequeo. La cuenta cambia en el momento; lo que se muestra, con
+    // la pantalla quieta.
+    const noteCheck = (result: ProbeResult) => {
+      if (result === "ok") {
+        if (failedChecksRef.current >= FAILED_CHECKS_BEFORE_NOTICE) {
+          pendingTroubleRef.current = null;
+        }
+        failedChecksRef.current = 0;
+      } else {
+        failedChecksRef.current += 1;
+        if (failedChecksRef.current >= FAILED_CHECKS_BEFORE_NOTICE) {
+          const since = lastUpdatedAtRef.current ?? Date.now();
+          pendingTroubleRef.current = { since, reason: result };
+        }
+      }
+      showWhenQuiet();
     };
 
     const refreshWhenQuiet = () => {
@@ -275,6 +313,8 @@ export function useAutoRefresh({
         refreshWhenQuiet();
         return;
       }
+      // Desde acá sale un chequeo: el otro aviso de volver a la pestaña ya no arranca otro.
+      lastCheckAt = Date.now();
       // Sin red en la PC no se le pregunta al servidor, pero es un chequeo que falló: la
       // pantalla tampoco se pone al día.
       if (isOffline(document)) {
@@ -294,8 +334,8 @@ export function useAutoRefresh({
         refreshWhenQuiet();
         return;
       }
-      lastRefreshAt = Date.now();
-      lastUpdatedAtRef.current = lastRefreshAt;
+      lastCheckAt = Date.now();
+      lastUpdatedAtRef.current = lastCheckAt;
       doRefresh();
     };
     const onActivity = () => {
@@ -304,9 +344,10 @@ export function useAutoRefresh({
     const onInterval = () => {
       void refresh();
     };
-    // Volver a la ventana o a la pestaña: con una recarga alcanza aunque lleguen los dos avisos.
+    // Volver a la ventana o a la pestaña: con un chequeo (y una recarga) alcanza aunque
+    // lleguen los dos avisos, también sin red.
     const refreshOnReturn = () => {
-      if (Date.now() - lastRefreshAt < RETURN_GAP_MS) return;
+      if (Date.now() - lastCheckAt < RETURN_GAP_MS) return;
       void refresh();
     };
     const onVisibilityChange = () => {
@@ -328,6 +369,10 @@ export function useAutoRefresh({
       if (quietTimer !== null) {
         window.clearTimeout(quietTimer);
         quietTimer = null;
+      }
+      if (showTimer !== null) {
+        window.clearTimeout(showTimer);
+        showTimer = null;
       }
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnReturn);

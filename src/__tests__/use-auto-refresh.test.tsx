@@ -250,7 +250,8 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     renderHook(() => useAutoRefresh());
     fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    // El focus llega 5 s después del chequeo de los 60 s, fuera del margen de 2 s.
+    await vi.advanceTimersByTimeAsync(65_000);
     window.dispatchEvent(new Event("focus"));
     await alDia();
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -286,7 +287,8 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     renderHook(() => useAutoRefresh());
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    // El focus llega 5 s después del chequeo de los 60 s, fuera del margen de 2 s.
+    await vi.advanceTimersByTimeAsync(65_000);
     window.dispatchEvent(new Event("focus"));
     await alDia();
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -295,6 +297,26 @@ describe("useAutoRefresh — Hoy se pone al día solo", () => {
     fetchMock.mockResolvedValue({ status: 204 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("un focus hasta 2 s después de un chequeo fallido no pregunta de nuevo; pasado el margen, sí", async () => {
+    // Sin el margen, un corte de segundos contaría dos chequeos fallidos de una vez.
+    renderHook(() => useAutoRefresh());
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    window.dispatchEvent(new Event("focus"));
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it.each([502, 503, 500])("si el servidor contesta %i (por ejemplo, durante un deploy) no refresca", async (status) => {
@@ -863,6 +885,120 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(avisoEnPantalla()).toBeNull();
+  });
+
+  it("volver a la pestaña sin red (visibilitychange y focus juntos) cuenta como un solo chequeo fallido", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+
+    await avanzar(10_000);
+    cambiarVisibilidad(true);
+    sinConexion = true;
+    await avanzar(10_000);
+
+    // A los 20 s vuelve a Hoy con el Wi-Fi reconectando: llegan los dos avisos juntos.
+    await act(async () => {
+      cambiarVisibilidad(false);
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // A los 30 s, el 2.º chequeo: un corte de 10 s todavía no muestra nada.
+    await avanzar(10_000);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // A los 60 s, el 3.º.
+    await avanzar(30_000);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("si la usan mientras vuelve el 3.º chequeo, la línea aparece recién cuando la pantalla queda quieta 2 s", async () => {
+    // Si apareciera en el momento, correría la grilla justo cuando va a tocar un botón.
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    servidorColgado();
+
+    // El 3.º chequeo sale a los 90 s con la pantalla quieta y queda esperando.
+    await avanzar(90_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // A los 94 s mueve el mouse hacia una tarjeta; a los 95 s vence el chequeo.
+    await avanzar(4_000);
+    usar("pointermove");
+    await avanzar(1_000);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // Sigue moviéndolo a los 95,5 s: la línea vuelve a esperar.
+    await avanzar(500);
+    usar("pointermove");
+    await avanzar(1_999);
+    expect(avisoEnPantalla()).toBeNull();
+
+    // A los 97,5 s lleva 2 s quieta.
+    await avanzar(1);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("si un chequeo vuelve a andar mientras la usan, la línea no se va hasta que la pantalla queda quieta 2 s", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(90_000);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+
+    // Vuelve internet: el 4.º chequeo sale a los 120 s y tarda en contestar.
+    let contestar: (r: Respuesta) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          contestar = resolve;
+        })
+    );
+    fetchMock.mockResolvedValue({ status: 204 });
+    await avanzar(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    // A los 121 s la tocan y enseguida contesta.
+    await avanzar(1_000);
+    usar("pointerdown");
+    contestar({ status: 204 });
+    await avanzar(0);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+    expect(refresh).not.toHaveBeenCalled();
+
+    await avanzar(1_999);
+    expect(avisoEnPantalla()).not.toBeNull();
+
+    // A los 123 s lleva 2 s quieta: la línea se va y Hoy se pone al día.
+    await avanzar(1);
+    expect(avisoEnPantalla()).toBeNull();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el chequeo pasa a ser una redirección mientras la usan, el texto de la sesión espera a que quede quieta", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await avanzar(90_000);
+    expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
+    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+
+    // El 4.º chequeo sale a los 120 s y tarda en contestar; a los 121 s la tocan.
+    let contestar: (r: Respuesta) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          contestar = resolve;
+        })
+    );
+    await avanzar(31_000);
+    usar("touchstart");
+    contestar({ status: 0, type: "opaqueredirect" });
+    await avanzar(0);
+    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+
+    await avanzar(2_000);
+    expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
   });
 
   it("es una sola línea chica en el flujo, que no tapa la grilla", async () => {
