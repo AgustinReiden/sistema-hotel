@@ -1,27 +1,43 @@
 // Helpers para formatear tiempos en la timezone del hotel (por default Tucumán).
 // Evitan que `toLocaleString` use la zona del navegador o del servidor.
+//
+// Ojo con el ICU: lo que dibuja un componente de cliente se calcula dos veces, una en
+// el servidor (Node) y otra en el navegador al hidratar, y cada uno trae su propio ICU.
+// Si el texto no da exactamente igual, React tira el HTML del servidor y redibuja todo
+// (error #418). Por eso la hora de 12 h se arma a mano: el ICU de Node escribe "p.",
+// espacio duro (U+00A0), "m.", y el de Chrome "p. m." con espacio común.
 
 export const DEFAULT_TZ = "America/Argentina/Tucuman";
 
-export function formatHotelTime(iso: string | null | undefined, timezone?: string): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timezone || DEFAULT_TZ,
-  });
+/** Fecha que no se puede leer: sin esto, `formatToParts` corta el dibujo con un RangeError. */
+function isValidInstant(iso: string): boolean {
+  return !Number.isNaN(new Date(iso).getTime());
 }
 
+// "a. m." y "p. m." con el espacio duro que ya ponía el servidor entre las dos letras:
+// en pantalla se ve igual que un espacio común, y en el ticket térmico la hora no se
+// corta entre "p." y "m." cuando el renglón no alcanza.
+const AM = "a.\xa0m.";
+const PM = "p.\xa0m.";
+
+// "14:30" -> "02:30 p. m.": la hora de 12 h que ya se veía en es-AR, sin pasar por el ICU.
+function toHotelClock12(timeKey: string): string {
+  const [hours, minutes] = timeKey.split(":");
+  const h = Number(hours);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h12).padStart(2, "0")}:${minutes} ${h < 12 ? AM : PM}`;
+}
+
+export function formatHotelTime(iso: string | null | undefined, timezone?: string): string {
+  if (!iso || !isValidInstant(iso)) return "—";
+  return toHotelClock12(hotelTimeKey(iso, timezone));
+}
+
+// "26/09/2026, 02:30 p. m.", como la escribía toLocaleString("es-AR").
 export function formatHotelDateTime(iso: string | null | undefined, timezone?: string): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timezone || DEFAULT_TZ,
-  });
+  if (!iso || !isValidInstant(iso)) return "—";
+  const [year, month, day] = hotelDateKey(iso, timezone).split("-");
+  return `${day}/${month}/${year}, ${toHotelClock12(hotelTimeKey(iso, timezone))}`;
 }
 
 export function formatHotelDate(iso: string | null | undefined, timezone?: string): string {
