@@ -37,8 +37,19 @@ export function isBankPaymentMethod(method: string | null | undefined): boolean 
  * pantalla antes de ARCA y la atraviesan LOS DOS caminos (consumidor final y CUIT):
  * ahí se lee letra, nombre, documento y total. Antes sólo existía para el caso de
  * ficha completa, y por eso una Factura A pudo salir sin que nadie la viera.
+ *
+ * `confirmSalir` es la pregunta "¿Salir sin facturar?" que sale al cerrar la
+ * pregunta de factura después del check-out sin haber decidido: la estadía queda
+ * pendiente para el administrador y recepción ya no la ve.
  */
-export type InvoiceStep = "ask" | "confirmNo" | "tipo" | "formB" | "formCuit" | "confirmar";
+export type InvoiceStep =
+  | "ask"
+  | "confirmNo"
+  | "tipo"
+  | "formB"
+  | "formCuit"
+  | "confirmar"
+  | "confirmSalir";
 
 type InvoiceStepInput = {
   /** Se entró desde /admin/fiscal o el control: la decisión de facturar ya está tomada. */
