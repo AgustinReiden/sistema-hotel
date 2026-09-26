@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Layers } from "lucide-react";
 
 import {
-  getCtaCteAccounts,
+  getCtaCteAccount,
   getCtaCteBillingProfile,
   getCurrentUserRole,
   getFiscalSettings,
@@ -17,8 +17,10 @@ export const dynamic = "force-dynamic";
 export default async function ConsolidadaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; id?: string }>;
+  // Un parámetro repetido en la URL (`?id=a&id=b`) llega como lista.
+  searchParams: Promise<{ kind?: string | string[]; id?: string | string[] }>;
 }) {
+  // El rol va antes que los parámetros: recepción va a /forbidden, traiga lo que traiga.
   const role = await getCurrentUserRole();
   if (role !== "admin") {
     redirect("/forbidden");
@@ -26,17 +28,21 @@ export default async function ConsolidadaPage({
 
   // A la consolidada se entra siempre con el cliente puesto: desde Control, Cuentas o
   // la ficha, que mandan `kind` e `id`. Sin cliente no hay nada que revisar, así que
-  // se vuelve a Control en vez de abrir un selector vacío.
+  // se vuelve a Control en vez de abrir un selector vacío. Un parámetro repetido
+  // tampoco es un cliente puesto (y `trim()` sobre una lista rompía la página).
   const { kind, id } = await searchParams;
   const preselectKind: CtaCteClientKind | null =
     kind === "company" || kind === "guest" ? kind : null;
-  const preselectId = id?.trim() || null;
+  const preselectId = typeof id === "string" ? id.trim() || null : null;
   if (!preselectKind || !preselectId) {
     redirect("/admin/fiscal/control");
   }
 
-  const [accounts, settings, hotel] = await Promise.all([
-    getCtaCteAccounts(),
+  const [cuenta, settings, hotel] = await Promise.all([
+    // Sólo el cliente de la URL, por su id: no depende de leer bien todas las cuentas.
+    // Si la lectura falla, la página no abre (antes, con la lista entera, un error en
+    // las empresas o en los huéspedes lo hacía pasar por "no es de cuenta corriente").
+    getCtaCteAccount(preselectKind, preselectId),
     getFiscalSettings().catch(() => null),
     // Sólo se usa para la zona horaria de los presets: si falla, la pantalla
     // tiene que seguir funcionando igual, no morirse por unos botones.
@@ -49,7 +55,7 @@ export default async function ConsolidadaPage({
   const todayKey = hotelDateKey(new Date(), hotel?.timezone || undefined);
 
   // Un id que no es de ningún cliente de cuenta corriente tampoco es un cliente puesto.
-  if (!accounts.some((a) => a.kind === preselectKind && a.id === preselectId)) {
+  if (!cuenta) {
     redirect("/admin/fiscal/control");
   }
 
@@ -87,7 +93,8 @@ export default async function ConsolidadaPage({
         <div className="max-w-5xl mx-auto">
           <ConsolidadaClient
             enabled={Boolean(settings?.enabled)}
-            accounts={accounts}
+            // La pantalla busca al cliente en esta lista: va sólo el de la URL.
+            accounts={[cuenta]}
             billingProfiles={billingProfiles}
             preselectKind={preselectKind}
             preselectId={preselectId}
