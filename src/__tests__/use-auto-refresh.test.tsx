@@ -922,18 +922,37 @@ describe("shouldSkipRefresh — cuándo no conviene recargar", () => {
 /** La zona del hotel en los tests del aviso de Hoy. */
 const TZ_HOTEL = "America/Argentina/Buenos_Aires";
 
-/** Lo que agrega el aviso cuando el chequeo recibe una redirección del proxy. */
+/**
+ * Lo que agrega el aviso cuando el chequeo recibe una redirección del proxy. "Volver a
+ * entrar" es un enlace: anda también en el celular y en la tablet, que no tienen F5.
+ */
 const AVISO_SESION =
-  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
+  "Se cerró la sesión o el sistema no responde. Si sigue así, tocá Volver a entrar.";
 
-/** Lo que agrega el aviso cuando la causa no es la sesión (pedido de Agustín del 26/09). */
+/**
+ * Lo que agrega el aviso cuando la pregunta al servidor no llegó (internet cortado, la PC
+ * sin red, sin respuesta): pedido de Agustín del 26/09.
+ */
 const AVISO_RED =
   "Fijate que haya internet. No hace falta recargar: se pone al día sola cuando vuelve.";
+
+/**
+ * Lo que agrega el aviso cuando el servidor contestó con un error (un 502 durante un
+ * deploy, un 404): internet anda, así que no manda a revisarlo.
+ */
+const AVISO_SISTEMA =
+  "El sistema no responde. No hace falta recargar: se pone al día sola cuando vuelve.";
 
 const sinActualizarDesde = (hora: string) => `Hoy no se actualiza desde las ${hora}.`;
 
 /** Cualquier versión del aviso, diga la hora que diga. */
 const avisoEnPantalla = () => screen.queryByText(/Hoy no se actualiza/);
+
+/**
+ * El texto completo de la línea del aviso ("" si no está). El de la sesión trae un enlace
+ * adentro, así que no se lo busca con getByText.
+ */
+const lineaDelAviso = () => avisoEnPantalla()?.parentElement?.textContent ?? "";
 
 /** Mueve el reloj y deja que React pinte lo que cambió (act). */
 const avanzar = (ms: number) =>
@@ -962,15 +981,20 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
    * Cada chequeo sale a los 30, 60 y 90 s. El que queda colgado falla 5 s después, así
    * que se mira a los 35, 65 y 95 s: ahí ya volvieron los tres.
    */
-  it.each<[string, () => void]>([
-    ["internet cortado (el pedido falla)", () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch"))],
-    ["el servidor contesta 502", () => fetchMock.mockResolvedValue({ status: 502 })],
-    ["la ruta contesta 404", () => fetchMock.mockResolvedValue({ status: 404 })],
-    ["el servidor no contesta en 5 s", servidorColgado],
-    ["la PC sin red (ni se pregunta)", () => (sinConexion = true)],
+  it.each<[string, () => void, string, string]>([
+    [
+      "internet cortado (el pedido falla)",
+      () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch")),
+      AVISO_RED,
+      AVISO_SISTEMA,
+    ],
+    ["el servidor contesta 502", () => fetchMock.mockResolvedValue({ status: 502 }), AVISO_SISTEMA, AVISO_RED],
+    ["la ruta contesta 404", () => fetchMock.mockResolvedValue({ status: 404 }), AVISO_SISTEMA, AVISO_RED],
+    ["el servidor no contesta en 5 s", servidorColgado, AVISO_RED, AVISO_SISTEMA],
+    ["la PC sin red (ni se pregunta)", () => (sinConexion = true), AVISO_RED, AVISO_SISTEMA],
   ])(
     "con %s: 1 o 2 chequeos fallidos no muestran nada; al 3.º aparece la línea con la hora del hotel",
-    async (_causa, caer) => {
+    async (_causa, caer, queHacer, loOtro) => {
       render(<AutoRefresh timezone={TZ_HOTEL} />);
       caer();
 
@@ -982,10 +1006,12 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
 
       await avanzar(30_000);
       expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
-      // No es una redirección: no habla de la sesión, dice qué hacer (fijarse en internet
-      // y no recargar, que se pone al día sola).
-      expect(screen.queryByText(AVISO_SESION)).toBeNull();
-      expect(screen.getByText(AVISO_RED)).toBeInTheDocument();
+      // No es una redirección: no habla de la sesión, dice qué hacer (no recargar, que se
+      // pone al día sola). Solo manda a fijarse en internet si la pregunta no llegó: si el
+      // servidor contestó con un error, internet anda.
+      expect(lineaDelAviso()).not.toContain(AVISO_SESION);
+      expect(screen.getByText(queHacer)).toBeInTheDocument();
+      expect(screen.queryByText(loOtro)).toBeNull();
       expect(refresh).not.toHaveBeenCalled();
     }
   );
@@ -1080,16 +1106,29 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
 
       await avanzar(60_000);
       expect(avisoEnPantalla()).toBeNull();
-      expect(screen.queryByText(AVISO_SESION)).toBeNull();
 
       await avanzar(30_000);
       expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
-      expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+      expect(lineaDelAviso()).toContain(AVISO_SESION);
       // Con la sesión, internet anda: no manda a revisarlo ni dice que se arregla sola.
       expect(screen.queryByText(AVISO_RED)).toBeNull();
+      expect(screen.queryByText(AVISO_SISTEMA)).toBeNull();
       expect(refresh).not.toHaveBeenCalled();
     }
   );
+
+  it("con la sesión cerrada, la línea trae el enlace para volver a entrar al panel (el celular no tiene F5)", async () => {
+    render(<AutoRefresh timezone={TZ_HOTEL} />);
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
+
+    await avanzar(90_000);
+    const enlace = screen.getByText("Volver a entrar");
+    expect(enlace.tagName).toBe("A");
+    // Un enlace común (no el de Next): pide el panel entero, como F5, y el proxy lleva a la
+    // pantalla de ingreso si la sesión no sirve.
+    expect(enlace.getAttribute("href")).toBe("/admin");
+    expect(lineaDelAviso()).not.toContain("F5");
+  });
 
   it("cuentan los 3 seguidos aunque cambie la causa; el texto de la sesión sale si el último fue una redirección", async () => {
     render(<AutoRefresh timezone={TZ_HOTEL} />);
@@ -1103,15 +1142,21 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
     await avanzar(30_000);
     expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
-    expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+    expect(lineaDelAviso()).toContain(AVISO_SESION);
     expect(screen.queryByText(AVISO_RED)).toBeNull();
 
     // El siguiente falla por la red: la línea sigue, sin lo de la sesión y con qué hacer.
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     await avanzar(30_000);
     expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
-    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+    expect(lineaDelAviso()).not.toContain(AVISO_SESION);
     expect(screen.getByText(AVISO_RED)).toBeInTheDocument();
+
+    // Y el siguiente, con un 502: el sistema no responde (internet anda).
+    fetchMock.mockResolvedValue({ status: 502 });
+    await avanzar(30_000);
+    expect(screen.getByText(AVISO_SISTEMA)).toBeInTheDocument();
+    expect(screen.queryByText(AVISO_RED)).toBeNull();
   });
 
   it("la línea se va sola cuando un chequeo vuelve a andar, y Hoy se pone al día", async () => {
@@ -1119,12 +1164,12 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
 
     await avanzar(90_000);
-    expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+    expect(lineaDelAviso()).toContain(AVISO_SESION);
 
     fetchMock.mockResolvedValue({ status: 204 });
     await avanzar(30_000);
     expect(avisoEnPantalla()).toBeNull();
-    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+    expect(screen.queryByText("Volver a entrar")).toBeNull();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -1288,7 +1333,7 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     await avanzar(90_000);
     expect(screen.getByText(sinActualizarDesde("10:00"))).toBeInTheDocument();
-    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+    expect(lineaDelAviso()).not.toContain(AVISO_SESION);
 
     // El 4.º chequeo sale a los 120 s y tarda en contestar; a los 121 s la tocan.
     let contestar: (r: Respuesta) => void = () => {};
@@ -1302,10 +1347,10 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     usar("touchstart");
     contestar({ status: 0, type: "opaqueredirect" });
     await avanzar(0);
-    expect(screen.queryByText(AVISO_SESION)).toBeNull();
+    expect(lineaDelAviso()).not.toContain(AVISO_SESION);
 
     await avanzar(2_000);
-    expect(screen.getByText(AVISO_SESION)).toBeInTheDocument();
+    expect(lineaDelAviso()).toContain(AVISO_SESION);
   });
 
   it.each<[string, () => void, string]>([
@@ -1315,6 +1360,7 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
       AVISO_SESION,
     ],
     ["la red", () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch")), AVISO_RED],
+    ["el sistema", () => fetchMock.mockResolvedValue({ status: 503 }), AVISO_SISTEMA],
   ])("es una sola línea chica en el flujo, que no tapa la grilla (causa: %s)", async (_causa, caer, queHacer) => {
     const { container } = render(<AutoRefresh timezone={TZ_HOTEL} />);
     caer();
@@ -1343,6 +1389,12 @@ describe("useAutoRefresh — lo que devuelve para el aviso", () => {
     await avanzar(60_000);
     expect(result.current).toBeNull();
 
+    // El servidor contestó, con un error: "server" (internet anda).
+    await avanzar(30_000);
+    expect(result.current).toEqual({ since: montado, reason: "server" });
+
+    // La pregunta no llegó: "failed".
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     await avanzar(30_000);
     expect(result.current).toEqual({ since: montado, reason: "failed" });
 
@@ -1365,7 +1417,7 @@ describe("useAutoRefresh — lo que devuelve para el aviso", () => {
 
     fetchMock.mockResolvedValue({ status: 502 });
     await avanzar(90_000);
-    expect(result.current).toEqual({ since: armada, reason: "failed" });
+    expect(result.current).toEqual({ since: armada, reason: "server" });
   });
 });
 
@@ -1412,16 +1464,67 @@ describe("useAutoRefresh — al volver con Atrás o Adelante (Next muestra la p�
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("si vuelve antes de los 30 s, no pregunta al montarse: esos datos son de hace menos de un turno", async () => {
+  it("si vuelve antes de los 30 s, no pregunta al montarse, pero se pone al día cuando esos datos cumplen 30 s (no un turno después de volver)", async () => {
     const armada = Date.now();
     const hoy = montarHoy(armada);
 
-    irseYVolver(hoy, armada, 20_000);
+    // Se va a Caja a los 25 s de verla y vuelve con Atrás a los 28 s: datos de hace 28 s.
+    irseYVolver(hoy, armada, 28_000);
     await alDia();
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await avanzar(30_000);
+    // A los 2 s de volver esos datos cumplen 30 s: pregunta y recarga ahí, no a los 30 s
+    // de volver (serían datos de casi un minuto).
+    await avanzar(1_999);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await avanzar(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Después sigue el turno de siempre.
+    await avanzar(28_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("ir y volver con Atrás varias veces no deja datos de más de 30 s", async () => {
+    const armada = Date.now();
+    let hoy = montarHoy(armada);
+
+    // Vuelve a los 20 s y a los 9 s se va otra vez (datos de 29 s: todavía no le tocaba).
+    hoy = irseYVolver(hoy, armada, 20_000);
+    await avanzar(9_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Vuelve 3 s después: datos de 32 s, se pone al día enseguida.
+    irseYVolver(hoy, armada, 3_000);
+    await alDia();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("si mientras espera llega una página nueva (otra recarga), no pregunta de más; al irse no quedan timers", async () => {
+    const armada = Date.now();
+    const hoy = montarHoy(armada);
+
+    // Vuelve a los 20 s: esperaría 10 s. A los 5 s vuelve a la ventana y se pone al día.
+    const vuelta = irseYVolver(hoy, armada, 20_000);
+    await avanzar(5_000);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    const nueva = Date.now();
+    vuelta.rerender(<AutoRefresh timezone={TZ_HOTEL} renderedAt={nueva} />);
+
+    // Los datos son de recién: a los 10 s de volver no pregunta (la espera se desarmó).
+    await avanzar(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Al irse de Hoy no queda nada armado.
+    irseYVolver(vuelta, nueva, 5_000);
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("la página que trajo una recarga cuenta desde que llegó, no desde que se montó Hoy", async () => {

@@ -53,7 +53,18 @@ const NO_CARGA = "La conexión anda, pero la pantalla no carga. Avisale al encar
  * se cerró (por ejemplo, "Salir" en otro dispositivo) o Supabase no contesta.
  */
 const SESION =
-  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
+  "Se cerró la sesión o el sistema no responde. Si sigue así, tocá Volver a entrar.";
+/**
+ * Lo que dice el cartel cuando el servidor contestó con un error (un 5xx durante un deploy):
+ * la pregunta llegó, así que internet anda y "Sigue sin conexión" sería mentira.
+ */
+const SISTEMA = "El sistema no responde. Se vuelve a intentar sola en 30 s.";
+
+/**
+ * El texto del aviso que deja "Reintentar" ("" si no hay). El de la sesión trae un enlace
+ * adentro, así que no se lo busca con getByText.
+ */
+const avisoDelBoton = () => document.querySelector('p[role="status"]')?.textContent ?? "";
 
 function cambiarVisibilidad(oculta: boolean) {
   tabOculta = oculta;
@@ -198,7 +209,7 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     async (_tipo, respuesta) => {
       // Con `redirect: "manual"` la redirección a /login o a /forbidden llega como
       // `opaqueredirect`: recargar sacaría la pantalla del panel. "Sigue sin conexión" sería
-      // mentira (internet anda) y no dice cómo salir: F5 lleva a la pantalla de ingreso.
+      // mentira (internet anda) y no dice cómo salir: el enlace lleva a volver a entrar.
       const { container } = mostrarPantallaDeError();
       fetchMock.mockResolvedValue(respuesta);
 
@@ -207,37 +218,60 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
 
       expect(refresh).not.toHaveBeenCalled();
       expect(reset).not.toHaveBeenCalled();
-      expect(screen.getByText(SESION)).toBeInTheDocument();
+      expect(avisoDelBoton()).toBe(SESION);
       expect(screen.queryByText(SIN_CONEXION)).toBeNull();
       expect(boton(container).disabled).toBe(false);
     }
   );
 
-  it("con un error 5xx del servidor (por ejemplo, durante un deploy) tampoco recarga, y dice sin conexión (no lo de la sesión)", async () => {
+  it("con la sesión cerrada, el aviso trae el enlace para volver a entrar al panel (el celular no tiene F5)", async () => {
     mostrarPantallaDeError();
-    fetchMock.mockResolvedValue({ status: 502 });
+    fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
 
     fireEvent.click(botonReintentar());
     await alDiaEnPantalla();
 
-    expect(refresh).not.toHaveBeenCalled();
-    expect(reset).not.toHaveBeenCalled();
-    expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
-    expect(screen.queryByText(SESION)).toBeNull();
+    const enlace = screen.getByText("Volver a entrar");
+    expect(enlace.tagName).toBe("A");
+    expect(enlace.getAttribute("href")).toBe("/admin");
+    expect(avisoDelBoton()).not.toContain("F5");
   });
+
+  it.each([502, 503, 500, 404])(
+    "si el servidor contesta %i (por ejemplo, durante un deploy) tampoco recarga, y dice que el sistema no responde (no sin conexión: internet anda)",
+    async (status) => {
+      mostrarPantallaDeError();
+      fetchMock.mockResolvedValue({ status });
+
+      fireEvent.click(botonReintentar());
+      await alDiaEnPantalla();
+
+      expect(refresh).not.toHaveBeenCalled();
+      expect(reset).not.toHaveBeenCalled();
+      expect(avisoDelBoton()).toBe(SISTEMA);
+      expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+      expect(avisoDelBoton()).not.toContain("Se cerró la sesión");
+    }
+  );
 
   it("si después de la redirección el chequeo falla por la red, el aviso vuelve a decir sin conexión", async () => {
     mostrarPantallaDeError();
     fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
     fireEvent.click(botonReintentar());
     await alDiaEnPantalla();
-    expect(screen.getByText(SESION)).toBeInTheDocument();
+    expect(avisoDelBoton()).toBe(SESION);
 
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     fireEvent.click(botonReintentar());
     await alDiaEnPantalla();
     expect(screen.getByText(SIN_CONEXION)).toBeInTheDocument();
-    expect(screen.queryByText(SESION)).toBeNull();
+    expect(avisoDelBoton()).not.toContain("Se cerró la sesión");
+
+    // Y si el siguiente contesta un 502, dice que el sistema no responde.
+    fetchMock.mockResolvedValue({ status: 502 });
+    fireEvent.click(botonReintentar());
+    await alDiaEnPantalla();
+    expect(avisoDelBoton()).toBe(SISTEMA);
   });
 
   it("con la PC sin red no le pregunta al servidor ni recarga, y avisa", async () => {

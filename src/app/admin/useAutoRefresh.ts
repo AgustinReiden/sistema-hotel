@@ -78,10 +78,12 @@ export const FAILED_CHECKS_BEFORE_NOTICE = 3;
  * - "redirect": el proxy redirigió (a `/login` o a `/forbidden`). Pasa con la sesión
  *   cerrada (por ejemplo, "Salir" en otro dispositivo cierra la sesión en todos) o con
  *   Supabase que no contesta: desde el navegador no se distinguen;
- * - "failed": todo lo demás (sin red, internet cortado, más de `PROBE_TIMEOUT_MS`, un 5xx
- *   durante un deploy, un 404 si la ruta no está).
+ * - "server": el servidor contestó, pero con un error (un 5xx durante un deploy, un 404 si
+ *   la ruta no está). Internet anda: no hay que mandar a revisarlo;
+ * - "failed": la pregunta no llegó o no volvió (sin red, internet cortado, más de
+ *   `PROBE_TIMEOUT_MS`).
  */
-export type ProbeResult = "ok" | "redirect" | "failed";
+export type ProbeResult = "ok" | "redirect" | "server" | "failed";
 
 /**
  * Lo que devuelve `useAutoRefresh` cuando lleva `FAILED_CHECKS_BEFORE_NOTICE` chequeos
@@ -94,14 +96,6 @@ export type RefreshTrouble = { since: number; reason: Exclude<ProbeResult, "ok">
 function sameTrouble(a: RefreshTrouble | null, b: RefreshTrouble | null): boolean {
   return a === b || (a !== null && b !== null && a.since === b.since && a.reason === b.reason);
 }
-
-/**
- * Lo que dicen Hoy y la pantalla de error de `/admin` cuando el chequeo recibe una
- * redirección. F5 lleva a la pantalla de ingreso; si el que no contesta es el sistema,
- * tampoco anda: por eso "si sigue así".
- */
-export const SESSION_CLOSED_NOTICE =
-  "Se cerró la sesión o el sistema no responde. Si sigue así, apretá F5 para volver a entrar.";
 
 /**
  * Si alguien movió el mouse, tocó la pantalla, usó la rueda, apretó una tecla o la pantalla
@@ -210,9 +204,10 @@ function shouldWait(doc: Document): boolean {
 /**
  * ¿Está el panel? "ok" solo si `/admin/ping` contesta 2xx sin redirección. "redirect" si
  * el proxy redirige a `/login` o a `/forbidden` (sesión cerrada o vencida, Supabase caído,
- * sesión o rol que no se pudieron leer). "failed" si el pedido falla (internet cortado,
- * servidor apagado, más de `PROBE_TIMEOUT_MS`) o si contesta otra cosa (el 502 del proxy
- * durante un deploy, un 404 si la ruta no está).
+ * sesión o rol que no se pudieron leer). "server" si contesta otra cosa (el 502 del hosting
+ * durante un deploy, un 404 si la ruta no está): la pregunta llegó, así que internet anda.
+ * "failed" si el pedido falla (internet cortado, servidor apagado, más de
+ * `PROBE_TIMEOUT_MS`).
  *
  * `redirect: "manual"`: el navegador no sigue la redirección y la devuelve como
  * `opaqueredirect`; `redirected` cubre a uno que la siguiera igual, y un 3xx a la vista, a
@@ -229,7 +224,7 @@ async function askServer(signal: AbortSignal): Promise<ProbeResult> {
     });
     if (res.type === "opaqueredirect" || res.redirected) return "redirect";
     if (res.status >= 300 && res.status < 400) return "redirect";
-    return res.status >= 200 && res.status < 300 ? "ok" : "failed";
+    return res.status >= 200 && res.status < 300 ? "ok" : "server";
   } catch {
     return "failed";
   }
@@ -239,8 +234,8 @@ async function askServer(signal: AbortSignal): Promise<ProbeResult> {
  * El chequeo antes de recargar: pregunta una vez si el panel contesta, con el corte de
  * `PROBE_TIMEOUT_MS`. `cancel` la corta antes (si la pantalla se desmonta mientras espera)
  * y entonces `result` da "failed". La usan el refresco automático y el botón "Reintentar"
- * de la pantalla de error de `/admin`: así el botón tampoco recarga sin conexión ni sin
- * sesión, y puede decir cuál de las dos es.
+ * de la pantalla de error de `/admin`: así el botón tampoco recarga sin conexión, sin
+ * sesión ni con el servidor contestando un error, y puede decir cuál de las tres es.
  */
 export function probeServer(): { result: Promise<ProbeResult>; cancel: () => void } {
   const controller = new AbortController();
@@ -275,15 +270,18 @@ type UseAutoRefreshOptions = {
    *
    * También sirve para reconocer esa vuelta: si al montarse la página ya se había visto en
    * esta pestaña hace más de `intervalMs` (con el reloj de la PC), se pone al día enseguida,
-   * como al volver a la pestaña, en lugar de esperar el primer turno.
+   * como al volver a la pestaña. Si la vio hace menos, se pone al día cuando esos datos
+   * cumplen `intervalMs`, no un turno entero después de volver: así nunca se ven datos de
+   * más de `intervalMs` por ir y volver con Atrás.
    */
   renderedAt?: number;
 };
 
 /**
  * Pone al día la pantalla sola: cada `intervalMs`, al volver a la ventana (`focus`), al
- * volver a la pestaña (`visibilitychange`) y al volver con Atrás o Adelante a una página
- * vieja (con `renderedAt`: ver `rememberPage`). Usa `router.refresh()`, que vuelve a
+ * volver a la pestaña (`visibilitychange`) y al volver con Atrás o Adelante (con
+ * `renderedAt`, ver `rememberPage`: enseguida si esos datos tienen más de `intervalMs`, y si
+ * no, cuando los cumplen). Usa `router.refresh()`, que vuelve a
  * pedir los server components (el mismo patrón que la Caja). Antes de cada recarga:
  * - `shouldSkipRefresh` decide si no conviene (pestaña oculta, sin red, cuadro abierto,
  *   foco en un campo): se saltea hasta el próximo turno;
@@ -491,23 +489,33 @@ export function useAutoRefresh({
     };
   }, [intervalMs, paused]);
 
-  // ¿La página que se ve es una vuelta con Atrás o Adelante a datos viejos? Mira el registro
-  // de páginas vistas (y anota la página si es nueva) con el reloj de la PC. Lee
-  // `intervalMs` del último render sin ser dependencia.
-  const onPageShown = useEffectEvent((shownRenderedAt: number) => {
+  // ¿La página que se ve es una vuelta con Atrás o Adelante? Mira el registro de páginas
+  // vistas (y anota la página si es nueva) con el reloj de la PC. Lee `intervalMs` del
+  // último render sin ser dependencia. Devuelve cómo desarmar la espera, si armó una.
+  const onPageShown = useEffectEvent((shownRenderedAt: number): (() => void) | undefined => {
     const now = Date.now();
-    if (now - rememberPage(shownRenderedAt, now) > intervalMs) {
-      // Lo mismo que al volver a la pestaña: respeta la pestaña oculta, un cuadro abierto,
-      // un campo con el foco, la actividad y el chequeo, y un `focus` justo después no
-      // pregunta de nuevo.
+    const age = now - rememberPage(shownRenderedAt, now);
+    // Una página nueva: el intervalo, que arranca al montarse, la pone al día a tiempo.
+    if (age <= 0) return undefined;
+    // Lo mismo que al volver a la pestaña: respeta la pestaña oculta, un cuadro abierto,
+    // un campo con el foco, la actividad y el chequeo, y un `focus` justo después no
+    // pregunta de nuevo.
+    if (age > intervalMs) {
       refreshOnReturnRef.current?.();
+      return undefined;
     }
+    // Datos de menos de un turno: el intervalo se volvió a armar al montarse y los dejaría
+    // hasta casi dos turnos. Se ponen al día cuando cumplen `intervalMs`.
+    const timer = window.setTimeout(() => refreshOnReturnRef.current?.(), intervalMs - age);
+    return () => window.clearTimeout(timer);
   });
   // Va después del efecto de arriba: al montarse, `refreshOnReturn` ya está armado. Corre
   // al montarse (la vuelta con Atrás monta la página de nuevo) y con cada página que llega
-  // (se anota desde ese momento).
+  // (se anota desde ese momento). Una página nueva que llega, o irse de Hoy, desarma la
+  // espera de la anterior.
   useEffect(() => {
-    if (renderedAt !== undefined) onPageShown(renderedAt);
+    if (renderedAt === undefined) return undefined;
+    return onPageShown(renderedAt);
   }, [renderedAt]);
 
   return trouble;

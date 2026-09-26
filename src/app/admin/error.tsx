@@ -3,13 +3,23 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { SessionClosedNotice } from "./AutoRefresh";
 import {
   AUTO_REFRESH_INTERVAL_MS,
   probeServer,
-  SESSION_CLOSED_NOTICE,
   useAutoRefresh,
   type ProbeResult,
 } from "./useAutoRefresh";
+
+/** Qué dice el cartel después de un toque a "Reintentar" que no llegó a recargar o falló. */
+type RetryNotice = "offline" | "server" | "session" | "failed";
+
+/** El aviso del botón según cómo salió el chequeo (cuando no dio "ok"). */
+const NOTICE_BY_PROBE: Record<Exclude<ProbeResult, "ok">, RetryNotice> = {
+  failed: "offline",
+  server: "server",
+  redirect: "session",
+};
 
 /**
  * Cuándo (`Date.now()`) "Reintentar" mandó a recargar, con la conexión y la sesión ya
@@ -63,10 +73,11 @@ export default function AdminError({
   const router = useRouter();
   // true mientras se reintenta (la pregunta al servidor y la recarga): el botón lo muestra.
   const [isPending, startTransition] = useTransition();
-  // Cómo salió el último toque de "Reintentar": sin conexión (no recargó), con la sesión
-  // cerrada o el sistema sin contestar (el chequeo recibió una redirección: no recargó) o
-  // recargó y la pantalla volvió a fallar.
-  const [notice, setNotice] = useState<"offline" | "session" | "failed" | null>(() =>
+  // Cómo salió el último toque de "Reintentar": sin conexión (la pregunta no llegó: no
+  // recargó), el servidor contestó con un error (un 5xx durante un deploy: no recargó), con
+  // la sesión cerrada o el sistema sin contestar (el chequeo recibió una redirección: no
+  // recargó) o recargó y la pantalla volvió a fallar.
+  const [notice, setNotice] = useState<RetryNotice | null>(() =>
     comesFromManualRetry() ? "failed" : null
   );
   // La pregunta al servidor del botón, para cortarla si el cartel se va mientras espera.
@@ -105,7 +116,8 @@ export default function AdminError({
   // cambiaría este cartel por su página de "Sin conexión" y se irían el menú y el reintento.
   // Y sin sesión o sin Supabase, la recarga terminaría en `/login` o en `/forbidden`: ahí
   // el aviso no dice "sin conexión" (internet anda) sino cómo volver a entrar ("Salir" en
-  // otro dispositivo cierra la sesión en todos).
+  // otro dispositivo cierra la sesión en todos). Si el servidor contestó con un error
+  // (un 5xx durante un deploy), tampoco dice "sin conexión": dice que el sistema no responde.
   const retryFromButton = () => {
     if (isPending) return;
     setNotice(null);
@@ -118,7 +130,7 @@ export default function AdminError({
         if (probeRef.current === current) probeRef.current = null;
       }
       if (result !== "ok") {
-        setNotice(result === "redirect" ? "session" : "offline");
+        setNotice(NOTICE_BY_PROBE[result]);
         return;
       }
       manualRetryAt = Date.now();
@@ -172,11 +184,15 @@ export default function AdminError({
         {/* "failed": el chequeo dio bien (conexión, sesión y rol) y la recarga igual falló. */}
         {notice && !isPending && (
           <p role="status" className="text-sm font-medium text-amber-700 text-center">
-            {notice === "offline"
-              ? `Sigue sin conexión. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
-              : notice === "session"
-                ? SESSION_CLOSED_NOTICE
-                : "La conexión anda, pero la pantalla no carga. Avisale al encargado."}
+            {notice === "offline" ? (
+              `Sigue sin conexión. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
+            ) : notice === "server" ? (
+              `El sistema no responde. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
+            ) : notice === "session" ? (
+              <SessionClosedNotice />
+            ) : (
+              "La conexión anda, pero la pantalla no carga. Avisale al encargado."
+            )}
           </p>
         )}
       </div>
