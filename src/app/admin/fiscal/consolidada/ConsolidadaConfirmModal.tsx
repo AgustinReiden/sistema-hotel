@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AlertTriangle, FileText, Loader2 } from "lucide-react";
 
 import { formatCuit } from "@/lib/arca/amounts";
@@ -29,6 +29,11 @@ type Props = {
   letra: "A" | "B";
   receptorNombre: string;
   documento: ConsolidadaDocumento;
+  /**
+   * Con DNI (consumidor final): el nombre y el DNI se vuelven a leer de la ficha al abrir
+   * el cuadro. True si esa lectura falló y se muestran los de cuando se abrió la página.
+   */
+  documentoSinReleer?: boolean;
   condicionIvaLabel: string;
   /** Cuántas estadías entran en la factura. */
   estadias: number;
@@ -52,7 +57,10 @@ type Props = {
   diasVto: number;
   emitting: boolean;
   onConfirm: () => void;
+  /** «Volver» y Escape (Escape, nunca mientras emite). */
   onCancel: () => void;
+  /** El botón que abrió el cuadro: al cerrarse, el foco vuelve ahí. */
+  focoAlCerrar?: RefObject<HTMLElement | null>;
   /**
    * Avisos que se dibujan arriba de los botones. Lo deja preparado para la fase C de
    * remitos (C2), que va a listar acá los remitos firmados que faltan y pedir el motivo
@@ -80,9 +88,10 @@ function textoVencimiento(dias: number) {
 /**
  * Cómo sale el detalle impreso. Una línea con texto escrito a mano se imprime tal cual
  * (factura/[invoiceId]: `descripcion ?? automático`), así que de esa no se puede prometer
- * que lleve la habitación y las fechas.
+ * que lleve la habitación y las fechas. La pantalla usa la misma frase debajo de
+ * «Detallado»: lo que se lee ahí y en el cuadro es lo mismo.
  */
-function textoDetalle(conceptoUnico: string | null, estadias: number, lineasEditadas: number) {
+export function textoDetalle(conceptoUnico: string | null, estadias: number, lineasEditadas: number) {
   if (conceptoUnico !== null) {
     return `Detalle: un solo concepto, «${conceptoUnico}», por el total. No figuran las habitaciones ni las fechas de cada estadía.`;
   }
@@ -105,6 +114,7 @@ export default function ConsolidadaConfirmModal({
   letra,
   receptorNombre,
   documento,
+  documentoSinReleer = false,
   condicionIvaLabel,
   estadias,
   total,
@@ -119,13 +129,14 @@ export default function ConsolidadaConfirmModal({
   emitting,
   onConfirm,
   onCancel,
+  focoAlCerrar,
   avisos,
   bloquearConfirmar = false,
 }: Props) {
   // El servidor rechaza un DNI que no tenga 7 u 8 dígitos (P0022). Se avisa acá para no
-  // llegar al rechazo con el cuadro ya confirmado. El DNI es el que se leyó al abrir la
-  // página: si lo corrigen en Huéspedes con la página abierta, el cuadro sigue trabado
-  // hasta que se recarga, y por eso el aviso lo pide.
+  // llegar al rechazo con el cuadro ya confirmado. El DNI se vuelve a leer de la ficha
+  // cada vez que se abre el cuadro: corregido en Huéspedes, alcanza con cerrarlo y
+  // volver a abrirlo, sin recargar la página.
   const dniDigits = documento.tipo === "DNI" ? (documento.numero ?? "").replace(/\D/g, "") : "";
   const dniInvalido = documento.tipo === "DNI" && dniDigits.length !== 7 && dniDigits.length !== 8;
 
@@ -145,6 +156,30 @@ export default function ConsolidadaConfirmModal({
   useEffect(() => {
     volverRef.current?.focus({ preventScroll: true });
   }, []);
+
+  // Al cerrarse, el foco vuelve al botón que abrió el cuadro: si no, queda en el aire (el
+  // botón que lo tenía se fue con el cuadro). Si ese botón ya no está (la barra se va
+  // cuando no queda nada tildado), no se fuerza nada. Corre antes que los efectos de la
+  // pantalla, así el aviso fijo que aparece al cerrarse sí se queda con el foco.
+  useEffect(() => {
+    const destino = focoAlCerrar?.current ?? null;
+    return () => {
+      if (destino?.isConnected) destino.focus();
+    };
+  }, [focoAlCerrar]);
+
+  // Escape es «Volver». Mientras emite no: el cuadro dice «no cierres esta ventana» y
+  // «Volver» está deshabilitado.
+  useEffect(() => {
+    if (emitting) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [emitting, onCancel]);
 
   // Tab y Shift+Tab dan la vuelta adentro del cuadro. El fondo tapa el mouse, pero no el
   // teclado: sin esto, el foco sale al formulario de atrás, y cambiar ahí la condición
@@ -183,7 +218,10 @@ export default function ConsolidadaConfirmModal({
         aria-label="Revisá antes de emitir"
         className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain max-h-[92dvh] sm:max-h-[88dvh]"
       >
-        <div className="p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50">
+        {/* En un celular chico el cuadro no entra entero y se desplaza: el título queda
+            fijo arriba y los botones fijos al pie (sticky), así «Confirmar» y «Volver»
+            están siempre a mano y nunca se confirma sin saber qué cuadro es. */}
+        <div className="sticky top-0 z-10 p-4 sm:p-6 border-b border-slate-100 flex items-center gap-3 bg-slate-50">
           <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
             <FileText size={20} />
           </div>
@@ -193,7 +231,7 @@ export default function ConsolidadaConfirmModal({
           </div>
         </div>
 
-        <div className="p-6 space-y-3">
+        <div className="p-4 sm:p-6 space-y-3">
           {environment === "produccion" ? (
             <div className="flex items-start gap-2 bg-rose-600 text-white rounded-xl px-3 py-2.5">
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />
@@ -227,6 +265,12 @@ export default function ConsolidadaConfirmModal({
                 ? `CUIT ${formatCuit(documento.numero)}`
                 : `DNI ${dniDigits || "(sin cargar)"}`}
             </p>
+            {documento.tipo === "DNI" && documentoSinReleer && (
+              <p className="text-[11px] font-semibold text-amber-700 mt-0.5">
+                No pudimos volver a leer la ficha del huésped: el nombre y el DNI son los de
+                cuando abriste la página. Se emite con los que tenga la ficha.
+              </p>
+            )}
             <p className="text-xs text-slate-500">{condicionIvaLabel}</p>
 
             <p className="text-sm font-semibold text-slate-700 mt-3">
@@ -260,15 +304,17 @@ export default function ConsolidadaConfirmModal({
               <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
               <p className="text-xs font-semibold text-rose-800">
                 El DNI de la ficha del huésped ({dniDigits || "vacío"}) no sirve para facturar: tiene
-                que tener 7 u 8 dígitos. Corregilo en Huéspedes y después recargá esta página: el
-                DNI se lee al abrirla.
+                que tener 7 u 8 dígitos. Corregilo en Huéspedes y volvé a abrir este cuadro: el
+                DNI se lee de nuevo cada vez que se abre.
               </p>
             </div>
           )}
 
           {avisos}
+        </div>
 
-          <div className="flex gap-3 pt-1">
+        <div className="sticky bottom-0 bg-white border-t border-slate-100 px-4 sm:px-6 pt-3 pb-4 space-y-2">
+          <div className="flex gap-3">
             {/* El foco arranca acá (ver volverRef): un Enter de más no emite nada. */}
             <button
               ref={volverRef}
