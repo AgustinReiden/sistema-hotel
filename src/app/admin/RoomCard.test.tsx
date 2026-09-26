@@ -257,3 +257,29 @@ describe("RoomCard: check-out a cuenta corriente y el remito", () => {
     expect(open).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("RoomCard: ampliar la reserva", () => {
+  it("el botón dice las noches y el nuevo día de salida, y amplía las noches del stepper", async () => {
+    const { handleExtendReservation } = await import("./actions");
+    vi.mocked(handleExtendReservation).mockResolvedValue({
+      success: true,
+      data: { halfDayRemoved: false, halfDayAmount: 0 },
+    });
+    // Entró el 24/09 y sale el 25/09 a las 10:00.
+    abrir(
+      habitacion({
+        check_in_target: "2026-09-24T17:00:00.000Z",
+        check_out_target: "2026-09-25T13:00:00.000Z",
+      })
+    );
+
+    fireEvent.click(screen.getByText("Ampliar Reserva"));
+    expect(screen.getByText("Ampliar 1 noche · sale el 26/09")).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("Noches adicionales: sumar 1"));
+    expect(screen.getByText("Ampliar 2 noches · sale el 27/09")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Ampliar 2 noches · sale el 27/09"));
+    await waitFor(() => expect(handleExtendReservation).toHaveBeenCalledWith("res-1", 2));
+  });
+});
