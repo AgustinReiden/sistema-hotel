@@ -69,8 +69,10 @@ export default function PrintBlockedModal({
           >
             Cerrar sin imprimir
           </button>
+          {/* El foco arranca acá: un Enter imprime, no cierra sin imprimir. */}
           <button
             type="button"
+            autoFocus
             onClick={onPrint}
             className="flex-1 px-4 py-2.5 bg-brand-700 text-white font-semibold rounded-xl hover:bg-brand-800 flex items-center justify-center gap-2"
           >
