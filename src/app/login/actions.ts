@@ -39,28 +39,29 @@ export async function login(formData: FormData) {
     redirect(target);
 }
 
+/**
+ * "Salir" (`LogoutButton`): cierra la sesión solo en este dispositivo. Sin scope,
+ * Supabase la cierra en todos lados (la otra PC, el celular). Es el único camino que
+ * pasa por acá; los demás usan `logoutEverywhere()`.
+ * Si una recepcionista toca "Salir" sin haber rendido su caja, su sesión en otro
+ * dispositivo sigue abierta hasta que la cierre la inactividad de ese dispositivo (que
+ * cierra en todos lados) o hasta que salga ahí.
+ */
 export async function logout() {
     const supabase = await createClient();
-    // Solo este dispositivo. Sin scope, Supabase cierra la sesión del usuario en todos
-    // lados (la otra PC, el celular). "Salir", el cierre por inactividad y "Cerrar
-    // sesión" del traspaso forzado pasan todos por acá. El "Listo" de fin de turno
-    // usa logoutEverywhere().
-    // Ojo en recepción: si se sale por acá sin haber tocado ese "Listo" (sin rendir la
-    // caja, o rendida pero sin "Listo"), las otras sesiones del mismo usuario siguen
-    // abiertas. Cuando la siguiente abre su caja, esas sesiones caen en la rendición
-    // forzada de la caja nueva ("Entraste como…") y quien tenga ese dispositivo podría
-    // rendirla a ciegas a nombre de quien se fue.
     await supabase.auth.signOut({ scope: 'local' });
     redirect('/login');
 }
 
 /**
- * Fin de turno de recepción: "Listo" después de rendir la caja propia. Cierra la
- * sesión en todos los dispositivos, como hacía `logout()` antes de pasar a solo este.
- * La recepcionista se va: si le quedara una sesión abierta en otra PC o en el celular,
- * cuando la siguiente abre su caja esa sesión caería en la rendición forzada y podría
- * cerrarle la caja a ciegas a nombre de quien ya se fue. Protege solo este camino: los
- * que pasan por `logout()` dejan ese riesgo abierto (ver el comentario de arriba).
+ * Cierra la sesión en todos los dispositivos del usuario, como hacía `logout()` antes de
+ * que "Salir" pasara a cerrar solo este (decisión de Agustín del 27/09). La usan:
+ *  - el cierre por inactividad de recepción (`IdleLogout`);
+ *  - "¿No sos vos? → Cerrar sesión" del traspaso forzado (`CloseShiftModal`);
+ *  - "Listo" después de rendir la caja propia al fin de turno (`CloseShiftModal`).
+ * Una sesión de esa recepcionista que quedara abierta en otra PC o en el celular caería
+ * en la rendición forzada de la caja que abre la siguiente y podría cerrarla a ciegas a
+ * nombre de quien ya se fue.
  */
 export async function logoutEverywhere() {
     const supabase = await createClient();

@@ -239,6 +239,7 @@ describe("CloseShiftModal — ¿No sos vos? (traspaso forzado)", () => {
     });
     closeShiftAction.mockReset();
     logout.mockReset();
+    logoutEverywhere.mockReset();
   });
 
   /** Como lo abre ForcedShiftHandover: no se puede descartar sin rendir. */
@@ -274,7 +275,9 @@ describe("CloseShiftModal — ¿No sos vos? (traspaso forzado)", () => {
 
     fireEvent.click(screen.getByText("Cerrar sesión"));
 
-    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    // En todos los dispositivos, no solo en este (decisión de Agustín del 27/09).
+    await waitFor(() => expect(logoutEverywhere).toHaveBeenCalledTimes(1));
+    expect(logout).not.toHaveBeenCalled();
     expect(closeShiftAction).not.toHaveBeenCalled();
   });
 
@@ -305,7 +308,8 @@ describe("CloseShiftModal — ¿No sos vos? (traspaso forzado)", () => {
     expect(screen.getByText("Juan Prueba")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Cerrar sesión"));
-    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(logoutEverywhere).toHaveBeenCalledTimes(1));
+    expect(logout).not.toHaveBeenCalled();
   });
 
   it("también se ve al confirmar el monto contado", async () => {
@@ -318,7 +322,8 @@ describe("CloseShiftModal — ¿No sos vos? (traspaso forzado)", () => {
     expect(screen.getByText("Juan Prueba")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Cerrar sesión"));
-    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(logoutEverywhere).toHaveBeenCalledTimes(1));
+    expect(logout).not.toHaveBeenCalled();
     expect(closeShiftAction).not.toHaveBeenCalled();
   });
 
@@ -340,6 +345,7 @@ describe("ForcedShiftHandover — el traspaso tal como lo arma el layout", () =>
     });
     closeShiftAction.mockReset();
     logout.mockReset();
+    logoutEverywhere.mockReset();
   });
 
   function abrirHandover(openedByName: string | null) {
@@ -369,7 +375,8 @@ describe("ForcedShiftHandover — el traspaso tal como lo arma el layout", () =>
 
     fireEvent.click(screen.getByText("Cerrar sesión"));
 
-    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(logoutEverywhere).toHaveBeenCalledTimes(1));
+    expect(logout).not.toHaveBeenCalled();
     expect(closeShiftAction).not.toHaveBeenCalled();
   });
 

@@ -5,14 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *
  * `signOut()` de Supabase usa alcance global por defecto: cierra la sesión del usuario
  * en todos sus dispositivos (la PC de recepción, el celular, la otra PC). Con
- * `{ scope: 'local' }` se cierra solo esta. "Salir", el cierre por inactividad y
- * "Cerrar sesión" del traspaso forzado usan `logout()`.
+ * `{ scope: 'local' }` se cierra solo esta. Solo "Salir" usa `logout()`.
  *
- * El cuarto camino, "Listo" después de rendir la caja propia al fin de turno, sigue
- * cerrando en todos lados (`logoutEverywhere()`): la recepcionista se va, y una sesión
- * suya que quedó abierta en otra PC o en el celular no puede terminar rindiendo la caja
- * que abre la siguiente. Los otros tres caminos no cubren ese riesgo: si la recepcionista
- * se va por ahí sin tocar "Listo", sus otras sesiones siguen abiertas.
+ * Los otros tres caminos siguen cerrando en todos lados (`logoutEverywhere()`), como
+ * hasta hoy (decisión de Agustín del 27/09): el cierre por inactividad de recepción,
+ * "¿No sos vos? → Cerrar sesión" del traspaso forzado y "Listo" después de rendir la caja
+ * propia al fin de turno. Una sesión de la recepcionista que quedó abierta en otra PC o
+ * en el celular no puede terminar rindiendo la caja que abre la siguiente.
+ *
+ * Qué camino usa qué acción, de punta a punta: `logout-caminos.test.tsx`.
  */
 
 const H = vi.hoisted(() => ({
@@ -72,7 +73,7 @@ describe("logout", () => {
   });
 });
 
-describe("logoutEverywhere (Listo al fin de turno)", () => {
+describe("logoutEverywhere (inactividad, ¿No sos vos? y Listo al fin de turno)", () => {
   beforeEach(() => {
     H.calls = [];
     H.signOut.mockReset();

@@ -32,7 +32,7 @@ import {
   reportShiftConflictAction,
 } from "./actions";
 import { handleExtendReservation } from "@/app/admin/actions";
-import { logout, logoutEverywhere } from "@/app/login/actions";
+import { logoutEverywhere } from "@/app/login/actions";
 import ExportCsvButton from "./ExportCsvButton";
 import ParsedAmountHint, { UNREADABLE_AMOUNT_MESSAGE } from "@/app/admin/ParsedAmountHint";
 import { formatAmount, formatAmountForInput, parseArMoney } from "@/lib/format";
@@ -509,7 +509,8 @@ export default function CloseShiftModal({
 
   // "¿No sos vos?": en el traspaso forzado el modal no se puede descartar, así que si
   // quedó abierta la sesión equivocada esta es la única salida. Va en los pasos 1, 2 y
-  // 2b; después de cerrar ya no hace falta (el "Listo" sigue su camino).
+  // 2b; después de cerrar ya no hace falta (el "Listo" sigue su camino). Cierra esa
+  // sesión en todos los dispositivos, no solo en este (a diferencia de "Salir").
   const identityBar = identity ? (
     <div className="px-6 py-3 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-2 shrink-0">
       <p className="text-sm text-slate-600">
@@ -517,7 +518,7 @@ export default function CloseShiftModal({
       </p>
       <button
         type="button"
-        onClick={() => startLogout(() => logout())}
+        onClick={() => startLogout(() => logoutEverywhere())}
         disabled={loggingOut || loading}
         className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-red-50 hover:text-red-700 hover:border-red-200 disabled:opacity-70 transition-colors flex items-center gap-1.5"
       >
