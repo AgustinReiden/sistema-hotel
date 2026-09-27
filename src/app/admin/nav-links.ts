@@ -38,6 +38,12 @@ export type NavBadge = {
   text: string;
   tone: "ok" | "warn" | "alert";
   title: string;
+  /**
+   * Hay que resolverlo ya: con la sección cerrada, a igual color le gana a los otros
+   * numeritos. Es para que un número que casi nunca baja a cero (lo que falta facturar)
+   * no tape las facturas que no salieron.
+   */
+  urgent?: boolean;
 };
 
 /** Qué URLs marcan una pestaña como la pantalla actual. */
@@ -91,8 +97,8 @@ export type NavState = {
   facturasConError?: number;
 };
 
-function countBadge(count: number, tone: NavBadge["tone"], title: string): NavBadge | undefined {
-  return count > 0 ? { text: String(count), tone, title } : undefined;
+function countBadge(count: number, tone: NavBadge["tone"], title: string, urgent = false): NavBadge | undefined {
+  return count > 0 ? { text: String(count), tone, title, urgent } : undefined;
 }
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
@@ -212,7 +218,13 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           href: "/admin/fiscal?view=pendientes",
           icon: AlertTriangle,
           match: [{ path: "/admin/fiscal", exact: true, param: { name: "view", value: "pendientes", isDefault: !isAdmin } }],
-          badge: countBadge(facturasConError, "alert", plural(facturasConError, "factura no salió", "facturas no salieron")),
+          // Urgente: con Facturación cerrada, le gana al rojo de Por facturar.
+          badge: countBadge(
+            facturasConError,
+            "alert",
+            plural(facturasConError, "factura no salió", "facturas no salieron"),
+            true
+          ),
         },
         {
           id: "emitidas",
@@ -350,16 +362,21 @@ export function sectionHref(section: NavSection): string {
   return section.tabs[0]?.href ?? "/admin";
 }
 
-const BADGE_RANK: Record<NavBadge["tone"], number> = { alert: 3, warn: 2, ok: 1 };
+const TONE_RANK: Record<NavBadge["tone"], number> = { alert: 3, warn: 2, ok: 1 };
+
+/** Manda el color; `urgent` solo desempata dentro del mismo color, nunca salta uno. */
+const badgeRank = (b: NavBadge) => TONE_RANK[b.tone] * 2 + (b.urgent ? 1 : 0);
 
 /**
  * El aviso que muestra la sección cuando sus pestañas no están a la vista: el más
- * urgente (rojo antes que ámbar, ámbar antes que verde); a igual urgencia, el primero.
+ * urgente (rojo antes que ámbar, ámbar antes que verde; a igual color, el `urgent`,
+ * como las facturas que no salieron frente a lo que falta facturar); si siguen
+ * empatados, el primero.
  */
 export function sectionBadge(section: NavSection): NavBadge | undefined {
   let best: NavBadge | undefined;
   for (const tab of section.tabs) {
-    if (tab.badge && (!best || BADGE_RANK[tab.badge.tone] > BADGE_RANK[best.tone])) best = tab.badge;
+    if (tab.badge && (!best || badgeRank(tab.badge) > badgeRank(best))) best = tab.badge;
   }
   return best;
 }

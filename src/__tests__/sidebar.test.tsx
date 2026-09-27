@@ -80,6 +80,13 @@ describe("menú lateral de escritorio", () => {
     expect(within(link("Remitos", abierto)!).getByText("3")).toBeInTheDocument();
   });
 
+  it("con Facturación cerrada, las facturas que no salieron no quedan tapadas por lo que falta facturar", () => {
+    render(<Sidebar role="admin" userEmail="admin@example.com" unbilledCount={286} facturasConError={2} />);
+    const facturacion = link("Facturación")!;
+    expect(within(facturacion).getByText("2")).toHaveAttribute("title", "2 facturas no salieron");
+    expect(within(facturacion).queryByText("286")).toBeNull();
+  });
+
   it("en un comprobante para imprimir no marca nada", () => {
     en("/admin/recibo/1");
     const { container } = render(<Sidebar role="admin" userEmail="admin@example.com" />);

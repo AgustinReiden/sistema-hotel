@@ -171,6 +171,33 @@ describe("menu: numeritos", () => {
     const clientes = getNavSections("admin").find((s) => s.id === "clientes")!;
     expect(sectionBadge(clientes)).toBeUndefined();
   });
+
+  it("sectionBadge: con los dos en rojo, las facturas que no salieron le ganan a lo que falta facturar", () => {
+    // Lo que falta facturar casi nunca baja a cero: si ganara el primero, el dueño no
+    // vería nunca las facturas rechazadas o trabadas con Facturación cerrada.
+    const facturacion = getNavSections("admin", {
+      unbilledCount: 286,
+      facturasConError: 2,
+      remitosPendientes: 4,
+    }).find((s) => s.id === "facturacion")!;
+    expect(sectionBadge(facturacion)).toMatchObject({ text: "2", tone: "alert", title: "2 facturas no salieron" });
+
+    // Sin facturas con error, vuelve a mostrar lo que falta facturar.
+    const sinError = getNavSections("admin", { unbilledCount: 286, facturasConError: 0 }).find(
+      (s) => s.id === "facturacion"
+    )!;
+    expect(sectionBadge(sinError)).toMatchObject({ text: "286", tone: "alert" });
+
+    // Urgente desempata dentro del color, pero no salta uno: un ámbar urgente no le gana al rojo.
+    const inventada: NavSection = {
+      ...facturacion,
+      tabs: [
+        { ...facturacion.tabs[0], badge: { text: "7", tone: "warn", title: "ámbar", urgent: true } },
+        { ...facturacion.tabs[1], badge: { text: "1", tone: "alert", title: "rojo" } },
+      ],
+    };
+    expect(sectionBadge(inventada)).toMatchObject({ text: "1", tone: "alert" });
+  });
 });
 
 describe("findActiveNav", () => {
