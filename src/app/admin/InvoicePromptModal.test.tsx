@@ -2,10 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal";
+import { DNI_INVALIDO_MSG } from "@/lib/arca/amounts";
 
 const H = vi.hoisted(() => ({
   declineInvoiceAction: vi.fn(),
   emitInvoiceForReservationAction: vi.fn(),
+  fixReservationDniAction: vi.fn(),
   lookupReceptorByCuitAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
@@ -15,6 +17,7 @@ vi.mock("sonner", () => ({ toast: H.toast }));
 vi.mock("./fiscal/actions", () => ({
   declineInvoiceAction: H.declineInvoiceAction,
   emitInvoiceForReservationAction: H.emitInvoiceForReservationAction,
+  fixReservationDniAction: H.fixReservationDniAction,
   lookupReceptorByCuitAction: H.lookupReceptorByCuitAction,
 }));
 
@@ -303,5 +306,210 @@ describe("InvoicePromptModal: si la emisión o el «no facturar» no vuelven (re
         description: "Si no quedó, la estadía le queda al administrador en Por facturar.",
       })
     );
+  });
+});
+
+describe("InvoicePromptModal: el DNI se corrige ahí mismo", () => {
+  const DNI_9 = "301234567";
+  const CAMPO_DNI = "DNI correcto";
+  const TURNO_AJENO =
+    "Esta estadía no es de tu turno: el DNI no se puede cambiar desde acá. Pedile al administrador.";
+  const CUIT_MAL =
+    "El CUIT del receptor no es valido (11 digitos con digito verificador). Corregilo y reintenta.";
+
+  beforeEach(() => {
+    H.declineInvoiceAction.mockReset();
+    H.emitInvoiceForReservationAction.mockReset();
+    H.fixReservationDniAction.mockReset();
+    H.toast.success.mockReset();
+    H.toast.error.mockReset();
+    H.toast.warning.mockReset();
+    vi.stubGlobal("open", vi.fn().mockReturnValue({} as Window));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** SÍ → Consumidor Final → Continuar: queda en "Revisá antes de emitir". */
+  function irAConfirmarB() {
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(screen.getByText("Consumidor Final"));
+    fireEvent.click(screen.getByText("Continuar"));
+  }
+
+  const botonEmitir = () => screen.getByText("Confirmar y emitir") as HTMLButtonElement;
+
+  it("con un DNI de 9 dígitos aparece «Corregir DNI» y «Confirmar y emitir» está deshabilitado", () => {
+    abrir(datos({ clientDni: DNI_9 }));
+
+    irAConfirmarB();
+
+    expect(screen.getByText("Corregir DNI")).toBeTruthy();
+    expect(screen.getByLabelText(CAMPO_DNI)).toBeTruthy();
+    expect(botonEmitir().disabled).toBe(true);
+    // Ya no manda a un lugar al que recepción no puede ir.
+    expect(screen.queryByText(/en la reserva/i)).toBeNull();
+  });
+
+  it("en los datos de la Factura B, el DNI que no sirve abre el campo y no dice «en la reserva»", () => {
+    abrir(datos({ clientDni: DNI_9 }));
+
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(screen.getByText("Consumidor Final"));
+
+    expect(screen.getByLabelText(CAMPO_DNI)).toBeTruthy();
+    expect(screen.getByText("Guardar DNI")).toBeTruthy();
+    expect(screen.queryByText(/en la reserva/i)).toBeNull();
+  });
+
+  it("tipear 30123456 y «Guardar DNI» lo corrige, cambia el DNI a la vista y habilita emitir", async () => {
+    H.fixReservationDniAction.mockResolvedValue({ success: true });
+    abrir(datos({ clientDni: DNI_9 }));
+    irAConfirmarB();
+
+    fireEvent.change(screen.getByLabelText(CAMPO_DNI), { target: { value: "30123456" } });
+    fireEvent.click(screen.getByText("Guardar DNI"));
+
+    await waitFor(() =>
+      expect(H.fixReservationDniAction).toHaveBeenCalledWith("res-1", "30123456")
+    );
+    await waitFor(() => expect(botonEmitir().disabled).toBe(false));
+    expect(screen.getByText("DNI 30123456")).toBeTruthy();
+    expect(H.toast.success).toHaveBeenCalledWith("DNI corregido");
+    expect(screen.queryByText("Corregir DNI")).toBeNull();
+    // No emite solo: la factura sale recién con "Confirmar y emitir".
+    expect(H.emitInvoiceForReservationAction).not.toHaveBeenCalled();
+  });
+
+  it("el campo toma sólo dígitos, hasta 8, y no deja guardar menos de 7", () => {
+    abrir(datos({ clientDni: DNI_9 }));
+    irAConfirmarB();
+    const campo = screen.getByLabelText(CAMPO_DNI) as HTMLInputElement;
+    const guardar = () => screen.getByText("Guardar DNI") as HTMLButtonElement;
+
+    fireEvent.change(campo, { target: { value: "12345" } });
+    expect(guardar().disabled).toBe(true);
+
+    fireEvent.change(campo, { target: { value: "30.123.456-9" } });
+    expect(campo.value).toBe("30123456");
+    expect(guardar().disabled).toBe(false);
+  });
+
+  it("si la estadía no es de su turno (P0023), lee «Pedile al administrador» y el DNI no cambia", async () => {
+    H.fixReservationDniAction.mockResolvedValue({
+      success: false,
+      code: "P0023",
+      error: TURNO_AJENO,
+    });
+    abrir(datos({ clientDni: DNI_9 }));
+    irAConfirmarB();
+
+    fireEvent.change(screen.getByLabelText(CAMPO_DNI), { target: { value: "30123456" } });
+    fireEvent.click(screen.getByText("Guardar DNI"));
+
+    expect(await screen.findByText(TURNO_AJENO)).toBeTruthy();
+    expect(screen.getByText(`DNI ${DNI_9}`)).toBeTruthy();
+    expect(botonEmitir().disabled).toBe(true);
+    expect(H.toast.success).not.toHaveBeenCalled();
+  });
+
+  it("en los datos de la B, «¿El DNI está mal? Corregilo acá» abre el campo aunque tenga 8 dígitos", () => {
+    abrir(datos());
+
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(screen.getByText("Consumidor Final"));
+    expect(screen.queryByLabelText(CAMPO_DNI)).toBeNull();
+
+    fireEvent.click(screen.getByText("¿El DNI está mal? Corregilo acá"));
+
+    expect(screen.getByLabelText(CAMPO_DNI)).toBeTruthy();
+  });
+
+  it("un DNI escrito y sin guardar no se pierde: «Continuar» avisa y no avanza", () => {
+    abrir(datos());
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(screen.getByText("Consumidor Final"));
+    fireEvent.click(screen.getByText("¿El DNI está mal? Corregilo acá"));
+
+    fireEvent.change(screen.getByLabelText(CAMPO_DNI), { target: { value: "30123457" } });
+    fireEvent.click(screen.getByText("Continuar"));
+
+    expect(H.toast.error).toHaveBeenCalledWith(
+      "Tocá «Guardar DNI» antes de seguir, o borrá lo que escribiste."
+    );
+    expect(screen.queryByText("Revisá antes de emitir")).toBeNull();
+    expect(H.fixReservationDniAction).not.toHaveBeenCalled();
+  });
+
+  it("si emitir vuelve con un P0022 de DNI, no cierra: pide el DNI y después vuelve a confirmar", async () => {
+    // El check-out no trajo DNI: no se valida en pantalla y decide la base.
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: false,
+      code: "P0022",
+      error: DNI_INVALIDO_MSG,
+    });
+    H.fixReservationDniAction.mockResolvedValue({ success: true });
+    const { onClose } = abrir(datos({ clientDni: null }));
+    irAConfirmarB();
+
+    fireEvent.click(botonEmitir());
+
+    expect(await screen.findByLabelText(CAMPO_DNI)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(H.toast.error).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(CAMPO_DNI), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByText("Guardar DNI"));
+
+    // Vuelve a la confirmación con el DNI nuevo, lista para emitir.
+    await waitFor(() => expect(botonEmitir().disabled).toBe(false));
+    expect(screen.getByText("Revisá antes de emitir")).toBeTruthy();
+    expect(screen.getByText("DNI 12345678")).toBeTruthy();
+    expect(H.fixReservationDniAction).toHaveBeenCalledWith("res-1", "12345678");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("si el emisor la deja pendiente por el DNI, también pide el DNI en vez de cerrar", async () => {
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: true,
+      data: { status: "pending", invoiceId: "inv-1", userMessage: DNI_INVALIDO_MSG },
+    });
+    const { onClose } = abrir(datos());
+    irAConfirmarB();
+
+    fireEvent.click(botonEmitir());
+
+    expect(await screen.findByLabelText(CAMPO_DNI)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(H.toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("una Factura A con el CUIT mal cargado dice que el problema es el CUIT y no abre el campo de DNI", async () => {
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: false,
+      code: "P0022",
+      error: CUIT_MAL,
+    });
+    const { onClose } = abrir(
+      datos({
+        suggestA: true,
+        prefillComplete: true,
+        aPrefill: {
+          razonSocial: "Empresa Ficticia SA",
+          cuit: "30123456781",
+          condicionIva: "responsable_inscripto",
+          domicilio: "Calle Falsa 123",
+        },
+      })
+    );
+
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(botonEmitir());
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(H.toast.error).toHaveBeenCalledWith(CUIT_MAL);
+    expect(screen.queryByLabelText(CAMPO_DNI)).toBeNull();
+    expect(H.fixReservationDniAction).not.toHaveBeenCalled();
   });
 });
