@@ -1,9 +1,18 @@
+import { Suspense } from "react";
 import Sidebar from './Sidebar';
 import { MobileTabBar, MobileTopBar } from './MobileNav';
+import type { NavState } from "./nav-links";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { countBillingPending, getActiveOpenShift, getRemitosSalud, getShiftSummary } from "@/lib/data";
-import { BILLING_PENDING_DAYS, totalPendingBilling } from "@/lib/billing";
+import {
+    countBillingPending,
+    getActiveOpenShift,
+    getPendingSolicitudesCount,
+    getRemitosSalud,
+    getShiftSummary,
+    listPendingInvoices,
+} from "@/lib/data";
+import { BILLING_PENDING_DAYS, facturasConError, totalPendingBilling } from "@/lib/billing";
 import { remitosParaRevisar } from "@/lib/remitos";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 import IdleLogout from "./IdleLogout";
@@ -90,20 +99,40 @@ export default async function AdminLayout({
     // abre. Antes el badge miraba 60 días y sólo `falta` mientras la pantalla sumaba
     // las dos mitades sobre todo el historial: 165 acá y 286 allá, para el mismo dato.
     //
-    // Remitos a revisar + piezas sin resolver (mig 116), para el numerito de "Remitos
-    // firmados". Si la consulta falla, el menú sigue igual: 0. Las dos cuentas corren a
-    // la vez: son una consulta más en cada pantalla del admin.
-    const [unbilledCount, remitosPendientes] =
-        role === "admin"
-            ? await Promise.all([
-                  countBillingPending(BILLING_PENDING_DAYS)
-                      .then(totalPendingBilling)
-                      .catch(() => 0),
-                  getRemitosSalud()
-                      .then((s) => remitosParaRevisar(s).total)
-                      .catch(() => 0),
-              ])
-            : [0, 0];
+    // Remitos a revisar + vencidos + piezas sin resolver (migs 116 y 124), para el
+    // numerito de Remitos: el mismo total que la línea "Para revisar" del panel.
+    //
+    // Solicitudes sin responder y facturas que no salieron (rechazadas o trabadas más de
+    // 15 minutos) van para los dos roles: a recepción la RPC ya le trae solo las de su
+    // turno. Lo del dueño (falta facturar y remitos) no se le pide a recepción.
+    //
+    // Las cuatro cuentas corren a la vez, y si una falla ese numerito queda en 0 y el
+    // menú sigue: el layout envuelve todo el panel.
+    const isAdmin = role === "admin";
+    const now = new Date();
+    const [unbilledCount, remitosPendientes, solicitudesPendientes, facturasConErrorCount] = await Promise.all([
+        isAdmin
+            ? countBillingPending(BILLING_PENDING_DAYS)
+                  .then(totalPendingBilling)
+                  .catch(() => 0)
+            : 0,
+        isAdmin
+            ? getRemitosSalud()
+                  .then((s) => remitosParaRevisar(s).total)
+                  .catch(() => 0)
+            : 0,
+        getPendingSolicitudesCount().catch(() => 0),
+        listPendingInvoices()
+            .then((rows) => facturasConError(rows, now).length)
+            .catch(() => 0),
+    ]);
+    const navState: NavState = {
+        hasOpenShift: !!openShift,
+        unbilledCount,
+        remitosPendientes,
+        solicitudesPendientes,
+        facturasConError: facturasConErrorCount,
+    };
 
     return (
         // Shell de alto fijo: sin una altura definida en este ancestro, los h-full y los
@@ -120,20 +149,29 @@ export default async function AdminLayout({
         <>
             {role === "receptionist" && <IdleLogout />}
             <div data-admin-shell className="h-dvh bg-slate-50 flex flex-col md:flex-row overflow-hidden">
-                <MobileTopBar
-                    role={role}
-                    userEmail={userEmail}
-                    hasOpenShift={!!openShift}
-                    unbilledCount={unbilledCount}
-                    remitosPendientes={remitosPendientes}
-                />
-                <Sidebar
-                    role={role}
-                    userEmail={userEmail}
-                    hasOpenShift={!!openShift}
-                    unbilledCount={unbilledCount}
-                    remitosPendientes={remitosPendientes}
-                />
+                {/* Los dos menús leen ?view= con useSearchParams, y eso pide un <Suspense>
+                    alrededor o `next build` falla. Los reemplazos ocupan el mismo lugar
+                    que el menú para que nada salte mientras cargan. */}
+                <Suspense
+                    fallback={
+                        <div
+                            aria-hidden
+                            className="md:hidden shrink-0 h-14 border-b border-slate-800 bg-slate-900 print:hidden"
+                        />
+                    }
+                >
+                    <MobileTopBar role={role} userEmail={userEmail} {...navState} />
+                </Suspense>
+                <Suspense
+                    fallback={
+                        <aside
+                            aria-hidden
+                            className="hidden md:block md:w-64 md:h-dvh bg-slate-900 border-r border-slate-800 shrink-0"
+                        />
+                    }
+                >
+                    <Sidebar role={role} userEmail={userEmail} {...navState} />
+                </Suspense>
                 <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
                     <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
                     {/* El que scrollea es este wrapper y no <main> para dejar el aviso de turno
