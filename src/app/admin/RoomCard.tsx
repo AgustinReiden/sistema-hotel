@@ -131,17 +131,27 @@ function textosImpresoBloqueado(impreso: Impreso) {
   return {
     titulo: "El check-out quedó hecho y el pago quedó registrado.",
     detalle:
-      "Falta el recibo: el navegador bloqueó la ventana. Apretá «Imprimir recibo» para que salga. Si lo cerrás sin imprimir, el recibo no sale.",
+      "Falta el recibo: el navegador bloqueó la ventana. Apretá «Imprimir recibo» para que salga. Si lo cerrás sin imprimir, no hay otro lugar desde donde imprimirlo.",
     botonLabel: "Imprimir recibo",
   };
 }
 
 /** Acciones de la tarjeta que se confirman antes: se aprietan de pasada y no tienen vuelta fácil. */
-type Confirmacion = "checkin" | "mantenimiento" | "lista";
+type Confirmacion = "checkin" | "mantenimiento" | "lista" | "medioDia";
 
 /** La acción salió y no volvió respuesta (red cortada): puede haberse hecho o no. */
 const AVISO_INCIERTO =
   "No sabemos si se hizo: esperá a que Hoy se actualice y revisá la tarjeta antes de repetirlo.";
+
+/**
+ * El renglón que suma el aviso cuando lo que no volvió fue un check-out: si entró,
+ * el recibo y la pregunta de factura no salieron, porque esperaban la respuesta.
+ */
+const AVISO_INCIERTO_CHECKOUT =
+  "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salieron el recibo ni la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).";
+
+/** Qué quedó sin respuesta: el check-out suma su renglón al aviso. */
+type AvisoIncierto = "accion" | "checkout";
 
 export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, standardCheckOutTime, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
@@ -157,7 +167,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   // el revalidate del check-out, así que el aviso del papel que falta no se pierde.
   const [impresosBloqueados, setImpresosBloqueados] = useState<Impreso[]>([]);
   const [confirmacion, setConfirmacion] = useState<Confirmacion | null>(null);
-  const [avisoIncierto, setAvisoIncierto] = useState(false);
+  const confirmacionTituloId = useId();
+  const [avisoIncierto, setAvisoIncierto] = useState<AvisoIncierto | null>(null);
   const avisoTituloId = useId();
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
@@ -243,9 +254,9 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   };
 
   /** La acción no volvió: los cuadros se cierran (repetirla no es un click) y queda el aviso. */
-  const avisarIncierto = () => {
+  const avisarIncierto = (aviso: AvisoIncierto = "accion") => {
     cerrarCuadros();
-    setAvisoIncierto(true);
+    setAvisoIncierto(aviso);
   };
 
   /**
@@ -254,12 +265,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
    * salía de la transición y todo Hoy pasaba a la pantalla de error sin decir que la
    * acción pudo haberse hecho. No se relanza: queda el aviso.
    */
-  const correr = (accion: () => Promise<void>) => {
+  const correr = (accion: () => Promise<void>, aviso: AvisoIncierto = "accion") => {
     startTransition(async () => {
       try {
         await accion();
       } catch {
-        avisarIncierto();
+        avisarIncierto(aviso);
       }
     });
   };
@@ -468,7 +479,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           : "Check-out realizado correctamente."
       );
       if (shouldPromptInvoice() && prompt) setInvoicePrompt(prompt);
-    });
+    }, "checkout");
   };
 
   const submitCheckoutPayment = async ({
@@ -493,8 +504,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       });
     } catch {
       // Sin respuesta: el cobro pudo haber entrado. Se cierra el cobro (repetirlo no
-      // es un click) y queda el aviso.
-      avisarIncierto();
+      // es un click) y queda el aviso, con el renglón del check-out.
+      avisarIncierto("checkout");
       return { success: false as const, error: AVISO_INCIERTO };
     }
 
@@ -594,7 +605,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         return;
       }
 
-      toast.success("Habitacion marcada como disponible.");
+      toast.success("Habitación marcada como disponible.");
     });
   };
 
@@ -622,6 +633,14 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           detalle: "Pasa a disponible y se puede alquilar. Confirmalo solo si ya está limpia.",
           boton: "Sí, marcar lista",
           accion: onMarkAvailable,
+        };
+      case "medioDia":
+        return {
+          pregunta: `¿Seguro? Vas a cobrar medio día a ${room.client ?? "la reserva"} en ${hab}.`,
+          detalle:
+            "Se cobra el precio de medio día y la salida pasa al horario de late check-out. Se aplica una vez por reserva.",
+          boton: "Sí, cobrar medio día",
+          accion: onLateCheckout,
         };
     }
   };
@@ -682,7 +701,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         {room.status === "occupied" && (
           <>
             <div>
-              <p className="text-xs text-slate-500 mb-0.5">Huesped</p>
+              <p className="text-xs text-slate-500 mb-0.5">Huésped</p>
               <p className="text-sm font-semibold text-slate-800 truncate">{room.client}</p>
             </div>
 
@@ -709,11 +728,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
             <div className="pt-1 flex gap-2">
               {room.canChargeLateCheckout && (
                 <button
-                  onClick={onLateCheckout}
+                  onClick={() => setConfirmacion("medioDia")}
                   disabled={isPending}
                   className="flex-1 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-700 border border-amber-200 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
                 >
-                  Cobrar Medio Dia
+                  Cobrar Medio Día
                 </button>
               )}
               <button
@@ -1005,13 +1024,16 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                   Hab. {room.number}: no llegó la respuesta
                 </h2>
                 <p className="text-sm text-slate-600 mt-1">{AVISO_INCIERTO}</p>
+                {avisoIncierto === "checkout" && (
+                  <p className="text-sm text-slate-600 mt-2">{AVISO_INCIERTO_CHECKOUT}</p>
+                )}
               </div>
             </div>
             {/* No se va solo: solo con este botón. */}
             <button
               type="button"
               autoFocus
-              onClick={() => setAvisoIncierto(false)}
+              onClick={() => setAvisoIncierto(null)}
               className="w-full px-4 py-2.5 bg-brand-700 text-white font-semibold rounded-xl hover:bg-brand-800"
             >
               Entendido
@@ -1022,12 +1044,21 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
 
       {confirmacionAbierta && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-sm overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]">
-            <h3 className="text-lg font-bold text-slate-800 mb-2">{confirmacionAbierta.pregunta}</h3>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={confirmacionTituloId}
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-sm overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]"
+          >
+            <h3 id={confirmacionTituloId} className="text-lg font-bold text-slate-800 mb-2">
+              {confirmacionAbierta.pregunta}
+            </h3>
             <p className="text-sm text-slate-600 mb-6">{confirmacionAbierta.detalle}</p>
             <div className="flex gap-3 justify-end">
+              {/* El foco arranca en «Volver»: un Enter de pasada no confirma. */}
               <button
                 type="button"
+                autoFocus
                 className="px-4 py-2 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                 onClick={() => setConfirmacion(null)}
                 disabled={isPending}
@@ -1223,7 +1254,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Cancelar Reserva</h3>
             <p className="text-sm text-slate-600 mb-4">
-              Indica el motivo de cancelación para la reserva de <strong>{room.client}</strong>. Quedará auditado en la tabla de control.
+              Indicá el motivo de cancelación para la reserva de <strong>{room.client}</strong>. Quedará auditado en la tabla de control.
             </p>
             <label className="block text-sm font-semibold text-slate-700 mb-2" htmlFor={`cancel-reason-${room.id}`}>
               Motivo

@@ -311,7 +311,7 @@ export default function PaymentModal({
               {amountEditable && <ParsedAmountHint value={amount} />}
               <p className="mt-2 text-xs text-slate-500">
                 {!isCheckoutMode
-                  ? "Puedes registrar un pago parcial o total para esta reserva."
+                  ? "Podés registrar un pago parcial o total para esta reserva."
                   : isAccountCredit
                     ? "Se carga a la cuenta el saldo exacto pendiente."
                     : "El check-out solo permite cobrar el saldo exacto pendiente."}
@@ -396,7 +396,7 @@ export default function PaymentModal({
                 <div className="flex-1">
                   <p className="font-bold text-amber-900 text-sm">Caja cerrada</p>
                   <p className="text-xs text-amber-800 mt-0.5">
-                    Necesitas abrir la caja antes de cobrar. Los pagos se asocian al turno abierto.
+                    Necesitás abrir la caja antes de cobrar. Los pagos se asocian al turno abierto.
                   </p>
                   <Link
                     href="/admin/caja"

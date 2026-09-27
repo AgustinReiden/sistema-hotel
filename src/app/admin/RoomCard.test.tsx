@@ -221,6 +221,9 @@ function abrir(room: Room, opciones: Opciones = {}) {
 const AVISO_INCIERTO =
   "No sabemos si se hizo: esperá a que Hoy se actualice y revisá la tarjeta antes de repetirlo.";
 
+const AVISO_INCIERTO_CHECKOUT =
+  "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salieron el recibo ni la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).";
+
 function marcados(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
     .filter((r) => r.checked)
@@ -573,6 +576,10 @@ describe("RoomCard: el recibo sale después de decidir la factura", () => {
 
     expect(screen.getByText("El check-out quedó hecho y el pago quedó registrado.")).toBeTruthy();
     expect(screen.getByText(/Falta el recibo: el navegador bloqueó la ventana/)).toBeTruthy();
+    // Cerrarlo no tiene vuelta: el recibo no se reimprime desde ningún otro lado.
+    expect(
+      screen.getByText(/Si lo cerrás sin imprimir, no hay otro lugar desde donde imprimirlo\.$/)
+    ).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByText("Imprimir recibo").closest("button"));
 
     // El botón es un click del usuario: esta vez abre, y el cuadro se va.
@@ -697,6 +704,14 @@ describe("RoomCard: los cuadros se cierran si cambia la reserva", () => {
       hacia: () => llegada({ reservationId: "res-9" }),
       opciones: { isAdmin: true },
     },
+    {
+      cuadro: "la confirmación de Cobrar Medio Día",
+      boton: "Cobrar Medio Día",
+      abierto: /^¿Seguro\?/,
+      desde: () => particular({ canChargeLateCheckout: true }),
+      hacia: () =>
+        particular({ reservationId: "res-2", client: "Ana Ficticia", canChargeLateCheckout: true }),
+    },
   ];
 
   it.each(casos)("$cuadro se cierra cuando Hoy trae otra reserva", ({ boton, abierto, desde, hacia, opciones }) => {
@@ -729,6 +744,8 @@ describe("RoomCard: confirmar antes de actuar", () => {
     H.handleSetMaintenance.mockResolvedValue({ success: true });
     H.handleMarkAvailable.mockReset();
     H.handleMarkAvailable.mockResolvedValue({ success: true });
+    H.handleLateCheckOut.mockReset();
+    H.handleLateCheckOut.mockResolvedValue({ success: true, data: { halfDayCharged: true } });
     H.toast.success.mockReset();
   });
 
@@ -782,6 +799,65 @@ describe("RoomCard: confirmar antes de actuar", () => {
     fireEvent.click(screen.getByText("Sí, marcar lista"));
 
     await waitFor(() => expect(H.handleMarkAvailable).toHaveBeenCalledWith(4));
+    await waitFor(() =>
+      expect(H.toast.success).toHaveBeenCalledWith("Habitación marcada como disponible.")
+    );
+  });
+
+  it("«Cobrar Medio Día» pregunta antes, y sin el «Sí» no cobra", async () => {
+    abrir(particular({ canChargeLateCheckout: true }));
+
+    fireEvent.click(screen.getByText("Cobrar Medio Día"));
+
+    expect(
+      screen.getByText("¿Seguro? Vas a cobrar medio día a Juan Prueba en la Hab. 4.")
+    ).toBeTruthy();
+    expect(H.handleLateCheckOut).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Volver"));
+    expect(screen.queryByText(/^¿Seguro\?/)).toBeNull();
+    expect(H.handleLateCheckOut).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Cobrar Medio Día"));
+    fireEvent.click(screen.getByText("Sí, cobrar medio día"));
+
+    await waitFor(() => expect(H.handleLateCheckOut).toHaveBeenCalledTimes(1));
+    expect(H.handleLateCheckOut).toHaveBeenCalledWith("res-1");
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalledWith("Medio día cobrado."));
+    expect(screen.queryByText(/^¿Seguro\?/)).toBeNull();
+  });
+
+  it("la confirmación es un diálogo con su título y toma el foco en «Volver»", () => {
+    const { container } = abrir(particular({ canChargeLateCheckout: true }));
+
+    fireEvent.click(screen.getByText("Cobrar Medio Día"));
+
+    const dialogo = container.querySelector('[role="dialog"]');
+    expect(dialogo).not.toBeNull();
+    expect(dialogo?.getAttribute("aria-modal")).toBe("true");
+    const titulo = screen.getByText("¿Seguro? Vas a cobrar medio día a Juan Prueba en la Hab. 4.");
+    expect(titulo.id).not.toBe("");
+    expect(dialogo?.getAttribute("aria-labelledby")).toBe(titulo.id);
+    // El foco entra al diálogo, en el botón que no hace nada: un Enter de pasada no cobra.
+    expect(document.activeElement).toBe(screen.getByText("Volver"));
+    expect(dialogo?.contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe("RoomCard: textos con tilde y voseo", () => {
+  it("la tarjeta ocupada dice «Huésped» y «Cobrar Medio Día»", () => {
+    abrir(particular({ canChargeLateCheckout: true }));
+
+    expect(screen.getByText("Huésped")).toBeTruthy();
+    expect(screen.getByText("Cobrar Medio Día")).toBeTruthy();
+  });
+
+  it("cancelar una reserva pide «Indicá el motivo»", () => {
+    abrir(particular(), { isAdmin: true });
+
+    fireEvent.click(screen.getByText("Cancelar Reserva"));
+
+    expect(screen.getByText(/^Indicá el motivo de cancelación/)).toBeTruthy();
   });
 });
 
@@ -809,6 +885,8 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     fireEvent.click(screen.getByText("Confirmar"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    // El texto de siempre, y abajo el renglón propio del check-out.
+    expect(screen.getByText(AVISO_INCIERTO_CHECKOUT)).toBeTruthy();
     // El cuadro que lanzó la acción se cierra: repetirla ya no es un click.
     expect(screen.queryByText("Confirmar Check-Out")).toBeNull();
     expect(H.handleCheckOut).toHaveBeenCalledTimes(1);
@@ -816,6 +894,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     // Se va solo con «Entendido».
     fireEvent.click(screen.getByText("Entendido"));
     expect(screen.queryByText(AVISO_INCIERTO)).toBeNull();
+    expect(screen.queryByText(AVISO_INCIERTO_CHECKOUT)).toBeNull();
   });
 
   it("el aviso sobrevive a que Hoy se actualice con la reserva cambiada, que es lo que pide esperar", async () => {
@@ -844,10 +923,11 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     fireEvent.click(screen.getByText("Registrar y Cerrar"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.getByText(AVISO_INCIERTO_CHECKOUT)).toBeTruthy();
     expect(screen.queryByText("Cobrar y Finalizar")).toBeNull();
   });
 
-  it("check-in: queda el aviso en lugar de la pantalla de error", async () => {
+  it("check-in: queda el aviso en lugar de la pantalla de error, sin el renglón del check-out", async () => {
     H.handleCheckIn.mockRejectedValue(sinRed());
     abrir(llegada());
 
@@ -855,14 +935,17 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     fireEvent.click(screen.getByText("Sí, hacer el check-in"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.queryByText(AVISO_INCIERTO_CHECKOUT)).toBeNull();
   });
 
   it("Cobrar Medio Día: queda el aviso en lugar de la pantalla de error", async () => {
     H.handleLateCheckOut.mockRejectedValue(sinRed());
     abrir(particular({ canChargeLateCheckout: true }));
 
-    fireEvent.click(screen.getByText("Cobrar Medio Dia"));
+    fireEvent.click(screen.getByText("Cobrar Medio Día"));
+    fireEvent.click(screen.getByText("Sí, cobrar medio día"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.queryByText(AVISO_INCIERTO_CHECKOUT)).toBeNull();
   });
 });

@@ -303,6 +303,46 @@ describe("PaymentModal: el recibo", () => {
   });
 });
 
+describe("PaymentModal: textos con tilde y voseo", () => {
+  beforeEach(() => {
+    H.registerPaymentAction.mockReset();
+    H.toast.success.mockReset();
+    H.toast.error.mockReset();
+    vi.stubGlobal("open", vi.fn().mockReturnValue({} as Window));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("el pago suelto dice «Podés registrar…»", () => {
+    abrirPagoSuelto();
+
+    expect(
+      screen.getByText("Podés registrar un pago parcial o total para esta reserva.")
+    ).toBeTruthy();
+  });
+
+  it("con la caja cerrada dice «Necesitás abrir la caja…»", async () => {
+    H.registerPaymentAction.mockResolvedValue({
+      success: false,
+      error: "Hay que abrir la caja antes de cobrar.",
+      code: "P0003",
+    });
+    abrirPagoSuelto();
+
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+
+    await waitFor(() => expect(screen.getByText("Caja cerrada")).toBeTruthy());
+    expect(
+      screen.getByText(
+        "Necesitás abrir la caja antes de cobrar. Los pagos se asocian al turno abierto."
+      )
+    ).toBeTruthy();
+  });
+});
+
 describe("PaymentModal: en un celular", () => {
   it("Total, Pagado y Restante van en renglones y no en una fila que no entra en 360 px", () => {
     abrirCheckout();
