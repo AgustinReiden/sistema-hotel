@@ -51,4 +51,20 @@ describe("PaquetesSection", () => {
     expect(screen.getByText("Descargar").closest("a")).toHaveAttribute("href", "https://example.test/p");
     expect(screen.queryByText("Armar paquete")).not.toBeInTheDocument();
   });
+
+  it("la fecha de la factura sale tal cual, sin correrla de zona; la de la constancia, en la hora del hotel", () => {
+    render(
+      <PaquetesSection
+        facturas={[factura({ cbte_fch: "2026-09-01", constancia: { motivo: "se perdió", faltantes: 1, usuario: null, created_at: "2026-10-01T02:00:00Z" } })]}
+        clienteElegido
+        nowMs={AHORA}
+      />
+    );
+    // "2026-09-01" es una fecha sin hora: leída como medianoche UTC y pasada a la zona
+    // del hotel (UTC-3) salía el día anterior.
+    expect(screen.getByText(/· 01\/09\/2026 ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/31\/08\/2026/)).not.toBeInTheDocument();
+    // La constancia sí es un instante: las 02:00 UTC del 1/10 son las 23:00 del 30/09 en el hotel.
+    expect(screen.getByText(/motivo: se perdió, 30\/09\/2026/)).toBeInTheDocument();
+  });
 });
