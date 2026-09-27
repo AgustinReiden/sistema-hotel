@@ -11,15 +11,27 @@ import {
   type ProbeResult,
 } from "./useAutoRefresh";
 
-/** Qué dice el cartel después de un toque a "Reintentar" que no llegó a recargar o falló. */
-type RetryNotice = "offline" | "server" | "session" | "failed";
+/**
+ * Qué dice el cartel después de un toque a "Reintentar": el chequeo no llegó (la red), el
+ * servidor contestó con un error, la sesión (una redirección) o el chequeo dio bien, recargó
+ * y la pantalla volvió a fallar (`pageFailed`).
+ */
+type RetryNotice = Exclude<ProbeResult, "ok"> | "pageFailed";
 
-/** El aviso del botón según cómo salió el chequeo (cuando no dio "ok"). */
-const NOTICE_BY_PROBE: Record<Exclude<ProbeResult, "ok">, RetryNotice> = {
-  failed: "offline",
-  server: "server",
-  redirect: "session",
-};
+/** Lo que dice el cartel cuando la pregunta al servidor no llegó: ahí sí es internet. */
+const NETWORK_NOTICE = `Fijate que haya internet. Se vuelve a intentar sola en ${
+  AUTO_REFRESH_INTERVAL_MS / 1000
+} s.`;
+
+/**
+ * Lo que dice el cartel cuando el servidor contestó con un error (un 5xx durante un deploy,
+ * un 404): la pregunta llegó, así que internet anda y mandar a revisarlo sería mentira.
+ */
+const SERVER_NOTICE =
+  "La conexión anda, pero el sistema no responde bien. Esperá un momento; se vuelve a intentar sola.";
+
+/** Lo que dice el cartel nuevo cuando el chequeo dio bien, recargó y volvió a fallar. */
+const PAGE_FAILED_NOTICE = "La conexión anda, pero la pantalla no carga. Avisale al encargado.";
 
 /**
  * Cuándo (`Date.now()`) "Reintentar" mandó a recargar, con la conexión y la sesión ya
@@ -78,7 +90,7 @@ export default function AdminError({
   // la sesión cerrada o el sistema sin contestar (el chequeo recibió una redirección: no
   // recargó) o recargó y la pantalla volvió a fallar.
   const [notice, setNotice] = useState<RetryNotice | null>(() =>
-    comesFromManualRetry() ? "failed" : null
+    comesFromManualRetry() ? "pageFailed" : null
   );
   // La pregunta al servidor del botón, para cortarla si el cartel se va mientras espera.
   const probeRef = useRef<ReturnType<typeof probeServer> | null>(null);
@@ -115,14 +127,15 @@ export default function AdminError({
   // proxy). Sin conexión, `router.refresh()` falla y Next recarga la página entera: Chrome
   // cambiaría este cartel por su página de "Sin conexión" y se irían el menú y el reintento.
   // Y sin sesión o sin Supabase, la recarga terminaría en `/login` o en `/forbidden`: ahí
-  // el aviso no dice "sin conexión" (internet anda) sino cómo volver a entrar ("Salir" en
-  // otro dispositivo cierra la sesión en todos). Si el servidor contestó con un error
-  // (un 5xx durante un deploy), tampoco dice "sin conexión": dice que el sistema no responde.
+  // el aviso no manda a revisar internet (anda) sino a recargar si sigue así ("Salir" en
+  // otro dispositivo cierra la sesión en todos). Si el servidor contestó con un error (un
+  // 5xx durante un deploy), tampoco: dice que la conexión anda y que el sistema no responde
+  // bien. Solo si la pregunta no salió o no volvió (la red) manda a fijarse en internet.
   const retryFromButton = () => {
     if (isPending) return;
     setNotice(null);
     startTransition(async () => {
-      let result: ProbeResult = "failed";
+      let result: ProbeResult = "network";
       if (navigator.onLine !== false) {
         const current = probeServer();
         probeRef.current = current;
@@ -130,7 +143,7 @@ export default function AdminError({
         if (probeRef.current === current) probeRef.current = null;
       }
       if (result !== "ok") {
-        setNotice(NOTICE_BY_PROBE[result]);
+        setNotice(result);
         return;
       }
       manualRetryAt = Date.now();
@@ -181,17 +194,17 @@ export default function AdminError({
           {isPending ? "Reintentando…" : "Reintentar"}
         </button>
 
-        {/* "failed": el chequeo dio bien (conexión, sesión y rol) y la recarga igual falló. */}
+        {/* "pageFailed": el chequeo dio bien (conexión, sesión y rol) y la recarga igual falló. */}
         {notice && !isPending && (
           <p role="status" className="text-sm font-medium text-amber-700 text-center">
-            {notice === "offline" ? (
-              `Sigue sin conexión. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
+            {notice === "network" ? (
+              NETWORK_NOTICE
             ) : notice === "server" ? (
-              `El sistema no responde. Se vuelve a intentar sola en ${AUTO_REFRESH_INTERVAL_MS / 1000} s.`
-            ) : notice === "session" ? (
+              SERVER_NOTICE
+            ) : notice === "redirect" ? (
               <SessionClosedNotice />
             ) : (
-              "La conexión anda, pero la pantalla no carga. Avisale al encargado."
+              PAGE_FAILED_NOTICE
             )}
           </p>
         )}

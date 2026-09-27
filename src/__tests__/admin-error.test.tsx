@@ -4,9 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 const H = vi.hoisted(() => ({
   // Un solo objeto, como el router de Next (ver use-auto-refresh.test.tsx).
   router: { refresh: vi.fn() },
+  // La recarga entera de la página (el botón "Recargar"): jsdom no deja espiar
+  // `window.location.reload`.
+  reloadPage: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => H.router }));
+vi.mock("@/app/admin/reload-page", () => ({ reloadPage: H.reloadPage }));
 
 import AdminError from "@/app/admin/error";
 
@@ -45,23 +49,28 @@ function servidorColgado() {
   );
 }
 
-const SIN_CONEXION = "Sigue sin conexión. Se vuelve a intentar sola en 30 s.";
+/**
+ * Lo que dice el cartel cuando la pregunta al servidor no llegó (internet cortado, la PC sin
+ * red, sin respuesta en 5 s).
+ */
+const SIN_CONEXION = "Fijate que haya internet. Se vuelve a intentar sola en 30 s.";
 /** Lo que dice el cartel nuevo cuando la recarga de "Reintentar" salió y volvió a fallar. */
 const NO_CARGA = "La conexión anda, pero la pantalla no carga. Avisale al encargado.";
 /**
  * Lo que dice el cartel cuando el chequeo vuelve con una redirección del proxy: la sesión
- * se cerró (por ejemplo, "Salir" en otro dispositivo) o Supabase no contesta.
+ * se cerró (por ejemplo, "Salir" en otro dispositivo) o Supabase no contesta. "Recargar" es
+ * un botón: el celular y la tablet no tienen F5.
  */
-const SESION =
-  "Se cerró la sesión o el sistema no responde. Si sigue así, tocá Volver a entrar.";
+const SESION = "Se cerró la sesión o el sistema no responde. Si sigue así, tocá Recargar.";
 /**
  * Lo que dice el cartel cuando el servidor contestó con un error (un 5xx durante un deploy):
- * la pregunta llegó, así que internet anda y "Sigue sin conexión" sería mentira.
+ * la pregunta llegó, así que internet anda y mandar a revisarlo sería mentira.
  */
-const SISTEMA = "El sistema no responde. Se vuelve a intentar sola en 30 s.";
+const SISTEMA =
+  "La conexión anda, pero el sistema no responde bien. Esperá un momento; se vuelve a intentar sola.";
 
 /**
- * El texto del aviso que deja "Reintentar" ("" si no hay). El de la sesión trae un enlace
+ * El texto del aviso que deja "Reintentar" ("" si no hay). El de la sesión trae un botón
  * adentro, así que no se lo busca con getByText.
  */
 const avisoDelBoton = () => document.querySelector('p[role="status"]')?.textContent ?? "";
@@ -94,6 +103,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   refresh.mockClear();
   reset.mockClear();
+  H.reloadPage.mockClear();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ status: 204 });
   vi.stubGlobal("fetch", fetchMock);
@@ -208,8 +218,8 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     "si el chequeo vuelve con una redirección del proxy (%s: sesión cerrada o Supabase caído), no recarga y dice que se cerró la sesión o el sistema no responde",
     async (_tipo, respuesta) => {
       // Con `redirect: "manual"` la redirección a /login o a /forbidden llega como
-      // `opaqueredirect`: recargar sacaría la pantalla del panel. "Sigue sin conexión" sería
-      // mentira (internet anda) y no dice cómo salir: el enlace lleva a volver a entrar.
+      // `opaqueredirect`: recargar sacaría la pantalla del panel. Mandar a revisar internet
+      // sería mentira (internet anda) y no dice cómo salir: el botón "Recargar" sí.
       const { container } = mostrarPantallaDeError();
       fetchMock.mockResolvedValue(respuesta);
 
@@ -224,21 +234,28 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     }
   );
 
-  it("con la sesión cerrada, el aviso trae el enlace para volver a entrar al panel (el celular no tiene F5)", async () => {
+  it("con la sesión cerrada, el aviso trae un botón Recargar que recarga la página entera (el celular no tiene F5)", async () => {
     mostrarPantallaDeError();
     fetchMock.mockResolvedValue({ status: 0, type: "opaqueredirect" });
 
     fireEvent.click(botonReintentar());
     await alDiaEnPantalla();
 
-    const enlace = screen.getByText("Volver a entrar");
-    expect(enlace.tagName).toBe("A");
-    expect(enlace.getAttribute("href")).toBe("/admin");
+    const recargar = screen.getByText("Recargar");
+    expect(recargar.tagName).toBe("BUTTON");
+    expect(recargar.getAttribute("type")).toBe("button");
     expect(avisoDelBoton()).not.toContain("F5");
+    expect(H.reloadPage).not.toHaveBeenCalled();
+
+    fireEvent.click(recargar);
+    expect(H.reloadPage).toHaveBeenCalledTimes(1);
+    // Es la recarga entera, no el reintento del cartel.
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
   });
 
   it.each([502, 503, 500, 404])(
-    "si el servidor contesta %i (por ejemplo, durante un deploy) tampoco recarga, y dice que el sistema no responde (no sin conexión: internet anda)",
+    "si el servidor contesta %i (por ejemplo, durante un deploy) tampoco recarga, y dice que la conexión anda pero el sistema no responde bien (no manda a revisar internet)",
     async (status) => {
       mostrarPantallaDeError();
       fetchMock.mockResolvedValue({ status });
@@ -249,8 +266,28 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
       expect(refresh).not.toHaveBeenCalled();
       expect(reset).not.toHaveBeenCalled();
       expect(avisoDelBoton()).toBe(SISTEMA);
+      expect(avisoDelBoton()).not.toContain("internet");
       expect(screen.queryByText(SIN_CONEXION)).toBeNull();
       expect(avisoDelBoton()).not.toContain("Se cerró la sesión");
+      expect(screen.queryByText("Recargar")).toBeNull();
+    }
+  );
+
+  it.each<[string, () => void]>([
+    ["internet cortado (el pedido falla)", () => fetchMock.mockRejectedValue(new TypeError("Failed to fetch"))],
+    ["la PC sin red (ni se pregunta)", () => (sinConexion = true)],
+  ])(
+    "con %s manda a revisar internet, no dice que el sistema no responde y no ofrece Recargar",
+    async (_causa, caer) => {
+      mostrarPantallaDeError();
+      caer();
+
+      fireEvent.click(botonReintentar());
+      await alDiaEnPantalla();
+
+      expect(avisoDelBoton()).toBe(SIN_CONEXION);
+      expect(avisoDelBoton()).not.toContain("el sistema no responde");
+      expect(screen.queryByText("Recargar")).toBeNull();
     }
   );
 

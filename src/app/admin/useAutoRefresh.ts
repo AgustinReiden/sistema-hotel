@@ -80,10 +80,10 @@ export const FAILED_CHECKS_BEFORE_NOTICE = 3;
  *   Supabase que no contesta: desde el navegador no se distinguen;
  * - "server": el servidor contestó, pero con un error (un 5xx durante un deploy, un 404 si
  *   la ruta no está). Internet anda: no hay que mandar a revisarlo;
- * - "failed": la pregunta no llegó o no volvió (sin red, internet cortado, más de
- *   `PROBE_TIMEOUT_MS`).
+ * - "network": la pregunta no salió o no volvió (sin red en la PC, internet cortado, más
+ *   de `PROBE_TIMEOUT_MS`). Ahí sí hay que mirar internet.
  */
-export type ProbeResult = "ok" | "redirect" | "server" | "failed";
+export type ProbeResult = "ok" | "redirect" | "server" | "network";
 
 /**
  * Lo que devuelve `useAutoRefresh` cuando lleva `FAILED_CHECKS_BEFORE_NOTICE` chequeos
@@ -206,7 +206,7 @@ function shouldWait(doc: Document): boolean {
  * el proxy redirige a `/login` o a `/forbidden` (sesión cerrada o vencida, Supabase caído,
  * sesión o rol que no se pudieron leer). "server" si contesta otra cosa (el 502 del hosting
  * durante un deploy, un 404 si la ruta no está): la pregunta llegó, así que internet anda.
- * "failed" si el pedido falla (internet cortado, servidor apagado, más de
+ * "network" si el pedido no sale o no vuelve (internet cortado, servidor apagado, más de
  * `PROBE_TIMEOUT_MS`).
  *
  * `redirect: "manual"`: el navegador no sigue la redirección y la devuelve como
@@ -226,14 +226,14 @@ async function askServer(signal: AbortSignal): Promise<ProbeResult> {
     if (res.status >= 300 && res.status < 400) return "redirect";
     return res.status >= 200 && res.status < 300 ? "ok" : "server";
   } catch {
-    return "failed";
+    return "network";
   }
 }
 
 /**
  * El chequeo antes de recargar: pregunta una vez si el panel contesta, con el corte de
  * `PROBE_TIMEOUT_MS`. `cancel` la corta antes (si la pantalla se desmonta mientras espera)
- * y entonces `result` da "failed". La usan el refresco automático y el botón "Reintentar"
+ * y entonces `result` da "network". La usan el refresco automático y el botón "Reintentar"
  * de la pantalla de error de `/admin`: así el botón tampoco recarga sin conexión, sin
  * sesión ni con el servidor contestando un error, y puede decir cuál de las tres es.
  */
@@ -270,9 +270,10 @@ type UseAutoRefreshOptions = {
    *
    * También sirve para reconocer esa vuelta: si al montarse la página ya se había visto en
    * esta pestaña hace más de `intervalMs` (con el reloj de la PC), se pone al día enseguida,
-   * como al volver a la pestaña. Si la vio hace menos, se pone al día cuando esos datos
-   * cumplen `intervalMs`, no un turno entero después de volver: así nunca se ven datos de
-   * más de `intervalMs` por ir y volver con Atrás.
+   * como al volver a la pestaña. Si la vio hace menos, el primer turno toca cuando esos
+   * datos cumplen `intervalMs` (no un turno entero después de volver) y los siguientes,
+   * cada `intervalMs` desde ese: así nunca se ven datos de más de `intervalMs` por ir y
+   * volver con Atrás, y no hay una recarga de más.
    */
   renderedAt?: number;
 };
@@ -281,7 +282,7 @@ type UseAutoRefreshOptions = {
  * Pone al día la pantalla sola: cada `intervalMs`, al volver a la ventana (`focus`), al
  * volver a la pestaña (`visibilitychange`) y al volver con Atrás o Adelante (con
  * `renderedAt`, ver `rememberPage`: enseguida si esos datos tienen más de `intervalMs`, y si
- * no, cuando los cumplen). Usa `router.refresh()`, que vuelve a
+ * no, el primer turno toca cuando los cumplen). Usa `router.refresh()`, que vuelve a
  * pedir los server components (el mismo patrón que la Caja). Antes de cada recarga:
  * - `shouldSkipRefresh` decide si no conviene (pestaña oculta, sin red, cuadro abierto,
  *   foco en un campo): se saltea hasta el próximo turno;
@@ -331,9 +332,10 @@ export function useAutoRefresh({
   // pantalla quede quieta para mostrarse (undefined: no hay nada esperando). Fuera del
   // efecto para que no se pierda si el efecto se rearma: se muestra con el chequeo siguiente.
   const pendingTroubleRef = useRef<RefreshTrouble | null | undefined>(undefined);
-  // Ponerse al día como al volver a la pestaña (`refreshOnReturn` del efecto de abajo). Es
-  // null mientras el refresco está pausado: con `paused`, una vuelta con Atrás no pregunta.
-  const refreshOnReturnRef = useRef<(() => void) | null>(null);
+  // Qué hacer con la página que se ve según la edad de sus datos (`onPageShown` del efecto de
+  // abajo). Es null mientras el refresco está pausado: con `paused`, una vuelta con Atrás no
+  // pregunta.
+  const pageShownRef = useRef<((age: number) => void) | null>(null);
   // Lee el `onRefresh`, el router y `renderedAt` del último render sin ser dependencias del
   // efecto: si lo fueran, un `onRefresh` nuevo en cada render (o la hora nueva que trae cada
   // recarga) reiniciaría la cuenta de los 30 s.
@@ -420,10 +422,10 @@ export function useAutoRefresh({
       }
       // Desde acá sale un chequeo: el otro aviso de volver a la pestaña ya no arranca otro.
       lastCheckAt = Date.now();
-      // Sin red en la PC no se le pregunta al servidor, pero es un chequeo que falló: la
-      // pantalla tampoco se pone al día.
+      // Sin red en la PC no se le pregunta al servidor, pero es un chequeo que falló por la
+      // red: la pantalla tampoco se pone al día.
       if (isOffline(document)) {
-        noteCheck("failed");
+        noteCheck("network");
         return;
       }
       const current = probeServer();
@@ -458,16 +460,60 @@ export function useAutoRefresh({
       if (document.visibilityState === "visible") refreshOnReturn();
     };
 
-    const interval = window.setInterval(onInterval, intervalMs);
+    // Los turnos: uno cada `intervalMs`. El primero puede tocar antes (ver `onPageShown`).
+    let interval: number | null = null;
+    let firstTurn: number | null = null;
+    const stopTurns = () => {
+      if (interval !== null) window.clearInterval(interval);
+      if (firstTurn !== null) window.clearTimeout(firstTurn);
+      interval = null;
+      firstTurn = null;
+    };
+    // Arma los turnos: el primero dentro de `firstInMs` y los siguientes cada `intervalMs`
+    // desde ese. Con `firstInMs` igual a `intervalMs` es el intervalo de siempre.
+    const startTurns = (firstInMs: number) => {
+      stopTurns();
+      if (firstInMs >= intervalMs) {
+        interval = window.setInterval(onInterval, intervalMs);
+        return;
+      }
+      firstTurn = window.setTimeout(() => {
+        firstTurn = null;
+        interval = window.setInterval(onInterval, intervalMs);
+        onInterval();
+      }, Math.max(0, firstInMs));
+    };
+    // La página que se ve, con la edad de sus datos (con el reloj de la PC, ver
+    // `rememberPage`). Con Atrás o Adelante, Next monta la página de su caché:
+    // - con datos de más de un turno, se pone al día enseguida, como al volver a la pestaña
+    //   (con las mismas pausas, y un `focus` justo después no pregunta de nuevo);
+    // - con datos de menos, el primer turno toca cuando cumplen `intervalMs` (no un turno
+    //   entero después de volver) y los siguientes, cada `intervalMs` desde ese: así nunca
+    //   se ven datos de más de `intervalMs` por ir y volver, y no hay una recarga de más;
+    // - una página nueva (edad 0) no corre los turnos, salvo que el primero estuviera
+    //   esperando a que cumpliera la de antes: ahí se cuentan desde la nueva.
+    const onPageShown = (age: number) => {
+      if (age > intervalMs) {
+        refreshOnReturn();
+        return;
+      }
+      if (age > 0) {
+        startTurns(intervalMs - age);
+        return;
+      }
+      if (firstTurn !== null) startTurns(intervalMs);
+    };
+
+    startTurns(intervalMs);
     window.addEventListener("focus", refreshOnReturn);
     document.addEventListener("visibilitychange", onVisibilityChange);
     for (const type of ACTIVITY_EVENTS) {
       window.addEventListener(type, onActivity, ACTIVITY_LISTENER_OPTIONS);
     }
-    refreshOnReturnRef.current = refreshOnReturn;
+    pageShownRef.current = onPageShown;
     return () => {
       disposed = true;
-      refreshOnReturnRef.current = null;
+      pageShownRef.current = null;
       if (probe) {
         probe.cancel();
         probe = null;
@@ -480,7 +526,7 @@ export function useAutoRefresh({
         window.clearTimeout(showTimer);
         showTimer = null;
       }
-      window.clearInterval(interval);
+      stopTurns();
       window.removeEventListener("focus", refreshOnReturn);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       for (const type of ACTIVITY_EVENTS) {
@@ -490,32 +536,14 @@ export function useAutoRefresh({
   }, [intervalMs, paused]);
 
   // ¿La página que se ve es una vuelta con Atrás o Adelante? Mira el registro de páginas
-  // vistas (y anota la página si es nueva) con el reloj de la PC. Lee `intervalMs` del
-  // último render sin ser dependencia. Devuelve cómo desarmar la espera, si armó una.
-  const onPageShown = useEffectEvent((shownRenderedAt: number): (() => void) | undefined => {
-    const now = Date.now();
-    const age = now - rememberPage(shownRenderedAt, now);
-    // Una página nueva: el intervalo, que arranca al montarse, la pone al día a tiempo.
-    if (age <= 0) return undefined;
-    // Lo mismo que al volver a la pestaña: respeta la pestaña oculta, un cuadro abierto,
-    // un campo con el foco, la actividad y el chequeo, y un `focus` justo después no
-    // pregunta de nuevo.
-    if (age > intervalMs) {
-      refreshOnReturnRef.current?.();
-      return undefined;
-    }
-    // Datos de menos de un turno: el intervalo se volvió a armar al montarse y los dejaría
-    // hasta casi dos turnos. Se ponen al día cuando cumplen `intervalMs`.
-    const timer = window.setTimeout(() => refreshOnReturnRef.current?.(), intervalMs - age);
-    return () => window.clearTimeout(timer);
-  });
-  // Va después del efecto de arriba: al montarse, `refreshOnReturn` ya está armado. Corre
-  // al montarse (la vuelta con Atrás monta la página de nuevo) y con cada página que llega
-  // (se anota desde ese momento). Una página nueva que llega, o irse de Hoy, desarma la
-  // espera de la anterior.
+  // vistas (y anota la página si es nueva) con el reloj de la PC y le pasa la edad de esos
+  // datos al efecto de arriba, que decide cuándo toca el turno. Va después de ese efecto: al
+  // montarse, los turnos ya están armados. Corre al montarse (la vuelta con Atrás monta la
+  // página de nuevo) y con cada página que llega (se anota desde ese momento).
   useEffect(() => {
-    if (renderedAt === undefined) return undefined;
-    return onPageShown(renderedAt);
+    if (renderedAt === undefined) return;
+    const now = Date.now();
+    pageShownRef.current?.(now - rememberPage(renderedAt, now));
   }, [renderedAt]);
 
   return trouble;
