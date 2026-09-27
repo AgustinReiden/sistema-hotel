@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as dataMod from "@/lib/data";
+import { DNI_INVALIDO_MSG } from "@/lib/arca/amounts";
 import { ARCA_ENDPOINTS } from "@/lib/arca/config";
 import { ArcaNetworkError, ArcaUnknownOutcomeError, type TaData } from "@/lib/arca/types";
 import type { BeginEmissionPayload } from "@/lib/data";
@@ -624,6 +625,45 @@ describe("emitInvoice — el claim de número falla", () => {
       invoiceId: INVOICE_ID,
       userMessage: "Hay otra factura emitiendose. Reintenta en unos segundos.",
     });
+  });
+
+  // Al emitir, la base vuelve a leer el DNI de la reserva y lo rechaza con P0022 y
+  // el texto viejo ("Corregilo en la reserva"). Recepción no puede editar una
+  // estadía cerrada: el aviso tiene que decir qué tiene que tener el DNI.
+  it("P0022 del DNI de la reserva: avisa con DNI_INVALIDO_MSG, sin pedir CAE", async () => {
+    facturas.set(INVOICE_ID, invoice());
+    beginError = Object.assign(
+      new Error(
+        "El DNI de la reserva no es valido para facturar (7 u 8 digitos). Corregilo en la reserva y reintenta."
+      ),
+      { code: "P0022" }
+    );
+    wsfeCola = { FECompUltimoAutorizado: [xmlUltimoAutorizado(1234)] };
+
+    const outcome = await emitInvoice(INVOICE_ID);
+
+    expect(H.calls).not.toContain("callWsfe:FECAESolicitar");
+    expect(db.finalizeInvoice).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      status: "pending",
+      invoiceId: INVOICE_ID,
+      userMessage: DNI_INVALIDO_MSG,
+    });
+  });
+
+  it("P0022 del CUIT o del documento de la consolidada: el mensaje queda como viene", async () => {
+    for (const message of [
+      "El CUIT del receptor no es valido (11 digitos). Descarta la factura y volve a emitirla con el CUIT correcto.",
+      "El DNI del receptor no es valido. Corregilo en la ficha y volve a generar el comprobante.",
+    ]) {
+      facturas.set(INVOICE_ID, invoice());
+      beginError = Object.assign(new Error(message), { code: "P0022" });
+      wsfeCola = { FECompUltimoAutorizado: [xmlUltimoAutorizado(1234)] };
+
+      const outcome = await emitInvoice(INVOICE_ID);
+
+      expect(outcome).toEqual({ status: "pending", invoiceId: INVOICE_ID, userMessage: message });
+    }
   });
 });
 
