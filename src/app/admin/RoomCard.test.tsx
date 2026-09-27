@@ -221,8 +221,22 @@ function abrir(room: Room, opciones: Opciones = {}) {
 const AVISO_INCIERTO =
   "No sabemos si se hizo: esperá a que Hoy se actualice y revisá la tarjeta antes de repetirlo.";
 
-const AVISO_INCIERTO_CHECKOUT =
-  "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salieron el recibo ni la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).";
+/** El renglón que suma el aviso en un check-out: nombra solo lo que no llegó a salir. */
+const RENGLON = {
+  reciboYFactura:
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salieron el recibo ni la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).",
+  recibo:
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el recibo, y no hay otro lugar desde donde imprimirlo.",
+  factura:
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).",
+  remito:
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero.",
+  remitoYFactura:
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero. Tampoco salió la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).",
+};
+
+/** Cualquiera de los renglones del check-out. */
+const ALGUN_RENGLON = /^Si la tarjeta ya figura en Limpieza/;
 
 function marcados(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
@@ -877,7 +891,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("check-out sin saldo: avisa que no sabemos si se hizo, y el aviso no se va solo", async () => {
+  it("check-out sin saldo y sin factura: avisa que no sabemos si se hizo, sin renglón, y el aviso no se va solo", async () => {
     H.handleCheckOut.mockRejectedValue(sinRed());
     abrir(particular({ paidAmount: 80000 }));
 
@@ -885,8 +899,8 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     fireEvent.click(screen.getByText("Confirmar"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
-    // El texto de siempre, y abajo el renglón propio del check-out.
-    expect(screen.getByText(AVISO_INCIERTO_CHECKOUT)).toBeTruthy();
+    // Sin cobro no hay recibo, y con fiscal apagado no hay pregunta: no faltaba nada.
+    expect(screen.queryByText(ALGUN_RENGLON)).toBeNull();
     // El cuadro que lanzó la acción se cierra: repetirla ya no es un click.
     expect(screen.queryByText("Confirmar Check-Out")).toBeNull();
     expect(H.handleCheckOut).toHaveBeenCalledTimes(1);
@@ -894,7 +908,18 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     // Se va solo con «Entendido».
     fireEvent.click(screen.getByText("Entendido"));
     expect(screen.queryByText(AVISO_INCIERTO)).toBeNull();
-    expect(screen.queryByText(AVISO_INCIERTO_CHECKOUT)).toBeNull();
+  });
+
+  it("check-out sin saldo con factura: el renglón nombra la pregunta y no el recibo", async () => {
+    H.handleCheckOut.mockRejectedValue(sinRed());
+    abrir(particular({ paidAmount: 80000 }), { fiscalEnabled: true });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByText("Confirmar"));
+
+    await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.getByText(RENGLON.factura)).toBeTruthy();
+    expect(screen.queryByText(/recibo/)).toBeNull();
   });
 
   it("el aviso sobrevive a que Hoy se actualice con la reserva cambiada, que es lo que pide esperar", async () => {
@@ -914,7 +939,20 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     expect(screen.queryByText(AVISO_INCIERTO)).toBeNull();
   });
 
-  it("cobro del check-out: se cierra el cobro y queda el aviso", async () => {
+  it("cobro del check-out con factura: se cierra el cobro y el renglón nombra el recibo y la pregunta", async () => {
+    H.handleCheckOut.mockRejectedValue(sinRed());
+    abrir(particular(), { fiscalEnabled: true });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar y Cerrar"));
+
+    await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.getByText(RENGLON.reciboYFactura)).toBeTruthy();
+    expect(screen.queryByText("Cobrar y Finalizar")).toBeNull();
+  });
+
+  it("cobro del check-out con fiscal apagado: el renglón nombra solo el recibo, sin Por facturar", async () => {
     H.handleCheckOut.mockRejectedValue(sinRed());
     abrir(particular());
 
@@ -923,29 +961,66 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     fireEvent.click(screen.getByText("Registrar y Cerrar"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
-    expect(screen.getByText(AVISO_INCIERTO_CHECKOUT)).toBeTruthy();
-    expect(screen.queryByText("Cobrar y Finalizar")).toBeNull();
+    expect(screen.getByText(RENGLON.recibo)).toBeTruthy();
+    expect(screen.queryByText(/Por facturar/)).toBeNull();
+  });
+
+  it("vale blanco con fiscal prendido: no hay pregunta de factura, el renglón nombra solo el recibo", async () => {
+    H.handleCheckOut.mockRejectedValue(sinRed());
+    abrir(particular(), { fiscalEnabled: true });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByLabelText("Vale Blanco"));
+    fireEvent.click(screen.getByText("Registrar y Cerrar"));
+
+    await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.getByText(RENGLON.recibo)).toBeTruthy();
+    expect(screen.queryByText(/Por facturar/)).toBeNull();
+  });
+
+  it("Cta. Cte. en la consolidada: el renglón nombra el remito para que firme el pasajero, sin recibo ni Por facturar", async () => {
+    H.handleCheckOut.mockRejectedValue(sinRed());
+    abrir(habitacion(), { fiscalEnabled: true });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByText("Cargar a la cuenta y cerrar"));
+
+    await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.getByText(RENGLON.remito)).toBeTruthy();
+    expect(screen.queryByText(/recibo/)).toBeNull();
+    expect(screen.queryByText(/Por facturar/)).toBeNull();
+  });
+
+  it("Cta. Cte. con factura por check-out: el renglón nombra el remito y la pregunta", async () => {
+    H.handleCheckOut.mockRejectedValue(sinRed());
+    abrir(habitacion({ facturacionModo: "por_checkout" }), { fiscalEnabled: true });
+
+    fireEvent.click(screen.getByText("Hacer Check-Out"));
+    fireEvent.click(screen.getByText("Cargar a la cuenta y cerrar"));
+
+    await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    expect(screen.getByText(RENGLON.remitoYFactura)).toBeTruthy();
   });
 
   it("check-in: queda el aviso en lugar de la pantalla de error, sin el renglón del check-out", async () => {
     H.handleCheckIn.mockRejectedValue(sinRed());
-    abrir(llegada());
+    abrir(llegada(), { fiscalEnabled: true });
 
     fireEvent.click(screen.getByText("Hacer Check-In Automático"));
     fireEvent.click(screen.getByText("Sí, hacer el check-in"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
-    expect(screen.queryByText(AVISO_INCIERTO_CHECKOUT)).toBeNull();
+    expect(screen.queryByText(ALGUN_RENGLON)).toBeNull();
   });
 
   it("Cobrar Medio Día: queda el aviso en lugar de la pantalla de error", async () => {
     H.handleLateCheckOut.mockRejectedValue(sinRed());
-    abrir(particular({ canChargeLateCheckout: true }));
+    abrir(particular({ canChargeLateCheckout: true }), { fiscalEnabled: true });
 
     fireEvent.click(screen.getByText("Cobrar Medio Día"));
     fireEvent.click(screen.getByText("Sí, cobrar medio día"));
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
-    expect(screen.queryByText(AVISO_INCIERTO_CHECKOUT)).toBeNull();
+    expect(screen.queryByText(ALGUN_RENGLON)).toBeNull();
   });
 });

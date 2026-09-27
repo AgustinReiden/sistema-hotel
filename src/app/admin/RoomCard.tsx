@@ -144,14 +144,37 @@ const AVISO_INCIERTO =
   "No sabemos si se hizo: esperá a que Hoy se actualice y revisá la tarjeta antes de repetirlo.";
 
 /**
- * El renglón que suma el aviso cuando lo que no volvió fue un check-out: si entró,
- * el recibo y la pregunta de factura no salieron, porque esperaban la respuesta.
+ * Lo que un check-out saca recién con la respuesta: el papel (el remito de lo fiado,
+ * el recibo del cobro, o ninguno si no hubo cobro) y la pregunta de factura (solo si
+ * correspondía: no con fiscal apagado, vale blanco, "no facturar" o la consolidada).
  */
-const AVISO_INCIERTO_CHECKOUT =
-  "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salieron el recibo ni la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).";
+type SalidaCheckout = { papel: "remito" | "recibo" | null; pregunta: boolean };
 
-/** Qué quedó sin respuesta: el check-out suma su renglón al aviso. */
-type AvisoIncierto = "accion" | "checkout";
+/**
+ * El renglón que suma el aviso cuando lo que no volvió fue un check-out: si entró,
+ * nombra solo lo que ese check-out no llegó a sacar, porque esperaba la respuesta.
+ * Si no iba a salir nada (sin cobro y sin pregunta), no hay renglón.
+ */
+function renglonCheckoutIncierto({ papel, pregunta }: SalidaCheckout): string | null {
+  const entro = "Si la tarjeta ya figura en Limpieza, el check-out entró pero";
+  const porFacturar = "avisale al administrador (la estadía le queda en Por facturar)";
+  if (papel === "remito") {
+    const remito = `${entro} no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero.`;
+    return pregunta ? `${remito} Tampoco salió la pregunta de factura: ${porFacturar}.` : remito;
+  }
+  if (papel === "recibo") {
+    return pregunta
+      ? `${entro} no salieron el recibo ni la pregunta de factura: ${porFacturar}.`
+      : `${entro} no salió el recibo, y no hay otro lugar desde donde imprimirlo.`;
+  }
+  return pregunta ? `${entro} no salió la pregunta de factura: ${porFacturar}.` : null;
+}
+
+/** Qué quedó sin respuesta: en un check-out, el renglón de lo que no salió (si algo faltaba). */
+type AvisoIncierto = { renglon: string | null };
+
+/** Cualquier otra acción de la tarjeta: el aviso va sin renglón. */
+const AVISO_ACCION: AvisoIncierto = { renglon: null };
 
 export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, standardCheckOutTime, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
@@ -254,7 +277,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   };
 
   /** La acción no volvió: los cuadros se cierran (repetirla no es un click) y queda el aviso. */
-  const avisarIncierto = (aviso: AvisoIncierto = "accion") => {
+  const avisarIncierto = (aviso: AvisoIncierto = AVISO_ACCION) => {
     cerrarCuadros();
     setAvisoIncierto(aviso);
   };
@@ -265,7 +288,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
    * salía de la transición y todo Hoy pasaba a la pantalla de error sin decir que la
    * acción pudo haberse hecho. No se relanza: queda el aviso.
    */
-  const correr = (accion: () => Promise<void>, aviso: AvisoIncierto = "accion") => {
+  const correr = (accion: () => Promise<void>, aviso: AvisoIncierto = AVISO_ACCION) => {
     startTransition(async () => {
       try {
         await accion();
@@ -462,6 +485,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const reservationId = room.reservationId;
     if (!reservationId) return;
     const prompt = buildInvoicePrompt();
+    const pregunta = shouldPromptInvoice() && prompt !== null;
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
     correr(async () => {
@@ -478,8 +502,10 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           ? "Salida anticipada realizada."
           : "Check-out realizado correctamente."
       );
-      if (shouldPromptInvoice() && prompt) setInvoicePrompt(prompt);
-    }, "checkout");
+      if (pregunta && prompt) setInvoicePrompt(prompt);
+      // Sin cobro no hay recibo ni remito: si no vuelve, lo único que pudo faltar es
+      // la pregunta de factura, y solo si iba a salir.
+    }, { renglon: renglonCheckoutIncierto({ papel: null, pregunta }) });
   };
 
   const submitCheckoutPayment = async ({
@@ -504,8 +530,14 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       });
     } catch {
       // Sin respuesta: el cobro pudo haber entrado. Se cierra el cobro (repetirlo no
-      // es un click) y queda el aviso, con el renglón del check-out.
-      avisarIncierto("checkout");
+      // es un click) y queda el aviso, con el renglón de lo que no salió: el remito
+      // si se fió (no hay recibo), si no el recibo, y la pregunta solo si iba a salir.
+      avisarIncierto({
+        renglon: renglonCheckoutIncierto({
+          papel: paymentMethod === "cuenta_corriente" ? "remito" : "recibo",
+          pregunta: shouldPromptInvoice(paymentMethod) && prompt !== null,
+        }),
+      });
       return { success: false as const, error: AVISO_INCIERTO };
     }
 
@@ -1024,8 +1056,8 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                   Hab. {room.number}: no llegó la respuesta
                 </h2>
                 <p className="text-sm text-slate-600 mt-1">{AVISO_INCIERTO}</p>
-                {avisoIncierto === "checkout" && (
-                  <p className="text-sm text-slate-600 mt-2">{AVISO_INCIERTO_CHECKOUT}</p>
+                {avisoIncierto.renglon && (
+                  <p className="text-sm text-slate-600 mt-2">{avisoIncierto.renglon}</p>
                 )}
               </div>
             </div>
