@@ -67,6 +67,19 @@ function botonCrear(container: HTMLElement): HTMLButtonElement {
   return boton;
 }
 
+// Cambia la Salida con el calendario al día `dia` del mes que muestra (octubre 2026).
+function cambiarSalida(dia: string) {
+  fireEvent.click(screen.getByLabelText("Salida"));
+  fireEvent.click(screen.getByText(dia));
+  fireEvent.click(screen.getByText("Aceptar"));
+}
+
+function completarHuesped() {
+  fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Juan" } });
+  fireEvent.change(screen.getByLabelText("Apellido"), { target: { value: "Prueba" } });
+  fireEvent.change(screen.getByLabelText("DNI o CUIT"), { target: { value: "30123456" } });
+}
+
 function expectAntes(primero: Element, despues: Element) {
   expect(primero.compareDocumentPosition(despues) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 }
@@ -160,6 +173,71 @@ describe("NewReservationModal: aviso cuando la habitación elegida deja de estar
     H.fetchAvailableRoomsAction.mockResolvedValue([hab5, hab7]);
     abrir({ roomId: 5, checkIn: "2026-10-12T14:00", checkOut: "2026-10-14T10:00" });
 
+    await waitFor(() => expect(selector().value).toBe("5"));
+    expect(screen.queryByText(/no está libre/)).toBeNull();
+  });
+});
+
+describe("NewReservationModal: el aviso sigue a las fechas que están en pantalla", () => {
+  it("si con las fechas nuevas la Hab. 5 está libre, vuelve a quedar elegida y el aviso se va", async () => {
+    H.fetchAvailableRoomsAction.mockResolvedValueOnce([hab7]).mockResolvedValue([hab5, hab7]);
+    const { container } = abrir({ roomId: 5, checkIn: "2026-10-12T14:00", checkOut: "2026-10-14T10:00" });
+    await screen.findByText(/La Hab\. 5 no está libre del 12 oct al 14 oct/);
+
+    // Hace lo que dice el aviso: la salida pasa al 13, donde la 5 está libre.
+    cambiarSalida("13");
+
+    await waitFor(() => expect(selector().value).toBe("5"));
+    expect(screen.queryByText(/no está libre/)).toBeNull();
+    expect(selector()).not.toHaveAttribute("aria-describedby");
+    expect(H.fetchAvailableRoomsAction).toHaveBeenCalledTimes(2);
+
+    completarHuesped();
+    expect(botonCrear(container)).toBeEnabled();
+  });
+
+  it("si con las fechas nuevas sigue ocupada, el aviso dice las fechas nuevas y no las viejas", async () => {
+    H.fetchAvailableRoomsAction.mockResolvedValue([hab7]);
+    abrir({ roomId: 5, checkIn: "2026-10-12T14:00", checkOut: "2026-10-14T10:00" });
+    await screen.findByText(/La Hab\. 5 no está libre del 12 oct al 14 oct/);
+
+    cambiarSalida("16");
+    // Mientras se consulta, no queda a la vista el aviso con las fechas de antes.
+    expect(screen.queryByText(/al 14 oct/)).toBeNull();
+
+    expect(
+      await screen.findByText("La Hab. 5 no está libre del 12 oct al 16 oct. Elegí otra o cambiá las fechas.")
+    ).toBeInTheDocument();
+    expect(selector().value).toBe("");
+    expect(H.fetchAvailableRoomsAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("con la salida antes de la entrada no queda el aviso de las fechas anteriores", async () => {
+    H.fetchAvailableRoomsAction.mockResolvedValue([hab7]);
+    abrir({ roomId: 5, checkIn: "2026-10-12T14:00", checkOut: "2026-10-14T10:00" });
+    await screen.findByText(/La Hab\. 5 no está libre/);
+
+    cambiarSalida("10");
+
+    expect(screen.getByText("Elegí primero las fechas")).toBeInTheDocument();
+    expect(screen.queryByText(/no está libre/)).toBeNull();
+    expect(selector()).not.toHaveAttribute("aria-describedby");
+    expect(selector().value).toBe("");
+  });
+
+  it("si la consulta de disponibilidad falla, no dice que la habitación está ocupada", async () => {
+    // null = no se pudo consultar (distinto de [] = no hay ninguna libre).
+    H.fetchAvailableRoomsAction.mockResolvedValueOnce(null).mockResolvedValue([hab5, hab7]);
+    const { container } = abrir({ roomId: 5, checkIn: "2026-10-12T14:00", checkOut: "2026-10-14T10:00" });
+
+    await waitFor(() => expect(H.fetchAvailableRoomsAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(selector()).toBeEnabled());
+    expect(screen.queryByText(/no está libre/)).toBeNull();
+    expect(selector().value).toBe("");
+    expect(botonCrear(container)).toBeDisabled();
+
+    // La consulta siguiente anda y la 5 está libre: vuelve a quedar elegida.
+    cambiarSalida("13");
     await waitFor(() => expect(selector().value).toBe("5"));
     expect(screen.queryByText(/no está libre/)).toBeNull();
   });

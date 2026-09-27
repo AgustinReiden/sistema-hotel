@@ -56,12 +56,14 @@ type NewReservationModalProps = {
   standardCheckOutTime?: string;
 };
 
-// La habitación elegida que se sacó del selector porque dejó de estar libre para las fechas
+// La habitación elegida que se sacó del selector porque no está libre para las fechas
 // consultadas (desde/hasta en el formato local del form). El número se busca en `rooms`.
+// `ocupada` es false si la consulta falló: no se sabe si está libre, así que no se avisa.
 type HabitacionQuitada = {
   roomId: number;
   desde: string;
   hasta: string;
+  ocupada: boolean;
 };
 
 type ReservationFormState = {
@@ -147,6 +149,30 @@ function avisoHabitacionQuitada(numero: string | null, desde: string, hasta: str
   return `${habitacion} no está libre del ${fecha(desde)} al ${fecha(hasta)}. Elegí otra o cambiá las fechas.`;
 }
 
+// Acomoda la habitación elegida con las libres para desde/hasta (`libres` null = la consulta
+// falló). Si no está libre, se saca del selector y se guarda para avisarlo: si se borra
+// callada, la recepcionista cree que reservó la que había elegido (también al entrar desde el
+// calendario). Si ya se había sacado y con las fechas nuevas está libre, vuelve a quedar elegida.
+function aplicarDisponibilidad(
+  current: ReservationFormState,
+  libres: Room[] | null,
+  desde: string,
+  hasta: string
+): ReservationFormState {
+  const elegida =
+    current.roomId !== "" ? Number(current.roomId) : current.habitacionQuitada?.roomId ?? null;
+  if (elegida === null) return current;
+  const libre = libres !== null && libres.some((r) => r.id === elegida);
+  if (libre) {
+    return current.roomId === "" ? { ...current, roomId: elegida, habitacionQuitada: null } : current;
+  }
+  return {
+    ...current,
+    roomId: "",
+    habitacionQuitada: { roomId: elegida, desde, hasta, ocupada: libres !== null },
+  };
+}
+
 function splitName(full: string): { first: string; last: string } {
   const parts = full.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return { first: "", last: "" };
@@ -205,20 +231,9 @@ export default function NewReservationModal({
         new Date(checkOut).toISOString()
       );
       if (!active) return;
-      setAvailableRooms(libres);
+      setAvailableRooms(libres ?? []);
       setLoadingRooms(false);
-      // Si la habitación elegida ya no está libre, se saca del selector y se guarda cuál era
-      // y para qué fechas, para avisarlo: si se borra callada, la recepcionista cree que
-      // reservó la que había elegido (también al entrar desde el calendario).
-      setForm((current) =>
-        current.roomId !== "" && !libres.some((r) => r.id === Number(current.roomId))
-          ? {
-              ...current,
-              roomId: "",
-              habitacionQuitada: { roomId: Number(current.roomId), desde: checkIn, hasta: checkOut },
-            }
-          : current
-      );
+      setForm((current) => aplicarDisponibilidad(current, libres, checkIn, checkOut));
     }, 250);
     return () => {
       active = false;
@@ -309,7 +324,14 @@ export default function NewReservationModal({
 
   const selectedRoom =
     form.roomId === "" ? null : rooms.find((room) => room.id === Number(form.roomId)) ?? null;
-  const quitada = form.habitacionQuitada;
+  // El aviso se muestra solo si la consulta dijo que está ocupada y para las fechas que están
+  // en pantalla: al cambiarlas se va hasta que la consulta nueva confirme (o la vuelva a elegir).
+  const quitada =
+    form.habitacionQuitada?.ocupada &&
+    form.habitacionQuitada.desde === form.checkIn &&
+    form.habitacionQuitada.hasta === form.checkOut
+      ? form.habitacionQuitada
+      : null;
   const avisoQuitada = quitada
     ? avisoHabitacionQuitada(
         rooms.find((room) => room.id === quitada.roomId)?.room_number ?? null,
