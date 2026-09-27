@@ -133,3 +133,42 @@ describe("RemitosClient", () => {
     await waitFor(() => expect(saveRemitosAjustesAction).toHaveBeenCalledWith(95, 151, 72, "2026-09-24"));
   });
 });
+
+// Lo que dice el menú es lo que se ve al abrir: un remito a revisar de otro mes no está
+// en la tabla del mes, así que la línea "Para revisar" lleva a la lista de todos.
+describe("RemitosClient: ver los remitos a revisar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    n = 150;
+  });
+
+  it("la línea ofrece ver los N a revisar, sin contar los vencidos (tienen su lista)", () => {
+    renderPanel({ salud: { ...SALUD, a_revisar: 3, a_revisar_vencidos: 1, vencidos: 1, piezas_abiertas: 2 } });
+    expect(screen.getByTestId("para-revisar")).toHaveTextContent("Para revisar: 2 remitos, 1 vencido y 2 piezas");
+    expect(screen.getByText("Ver los 2 a revisar").closest("a")).toHaveAttribute("href", "/admin/remitos?ver=a_revisar");
+  });
+
+  it("con uno solo, en singular", () => {
+    renderPanel({ salud: { ...SALUD, a_revisar: 1 } });
+    expect(screen.getByText("Ver el remito a revisar").closest("a")).toHaveAttribute("href", "/admin/remitos?ver=a_revisar");
+  });
+
+  it("sin remitos a revisar (solo vencidos o piezas) no hay link", () => {
+    renderPanel({ salud: { ...SALUD, vencidos: 1, piezas_abiertas: 2 } });
+    expect(screen.getByTestId("para-revisar")).toBeInTheDocument();
+    expect(screen.queryByText(/a revisar$/)).toBeNull();
+  });
+
+  it("en la lista de a revisar lo dice y deja volver al mes", () => {
+    renderPanel({ aRevisar: true, rows: [fila("a_revisar"), fila("a_revisar")], salud: { ...SALUD, a_revisar: 2 } });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("2 remitos a revisar, de todos los meses");
+    expect(screen.queryByText("Ver los 2 a revisar")).toBeNull();
+    expect(screen.getByText("Volver al mes").closest("a")).toHaveAttribute("href", "/admin/remitos");
+  });
+
+  it("sin nada a revisar, la lista lo dice", () => {
+    renderPanel({ aRevisar: true, cliente: "company:c1" });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("No quedan remitos a revisar.");
+    expect(screen.getByText("Volver al mes").closest("a")).toHaveAttribute("href", "/admin/remitos?cliente=company%3Ac1");
+  });
+});

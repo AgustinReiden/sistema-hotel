@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ExternalLink, Info, Loader2, Settings2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -57,6 +58,8 @@ type Props = {
   cliente: string;
   /** "AAAA-MM". */
   mes: string;
+  /** ?ver=a_revisar: `rows` son los remitos a revisar de todos los meses, sin los vencidos. */
+  aRevisar?: boolean;
   nowMs: number;
   /** Qué no se pudo cargar (la pantalla lo dice en vez de mostrar una lista vacía). */
   errores: string[];
@@ -109,7 +112,7 @@ function EnlaceEscaneo({ row }: { row: RemitoPanelRow }) {
   );
 }
 
-export default function RemitosClient({ rows, vencidos = [], paquetes = [], piezas, salud, accounts, cliente, mes, nowMs, errores }: Props) {
+export default function RemitosClient({ rows, vencidos = [], paquetes = [], piezas, salud, accounts, cliente, mes, aRevisar = false, nowMs, errores }: Props) {
   const router = useRouter();
   const [clienteSel, setClienteSel] = useState(cliente);
   const [mesSel, setMesSel] = useState(mes);
@@ -134,7 +137,14 @@ export default function RemitosClient({ rows, vencidos = [], paquetes = [], piez
 
   const resumen = useMemo(() => resumirRemitos(rows), [rows]);
   const vencidosDelMes = useMemo(() => rows.filter((r) => esVencido(r, salud, nowMs)).length, [rows, salud, nowMs]);
-  const paraRevisar = textoParaRevisar(remitosParaRevisar(salud));
+  // La misma cuenta que el numerito del menú (layout.tsx): lo que dice el menú es lo que
+  // se ve al abrir. Los vencidos y las piezas están en sus listas; los remitos a revisar
+  // pueden ser de otro mes, así que el link los trae todos.
+  const cuentaParaRevisar = remitosParaRevisar(salud);
+  const paraRevisar = textoParaRevisar(cuentaParaRevisar);
+  const verARevisar =
+    cuentaParaRevisar.remitos === 1 ? "Ver el remito a revisar" : `Ver los ${cuentaParaRevisar.remitos} a revisar`;
+  const volverAlMes = `/admin/remitos${cliente ? `?${new URLSearchParams({ cliente })}` : ""}`;
   const avisos = useMemo(() => avisosSalud(salud, nowMs), [salud, nowMs]);
   const mostrarCliente = cliente === "";
 
@@ -281,14 +291,34 @@ export default function RemitosClient({ rows, vencidos = [], paquetes = [], piez
       <VencidosSection rows={vencidos} horas={salud.horas_vencimiento} nowMs={nowMs} renderAcciones={accionesDe} />
 
       {paraRevisar && (
-        <p className="text-sm font-semibold text-rose-800" data-testid="para-revisar">
-          {paraRevisar}
-        </p>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="text-sm font-semibold text-rose-800" data-testid="para-revisar">
+            {paraRevisar}
+          </p>
+          {cuentaParaRevisar.remitos > 0 && !aRevisar && (
+            <Link href="/admin/remitos?ver=a_revisar" className="text-sm font-semibold text-emerald-700 hover:underline">
+              {verARevisar}
+            </Link>
+          )}
+        </div>
       )}
 
-      <p className="text-sm font-semibold text-slate-700" data-testid="semaforo">
-        {textoSemaforo(resumen, vencidosDelMes)}
-      </p>
+      {aRevisar ? (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="text-sm font-semibold text-slate-700" data-testid="semaforo">
+            {rows.length === 0
+              ? "No quedan remitos a revisar."
+              : `${rows.length} ${rows.length === 1 ? "remito a revisar" : "remitos a revisar"}, de todos los meses.`}
+          </p>
+          <Link href={volverAlMes} className="text-sm font-semibold text-emerald-700 hover:underline">
+            Volver al mes
+          </Link>
+        </div>
+      ) : (
+        <p className="text-sm font-semibold text-slate-700" data-testid="semaforo">
+          {textoSemaforo(resumen, vencidosDelMes)}
+        </p>
+      )}
 
       {rows.length > 0 && (
         <>

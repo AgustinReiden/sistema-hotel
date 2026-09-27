@@ -9,7 +9,8 @@ import {
   listRemitoPiezas,
   listRemitos,
 } from "@/lib/data";
-import { esVencido, rangoDeMes } from "@/lib/remitos";
+import { BILLING_EPOCH } from "@/lib/date-range";
+import { esVencido, rangoDeMes, remitosARevisar } from "@/lib/remitos";
 import { hotelDateKey } from "@/lib/time";
 import type { CtaCteClientKind, RemitoPaqueteFactura, RemitosSalud } from "@/lib/types";
 import RemitosClient from "./RemitosClient";
@@ -26,15 +27,19 @@ const SALUD_VACIA: RemitosSalud = {
 export default async function RemitosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cliente?: string; mes?: string }>;
+  searchParams: Promise<{ cliente?: string; mes?: string; ver?: string }>;
 }) {
   const role = await getCurrentUserRole();
   if (role !== "admin") redirect("/forbidden");
 
-  const { cliente, mes } = await searchParams;
+  const { cliente, mes, ver } = await searchParams;
   const ahora = new Date();
-  const mesFiltro = mes && MES_RE.test(mes) ? mes : hotelDateKey(ahora).slice(0, 7);
-  const { desde, hasta } = rangoDeMes(mesFiltro);
+  const hoyKey = hotelDateKey(ahora);
+  const mesFiltro = mes && MES_RE.test(mes) ? mes : hoyKey.slice(0, 7);
+  // ?ver=a_revisar es la lista de «Ver los N a revisar»: los a revisar de todo el
+  // historial, no solo los del mes, para que el número del menú sea lo que se ve.
+  const aRevisar = ver === "a_revisar";
+  const { desde, hasta } = aRevisar ? { desde: BILLING_EPOCH, hasta: hoyKey } : rangoDeMes(mesFiltro);
 
   // `cliente` viaja como "company:<uuid>" | "guest:<uuid>", igual que en el control.
   const [rawKind, rawId] = (cliente ?? "").split(":");
@@ -51,7 +56,7 @@ export default async function RemitosPage({
       return vacio;
     });
 
-  const [rows, piezas, salud, accounts, paquetes] = await Promise.all([
+  const [periodo, piezas, salud, accounts, paquetes] = await Promise.all([
     cargar(listRemitos(desde, hasta, clientKind, clientId), [], "los remitos"),
     cargar(listRemitoPiezas(false), [], "las piezas a revisar"),
     cargar(getRemitosSalud(), SALUD_VACIA, "el estado de la ingesta"),
@@ -61,8 +66,10 @@ export default async function RemitosPage({
       : Promise.resolve([] as RemitoPaqueteFactura[]),
   ]);
 
+  // Los vencidos van en su propia lista, arriba: la de a revisar no los repite.
+  const rows = aRevisar ? remitosARevisar(periodo, salud, ahora.getTime()) : periodo;
+
   // Los vencidos no dependen del mes elegido. Solo se buscan si la salud dice que hay.
-  const hoyKey = hotelDateKey(ahora);
   const vencidos =
     salud.vencidos > 0
       ? (await cargar(listRemitos(salud.alertar_desde, hoyKey), [], "los remitos vencidos"))
@@ -94,6 +101,7 @@ export default async function RemitosPage({
             accounts={accounts}
             cliente={cliente ?? ""}
             mes={mesFiltro}
+            aRevisar={aRevisar}
             nowMs={ahora.getTime()}
             errores={errores}
           />
