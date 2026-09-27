@@ -8,21 +8,21 @@ import {
   formatHotelWeekdayDate,
   hotelDateKey,
 } from "@/lib/time";
-import { conIcuCambiado, conIcuDeChrome, septiembreSinT } from "./icu-chrome";
+import { conIcuCambiado, conIcuDeChrome, horaDe24, septiembreSinT } from "./icu-chrome";
 
 const TZ = "America/Argentina/Tucuman";
 
 // Error #418 de React en Mantenimiento (y en toda pantalla que dibuje una hora desde un
-// componente de cliente): el servidor escribía "p.", espacio duro, "m." (ICU de Node) y el
-// navegador "p. m." (ICU de Chrome), así que React tiraba el HTML del servidor y
-// redibujaba todo.
+// componente de cliente): el servidor escribía "p.", espacio duro, "m." (ICU 74+ de Node),
+// o "14:30" con un ICU 73 o anterior, y el navegador "p. m." (ICU de Chrome), así que
+// React tiraba el HTML del servidor y redibujaba todo.
 describe("formatHotelTime y formatHotelDateTime (no dependen del ICU)", () => {
   // 17:30 UTC = 14:30 en Tucumán.
   const TARDE = "2026-09-26T17:30:00Z";
 
-  // Entre "p." y "m." va un espacio duro, como lo escribía el servidor: se ve igual que
-  // uno común y en el ticket no deja cortar la hora en dos renglones.
-  it("escriben la hora de 12 h que ya se veía", () => {
+  // Entre "p." y "m." va un espacio duro, como lo escribe el ICU 74+ de Node: se ve igual
+  // que uno común y en el ticket no deja cortar la hora en dos renglones.
+  it("escriben la hora de 12 h de es-AR", () => {
     expect(formatHotelTime(TARDE, TZ)).toBe("02:30 p.\xa0m.");
     expect(formatHotelDateTime(TARDE, TZ)).toBe("26/09/2026, 02:30 p.\xa0m.");
   });
@@ -52,6 +52,29 @@ describe("formatHotelTime y formatHotelDateTime (no dependen del ICU)", () => {
       "26/09/2026, 12:05 a.\xa0m.",
       "08:45 p.\xa0m.",
       "31/12/2026, 08:45 p.\xa0m.",
+    ]);
+  });
+
+  // Hasta ICU 73 (CLDR 43) es-AR escribía la hora en 24 h. Un servidor con ese ICU
+  // imprimía "14:30" en recibos, rendiciones y la columna "Hora" del CSV fiscal; con
+  // estos helpers imprime "02:30 p. m.". La versión de Node de PROD no está fijada en el
+  // repo: por eso Agustín mira la hora de una rendición antes de mergear.
+  it("escriben 12 h aunque el ICU del servidor escriba la hora en 24 h (ICU 73)", async () => {
+    const horarios = ["2026-09-26T17:30:00Z", "2026-09-26T03:05:00Z", "2026-09-26T15:07:00Z"];
+    const opciones = { hour: "2-digit", minute: "2-digit", timeZone: TZ } as const;
+
+    const conIcuViejo = await conIcuCambiado(horaDe24, () =>
+      horarios.map((iso) => ({
+        icu: new Date(iso).toLocaleTimeString("es-AR", opciones),
+        hora: formatHotelTime(iso, TZ),
+        fechaYHora: formatHotelDateTime(iso, TZ),
+      }))
+    );
+
+    expect(conIcuViejo).toEqual([
+      { icu: "14:30", hora: "02:30 p.\xa0m.", fechaYHora: "26/09/2026, 02:30 p.\xa0m." },
+      { icu: "00:05", hora: "12:05 a.\xa0m.", fechaYHora: "26/09/2026, 12:05 a.\xa0m." },
+      { icu: "12:07", hora: "12:07 p.\xa0m.", fechaYHora: "26/09/2026, 12:07 p.\xa0m." },
     ]);
   });
 

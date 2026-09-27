@@ -4,10 +4,14 @@
 // Ojo con el ICU: lo que dibuja un componente de cliente se calcula dos veces, una en
 // el servidor (Node) y otra en el navegador al hidratar, y cada uno trae su propio ICU.
 // Si el texto no da exactamente igual, React tira el HTML del servidor y redibuja todo
-// (error #418). Por eso la hora de 12 h se arma a mano: el ICU de Node escribe "p.",
-// espacio duro (U+00A0), "m.", y el de Chrome "p. m." con espacio común. Y el mes
-// abreviado sale de una tabla: cada versión del ICU trae sus propios nombres ("sept" o
-// "sep"), y el Node del servidor y el Chrome de la recepción no tienen por qué coincidir.
+// (error #418). Por eso la hora de 12 h se arma a mano y no depende del ICU. Con un ICU
+// 74 o posterior (CLDR 44 en adelante: Node 22 y los Chrome de hoy), es-AR escribe la
+// hora en 12 h, pero el de Node pone "p.", espacio duro (U+00A0), "m.", y el de Chrome
+// "p. m." con espacio común. Con un ICU 73 o anterior (CLDR 43), es-AR la escribía en
+// 24 h ("14:30"): un servidor así imprimía "14:30" y estos helpers escriben "02:30 p. m.".
+// Y el mes abreviado sale de una tabla: cada versión del ICU trae sus propios nombres
+// ("sept" o "sep"), y el Node del servidor y el Chrome de la recepción no tienen por qué
+// coincidir.
 
 export const DEFAULT_TZ = "America/Argentina/Tucuman";
 
@@ -16,13 +20,13 @@ function isValidInstant(iso: string): boolean {
   return !Number.isNaN(new Date(iso).getTime());
 }
 
-// "a. m." y "p. m." con el espacio duro que ya ponía el servidor entre las dos letras:
+// "a. m." y "p. m." con el espacio duro que pone el ICU 74+ de Node entre las dos letras:
 // en pantalla se ve igual que un espacio común, y en el ticket térmico la hora no se
 // corta entre "p." y "m." cuando el renglón no alcanza.
 const AM = "a.\xa0m.";
 const PM = "p.\xa0m.";
 
-// "14:30" -> "02:30 p. m.": la hora de 12 h que ya se veía en es-AR, sin pasar por el ICU.
+// "14:30" -> "02:30 p. m.": la hora de 12 h de es-AR con ICU 74+, sin pasar por el ICU.
 function toHotelClock12(timeKey: string): string {
   const [hours, minutes] = timeKey.split(":");
   const h = Number(hours);
@@ -35,7 +39,7 @@ export function formatHotelTime(iso: string | null | undefined, timezone?: strin
   return toHotelClock12(hotelTimeKey(iso, timezone));
 }
 
-// "26/09/2026, 02:30 p. m.", como la escribía toLocaleString("es-AR").
+// "26/09/2026, 02:30 p. m.", como la escribe toLocaleString("es-AR") con ICU 74+.
 export function formatHotelDateTime(iso: string | null | undefined, timezone?: string): string {
   if (!iso || !isValidInstant(iso)) return "—";
   const [year, month, day] = hotelDateKey(iso, timezone).split("-");

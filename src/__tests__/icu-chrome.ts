@@ -23,6 +23,21 @@ export const comoChrome: CambioDeIcu = (texto) => texto.replace(/[\xa0\u{202f}]/
  */
 export const septiembreSinT: CambioDeIcu = (texto) => texto.replace(/\bsept\b/g, "sep");
 
+/**
+ * La hora en 24 h ("14:30") en vez de 12 h ("02:30 p. m."), como la escribe un ICU 73 o
+ * anterior. Hasta CLDR 43 (ICU 73) la hora preferida de la Argentina era de 24 h; desde
+ * CLDR 44 (ICU 74) es de 12 h. El repo no fija la versión de Node del contenedor de PROD,
+ * así que el servidor puede escribir cualquiera de las dos.
+ */
+export const horaDe24: CambioDeIcu = (texto) =>
+  texto.replace(
+    /\b(\d{1,2}):(\d{2})[ \xa0\u{202f}]([ap])\.[ \xa0\u{202f}]m\./gu,
+    (_, horas: string, minutos: string, periodo: string) => {
+      const h = (Number(horas) % 12) + (periodo === "p" ? 12 : 0);
+      return `${String(h).padStart(2, "0")}:${minutos}`;
+    }
+  );
+
 /** Corre `fn` con las fechas escritas como las escribe Chrome. */
 export function conIcuDeChrome<T>(fn: () => T | Promise<T>): Promise<T> {
   return conIcuCambiado(comoChrome, fn);
