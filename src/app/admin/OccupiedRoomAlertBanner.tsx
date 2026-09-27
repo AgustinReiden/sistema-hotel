@@ -25,6 +25,14 @@ type Pendientes = Record<number, string>;
  */
 const PENDIENTES_KEY = "hotelsync:avisos-ocupada-sin-cerrar";
 
+/**
+ * Dónde se guardan, en la pestaña, los avisos cuya estadía ya se cargó pero no sirve para
+ * cerrarlos (ya salió o cambió de habitación, ver `ESTADIA_YA_NO_SIRVE_CODE`): una lista de
+ * ids de aviso, sin la estadía. Así, al volver a armarse, la fila no vuelve a ofrecer
+ * "Cerrar el aviso" (fallaría siempre igual) ni "Cargar la estadía" (la cobraría dos veces).
+ */
+const SIN_CIERRE_KEY = "hotelsync:avisos-ocupada-cargada-sin-cierre";
+
 /** Quién está mostrando lo guardado, para avisarle cuando cambia. */
 const pendientesListeners = new Set<() => void>();
 
@@ -35,13 +43,42 @@ function subscribePendientes(listener: () => void) {
   };
 }
 
-/** Lo guardado, tal cual (un texto: React lo compara por valor). null si no hay o no anda. */
-function leerPendientesGuardados(): string | null {
+/**
+ * Lo guardado con esa clave, tal cual (un texto: React lo compara por valor). null si no hay
+ * o no anda.
+ */
+function leerGuardado(key: string): string | null {
   try {
-    return window.sessionStorage.getItem(PENDIENTES_KEY);
+    return window.sessionStorage.getItem(key);
   } catch {
     return null;
   }
+}
+
+function leerPendientesGuardados(): string | null {
+  return leerGuardado(PENDIENTES_KEY);
+}
+
+function leerSinCierreGuardados(): string | null {
+  return leerGuardado(SIN_CIERRE_KEY);
+}
+
+/**
+ * Guarda `value` con esa clave (null la borra) y avisa a quien lo muestra. Si la pestaña no
+ * deja guardar, no pasa nada: el estado del componente lo sigue mostrando, como antes, hasta
+ * que se vuelva a armar.
+ */
+function escribirGuardado(key: string, value: string | null) {
+  try {
+    if (value === null) {
+      window.sessionStorage.removeItem(key);
+    } else {
+      window.sessionStorage.setItem(key, value);
+    }
+  } catch {
+    return;
+  }
+  pendientesListeners.forEach((listener) => listener());
 }
 
 /** Lo guardado, ya leído. Lo que no tiene la forma esperada se ignora. */
@@ -63,10 +100,7 @@ function parsePendientes(raw: string | null): Pendientes {
   }
 }
 
-/**
- * Cambia lo guardado para un aviso (null lo olvida). Si la pestaña no deja guardar, no pasa
- * nada: el estado del componente lo sigue mostrando, como antes, hasta que se vuelva a armar.
- */
+/** Cambia la estadía guardada para un aviso (null la olvida). */
 function guardarPendiente(alertId: number, reservationId: string | null) {
   const pendientes = parsePendientes(leerPendientesGuardados());
   if (reservationId === null) {
@@ -75,16 +109,30 @@ function guardarPendiente(alertId: number, reservationId: string | null) {
   } else {
     pendientes[alertId] = reservationId;
   }
+  escribirGuardado(
+    PENDIENTES_KEY,
+    Object.keys(pendientes).length === 0 ? null : JSON.stringify(pendientes)
+  );
+}
+
+/** Los avisos guardados como "cargada, no se cierra desde acá". Lo roto se ignora. */
+function parseSinCierre(raw: string | null): number[] {
+  if (!raw) return [];
   try {
-    if (Object.keys(pendientes).length === 0) {
-      window.sessionStorage.removeItem(PENDIENTES_KEY);
-    } else {
-      window.sessionStorage.setItem(PENDIENTES_KEY, JSON.stringify(pendientes));
-    }
+    const data: unknown = JSON.parse(raw);
+    if (!Array.isArray(data)) return [];
+    return data.filter((id): id is number => Number.isInteger(id) && id > 0);
   } catch {
-    return;
+    return [];
   }
-  pendientesListeners.forEach((listener) => listener());
+}
+
+/** Marca (o desmarca) un aviso como "cargada, no se cierra desde acá". */
+function guardarSinCierre(alertId: number, sinCierre: boolean) {
+  const ids = parseSinCierre(leerSinCierreGuardados());
+  if (ids.includes(alertId) === sinCierre) return;
+  const siguientes = sinCierre ? [...ids, alertId] : ids.filter((id) => id !== alertId);
+  escribirGuardado(SIN_CIERRE_KEY, siguientes.length === 0 ? null : JSON.stringify(siguientes));
 }
 
 /**
@@ -94,9 +142,13 @@ function guardarPendiente(alertId: number, reservationId: string | null) {
  */
 const ESTADIA_YA_NO_SIRVE_CODE = "22023";
 
-/** Lo que se dice cuando pasa eso: por qué no se cierra y que no la vuelvan a cargar. */
+/**
+ * Lo que se dice cuando pasa eso: por qué no se cierra, que no la vuelvan a cargar y qué
+ * hacer. Cerrar el aviso sin estadía pide una nota (mig 105) y hoy ninguna pantalla la pide:
+ * lo cierra quien administra el sistema.
+ */
 const ESTADIA_YA_NO_SIRVE =
-  "Esa estadía ya salió o cambió de habitación, así que este aviso no se puede cerrar desde acá. Ya está cargada: no la vuelvas a cargar.";
+  "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Para cerrar el aviso, avisale al encargado del sistema.";
 
 type Props = {
   alerts: RoomOccupancyAlert[];
@@ -149,11 +201,15 @@ type Props = {
  * (`reservations_no_active_overlap` rechaza dos estadías en la misma pieza y horario).
  *
  * SI LA ESTADÍA GUARDADA YA SALIÓ O CAMBIÓ DE HABITACIÓN, la base rechaza el cierre
- * (`ESTADIA_YA_NO_SIRVE_CODE`) y reintentar no lo arregla: la fila lo dice, saca el botón
- * y sigue sin ofrecer "Cargar la estadía" (ya está cargada: volver a cargarla la cobraría
- * dos veces). Lo guardado no se olvida por eso, justamente para no volver a ofrecerla.
- * Cerrar el aviso sin cargar la estadía pide una nota (mig 105), y Mantenimiento todavía
- * no la pide: ese camino queda pendiente, fuera de esta pantalla.
+ * (`ESTADIA_YA_NO_SIRVE_CODE`) y reintentar no lo arregla. La estadía guardada se descarta
+ * (no hay con qué volver a intentarlo: sin eso, cada vez que la pantalla se vuelve a armar
+ * la fila ofrecería de nuevo un "Cerrar el aviso" que falla siempre igual) y el aviso queda
+ * marcado en la pestaña como "cargada, no se cierra desde acá" (`SIN_CIERRE_KEY`): la fila
+ * dice por qué, que no la vuelvan a cargar y qué hacer, y no ofrece ningún botón. Tampoco
+ * "Cargar la estadía": ya está cargada, y volver a cargarla la cobraría dos veces. Cerrar el
+ * aviso sin cargar la estadía pide una nota (mig 105), y ninguna pantalla la pide todavía:
+ * ese camino queda pendiente, fuera de esta pantalla. La marca se olvida cuando el aviso
+ * llega resuelto, como la estadía guardada.
  *
  * Se eligió guardar y no frenar la recarga de Hoy mientras haya uno sin cerrar: frenarla
  * dejaría Hoy sin ponerse al día (y sin la línea que lo avisa) todo el tiempo que el
@@ -181,8 +237,18 @@ export default function OccupiedRoomAlertBanner({
     [guardados, enPantalla]
   );
   const [closingId, setClosingId] = useState<number | null>(null);
-  // Avisos cuya estadía guardada ya no sirve para cerrarlos (ver arriba): sin botón.
-  const [sinCierre, setSinCierre] = useState<number[]>([]);
+  // Avisos cuya estadía ya se cargó pero no sirve para cerrarlos (ver arriba): sin botón.
+  // Lo de la pestaña más lo de esta pantalla, como la estadía guardada.
+  const sinCierreGuardados = useSyncExternalStore(
+    subscribePendientes,
+    leerSinCierreGuardados,
+    () => null
+  );
+  const [sinCierreEnPantalla, setSinCierreEnPantalla] = useState<number[]>([]);
+  const sinCierre = useMemo(
+    () => new Set([...parseSinCierre(sinCierreGuardados), ...sinCierreEnPantalla]),
+    [sinCierreGuardados, sinCierreEnPantalla]
+  );
 
   const abiertas = useMemo(() => alerts.filter((a) => a.resolved_at === null), [alerts]);
   const cerradas = useMemo(() => alerts.filter((a) => a.resolved_at !== null), [alerts]);
@@ -190,7 +256,10 @@ export default function OccupiedRoomAlertBanner({
   // Un aviso que llega resuelto (lo cerró otro admin, o el cierre de acá se hizo pero la
   // respuesta no llegó) ya no tiene nada que asociar: se olvida de la pestaña.
   useEffect(() => {
-    for (const a of cerradas) guardarPendiente(a.alert_id, null);
+    for (const a of cerradas) {
+      guardarPendiente(a.alert_id, null);
+      guardarSinCierre(a.alert_id, false);
+    }
   }, [cerradas]);
 
   if (alerts.length === 0) return null;
@@ -231,25 +300,34 @@ export default function OccupiedRoomAlertBanner({
     return { success: true };
   };
 
+  // La estadía que faltaba asociar a ese aviso deja de estar, en pantalla y en la pestaña.
+  const olvidarPendiente = (alertId: number) => {
+    setEnPantalla((prev) => {
+      const next = { ...prev };
+      delete next[alertId];
+      return next;
+    });
+    guardarPendiente(alertId, null);
+  };
+
   const closeAlert = async (alertId: number, reservationId: string) => {
     setClosingId(alertId);
     try {
       const result = await closeOccupancyAlertAction(alertId, reservationId);
       if (!result.success) {
         if (result.code === ESTADIA_YA_NO_SIRVE_CODE) {
-          setSinCierre((prev) => (prev.includes(alertId) ? prev : [...prev, alertId]));
+          // Sale del bucle: la estadía guardada ya no sirve, se descarta, y el aviso queda
+          // como "cargada, no se cierra desde acá" (ni reintentar ni volver a cargarla).
+          olvidarPendiente(alertId);
+          setSinCierreEnPantalla((prev) => (prev.includes(alertId) ? prev : [...prev, alertId]));
+          guardarSinCierre(alertId, true);
           toast.error(ESTADIA_YA_NO_SIRVE, { duration: 12000 });
           return;
         }
         toast.error(result.error);
         return;
       }
-      setEnPantalla((prev) => {
-        const next = { ...prev };
-        delete next[alertId];
-        return next;
-      });
-      guardarPendiente(alertId, null);
+      olvidarPendiente(alertId);
       toast.success("Aviso cerrado. La estadía ya estaba cargada: cobrala en el check-out.");
     } catch {
       toast.error("No se pudo cerrar el aviso. La estadía sigue cargada: probá de nuevo.");
@@ -282,8 +360,10 @@ export default function OccupiedRoomAlertBanner({
 
           <ul className="space-y-2">
             {abiertas.map((a) => {
-              const pendiente = isAdmin ? pendientes[a.alert_id] : undefined;
-              const noSeCierraDesdeAca = pendiente !== undefined && sinCierre.includes(a.alert_id);
+              // Cargada pero sin estadía que sirva para cerrarlo: ni reintentar ni volver a cargar.
+              const noSeCierraDesdeAca = isAdmin && sinCierre.has(a.alert_id);
+              const pendiente =
+                isAdmin && !noSeCierraDesdeAca ? pendientes[a.alert_id] : undefined;
               return (
                 <li
                   key={a.alert_id}
@@ -298,11 +378,11 @@ export default function OccupiedRoomAlertBanner({
                         ? `La marcó ${a.reported_by_name}`
                         : "Marcada por limpieza"}{" "}
                       el {formatHotelShortDateTime(a.detected_at, timezone)}
-                      {isAdmin && !pendiente && (
+                      {isAdmin && !pendiente && !noSeCierraDesdeAca && (
                         <> · se cargaría desde el {checkInDateFor(a).split("-").reverse().join("/")}</>
                       )}
                     </p>
-                    {pendiente && (
+                    {(pendiente || noSeCierraDesdeAca) && (
                       <p className="text-xs font-bold text-amber-700 mt-0.5">
                         {noSeCierraDesdeAca
                           ? ESTADIA_YA_NO_SIRVE

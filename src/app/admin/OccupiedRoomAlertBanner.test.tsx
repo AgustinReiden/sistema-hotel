@@ -51,9 +51,22 @@ vi.mock("./WalkInModal", () => ({
 
 const TZ = "America/Argentina/Buenos_Aires";
 
-/** Lo que dice el aviso cuando la estadía guardada ya no sirve para cerrarlo. */
+/**
+ * Lo que dice el aviso cuando la estadía guardada ya no sirve para cerrarlo: por qué, qué no
+ * hacer (volver a cargarla la cobraría dos veces) y qué hacer.
+ */
 const ESTADIA_YA_NO_SIRVE =
-  "Esa estadía ya salió o cambió de habitación, así que este aviso no se puede cerrar desde acá. Ya está cargada: no la vuelvas a cargar.";
+  "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Para cerrar el aviso, avisale al encargado del sistema.";
+
+/** Todo lo guardado en la pestaña, junto, para ver si quedó una estadía. */
+function guardadoEnLaPestana(): string {
+  const valores: string[] = [];
+  for (let i = 0; i < window.sessionStorage.length; i++) {
+    const clave = window.sessionStorage.key(i);
+    if (clave) valores.push(window.sessionStorage.getItem(clave) ?? "");
+  }
+  return valores.join(" ");
+}
 
 const pricingByRoomId = {
   2: { roomNumber: "2", basePrice: 50000, halfDayPrice: 25000 },
@@ -258,17 +271,19 @@ describe("OccupiedRoomAlertBanner", () => {
     "La estadia tiene que estar con el huesped adentro para cerrar el aviso.",
     "Esa estadia es de otra habitacion.",
   ])(
-    "si la estadía guardada ya salió o cambió de habitación (%s), lo dice con tildes, saca el botón y no ofrece volver a cargarla",
+    "si la estadía guardada ya salió o cambió de habitación (%s), lo dice con tildes y qué hacer, descarta la estadía, saca el botón y no ofrece volver a cargarla",
     async (motivo) => {
       H.closeOccupancyAlertAction.mockResolvedValue({ success: false, error: motivo, code: "22023" });
       renderBanner([abierta], true);
       await cargarConAvisoSinCerrar();
+      expect(guardadoEnLaPestana()).toContain("r-1");
 
       fireEvent.click(screen.getByText("Cerrar el aviso"));
 
       await waitFor(() => expect(H.toast.error).toHaveBeenCalled());
       const aviso = H.toast.error.mock.calls[0][0] as string;
       expect(aviso).toBe(ESTADIA_YA_NO_SIRVE);
+      expect(aviso).toContain("avisale al encargado del sistema");
       // La fila lo dice y ya no ofrece un botón que va a fallar siempre igual.
       expect(screen.getByText(ESTADIA_YA_NO_SIRVE)).toBeInTheDocument();
       expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
@@ -276,6 +291,8 @@ describe("OccupiedRoomAlertBanner", () => {
       expect(screen.queryByText("Cargar la estadía")).not.toBeInTheDocument();
       expect(screen.getByText("Ya está cargada")).toBeInTheDocument();
       expect(H.closeOccupancyAlertAction).toHaveBeenCalledTimes(1);
+      // La estadía que faltaba asociar se descarta: no sirve para cerrarlo.
+      expect(guardadoEnLaPestana()).not.toContain("r-1");
     }
   );
 
@@ -361,25 +378,70 @@ describe("OccupiedRoomAlertBanner — la estadía sin asociar sobrevive a que la
     expect(screen.getByText("Cerrar el aviso")).toBeInTheDocument();
   });
 
-  it("si la estadía ya salió, después de volver a armarse sigue sin ofrecer cargarla; el botón, si falla igual, vuelve a decir por qué", async () => {
+  /** Carga la estadía, el aviso queda sin cerrar y el cierre falla porque la estadía ya salió. */
+  async function cargarYQueYaSalio() {
     H.closeOccupancyAlertAction.mockResolvedValue({
       success: false,
       error: "La estadia tiene que estar con el huesped adentro para cerrar el aviso.",
       code: "22023",
     });
-    const primera = renderBanner([abierta], true);
     await cargarConAvisoSinCerrar();
     fireEvent.click(screen.getByText("Cerrar el aviso"));
     await waitFor(() => expect(H.toast.error).toHaveBeenCalledTimes(1));
+  }
+
+  it("si la estadía ya salió, después de volver a armarse no vuelve a ofrecer el cierre que falla (sale del bucle) ni cargarla, y sigue diciendo qué hacer", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarYQueYaSalio();
     primera.unmount();
 
     renderBanner([abierta], true);
-    expect(screen.queryByText("Cargar la estadía")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Cerrar el aviso"));
-    await waitFor(() => expect(H.toast.error).toHaveBeenCalledTimes(2));
-    expect(H.toast.error.mock.calls[1][0]).toBe(ESTADIA_YA_NO_SIRVE);
     expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
     expect(screen.queryByText("Cargar la estadía")).not.toBeInTheDocument();
+    expect(screen.getByText("Ya está cargada")).toBeInTheDocument();
+    expect(screen.getByText(ESTADIA_YA_NO_SIRVE)).toBeInTheDocument();
+    // Ya no "se cargaría": se cargó.
+    expect(screen.queryByText(/se cargaría desde el/)).not.toBeInTheDocument();
+    // No hay con qué volver a intentarlo: la acción no se vuelve a llamar.
+    expect(H.closeOccupancyAlertAction).toHaveBeenCalledTimes(1);
+    expect(H.toast.error).toHaveBeenCalledTimes(1);
+    expect(guardadoEnLaPestana()).not.toContain("r-1");
+  });
+
+  it("si la estadía ya salió y después el aviso llega resuelto (lo cerró otro admin), olvida también eso", async () => {
+    const { rerender, unmount } = renderBanner([abierta], true);
+    await cargarYQueYaSalio();
+
+    rerender(
+      <OccupiedRoomAlertBanner
+        alerts={[{ ...abierta, resolved_at: "2026-09-23T15:00:00.000Z", decision: null }]}
+        pricingByRoomId={pricingByRoomId}
+        associatedClients={[]}
+        timezone={TZ}
+        isAdmin
+      />
+    );
+    unmount();
+    expect(guardadoEnLaPestana()).toBe("");
+
+    renderBanner([abierta], true);
+    expect(screen.queryByText("Ya está cargada")).not.toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+  });
+
+  it("lo de la estadía que ya salió no se aplica a otro aviso ni a recepción", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarYQueYaSalio();
+    primera.unmount();
+
+    const otro = renderBanner([alerta({ alert_id: 20 })], true);
+    expect(screen.queryByText("Ya está cargada")).not.toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+    otro.unmount();
+
+    renderBanner([abierta], false);
+    expect(screen.queryByText("Ya está cargada")).not.toBeInTheDocument();
+    expect(screen.getByText("Lo resuelve el administrador")).toBeInTheDocument();
   });
 
   it("cuando el aviso se cierra, la olvida: al volver a armarse ya no ofrece cerrarlo", async () => {
