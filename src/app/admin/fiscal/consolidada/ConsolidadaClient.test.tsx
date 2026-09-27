@@ -2231,12 +2231,23 @@ describe("ConsolidadaClient", () => {
   });
 
   describe("textos del receptor: no prometen guardar en la ficha lo que no se guarda", () => {
-    const PROMESA_VIEJA = /queda guardad|Si la cambiás acá/;
+    // "Se completa" a secas era la trampa del DNI con otro dato: quien corrige acá un CUIT
+    // válido pero equivocado cree que corrigió la ficha, y la próxima vez sale el viejo.
+    const PROMESA_VIEJA = /queda guardad|Si la cambiás acá|se completan?\b/;
 
+    // Lo que hace la mig 125 (aplicada en PROD el 27/09) con la ficha de la empresa: el
+    // CUIT sólo si no tenía uno válido (uno válido no se pisa nunca), la condición y el
+    // domicilio sólo si estaban vacíos, la razón social nunca.
     const TEXTO_EMPRESA =
-      "Se precargan de la ficha. Lo que cargues acá vale para esta factura. En la ficha se completan el CUIT, si no tenía uno válido, y la condición frente al IVA y el domicilio, si estaban vacíos; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios.";
+      "Se precargan de la ficha. Lo que cargues acá vale para esta factura. El CUIT se guarda en la ficha solo si no tenía uno válido: si ya tenía uno válido y escribís otro, el nuevo vale solo para esta factura. La condición frente al IVA y el domicilio se guardan solo si la ficha los tenía vacíos, y la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios.";
     const AVISO_SIN_CONDICION =
-      "La ficha no trae una condición con CUIT: está vacía o dice Consumidor Final. La que elijas vale para esta factura. Si estaba vacía, se guarda en la ficha; si dice Consumidor Final, no: cambiala en Empresas / Convenios.";
+      "La ficha no trae una condición con CUIT: está vacía o dice Consumidor Final. La que elijas vale para esta factura y se guarda en la ficha solo si estaba vacía. Si dice Consumidor Final, la ficha sigue así: para cambiarla, editala en Empresas / Convenios.";
+    // Huésped con CUIT: la RPC completa el CUIT, la condición y el domicilio fiscal sólo
+    // si estaban vacíos (COALESCE): un CUIT que ya está en la ficha no se pisa.
+    const TEXTO_HUESPED_CONDICION =
+      "Sale precargada de la ficha del huésped. La que elijas acá vale para esta factura. Si la ficha no tenía condición y elegís una con CUIT, se guarda en la ficha; si ya tenía una, la ficha sigue igual: para cambiarla, editala en Huéspedes.";
+    const TEXTO_HUESPED =
+      "Se precargan de la ficha. Lo que cargues acá vale para esta factura. El CUIT, la condición frente al IVA y el domicilio fiscal se guardan en la ficha solo si estaban vacíos: si la ficha ya tenía un CUIT y escribís otro, el nuevo vale solo para esta factura. La razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes.";
 
     it("empresa: dice que se completa sólo lo que le faltaba a la ficha, y que la razón social no se guarda", async () => {
       const { container } = renderClient("ficticia");
@@ -2246,6 +2257,23 @@ describe("ConsolidadaClient", () => {
       expect(screen.getByText(TEXTO_EMPRESA)).toBeInTheDocument();
       // La ficha trae su condición: no hay nada que aclarar debajo del select.
       expect(screen.queryByText(AVISO_SIN_CONDICION)).not.toBeInTheDocument();
+    });
+
+    it("empresa con un CUIT válido en la ficha: escribir otro vale solo para esta factura, y la ficha se cambia en Empresas / Convenios", async () => {
+      renderClient("ficticia");
+      await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("30123456781"));
+
+      // Otro CUIT válido, como quien corrige acá uno equivocado de la ficha.
+      fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "20-30123456-3" } });
+      expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563");
+
+      const texto = screen.getByText(TEXTO_EMPRESA);
+      expect(texto.textContent).toContain(
+        "si ya tenía uno válido y escribís otro, el nuevo vale solo para esta factura"
+      );
+      expect(texto.textContent).toContain(
+        "Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios."
+      );
     });
 
     it("empresa con la ficha en Consumidor Final: la condición sale en «Elegí…» y avisa que elegirla acá no cambia la ficha", async () => {
@@ -2289,16 +2317,14 @@ describe("ConsolidadaClient", () => {
       await waitFor(() => expect(screen.getByLabelText("CUIT")).toHaveValue("20301234563"));
 
       expect(container.textContent).not.toMatch(PROMESA_VIEJA);
-      expect(
-        screen.getByText(
-          "Sale precargada de la ficha del huésped. Lo que elijas acá vale para esta factura; si la ficha no tenía condición y elegís una con CUIT, se completa. Para cambiar la de la ficha, editala en Huéspedes."
-        )
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT, condición frente al IVA o domicilio fiscal, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes."
-        )
-      ).toBeInTheDocument();
+      expect(screen.getByText(TEXTO_HUESPED_CONDICION)).toBeInTheDocument();
+      expect(screen.getByText(TEXTO_HUESPED)).toBeInTheDocument();
+
+      // Otro CUIT escrito acá: el de la ficha no cambia, y el texto lo dice.
+      fireEvent.change(screen.getByLabelText("CUIT"), { target: { value: "30123456781" } });
+      expect(screen.getByText(TEXTO_HUESPED).textContent).toContain(
+        "si la ficha ya tenía un CUIT y escribís otro, el nuevo vale solo para esta factura"
+      );
     });
 
     it("huésped consumidor final: dice que no se guarda nada en la ficha", async () => {
@@ -2420,7 +2446,7 @@ describe("ConsolidadaClient", () => {
     });
   });
 
-  describe("después de una factura autorizada, la siguiente del mismo cliente arranca de cero", () => {
+  describe("después de una factura autorizada (o pendiente, o en verificación), la siguiente del mismo cliente arranca de cero", () => {
     beforeEach(() => {
       vi.spyOn(window, "open").mockImplementation(() => null);
       vi.mocked(window.open).mockClear();
@@ -2483,6 +2509,87 @@ describe("ConsolidadaClient", () => {
       expect(campoConcepto()).toHaveValue("Alojamiento");
       // La hab. 1 salió de la selección porque se facturó: no es un aviso.
       expect(screen.queryByText(/de la selección/)).not.toBeInTheDocument();
+    });
+
+    /** Carga la nota, «Un solo concepto» y los textos de las hab. 1 y 2, con la 2 afuera. */
+    const cargarTextos = () => {
+      fireEvent.change(lineaDe("2"), { target: { value: "Salón" } });
+      fireEvent.click(fila("2"));
+      fireEvent.change(lineaDe("1"), { target: { value: "Convención anual" } });
+      fireEvent.change(campoNota(), { target: { value: "Orden de compra 4512" } });
+      fireEvent.click(screen.getByText("Un solo concepto"));
+      fireEvent.change(campoConcepto(), { target: { value: "Servicios de alojamiento" } });
+    };
+
+    // Pendiente o en verificación, la factura ya existe: se autoriza o se reintenta desde
+    // Facturación, no desde acá. Lo cargado era de ella y no pasa a la siguiente.
+    it.each([
+      ["pendiente", "pending", "La factura quedó pendiente"],
+      ["en verificación", "processing", "Todavía no sabemos si ARCA la autorizó"],
+    ])("con la factura %s también arranca de cero: esa factura ya existe y sigue en Facturación", async (_caso, status, titulo) => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), makeRow("r2", "2")]))
+        .mockImplementationOnce(() => lista([facturada("1"), makeRow("r2", "2")]));
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: { status, invoiceId: "inv-9", userMessage: "", count: 1 },
+      });
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+      cargarTextos();
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await screen.findByLabelText(titulo);
+      expect(emitConsolidatedInvoiceAction.mock.calls[0][0]).toMatchObject({
+        conceptoUnico: "Servicios de alojamiento",
+        nota: "Orden de compra 4512",
+      });
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(screen.queryByLabelText("Incluir estadía de habitación 1")).not.toBeInTheDocument()
+      );
+
+      fireEvent.click(fila("2"));
+      expect(screen.getByText("Detallado")).toHaveAttribute("aria-pressed", "true");
+      expect(campoNota()).toHaveValue("");
+      expect(lineaDe("2")).toHaveValue("Hab. 2 - 01/09/2026 al 03/09/2026");
+      fireEvent.click(screen.getByText("Un solo concepto"));
+      expect(campoConcepto()).toHaveValue("Alojamiento");
+    });
+
+    // Rechazada, la factura no salió: se corrige lo que haga falta y se vuelve a emitir con
+    // lo mismo (descartándola antes en Facturación). Borrarle lo cargado obligaría a
+    // escribirlo de nuevo.
+    it("con la factura rechazada, en cambio, queda todo cargado para corregir y reintentar", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), makeRow("r2", "2")]))
+        // En la realidad quedan atadas a la rechazada hasta descartarla en Facturación;
+        // acá la lista vuelve pendiente para poder mirar lo cargado.
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), makeRow("r2", "2")]));
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: {
+          status: "rejected",
+          invoiceId: "inv-9",
+          userMessage: "ARCA rechazó la factura: el receptor no está activo.",
+          count: 1,
+        },
+      });
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+      cargarTextos();
+
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      await screen.findByLabelText("ARCA rechazó la factura");
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+
+      expect(campoNota()).toHaveValue("Orden de compra 4512");
+      expect(campoConcepto()).toHaveValue("Servicios de alojamiento");
+      fireEvent.click(screen.getByText("Detallado"));
+      expect(lineaDe("1")).toHaveValue("Convención anual");
+      fireEvent.click(fila("2"));
+      expect(lineaDe("2")).toHaveValue("Salón");
     });
   });
 

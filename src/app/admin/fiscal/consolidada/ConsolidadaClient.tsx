@@ -1078,21 +1078,24 @@ export default function ConsolidadaClient({
     // Con la emisión en camino la URL pudo pasar a otro cliente: lo de abajo es de la
     // pantalla de este, y no se toca la del otro.
     const mismoCliente = montado.current && clienteUltimaCarga.current === cliente;
+    // Lo que se cargó para esta factura no pasa a la siguiente del mismo cliente: la nota
+    // al pie (una orden de compra, por ejemplo), la forma del detalle y los textos de las
+    // líneas son de cada factura (mig 102). Si no, la segunda salía con la orden de compra
+    // de la primera, y una factura emitida sólo se corrige con nota de crédito.
+    // Se reinicia cuando la factura ya existe: autorizada, pendiente o en verificación (esas
+    // dos se autorizan o se reintentan desde Facturación, no desde acá; lo cargado ya viaja
+    // en ellas). Con la rechazada, no: no salió, y se corrige lo que haga falta y se vuelve
+    // a emitir desde acá con lo mismo (antes se la descarta en Facturación, que es lo que
+    // suelta sus estadías). Con un error de la acción, tampoco (se sale antes, arriba).
+    if (mismoCliente && outcome?.status !== "rejected") {
+      setNota("");
+      setDetalleOverrides({});
+      setConceptoUnicoModo(false);
+      setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
+    }
     if (outcome?.status === "authorized") {
       toast.success(`Factura ${letra} ${outcome.numero ?? ""} emitida (${estadiasTexto(outcome.count)}).`);
       if (outcome.invoiceId) openInvoicePrint(outcome.invoiceId);
-      // Lo que se cargó para esta factura no pasa a la siguiente del mismo cliente: la
-      // nota al pie (una orden de compra, por ejemplo), la forma del detalle y los textos
-      // de las líneas son de cada factura (mig 102). Si no, la segunda salía con la orden
-      // de compra de la primera, y una factura emitida sólo se corrige con nota de
-      // crédito. Sólo con la factura autorizada: con un error o sin autorizar, se
-      // reintenta con lo mismo.
-      if (mismoCliente) {
-        setNota("");
-        setDetalleOverrides({});
-        setConceptoUnicoModo(false);
-        setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
-      }
     } else if (mismoCliente) {
       // Pendiente, en verificación o rechazada: el motivo queda en el aviso fijo de arriba
       // de la lista, con el link a Facturación. Un toast se iba solo a los 4 s.
@@ -1516,13 +1519,15 @@ export default function ConsolidadaClient({
                 <option value="monotributo">Monotributo</option>
                 <option value="exento">IVA Sujeto Exento</option>
               </select>
-              {/* Lo que hace la RPC (mig 103, y la 125 para el CUIT de la empresa): la
-                  condición elegida vale para esta factura, y en la ficha sólo se completa
-                  si no tenía una; consumidor final no guarda nada. */}
+              {/* Lo que hace la RPC con el huésped (mig 103, igual en la 125): la condición
+                  elegida vale para esta factura; con una condición con CUIT, en la ficha se
+                  guarda sólo si no tenía una (COALESCE), y una que ya tenía no se pisa;
+                  consumidor final no guarda nada. */}
               <p className="text-[11px] text-slate-500 mt-1">
-                Sale precargada de la ficha del huésped. Lo que elijas acá vale para esta
-                factura; si la ficha no tenía condición y elegís una con CUIT, se completa. Para
-                cambiar la de la ficha, editala en Huéspedes.
+                Sale precargada de la ficha del huésped. La que elijas acá vale para esta
+                factura. Si la ficha no tenía condición y elegís una con CUIT, se guarda en la
+                ficha; si ya tenía una, la ficha sigue igual: para cambiarla, editala en
+                Huéspedes.
               </p>
             </div>
           )}
@@ -1574,14 +1579,15 @@ export default function ConsolidadaClient({
                   </select>
                   {/* La precarga deja vacía una condición que no sirve para la consolidada:
                       la ficha puede no tener ninguna o decir Consumidor Final (Empresas /
-                      Convenios lo ofrece). La RPC la completa sólo si estaba vacía (COALESCE):
-                      en Consumidor Final queda igual aunque se emita con otra. Se mira la
-                      precarga (`profile`), no lo elegido: habla de la ficha. */}
+                      Convenios lo ofrece). La RPC la guarda sólo si estaba vacía (COALESCE, en
+                      la 103 y en la 125): en Consumidor Final queda igual aunque se emita con
+                      otra. Se mira la precarga (`profile`), no lo elegido: habla de la ficha. */}
                   {!profile?.condicionIva && (
                     <p className="text-[11px] text-amber-700 mt-1">
                       La ficha no trae una condición con CUIT: está vacía o dice Consumidor
-                      Final. La que elijas vale para esta factura. Si estaba vacía, se guarda en
-                      la ficha; si dice Consumidor Final, no: cambiala en Empresas / Convenios.
+                      Final. La que elijas vale para esta factura y se guarda en la ficha solo si
+                      estaba vacía. Si dice Consumidor Final, la ficha sigue así: para cambiarla,
+                      editala en Empresas / Convenios.
                     </p>
                   )}
                 </div>
@@ -1598,14 +1604,20 @@ export default function ConsolidadaClient({
                   className={inputClass}
                 />
               </div>
-              {/* La RPC completa en la ficha sólo lo que le faltaba: la condición y el
-                  domicilio si estaban vacíos, y el CUIT de la empresa si no tenía uno válido
-                  (mig 125; en el huésped, si no tenía). La razón social nunca. Una condición
-                  en Consumidor Final no está vacía: ver el aviso debajo del select. */}
+              {/* Lo que la RPC guarda en la ficha (mig 125, aplicada en PROD el 27/09), dicho
+                  entero para que nadie corrija acá un dato de la ficha creyendo que la
+                  arregla (la trampa del DNI):
+                  · Empresa: el CUIT sólo si la ficha no tenía uno válido; uno válido no se
+                    pisa nunca, y otro escrito acá vale sólo para esta factura. La condición
+                    y el domicilio sólo si estaban vacíos.
+                  · Huésped con CUIT: el CUIT, la condición y el domicilio fiscal sólo si
+                    estaban vacíos (COALESCE): un CUIT que ya tiene no se pisa.
+                  · La razón social nunca. Una condición en Consumidor Final no está vacía:
+                    ver el aviso debajo del select. */}
               <p className="md:col-span-2 text-[11px] text-slate-500">
                 {isCompany
-                  ? "Se precargan de la ficha. Lo que cargues acá vale para esta factura. En la ficha se completan el CUIT, si no tenía uno válido, y la condición frente al IVA y el domicilio, si estaban vacíos; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios."
-                  : "Se precargan de la ficha. Lo que cargues acá vale para esta factura. Si la ficha no tenía CUIT, condición frente al IVA o domicilio fiscal, se completan con lo de acá; la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes."}
+                  ? "Se precargan de la ficha. Lo que cargues acá vale para esta factura. El CUIT se guarda en la ficha solo si no tenía uno válido: si ya tenía uno válido y escribís otro, el nuevo vale solo para esta factura. La condición frente al IVA y el domicilio se guardan solo si la ficha los tenía vacíos, y la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios."
+                  : "Se precargan de la ficha. Lo que cargues acá vale para esta factura. El CUIT, la condición frente al IVA y el domicilio fiscal se guardan en la ficha solo si estaban vacíos: si la ficha ya tenía un CUIT y escribís otro, el nuevo vale solo para esta factura. La razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes."}
               </p>
             </div>
           ) : (
