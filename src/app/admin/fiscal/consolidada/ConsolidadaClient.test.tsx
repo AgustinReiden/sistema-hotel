@@ -2340,9 +2340,10 @@ describe("ConsolidadaClient", () => {
 
   describe("lo que se destilda a mano sigue destildado en cada recarga", () => {
     const tres = () => [makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")];
-    const LINEA_SELECCION = /de la selección/;
+    /** La línea que avisa que la recarga cambió la selección. */
+    const LINEA_SELECCION = /^Al recargar,/;
 
-    it("después de «Recargar» la destildada sigue destildada, y una estadía nueva entra tildada, sin aviso", async () => {
+    it("después de «Recargar» la destildada sigue destildada, y una estadía nueva entra tildada y lo avisa en una línea", async () => {
       loadCcAccountStaysAction
         .mockImplementationOnce(() => lista(tres()))
         .mockImplementationOnce(() => lista([...tres(), makeRow("r4", "4")]));
@@ -2350,13 +2351,52 @@ describe("ConsolidadaClient", () => {
       await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
 
       fireEvent.click(fila("2"));
+      expect(screen.getByLabelText(BARRA).textContent).toContain("2 estadías ·");
       fireEvent.click(screen.getByTitle("Recargar"));
 
       await waitFor(() => expect(filaCheckbox("4")).toBeChecked());
       expect(filaCheckbox("1")).toBeChecked();
       expect(filaCheckbox("2")).not.toBeChecked();
       expect(filaCheckbox("3")).toBeChecked();
-      expect(screen.queryByText(LINEA_SELECCION)).not.toBeInTheDocument();
+      // La selección armada a mano sobrevive a la recarga, y la barra pasa de 2 a 3
+      // estadías sin que nadie tilde nada: se dice en una línea, para no emitir con una
+      // estadía que no estaba en lo que se armó.
+      expect(
+        screen.getByText(
+          "Al recargar, entró a la selección 1 estadía pendiente que no tenías tildada. Revisá lo tildado antes de emitir."
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText(BARRA).textContent).toContain("3 estadías ·");
+    });
+
+    it("si al recargar vuelven a estar pendientes estadías que no estaban tildadas (se descartó su factura rechazada), también lo avisa, junto con las que salieron", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista([...tres(), facturada("4"), facturada("5")]))
+        // Mientras tanto, otra persona facturó la hab. 3, y en Facturación se descartó la
+        // factura rechazada de las hab. 4 y 5, que vuelven a estar pendientes.
+        .mockImplementationOnce(() =>
+          lista([
+            makeRow("r1", "1"),
+            makeRow("r2", "2"),
+            facturada("3"),
+            makeRow("r4", "4"),
+            makeRow("r5", "5"),
+          ])
+        );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+      expect(screen.getByLabelText(BARRA).textContent).toContain("3 estadías ·");
+
+      fireEvent.click(screen.getByTitle("Recargar"));
+
+      expect(
+        await screen.findByText(
+          "Al recargar, 1 estadía que tenías tildada ya no está pendiente y salió de la selección, y entraron a la selección 2 estadías pendientes que no tenías tildadas. Revisá lo tildado antes de emitir."
+        )
+      ).toBeInTheDocument();
+      expect(filaCheckbox("4")).toBeChecked();
+      expect(filaCheckbox("5")).toBeChecked();
+      expect(screen.getByLabelText(BARRA).textContent).toContain("4 estadías ·");
     });
 
     it("después de un error conocido de emisión, la recarga respeta lo destildado", async () => {
@@ -2411,8 +2451,10 @@ describe("ConsolidadaClient", () => {
       fireEvent.click(screen.getByTitle("Recargar"));
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(filaCheckbox("2")).toBeChecked());
+      // La selección quedó igual que antes de recargar: no hay nada que avisar.
+      expect(screen.queryByText(LINEA_SELECCION)).not.toBeInTheDocument();
 
-      // «Deseleccionar todo»: la recarga no vuelve a tildar ninguna, salvo la nueva.
+      // «Deseleccionar todo»: la recarga no vuelve a tildar ninguna, salvo la nueva, y lo dice.
       fireEvent.click(screen.getByLabelText("Seleccionar todas las estadías"));
       expect(filaCheckbox("1")).not.toBeChecked();
       fireEvent.click(screen.getByTitle("Recargar"));
@@ -2420,6 +2462,9 @@ describe("ConsolidadaClient", () => {
       expect(filaCheckbox("1")).not.toBeChecked();
       expect(filaCheckbox("2")).not.toBeChecked();
       expect(filaCheckbox("3")).not.toBeChecked();
+      expect(
+        screen.getByText(/^Al recargar, entró a la selección 1 estadía pendiente que no tenías tildada\./)
+      ).toBeInTheDocument();
     });
 
     it("si al recargar una estadía que estaba tildada ya no está pendiente, lo avisa en una línea", async () => {
@@ -2507,8 +2552,9 @@ describe("ConsolidadaClient", () => {
       expect(lineaDe("2")).toHaveValue("Hab. 2 - 01/09/2026 al 03/09/2026");
       fireEvent.click(screen.getByText("Un solo concepto"));
       expect(campoConcepto()).toHaveValue("Alojamiento");
-      // La hab. 1 salió de la selección porque se facturó: no es un aviso.
-      expect(screen.queryByText(/de la selección/)).not.toBeInTheDocument();
+      // La hab. 1 salió de la selección porque se facturó, y la hab. 2 sigue afuera porque
+      // se la dejó afuera a mano: ninguna de las dos es un aviso.
+      expect(screen.queryByText(/^Al recargar,/)).not.toBeInTheDocument();
     });
 
     /** Carga la nota, «Un solo concepto» y los textos de las hab. 1 y 2, con la 2 afuera. */
@@ -2633,7 +2679,7 @@ describe("ConsolidadaClient", () => {
         "rejected",
         "ARCA rechazó la factura: el receptor no está activo.",
         "ARCA rechazó la factura",
-        "Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar.",
+        "Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y recargá la lista.",
       ],
       [
         "pendiente",
@@ -2649,7 +2695,7 @@ describe("ConsolidadaClient", () => {
         "Todavía no sabemos si ARCA la autorizó",
         null,
       ],
-    ])("factura %s: el motivo queda arriba de la lista con su título y el link a Facturación, hasta cerrarlo", async (_caso, status, motivo, titulo, siguientePaso) => {
+    ])("factura %s: el motivo queda arriba de la lista con su título y el link a Facturación en otra pestaña, hasta cerrarlo", async (_caso, status, motivo, titulo, siguientePaso) => {
       emitConsolidatedInvoiceAction.mockResolvedValueOnce({
         success: true,
         data: { status, invoiceId: "inv-9", userMessage: motivo, count: 1 },
@@ -2666,10 +2712,14 @@ describe("ConsolidadaClient", () => {
       if (siguientePaso) expect(aviso.textContent).toContain(siguientePaso);
       // No afirma algo que no se sabe: en verificación o pendiente pudo salir o salir después.
       expect(aviso.textContent).not.toContain("no quedó autorizada");
-      expect(within(aviso).getByText("Ir a Facturación").closest("a")).toHaveAttribute(
-        "href",
-        "/admin/fiscal"
-      );
+      // Facturación se abre en otra pestaña: en la misma, la consolidada se desmonta y se
+      // pierden lo destildado a mano y lo que quedó cargado para reintentar la rechazada,
+      // que es justo lo que hay que ir a descartar allá.
+      const link = within(aviso).getByText("Abrir Facturación en otra pestaña").closest("a");
+      expect(link).toHaveAttribute("href", "/admin/fiscal");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+      expect(within(aviso).queryByText("Ir a Facturación")).not.toBeInTheDocument();
       expect(toast.warning).not.toHaveBeenCalled();
       expect(window.open).not.toHaveBeenCalled();
       // Se lleva el foco, como el de la emisión incierta: queda a la vista.
@@ -2687,7 +2737,7 @@ describe("ConsolidadaClient", () => {
     });
 
     it.each([
-      ["rejected", "ARCA rechazó la factura", "ARCA rechazó la factura. Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar."],
+      ["rejected", "ARCA rechazó la factura", "ARCA rechazó la factura. Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y recargá la lista."],
       ["processing", "Todavía no sabemos si ARCA la autorizó", "Quedó en verificación: fijate en Facturación en unos minutos."],
       ["pending", AVISO_PENDIENTE, "Revisala en Facturación."],
     ])("sin motivo del emisor, la factura %s dice igual qué hacer", async (status, titulo, texto) => {

@@ -123,6 +123,31 @@ function estadiasTexto(n: number): string {
 }
 
 /**
+ * La línea que avisa que una recarga de la misma lista cambió la selección sola (ver
+ * loadRows). Si entró alguna estadía, pide revisar lo tildado: la barra ahora suma algo
+ * que nadie eligió.
+ */
+function textoCambioDeSeleccion({ salieron, entraron }: { salieron: number; entraron: number }): string {
+  const partes: string[] = [];
+  if (salieron > 0) {
+    partes.push(
+      salieron === 1
+        ? "1 estadía que tenías tildada ya no está pendiente y salió de la selección"
+        : `${salieron} estadías que tenías tildadas ya no están pendientes y salieron de la selección`
+    );
+  }
+  if (entraron > 0) {
+    partes.push(
+      entraron === 1
+        ? "entró a la selección 1 estadía pendiente que no tenías tildada"
+        : `entraron a la selección ${entraron} estadías pendientes que no tenías tildadas`
+    );
+  }
+  const revisar = entraron > 0 ? " Revisá lo tildado antes de emitir." : "";
+  return `Al recargar, ${partes.join(", y ")}.${revisar}`;
+}
+
+/**
  * La emisión volvió sin la factura autorizada: pendiente, en verificación o rechazada. El
  * motivo (`userMessage` del emisor) va al aviso fijo de arriba de la lista, no a un toast
  * que se va solo a los 4 s sin que nadie lo haya leído.
@@ -148,7 +173,9 @@ function avisoSinAutorizar({ status, motivo }: ResultadoSinAutorizar): {
   if (status === "rejected") {
     return {
       titulo: "ARCA rechazó la factura",
-      texto: `${motivo || "ARCA rechazó la factura."} Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar.`,
+      // Facturación se abre en otra pestaña (ver el link del aviso): al volver a esta, la
+      // lista todavía las muestra atadas a la rechazada hasta recargarla.
+      texto: `${motivo || "ARCA rechazó la factura."} Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y recargá la lista.`,
     };
   }
   if (status === "processing") {
@@ -300,8 +327,9 @@ export default function ConsolidadaClient({
   // recarga de la lista vuelve a tildar lo pendiente MENOS estas: antes, una estadía que
   // se dejaba afuera a propósito volvía a entrar sin aviso con «Recargar», con un error
   // de emisión o al cambiar el período. Las nuevas que aparecen entran tildadas, como
-  // siempre. Es un ref porque lo lee `loadRows` y no se pinta; lleva el cliente para que
-  // lo destildado de otro no cuente, sin tener que borrarlo durante el render.
+  // siempre, y una línea lo avisa (ver `cambioDeSeleccion`). Es un ref porque lo lee
+  // `loadRows` y no se pinta; lleva el cliente para que lo destildado de otro no cuente,
+  // sin tener que borrarlo durante el render.
   const destildadas = useRef<{ cliente: string; ids: Set<string> }>({
     cliente: `${preselectKind}:${preselectId}`,
     ids: new Set(),
@@ -310,10 +338,15 @@ export default function ConsolidadaClient({
   const tildadasAntes = useRef<Set<string>>(new Set());
   // Cliente y período de la lista que está a la vista (la última carga que se pintó).
   const listaAplicada = useRef<{ cliente: string; from: string; to: string } | null>(null);
-  // Una recarga de la MISMA lista dejó afuera estadías que estaban tildadas y que nadie
-  // destildó: ya no están pendientes (por ejemplo, otra persona las facturó). Cuántas;
-  // null = no hay aviso.
-  const [salieronDeLaSeleccion, setSalieronDeLaSeleccion] = useState<number | null>(null);
+  // Una recarga de la MISMA lista cambió la selección sin que nadie tildara ni destildara:
+  // `salieron`, estadías tildadas que ya no están pendientes (por ejemplo, otra persona las
+  // facturó); `entraron`, estadías pendientes que no estaban tildadas y entraron tildadas
+  // (una estadía nueva, o las de una factura rechazada que se descartó en Facturación).
+  // Cuántas de cada una; null = no hay aviso.
+  const [cambioDeSeleccion, setCambioDeSeleccion] = useState<{
+    salieron: number;
+    entraron: number;
+  } | null>(null);
   // Anti doble click de la emisión: el ref corta aunque el segundo click llegue antes
   // del render que deshabilita el botón.
   const emisionEnCurso = useRef(false);
@@ -475,7 +508,7 @@ export default function ConsolidadaClient({
         setRows([]);
         setPicked(new Set());
         setErrorCarga(true);
-        setSalieronDeLaSeleccion(null);
+        setCambioDeSeleccion(null);
         listaAplicada.current = null;
         return false;
       }
@@ -492,7 +525,7 @@ export default function ConsolidadaClient({
       if (sinTildarEnLaProximaCarga.current) {
         sinTildarEnLaProximaCarga.current = false;
         setPicked(new Set());
-        setSalieronDeLaSeleccion(null);
+        setCambioDeSeleccion(null);
       } else {
         const aMano = destildadas.current.cliente === cliente ? destildadas.current.ids : null;
         const tildadas = new Set(
@@ -500,10 +533,14 @@ export default function ConsolidadaClient({
             .filter((r) => r.facturable && !aMano?.has(r.reservation_id))
             .map((r) => r.reservation_id)
         );
-        // Con la misma lista (cliente y período) que estaba a la vista, una estadía que
-        // estaba tildada y ya no queda tildada, sin que nadie la destilde, dejó de estar
-        // pendiente: la selección cambió sola y se avisa en una línea. Con otro período no:
-        // ahí las que quedan afuera las deja afuera el período, y lo dice el contador.
+        // Con la misma lista (cliente y período) que estaba a la vista, la selección cambia
+        // sola en dos casos, y se avisa en una línea: una estadía que estaba tildada y ya
+        // no queda tildada, sin que nadie la destilde, dejó de estar pendiente; y una
+        // pendiente que no estaba tildada entra tildada (una nueva, o una que se liberó).
+        // La segunda importa tanto como la primera: la selección armada a mano sobrevive a
+        // la recarga y se confía en ella, y una estadía que entra sola iría en la factura
+        // sin que nadie la haya elegido. Con otro período no: ahí lo que entra y sale lo
+        // decide el período, y lo dice el contador.
         const anterior = listaAplicada.current;
         const mismaLista =
           anterior !== null &&
@@ -511,13 +548,15 @@ export default function ConsolidadaClient({
           anterior.from === from &&
           anterior.to === to;
         const esperadas = new Set(opciones?.yaFacturadas ?? []);
+        const antes = tildadasAntes.current;
         const salieron = mismaLista
-          ? [...tildadasAntes.current].filter(
+          ? [...antes].filter(
               (rid) => !tildadas.has(rid) && !aMano?.has(rid) && !esperadas.has(rid)
             ).length
           : 0;
+        const entraron = mismaLista ? [...tildadas].filter((rid) => !antes.has(rid)).length : 0;
         setPicked(tildadas);
-        setSalieronDeLaSeleccion(salieron > 0 ? salieron : null);
+        setCambioDeSeleccion(salieron > 0 || entraron > 0 ? { salieron, entraron } : null);
       }
       listaAplicada.current = { cliente, from, to };
       return true;
@@ -573,12 +612,12 @@ export default function ConsolidadaClient({
     setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
     // Un cuadro de revisión abierto era del cliente anterior, y el aviso de emisión
     // incierta habla de su lista (lo mismo el de una factura sin autorizar y el de lo que
-    // salió de la selección). Lo destildado a mano también era de él: `destildadas` lleva
+    // cambió en la selección). Lo destildado a mano también era de él: `destildadas` lleva
     // el cliente y deja de contar sola.
     setRevisando(false);
     setEmisionIncierta(null);
     setResultadoSinAutorizar(null);
-    setSalieronDeLaSeleccion(null);
+    setCambioDeSeleccion(null);
     setFichaAlRevisar(null);
   }
 
@@ -639,6 +678,8 @@ export default function ConsolidadaClient({
     /** Con la lista cargando, el de la emisión incierta todavía no concluyó nada. */
     cerrable: boolean;
     cerrar: () => void;
+    /** El link a Facturación abre otra pestaña y deja esta como está. */
+    facturacionEnOtraPestana: boolean;
   } | null =
     textoIncierto !== null
       ? {
@@ -647,6 +688,7 @@ export default function ConsolidadaClient({
           texto: textoIncierto,
           cerrable: !loading,
           cerrar: () => setEmisionIncierta(null),
+          facturacionEnOtraPestana: false,
         }
       : sinAutorizar !== null
         ? {
@@ -657,6 +699,11 @@ export default function ConsolidadaClient({
             texto: sinAutorizar.texto,
             cerrable: true,
             cerrar: () => setResultadoSinAutorizar(null),
+            // El aviso manda a Facturación (a descartar la rechazada, a reintentar la
+            // pendiente) y a volver acá. En la misma pestaña la consolidada se desmonta: se
+            // pierden lo destildado a mano, que al volver entra tildado sin aviso, y lo que
+            // la rechazada deja cargado para reintentar. Como Huéspedes, en otra pestaña.
+            facturacionEnOtraPestana: true,
           }
         : null;
 
@@ -1170,9 +1217,20 @@ export default function ConsolidadaClient({
             )}
             <p className="text-sm font-semibold text-rose-800">{avisoFijo.texto}</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
-              <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
-                Ir a Facturación
-              </Link>
+              {avisoFijo.facturacionEnOtraPestana ? (
+                <Link
+                  href="/admin/fiscal"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-700 hover:underline"
+                >
+                  Abrir Facturación en otra pestaña
+                </Link>
+              ) : (
+                <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
+                  Ir a Facturación
+                </Link>
+              )}
               {/* Con la lista cargando, el aviso de la emisión incierta todavía no dice en
                   qué quedó cada estadía: cerrado ahí, esa conclusión no se vería nunca, y
                   el toast que sale al terminar la recarga manda a leerlo. */}
@@ -1231,13 +1289,12 @@ export default function ConsolidadaClient({
           </div>
 
           {/* La recarga respeta lo destildado a mano; si igual cambió la selección (una
-              estadía tildada dejó de estar pendiente), se dice acá. */}
-          {salieronDeLaSeleccion !== null && !loading && (
+              estadía tildada dejó de estar pendiente, o una pendiente entró tildada), se
+              dice acá. */}
+          {cambioDeSeleccion !== null && !loading && (
             <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
               <AlertTriangle size={13} className="shrink-0" />
-              {salieronDeLaSeleccion === 1
-                ? "Al recargar, 1 estadía que tenías tildada ya no está pendiente y salió de la selección."
-                : `Al recargar, ${salieronDeLaSeleccion} estadías que tenías tildadas ya no están pendientes y salieron de la selección.`}
+              {textoCambioDeSeleccion(cambioDeSeleccion)}
             </p>
           )}
 
