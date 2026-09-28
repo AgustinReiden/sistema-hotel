@@ -489,7 +489,12 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
 
               <button
                 type="button"
-                onClick={() => void emitPending()}
+                onClick={(e) => {
+                  // Un doble click en «Volver a la factura» pinta esta pantalla con el primer
+                  // click y el segundo puede caer acá: ese no emite (Enter/espacio = detail 0).
+                  if (e.detail > 1) return;
+                  void emitPending();
+                }}
                 disabled={pending.tipo === "B" && dniConocido && !dniSirve}
                 className="w-full mt-4 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-lg font-black rounded-2xl transition-colors"
               >

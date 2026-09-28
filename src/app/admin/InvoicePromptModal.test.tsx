@@ -106,6 +106,26 @@ describe("InvoicePromptModal: salir sin decidir", () => {
     expect(screen.getByText("¿A quién se le factura?")).toBeTruthy();
   });
 
+  it("«Volver a la factura» con doble click no emite: el segundo click cae en «Confirmar y emitir» y se ignora", async () => {
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: true,
+      data: { status: "authorized", userMessage: "Factura emitida.", invoiceId: "inv-1" },
+    });
+    abrir(datos());
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(screen.getByText("Consumidor Final"));
+    fireEvent.click(screen.getByText("Continuar"));
+
+    fireEvent.click(screen.getByLabelText("Cerrar"));
+    fireEvent.click(screen.getByText("Volver a la factura"), { detail: 1 });
+    fireEvent.click(screen.getByText("Confirmar y emitir"), { detail: 2 });
+
+    expect(H.emitInvoiceForReservationAction).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Confirmar y emitir"), { detail: 1 });
+    await waitFor(() => expect(H.emitInvoiceForReservationAction).toHaveBeenCalledTimes(1));
+  });
+
   it("en la pregunta de salir no hay X: un doble click no cierra sin querer", () => {
     const { onClose } = abrir(datos());
 

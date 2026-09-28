@@ -28,6 +28,7 @@ import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
 import { openPrintWindow } from "@/lib/print-window";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import { isBankPaymentMethod } from "@/lib/billing";
+import { formatAmount } from "@/lib/format";
 import type {
   AssociatedClient,
   CheckInPassengerInput,
@@ -141,7 +142,7 @@ type Confirmacion = "checkin" | "mantenimiento" | "lista" | "medioDia";
 
 /** La acción salió y no volvió respuesta (red cortada): puede haberse hecho o no. */
 const AVISO_INCIERTO =
-  "No sabemos si se hizo: esperá a que Hoy se actualice y revisá la tarjeta antes de repetirlo.";
+  "No sabemos si se hizo: esperá a que Hoy se actualice (o recargá la página con F5) y revisá la tarjeta antes de repetirlo.";
 
 /**
  * Lo que un check-out saca recién con la respuesta: el papel (el remito de lo fiado,
@@ -709,7 +710,9 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         return {
           pregunta: `¿Seguro? Vas a cobrar medio día a ${room.client ?? "la reserva"} en ${hab}.`,
           detalle:
-            "Se cobra el precio de medio día y la salida pasa al horario de late check-out. Se aplica una vez por reserva.",
+            `Se cobra ${
+              room.halfDayPrice > 0 ? `${formatAmount(room.halfDayPrice)} de medio día` : "el precio de medio día"
+            } y la salida pasa al horario de late check-out. Se aplica una vez por reserva.`,
           boton: "Sí, cobrar medio día",
           accion: onLateCheckout,
         };

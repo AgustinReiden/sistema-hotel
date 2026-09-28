@@ -219,7 +219,7 @@ function abrir(room: Room, opciones: Opciones = {}) {
 }
 
 const AVISO_INCIERTO =
-  "No sabemos si se hizo: esperá a que Hoy se actualice y revisá la tarjeta antes de repetirlo.";
+  "No sabemos si se hizo: esperá a que Hoy se actualice (o recargá la página con F5) y revisá la tarjeta antes de repetirlo.";
 
 /** El renglón que suma el aviso en un check-out: nombra solo lo que no llegó a salir. */
 const RENGLON = {
@@ -826,6 +826,8 @@ describe("RoomCard: confirmar antes de actuar", () => {
     expect(
       screen.getByText("¿Seguro? Vas a cobrar medio día a Juan Prueba en la Hab. 4.")
     ).toBeTruthy();
+    // Antes de confirmar se ve cuánto se cobra (halfDayPrice = 40000 en la tarjeta de prueba).
+    expect(screen.getByText(/Se cobra \$40\.000,00 de medio día/)).toBeTruthy();
     expect(H.handleLateCheckOut).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("Volver"));
