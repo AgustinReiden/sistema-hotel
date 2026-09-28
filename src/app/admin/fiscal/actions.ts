@@ -130,7 +130,8 @@ export async function fixReservationDniAction(
       return {
         success: false,
         code: parsed.code,
-        error: "Esta estadía ya tiene la factura emitida: el DNI ya no se puede cambiar.",
+        error:
+          "Esta estadía tiene o tuvo una factura emitida: el DNI no se puede cambiar desde acá. Si la anulaste con nota de crédito, pedile al administrador que lo revise.",
       };
     }
     return { success: false, error: parsed.error, code: parsed.code };

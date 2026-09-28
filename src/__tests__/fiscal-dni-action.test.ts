@@ -87,7 +87,7 @@ describe("fixReservationDniAction", () => {
     expect(H.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("ya facturada (P0020): avisa que el DNI de una factura emitida no se cambia", async () => {
+  it("ya facturada o anulada (P0020): no afirma que la factura sigue vigente", async () => {
     H.fixReservationDniForInvoice.mockRejectedValue(
       rpcError(
         "P0020",
@@ -100,7 +100,9 @@ describe("fixReservationDniAction", () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.code).toBe("P0020");
-    expect(result.error).toContain("ya tiene la factura emitida");
+    expect(result.error).toContain("tiene o tuvo una factura emitida");
+    expect(result.error).toContain("nota de crédito");
+    expect(result.error).not.toContain("ya tiene la factura emitida");
   });
 
   it("un DNI que la base no acepta (P0022) devuelve el texto nuevo, no «en la reserva»", async () => {
