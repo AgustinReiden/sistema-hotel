@@ -85,6 +85,12 @@ function openInvoicePrint(invoiceId: string) {
  * con nota de crédito y quedan los dos papeles. Mirar antes de emitir cuesta un clic;
  * el par factura+NC cuesta una explicación al contador.
  *
+ * SALIR SIN DECIDIR SE PREGUNTA. Después del check-out, la X (y el "Cancelar" del
+ * tipo cuando no hay SÍ/NO) no cierra de una: pregunta "¿Salir sin facturar?". Si
+ * sale, no se registra el "no facturar": la estadía le queda al administrador en
+ * Por facturar, y recepción ya no la ve. En /admin/fiscal y en Control (startAtTipo)
+ * el que factura es el admin, que la sigue viendo en la lista: ahí la X cierra directo.
+ *
  * El estado se inicializa desde `data` en el montaje; el padre pasa `key` (el
  * reservationId) para que se remonte fresco cada vez que abre un prompt nuevo.
  */
@@ -95,6 +101,8 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const [step, setStep] = useState<InvoiceStep>(() =>
     initialInvoiceStep({ startAtTipo, mandatory, prefillComplete })
   );
+  /** Dónde estaba cuando pidió salir: "Volver a la factura" lo deja como estaba. */
+  const [stepAntesDeSalir, setStepAntesDeSalir] = useState<InvoiceStep>(step);
   const [emitting, setEmitting] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupFuente, setLookupFuente] = useState<string | null>(null);
@@ -132,6 +140,20 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const dniConocido = data.clientDni !== undefined && data.clientDni !== null;
   const dniSirve = dniDigits.length === 7 || dniDigits.length === 8;
 
+  /**
+   * La X y el "Cancelar" sin a dónde volver. Con startAtTipo cierra directo, como
+   * siempre. Después del check-out pregunta antes: cerrar ahí deja la estadía sin
+   * facturar y fuera de la pantalla de recepción.
+   */
+  const pedirCierre = () => {
+    if (startAtTipo) {
+      onClose();
+      return;
+    }
+    setStepAntesDeSalir(step);
+    setStep("confirmSalir");
+  };
+
   const handleOutcome = (outcome: EmitInvoiceOutcome) => {
     if (outcome.status === "authorized") {
       // Cubre tanto la emisión nueva como el caso "ya estaba facturada" (reimprime).
@@ -158,7 +180,27 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const emitPending = async () => {
     if (emitting || !pending) return; // anti doble click
     setEmitting(true);
-    const result = await emitInvoiceForReservationAction(data.reservationId, pending);
+    let result: Awaited<ReturnType<typeof emitInvoiceForReservationAction>>;
+    try {
+      result = await emitInvoiceForReservationAction(data.reservationId, pending);
+    } catch {
+      // No volvió respuesta (red cortada, o el servidor no contestó mientras esperaba
+      // a ARCA): pudo haber salido o no. Se avisa y se cierra igual. Trabado en
+      // "Emitiendo…" no había salida, y el recibo del check-out espera este cierre.
+      // Si salió, tampoco se imprimió (no volvió el id): recepción le avisa al admin,
+      // que la ve en Facturación. El aviso no se va solo: en el check-out sale junto
+      // con el recibo, que abre otra ventana encima.
+      setEmitting(false);
+      toast.warning("No sabemos si la factura salió porque se cortó la comunicación.", {
+        description: startAtTipo
+          ? "Antes de volver a emitirla, fijate en Facturación si quedó emitida, pendiente o rechazada."
+          : "Avisale al administrador para que la revise en Facturación: si salió, no se imprimió y la reimprime desde ahí; si no salió, la emite él.",
+        duration: Infinity,
+        action: { label: "Entendido", onClick: () => {} },
+      });
+      onClose();
+      return;
+    }
     setEmitting(false);
 
     if (!result.success) {
@@ -171,15 +213,26 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
 
   /**
    * "No facturar" queda REGISTRADO (mig 80): el playero no puede cambiarlo después,
-   * sólo el administrador. Por eso se confirma antes. Si el registro falla, igual
-   * se cierra: el check-out ya está hecho y no se traba por esto.
+   * sólo el administrador. Por eso se confirma antes. Si el registro falla, o no
+   * vuelve respuesta, igual se cierra: el check-out ya está hecho y no se traba por
+   * esto (y el recibo del check-out espera este cierre).
    */
   const confirmNo = async () => {
     if (emitting) return;
     setEmitting(true);
-    const result = await declineInvoiceAction(data.reservationId);
+    try {
+      const result = await declineInvoiceAction(data.reservationId);
+      if (!result.success) toast.error(result.error);
+    } catch {
+      toast.warning(
+        "No sabemos si quedó registrado el «no facturar» porque se cortó la comunicación.",
+        {
+          description: "Si no quedó, la estadía le queda al administrador en Por facturar.",
+          duration: 12000,
+        }
+      );
+    }
     setEmitting(false);
-    if (!result.success) toast.error(result.error);
     onClose();
   };
 
@@ -258,7 +311,9 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       ? "Datos de facturación"
       : step === "confirmar"
         ? "Revisá antes de emitir"
-        : "¿Emitir factura?";
+        : step === "confirmSalir"
+          ? "¿Salir sin facturar?"
+          : "¿Emitir factura?";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
@@ -275,8 +330,15 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               </p>
             </div>
           </div>
-          {!emitting && (
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          {/* En "¿Salir sin facturar?" no hay X: está en el mismo lugar, y un doble
+              click la cerraría sin haber leído la pregunta. */}
+          {!emitting && step !== "confirmSalir" && (
+            <button
+              type="button"
+              aria-label="Cerrar"
+              onClick={pedirCierre}
+              className="text-slate-400 hover:text-slate-600"
+            >
               <X size={24} />
             </button>
           )}
@@ -339,6 +401,38 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 </button>
               </div>
             </>
+          ) : step === "confirmSalir" ? (
+            // Salir sin decidir: no se registra nada. La estadía queda en Por
+            // facturar para el admin (también si se cobró por medio bancario).
+            <>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-1.5">
+                <p className="text-sm font-bold text-amber-900">
+                  Queda pendiente para el administrador. Vos ya no la vas a ver en tu pantalla.
+                </p>
+                {mandatory && (
+                  <p className="text-xs font-semibold text-amber-800">
+                    Se cobró por medio bancario: la factura se tiene que emitir igual.
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setStep(stepAntesDeSalir)}
+                  className="py-5 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-black rounded-2xl transition-colors"
+                >
+                  Volver a la factura
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="py-5 border-2 border-slate-200 text-slate-600 hover:bg-slate-50 text-base font-black rounded-2xl transition-colors"
+                >
+                  Salir sin facturar
+                </button>
+              </div>
+            </>
           ) : step === "confirmar" && pending ? (
             // La última pantalla antes de ARCA: dice LETRA, NOMBRE, DOCUMENTO y TOTAL.
             // Lo que se lee acá es exactamente lo que se imprime.
@@ -395,7 +489,12 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
 
               <button
                 type="button"
-                onClick={() => void emitPending()}
+                onClick={(e) => {
+                  // Un doble click en «Volver a la factura» pinta esta pantalla con el primer
+                  // click y el segundo puede caer acá: ese no emite (Enter/espacio = detail 0).
+                  if (e.detail > 1) return;
+                  void emitPending();
+                }}
                 disabled={pending.tipo === "B" && dniConocido && !dniSirve}
                 className="w-full mt-4 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-lg font-black rounded-2xl transition-colors"
               >
@@ -459,12 +558,13 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                   </div>
                 </button>
               </div>
-              {/* Con pago bancario no hay a dónde volver: el SÍ/NO no existe. */}
+              {/* Con pago bancario no hay a dónde volver: el SÍ/NO no existe. Ahí
+                  "Cancelar" es salir, y después del check-out se pregunta antes. */}
               <button
                 type="button"
                 onClick={() => {
                   if (prefillComplete && pending) setStep("confirmar");
-                  else if (startAtTipo || mandatory) onClose();
+                  else if (startAtTipo || mandatory) pedirCierre();
                   else setStep("ask");
                 }}
                 className="mt-4 flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-600"

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { BedDouble, Clock, Pencil, Plus, Replace } from "lucide-react";
+import { useId, useRef, useState, useTransition } from "react";
+import { AlertTriangle, BedDouble, Clock, Pencil, Plus, Replace } from "lucide-react";
 import { toast } from "sonner";
 
 import WalkInModal from "./WalkInModal";
@@ -28,6 +28,7 @@ import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
 import { openPrintWindow } from "@/lib/print-window";
 import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import { isBankPaymentMethod } from "@/lib/billing";
+import { formatAmount } from "@/lib/format";
 import type {
   AssociatedClient,
   CheckInPassengerInput,
@@ -94,15 +95,120 @@ function openAccountVoucher(movementId: string): boolean {
   return openPrintWindow(`/admin/comprobante-cc/${movementId}?autoprint=1`, "comprobante-" + movementId);
 }
 
-/** Check-out fiado cuyo remito no salió: el cargo ya está, falta el papel. */
-type RemitoBloqueado = { movementId: string; holder: string };
+/** Recibo del cobro del check-out (original; el duplicado lo encadena la página). */
+function openStayReceipt(paymentId: string): boolean {
+  return openPrintWindow(`/admin/recibo/${paymentId}?autoprint=1&copy=original`, "recibo-" + paymentId);
+}
+
+/**
+ * Un papel que sale después del check-out: el remito de lo fiado (lo firma el
+ * pasajero) o el recibo del cobro. Ya quedó asentado en la base; falta imprimirlo.
+ */
+type Impreso =
+  | { tipo: "remito"; movementId: string; holder: string }
+  | { tipo: "recibo"; paymentId: string };
+
+/** Abre el impreso. false = el navegador bloqueó la ventana. */
+function abrirImpreso(impreso: Impreso): boolean {
+  return impreso.tipo === "remito"
+    ? openAccountVoucher(impreso.movementId)
+    : openStayReceipt(impreso.paymentId);
+}
+
+function claveImpreso(impreso: Impreso): string {
+  return impreso.tipo === "remito" ? `remito-${impreso.movementId}` : `recibo-${impreso.paymentId}`;
+}
+
+/** Qué dice PrintBlockedModal según el papel que falta. */
+function textosImpresoBloqueado(impreso: Impreso) {
+  if (impreso.tipo === "remito") {
+    return {
+      titulo: `El check-out quedó hecho y la estadía quedó a cuenta de ${impreso.holder}.`,
+      detalle:
+        "Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente (solapa Movimientos).",
+      botonLabel: "Imprimir remito",
+    };
+  }
+  return {
+    titulo: "El check-out quedó hecho y el pago quedó registrado.",
+    detalle:
+      "Falta el recibo: el navegador bloqueó la ventana. Apretá «Imprimir recibo» para que salga. Si lo cerrás sin imprimir, no hay otro lugar desde donde imprimirlo.",
+    botonLabel: "Imprimir recibo",
+  };
+}
+
+/** Acciones de la tarjeta que se confirman antes: se aprietan de pasada y no tienen vuelta fácil. */
+type Confirmacion = "checkin" | "mantenimiento" | "lista" | "medioDia";
+
+/** La acción salió y no volvió respuesta (red cortada): puede haberse hecho o no. */
+const AVISO_INCIERTO =
+  "No sabemos si se hizo: esperá a que Hoy se actualice (o recargá la página con F5) y revisá la tarjeta antes de repetirlo.";
+
+/**
+ * Lo que un check-out saca recién con la respuesta: el papel (el remito de lo fiado,
+ * el recibo del cobro, o ninguno si no hubo cobro) y la pregunta de factura (solo si
+ * correspondía: no con fiscal apagado, vale blanco, "no facturar" o la consolidada).
+ */
+type SalidaCheckout = { papel: "remito" | "recibo" | null; pregunta: boolean };
+
+/**
+ * El renglón que suma el aviso cuando lo que no volvió fue un check-out: si entró,
+ * nombra solo lo que ese check-out no llegó a sacar, porque esperaba la respuesta.
+ * Si no iba a salir nada (sin cobro y sin pregunta), no hay renglón.
+ */
+function renglonCheckoutIncierto({ papel, pregunta }: SalidaCheckout): string | null {
+  const entro = "Si la tarjeta ya figura en Limpieza, el check-out entró pero";
+  const porFacturar = "avisale al administrador (la estadía le queda en Por facturar)";
+  if (papel === "remito") {
+    const remito = `${entro} no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero.`;
+    return pregunta ? `${remito} Tampoco salió la pregunta de factura: ${porFacturar}.` : remito;
+  }
+  if (papel === "recibo") {
+    return pregunta
+      ? `${entro} no salieron el recibo ni la pregunta de factura: ${porFacturar}.`
+      : `${entro} no salió el recibo, y no hay otro lugar desde donde imprimirlo.`;
+  }
+  return pregunta ? `${entro} no salió la pregunta de factura: ${porFacturar}.` : null;
+}
+
+/** Qué quedó sin respuesta: en un check-out, el renglón de lo que no salió (si algo faltaba). */
+type AvisoIncierto = { renglon: string | null };
+
+/** Cualquier otra acción de la tarjeta: el aviso va sin renglón. */
+const AVISO_ACCION: AvisoIncierto = { renglon: null };
+
+/**
+ * Ampliar por noches, repetida, vuelve a hacer efecto: suma las noches otra vez (el
+ * medio día, en cambio, no se cobra dos veces). Si no volvió, la tarjeta sigue con la
+ * salida de antes (la respuesta traía la nueva), así que ampliar queda frenado hasta
+ * ver datos nuevos. En main el rechazo rompía la pantalla y la recarga los traía.
+ */
+const AVISO_AMPLIAR: AvisoIncierto = {
+  renglon:
+    "Hasta que la tarjeta muestre otra salida o recargues la página (F5), «Ampliar Reserva» queda frenado: ampliar de nuevo sumaría las noches otra vez.",
+};
+
+/** Lo que mostraba la tarjeta cuando se amplió sin respuesta. */
+type AmpliacionIncierta = { reservationId: string; checkOut: string | null; total: number };
 
 export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, standardCheckOutTime, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
+  /**
+   * Cola de impresión: el recibo y el remito del check-out esperan acá mientras
+   * está la pregunta de factura (abiertos antes, la tapaban) y salen al cerrarla.
+   * Es una ref y no un estado: se vacía de una sola vez al cerrar, aunque el cierre
+   * llegue desde un callback armado en un render anterior.
+   */
+  const colaImpresion = useRef<Impreso[]>([]);
   // Como invoicePrompt, vive acá y no en el PaymentModal: RoomCard no se desmonta con
-  // el revalidate del check-out, así que el aviso del remito no se pierde.
-  const [remitoBloqueado, setRemitoBloqueado] = useState<RemitoBloqueado | null>(null);
+  // el revalidate del check-out, así que el aviso del papel que falta no se pierde.
+  const [impresosBloqueados, setImpresosBloqueados] = useState<Impreso[]>([]);
+  const [confirmacion, setConfirmacion] = useState<Confirmacion | null>(null);
+  const confirmacionTituloId = useId();
+  const [avisoIncierto, setAvisoIncierto] = useState<AvisoIncierto | null>(null);
+  const avisoTituloId = useId();
+  const [ampliacionIncierta, setAmpliacionIncierta] = useState<AmpliacionIncierta | null>(null);
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -132,14 +238,95 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   // marcada. En todo lo demás (también el particular con cuenta) no viene ningún medio.
   const defaultPaymentMethod: PaymentMethod | undefined =
     room.billedToCompany && room.accountCreditEnabled ? "cuenta_corriente" : undefined;
-  /** A nombre de quién queda lo fiado: la empresa de la reserva, o el huésped. */
-  const accountHolderName = reservationCompany?.display_name ?? room.client;
+  /**
+   * A nombre de quién queda lo fiado: la empresa de la reserva, o el huésped. De la
+   * empresa, el nombre de la ficha: es el que imprime el remito, y dos áreas de la
+   * misma empresa son dos cuentas con la misma razón social (mig 94). La lista trae
+   * solo las activas: con la empresa desactivada, el nombre sale del contexto de
+   * facturación de la reserva, que no filtra por activas (sin esto, "Queda a cuenta
+   * de" nombraba al pasajero). Ahí es la razón social si la ficha la tiene.
+   */
+  const accountHolderName =
+    reservationCompany?.display_name ||
+    (room.billedToCompany ? room.invoicePrefill.razonSocial || room.client : room.client);
+
+  const cerrarCuadros = () => {
+    setIsWalkInModalOpen(false);
+    setIsCompanyCheckInOpen(false);
+    setIsPaymentModalOpen(false);
+    setIsExtendModalOpen(false);
+    setIsCheckoutConfirmOpen(false);
+    setIsCancelConfirmOpen(false);
+    setIsExtrasModalOpen(false);
+    setIsChangeRoomModalOpen(false);
+    setIsEditModalOpen(false);
+    setIsEarlyModalOpen(false);
+    setEarlyPreview(null);
+    setCheckoutMode("normal");
+    setConfirmacion(null);
+  };
+
+  // Hoy se actualiza solo. Si la habitación ya muestra otra reserva (o ninguna), los
+  // cuadros abiertos eran de la anterior: cobro, extras, cambio, edición, cancelación,
+  // ampliación, check-in, salida anticipada. Se cierran antes de pintar, así ninguno
+  // confirma con la reserva nueva lo que se abrió para la vieja. Lo que sigue a un
+  // check-out propio (la pregunta de factura, la cola de impresión y el papel que
+  // falta) no está en la lista a propósito: el check-out deja la reserva en null.
+  const [reservaDeLosCuadros, setReservaDeLosCuadros] = useState(room.reservationId);
+  if (room.reservationId !== reservaDeLosCuadros) {
+    setReservaDeLosCuadros(room.reservationId);
+    cerrarCuadros();
+  }
+
+  /** Imprime ya; lo que el navegador bloquea queda en un cuadro con su botón. */
+  const imprimir = (impresos: Impreso[]) => {
+    const bloqueados = impresos.filter((impreso) => !abrirImpreso(impreso));
+    if (bloqueados.length > 0) setImpresosBloqueados((prev) => [...prev, ...bloqueados]);
+  };
+
+  /** Se resolvió la pregunta de factura (emitir, NO o salir): sale lo que esperaba. */
+  const cerrarPreguntaFactura = () => {
+    setInvoicePrompt(null);
+    const pendientes = colaImpresion.current;
+    colaImpresion.current = [];
+    imprimir(pendientes);
+  };
+
+  /** La acción no volvió: los cuadros se cierran (repetirla no es un click) y queda el aviso. */
+  const avisarIncierto = (aviso: AvisoIncierto = AVISO_ACCION) => {
+    cerrarCuadros();
+    setAvisoIncierto(aviso);
+  };
+
+  /**
+   * Corre una acción de la tarjeta en la transición. Si la acción no vuelve (se cortó
+   * la red o el servidor no contestó), la promesa se rechaza, y sin esto el error
+   * salía de la transición y todo Hoy pasaba a la pantalla de error sin decir que la
+   * acción pudo haberse hecho. No se relanza: queda el aviso.
+   */
+  const correr = (accion: () => Promise<void>, aviso: AvisoIncierto = AVISO_ACCION) => {
+    startTransition(async () => {
+      try {
+        await accion();
+      } catch {
+        avisarIncierto(aviso);
+      }
+    });
+  };
 
   const debt = Math.max(0, room.totalPrice - room.paidAmount);
   const isConfirmedArrival = room.hasPendingArrival;
   const isOverdueArrival = isConfirmedArrival && room.arrivalIsOverdue;
   // Cuando el cobro es "salida anticipada", el PaymentModal usa los montos recalculados.
   const early = checkoutMode === "early" ? earlyPreview?.breakdown ?? null : null;
+  // Una ampliación sin respuesta y la tarjeta igual que entonces: ampliar sería a
+  // ciegas. Cualquier dato nuevo (otra salida u otro total) ya muestra lo que hay; la
+  // recarga (F5) también, porque monta la tarjeta de cero.
+  const ampliarFrenado =
+    ampliacionIncierta !== null &&
+    ampliacionIncierta.reservationId === room.reservationId &&
+    ampliacionIncierta.checkOut === room.check_out_target &&
+    ampliacionIncierta.total === room.totalPrice;
 
   // Devuelve el preview de salida anticipada si el huésped se retira antes del día
   // reservado (hay al menos una noche que no va a usar); si no, null.
@@ -171,7 +358,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   const runCheckIn = (passenger?: CheckInPassengerInput) => {
     const reservationId = room.reservationId;
     if (!reservationId) return;
-    startTransition(async () => {
+    correr(async () => {
       const result = await handleCheckIn(reservationId, passenger);
       if (!result.success) {
         toast.error(result.error);
@@ -183,17 +370,18 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   };
 
   // Reserva de empresa: la estadía está a nombre de la empresa hasta que alguien se
-  // presenta. El check-in es el que pregunta quién entra (mig 88).
+  // presenta. El check-in es el que pregunta quién entra (mig 88); ese cuadro ya es
+  // la confirmación. El automático se aprieta de pasada: se confirma antes.
   const onCheckIn = () => {
     if (room.billedToCompany && room.associatedClientId) {
       setIsCompanyCheckInOpen(true);
       return;
     }
-    runCheckIn();
+    setConfirmacion("checkin");
   };
 
   const onSetMaintenance = () => {
-    startTransition(async () => {
+    correr(async () => {
       const result = await handleSetMaintenance(room.id);
       if (!result.success) {
         toast.error(result.error);
@@ -207,7 +395,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const reservationId = room.reservationId;
     if (!reservationId) return;
 
-    startTransition(async () => {
+    correr(async () => {
       const result = await handleLateCheckOut(reservationId);
       if (!result.success) {
         toast.error(result.error);
@@ -321,9 +509,10 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const reservationId = room.reservationId;
     if (!reservationId) return;
     const prompt = buildInvoicePrompt();
+    const pregunta = shouldPromptInvoice() && prompt !== null;
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
-    startTransition(async () => {
+    correr(async () => {
       const result = await runCheckout({ reservationId });
       setIsCheckoutConfirmOpen(false);
 
@@ -337,8 +526,10 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           ? "Salida anticipada realizada."
           : "Check-out realizado correctamente."
       );
-      if (shouldPromptInvoice() && prompt) setInvoicePrompt(prompt);
-    });
+      if (pregunta && prompt) setInvoicePrompt(prompt);
+      // Sin cobro no hay recibo ni remito: si no vuelve, lo único que pudo faltar es
+      // la pregunta de factura, y solo si iba a salir.
+    }, { renglon: renglonCheckoutIncierto({ papel: null, pregunta }) });
   };
 
   const submitCheckoutPayment = async ({
@@ -354,22 +545,44 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const holder = accountHolderName ?? "Desconocido";
 
     const runCheckout = checkoutMode === "early" ? handleEarlyCheckOut : handleCheckOut;
-    const result = await runCheckout({
-      reservationId,
-      paymentAmount: amount,
-      paymentMethod,
-    });
+    let result: Awaited<ReturnType<typeof runCheckout>>;
+    try {
+      result = await runCheckout({
+        reservationId,
+        paymentAmount: amount,
+        paymentMethod,
+      });
+    } catch {
+      // Sin respuesta: el cobro pudo haber entrado. Se cierra el cobro (repetirlo no
+      // es un click) y queda el aviso, con el renglón de lo que no salió: el remito
+      // si se fió (no hay recibo), si no el recibo, y la pregunta solo si iba a salir.
+      avisarIncierto({
+        renglon: renglonCheckoutIncierto({
+          papel: paymentMethod === "cuenta_corriente" ? "remito" : "recibo",
+          pregunta: shouldPromptInvoice(paymentMethod) && prompt !== null,
+        }),
+      });
+      return { success: false as const, error: AVISO_INCIERTO };
+    }
 
     if (result.success) {
       setIsPaymentModalOpen(false);
-      // Cierre a cuenta corriente: imprimir el remito que firma el pasajero. Si el
-      // navegador bloquea la ventana, el cargo ya está hecho y falta el papel: queda
-      // un cuadro con el botón para imprimirlo, que no se va solo.
+      // Los papeles del check-out: el remito de lo fiado (lo firma el pasajero) y el
+      // recibo del cobro. Si sale la pregunta de factura, esperan en la cola hasta
+      // que se resuelve; si no, salen ya. Si el navegador bloquea una ventana, lo
+      // cobrado ya está y falta el papel: queda un cuadro con el botón para imprimirlo.
       const movementId = paymentMethod === "cuenta_corriente" ? result.data?.movementId : null;
-      if (movementId && !openAccountVoucher(movementId)) {
-        setRemitoBloqueado({ movementId, holder });
+      const paymentId = result.data?.paymentId ?? null;
+      const impresos: Impreso[] = [];
+      if (movementId) impresos.push({ tipo: "remito", movementId, holder });
+      if (paymentId) impresos.push({ tipo: "recibo", paymentId });
+
+      if (shouldPromptInvoice(paymentMethod) && prompt) {
+        colaImpresion.current = [...colaImpresion.current, ...impresos];
+        setInvoicePrompt(prompt);
+      } else {
+        imprimir(impresos);
       }
-      if (shouldPromptInvoice(paymentMethod) && prompt) setInvoicePrompt(prompt);
     }
 
     return result;
@@ -379,8 +592,15 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     e.preventDefault();
     const reservationId = room.reservationId;
     if (!reservationId) return;
+    const antes: AmpliacionIncierta = {
+      reservationId,
+      checkOut: room.check_out_target,
+      total: room.totalPrice,
+    };
 
-    startTransition(async () => {
+    correr(async () => {
+      // El medio día no se cobra dos veces (el server lo avisa): sin respuesta, el
+      // aviso de siempre alcanza.
       if (extendMode === "half_day") {
         const result = await handleLateCheckOut(reservationId);
         if (!result.success) {
@@ -396,7 +616,16 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         return;
       }
 
-      const result = await handleExtendReservation(reservationId, extendNights);
+      let result: Awaited<ReturnType<typeof handleExtendReservation>>;
+      try {
+        result = await handleExtendReservation(reservationId, extendNights);
+      } catch {
+        // Sin respuesta: las noches pudieron haber entrado. Se guarda lo que mostraba
+        // la tarjeta para frenar otra ampliación hasta que muestre algo distinto.
+        setAmpliacionIncierta(antes);
+        avisarIncierto(AVISO_AMPLIAR);
+        return;
+      }
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -428,7 +657,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     const reason = cancelReason.trim();
     if (!reservationId || !reason) return;
 
-    startTransition(async () => {
+    correr(async () => {
       const result = await handleCancelReservation(reservationId, reason);
       setIsCancelConfirmOpen(false);
       if (!result.success) {
@@ -441,16 +670,56 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   };
 
   const onMarkAvailable = () => {
-    startTransition(async () => {
+    correr(async () => {
       const result = await handleMarkAvailable(room.id);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
 
-      toast.success("Habitacion marcada como disponible.");
+      toast.success("Habitación marcada como disponible.");
     });
   };
+
+  /** Lo que dice y hace cada confirmación de la tarjeta. */
+  const textosConfirmacion = (tipo: Confirmacion) => {
+    const hab = `la Hab. ${room.number}`;
+    switch (tipo) {
+      case "checkin":
+        return {
+          pregunta: `¿Seguro? Vas a hacer el check-in de ${room.client ?? "la reserva"} en ${hab}.`,
+          detalle: "La habitación pasa a ocupada.",
+          boton: "Sí, hacer el check-in",
+          accion: () => runCheckIn(),
+        };
+      case "mantenimiento":
+        return {
+          pregunta: `¿Seguro? Vas a poner en mantenimiento ${hab}.`,
+          detalle: "Queda fuera de servicio: no se puede alquilar hasta que la marquen disponible.",
+          boton: "Sí, poner en mantenimiento",
+          accion: onSetMaintenance,
+        };
+      case "lista":
+        return {
+          pregunta: `¿Seguro? Vas a marcar lista ${hab}.`,
+          detalle: "Pasa a disponible y se puede alquilar. Confirmalo solo si ya está limpia.",
+          boton: "Sí, marcar lista",
+          accion: onMarkAvailable,
+        };
+      case "medioDia":
+        return {
+          pregunta: `¿Seguro? Vas a cobrar medio día a ${room.client ?? "la reserva"} en ${hab}.`,
+          detalle:
+            `Se cobra ${
+              room.halfDayPrice > 0 ? `${formatAmount(room.halfDayPrice)} de medio día` : "el precio de medio día"
+            } y la salida pasa al horario de late check-out. Se aplica una vez por reserva.`,
+          boton: "Sí, cobrar medio día",
+          accion: onLateCheckout,
+        };
+    }
+  };
+  const confirmacionAbierta = confirmacion ? textosConfirmacion(confirmacion) : null;
+  const impresoBloqueado = impresosBloqueados[0] ?? null;
 
   return (
     <div
@@ -506,7 +775,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         {room.status === "occupied" && (
           <>
             <div>
-              <p className="text-xs text-slate-500 mb-0.5">Huesped</p>
+              <p className="text-xs text-slate-500 mb-0.5">Huésped</p>
               <p className="text-sm font-semibold text-slate-800 truncate">{room.client}</p>
             </div>
 
@@ -533,15 +802,19 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
             <div className="pt-1 flex gap-2">
               {room.canChargeLateCheckout && (
                 <button
-                  onClick={onLateCheckout}
+                  onClick={() => setConfirmacion("medioDia")}
                   disabled={isPending}
                   className="flex-1 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-700 border border-amber-200 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
                 >
-                  Cobrar Medio Dia
+                  Cobrar Medio Día
                 </button>
               )}
               <button
                 onClick={() => {
+                  if (ampliarFrenado) {
+                    setAvisoIncierto(AVISO_AMPLIAR);
+                    return;
+                  }
                   setExtendMode("nights");
                   setExtendNights(1);
                   setIsExtendModalOpen(true);
@@ -684,7 +957,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 </button>
                 {isAdmin && (
                   <button
-                    onClick={onSetMaintenance}
+                    onClick={() => setConfirmacion("mantenimiento")}
                     disabled={isPending}
                     className="w-full text-xs font-bold text-slate-400 hover:text-slate-600 hover:underline transition-colors text-center mt-1"
                   >
@@ -703,7 +976,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
             </p>
             {isAdmin ? (
               <button
-                onClick={onMarkAvailable}
+                onClick={() => setConfirmacion("lista")}
                 disabled={isPending}
                 className="mt-4 w-full bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-sm font-bold transition-colors"
               >
@@ -790,26 +1063,104 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
       <InvoicePromptModal
         key={invoicePrompt?.reservationId ?? "none"}
         data={invoicePrompt}
-        onClose={() => setInvoicePrompt(null)}
+        onClose={cerrarPreguntaFactura}
       />
 
-      {remitoBloqueado && (
+      {/* De a un papel por vez; el key remonta el cuadro para que el foco vuelva al botón. */}
+      {impresoBloqueado && (
         <PrintBlockedModal
-          titulo={`El check-out quedó hecho y la estadía quedó a cuenta de ${remitoBloqueado.holder}.`}
-          detalle="Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente (solapa Movimientos)."
-          botonLabel="Imprimir remito"
+          key={claveImpreso(impresoBloqueado)}
+          {...textosImpresoBloqueado(impresoBloqueado)}
           onPrint={() => {
             // Es un click del usuario: esta vez el navegador la deja abrir.
-            if (openAccountVoucher(remitoBloqueado.movementId)) {
-              setRemitoBloqueado(null);
+            if (abrirImpreso(impresoBloqueado)) {
+              setImpresosBloqueados((prev) => prev.slice(1));
               return;
             }
             toast.error(
               "El navegador volvió a bloquear la ventana. Permití ventanas emergentes para este sitio y volvé a apretar."
             );
           }}
-          onClose={() => setRemitoBloqueado(null)}
+          onClose={() => setImpresosBloqueados((prev) => prev.slice(1))}
         />
+      )}
+
+      {avisoIncierto && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={avisoTituloId}
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-amber-100 rounded-lg shrink-0">
+                <AlertTriangle size={20} className="text-amber-600" />
+              </div>
+              <div>
+                <h2 id={avisoTituloId} className="text-lg font-bold text-slate-800">
+                  Hab. {room.number}: no llegó la respuesta
+                </h2>
+                <p className="text-sm text-slate-600 mt-1">{AVISO_INCIERTO}</p>
+                {avisoIncierto.renglon && (
+                  <p className="text-sm text-slate-600 mt-2">{avisoIncierto.renglon}</p>
+                )}
+              </div>
+            </div>
+            {/* No se va solo: solo con este botón. */}
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setAvisoIncierto(null)}
+              className="w-full px-4 py-2.5 bg-brand-700 text-white font-semibold rounded-xl hover:bg-brand-800"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmacionAbierta && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in text-left">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={confirmacionTituloId}
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-sm overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]"
+          >
+            <h3 id={confirmacionTituloId} className="text-lg font-bold text-slate-800 mb-2">
+              {confirmacionAbierta.pregunta}
+            </h3>
+            <p className="text-sm text-slate-600 mb-6">{confirmacionAbierta.detalle}</p>
+            <div className="flex gap-3 justify-end">
+              {/* El foco arranca en «Volver»: un Enter de pasada no confirma. */}
+              <button
+                type="button"
+                autoFocus
+                className="px-4 py-2 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                onClick={() => setConfirmacion(null)}
+                disabled={isPending}
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-white font-bold bg-brand-700 hover:bg-brand-800 rounded-lg transition-colors disabled:opacity-50"
+                onClick={(e) => {
+                  // El cuadro se pinta con el primer click de un doble click en el botón
+                  // de la tarjeta, y el segundo puede caer justo acá: ese no confirma.
+                  // El Enter o el espacio llegan con detail 0 y un click suelto con 1.
+                  if (e.detail > 1) return;
+                  setConfirmacion(null);
+                  confirmacionAbierta.accion();
+                }}
+                disabled={isPending}
+              >
+                {confirmacionAbierta.boton}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isEarlyModalOpen && earlyPreview && (
@@ -985,7 +1336,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md overflow-y-auto overscroll-contain p-6 relative max-h-[92dvh] sm:max-h-[88dvh]">
             <h3 className="text-xl font-bold text-slate-800 mb-2">Cancelar Reserva</h3>
             <p className="text-sm text-slate-600 mb-4">
-              Indica el motivo de cancelación para la reserva de <strong>{room.client}</strong>. Quedará auditado en la tabla de control.
+              Indicá el motivo de cancelación para la reserva de <strong>{room.client}</strong>. Quedará auditado en la tabla de control.
             </p>
             <label className="block text-sm font-semibold text-slate-700 mb-2" htmlFor={`cancel-reason-${room.id}`}>
               Motivo
