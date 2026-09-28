@@ -2489,6 +2489,81 @@ describe("ConsolidadaClient", () => {
       expect(screen.queryByLabelText("Incluir estadía de habitación 3")).not.toBeInTheDocument();
       expect(screen.getByLabelText(BARRA).textContent).toContain(`1 estadía · Total $${plata(10000)}`);
     });
+
+    /** El aviso del cuadro que nombra las estadías que entraron tildadas solas. */
+    const ENTRARON_SOLAS = "Estadías que entraron solas a esta factura";
+
+    it("una estadía que entró tildada sola al recargar sale nombrada en el cuadro, que es lo último que se lee antes de emitir", async () => {
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista(tres()))
+        // Después del error, la recarga trae la hab. 4: otro pasajero de la misma empresa
+        // hizo el check-out mientras tanto.
+        .mockImplementationOnce(() =>
+          lista([...tres(), makeRow("r4", "4", { desde: "2026-09-10", hasta: "2026-09-12" })])
+        );
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: false,
+        error: "El DNI del huésped no es válido.",
+      });
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+
+      // La hab. 3 se deja afuera a propósito. Sin nada que haya entrado solo, el cuadro no
+      // avisa nada.
+      fireEvent.click(fila("3"));
+      const primero = abrirCuadro();
+      expect(within(primero).queryByLabelText(ENTRARON_SOLAS)).not.toBeInTheDocument();
+      fireEvent.click(await confirmarListo(primero));
+
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(filaCheckbox("4")).toBeChecked());
+      await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      expect(filaCheckbox("3")).not.toBeChecked();
+
+      const cuadro = abrirCuadro();
+      const aviso = within(cuadro).getByLabelText(ENTRARON_SOLAS);
+      expect(aviso.textContent).toContain(
+        "Al recargar la lista, entró a la selección 1 estadía pendiente que no tenías tildada, y va en esta factura:"
+      );
+      expect(aviso.textContent).toContain("Hab. 4 · 10/09/26 → 12/09/26");
+      expect(aviso.textContent).toContain("Si no tiene que ir, tocá «Volver» y destildala en la lista.");
+      // Las que ya estaban tildadas no se nombran.
+      expect(aviso.textContent).not.toContain("Hab. 1");
+      expect(aviso.textContent).not.toContain("Hab. 2");
+      expect(within(cuadro).getByText(/^3 estadías/)).toBeInTheDocument();
+
+      // Destildada, ya no va en la factura: el cuadro deja de nombrarla.
+      fireEvent.click(within(cuadro).getByText("Volver"));
+      fireEvent.click(fila("4"));
+      const otro = abrirCuadro();
+      expect(within(otro).queryByLabelText(ENTRARON_SOLAS)).not.toBeInTheDocument();
+      expect(within(otro).getByText(/^2 estadías/)).toBeInTheDocument();
+      expect(emitConsolidatedInvoiceAction).toHaveBeenCalledTimes(1);
+    });
+
+    it("si entraron varias, el cuadro las nombra a todas, en plural", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(() => lista([makeRow("r1", "1"), facturada("4"), facturada("5")]))
+        .mockImplementationOnce(() =>
+          lista([makeRow("r1", "1"), makeRow("r4", "4"), makeRow("r5", "5")])
+        );
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("1")).toBeChecked());
+
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() => expect(filaCheckbox("5")).toBeChecked());
+
+      const aviso = within(abrirCuadro()).getByLabelText(ENTRARON_SOLAS);
+      expect(aviso.textContent).toContain(
+        "Al recargar la lista, entraron a la selección 2 estadías pendientes que no tenías tildadas, y van en esta factura:"
+      );
+      expect(aviso.textContent).toContain("Hab. 4 ·");
+      expect(aviso.textContent).toContain("Hab. 5 ·");
+      expect(aviso.textContent).toContain(
+        "Si alguna no tiene que ir, tocá «Volver» y destildala en la lista."
+      );
+    });
   });
 
   describe("después de una factura autorizada (o pendiente, o en verificación), la siguiente del mismo cliente arranca de cero", () => {
@@ -2629,6 +2704,9 @@ describe("ConsolidadaClient", () => {
       await screen.findByLabelText("ARCA rechazó la factura");
       await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(botonRevisar()).toBeEnabled());
+      // La recarga que sigue a la emisión no cierra el aviso aunque la lista vuelva
+      // pendiente: el aviso recién sale y tiene que leerse.
+      expect(screen.getByLabelText("ARCA rechazó la factura")).toBeInTheDocument();
 
       expect(campoNota()).toHaveValue("Orden de compra 4512");
       expect(campoConcepto()).toHaveValue("Servicios de alojamiento");
@@ -2679,7 +2757,7 @@ describe("ConsolidadaClient", () => {
         "rejected",
         "ARCA rechazó la factura: el receptor no está activo.",
         "ARCA rechazó la factura",
-        "Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y recargá la lista.",
+        "Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y tocá «Recargar la lista», acá abajo. No recargues la página entera: se pierde lo que dejaste cargado.",
       ],
       [
         "pendiente",
@@ -2720,6 +2798,12 @@ describe("ConsolidadaClient", () => {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
       expect(within(aviso).queryByText("Ir a Facturación")).not.toBeInTheDocument();
+      // «Recargar la lista» va sólo en la rechazada, que es la que manda a volver y recargar.
+      if (status === "rejected") {
+        expect(within(aviso).getByText("Recargar la lista").closest("button")).toBeInTheDocument();
+      } else {
+        expect(within(aviso).queryByText("Recargar la lista")).not.toBeInTheDocument();
+      }
       expect(toast.warning).not.toHaveBeenCalled();
       expect(window.open).not.toHaveBeenCalled();
       // Se lleva el foco, como el de la emisión incierta: queda a la vista.
@@ -2737,7 +2821,7 @@ describe("ConsolidadaClient", () => {
     });
 
     it.each([
-      ["rejected", "ARCA rechazó la factura", "ARCA rechazó la factura. Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y recargá la lista."],
+      ["rejected", "ARCA rechazó la factura", "ARCA rechazó la factura. Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y tocá «Recargar la lista», acá abajo. No recargues la página entera: se pierde lo que dejaste cargado."],
       ["processing", "Todavía no sabemos si ARCA la autorizó", "Quedó en verificación: fijate en Facturación en unos minutos."],
       ["pending", AVISO_PENDIENTE, "Revisala en Facturación."],
     ])("sin motivo del emisor, la factura %s dice igual qué hacer", async (status, titulo, texto) => {
@@ -2752,6 +2836,101 @@ describe("ConsolidadaClient", () => {
 
       const aviso = await screen.findByLabelText(titulo);
       expect(within(aviso).getByText(texto)).toBeInTheDocument();
+    });
+
+    /** Tres estadías; la hab. 3 se deja afuera a mano y se emiten la 1 y la 2, rechazada. */
+    const emitirRechazada = async () => {
+      vi.mocked(toast.info).mockClear();
+      emitConsolidatedInvoiceAction.mockResolvedValueOnce({
+        success: true,
+        data: {
+          status: "rejected",
+          invoiceId: "inv-9",
+          userMessage: "ARCA rechazó la factura: el receptor no está activo.",
+          count: 2,
+        },
+      });
+      renderClient();
+      await waitFor(() => expect(filaCheckbox("3")).toBeChecked());
+      fireEvent.click(fila("3"));
+      fireEvent.change(campoNota(), { target: { value: "Orden de compra 4512" } });
+      fireEvent.click(await confirmarListo(abrirCuadro()));
+      const aviso = await screen.findByLabelText("ARCA rechazó la factura");
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(within(aviso).getByText("Recargar la lista").closest("button")).toBeEnabled()
+      );
+      return aviso;
+    };
+    const tresPendientes = () => lista([makeRow("r1", "1"), makeRow("r2", "2"), makeRow("r3", "3")]);
+    /** Las hab. 1 y 2 atadas a la rechazada («Factura en proceso»); la 3, pendiente. */
+    const atadasALaRechazada = () => lista([facturada("1"), facturada("2"), makeRow("r3", "3")]);
+
+    it("rechazada: «Recargar la lista» del aviso recarga sin perder lo cargado, y cierra el aviso cuando las estadías vuelven a estar pendientes", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(tresPendientes)
+        .mockImplementationOnce(atadasALaRechazada)
+        // Todavía no se la descartó en Facturación.
+        .mockImplementationOnce(atadasALaRechazada)
+        // Ya se la descartó: vuelven a estar pendientes.
+        .mockImplementationOnce(tresPendientes);
+      const aviso = await emitirRechazada();
+
+      // El texto nombra el botón que está en el aviso y dice que recargar la página
+      // entera (F5, o tirar la pantalla para abajo en el celular) pierde lo cargado.
+      expect(aviso.textContent).toContain("tocá «Recargar la lista», acá abajo");
+      expect(aviso.textContent).toContain(
+        "No recargues la página entera: se pierde lo que dejaste cargado."
+      );
+
+      // Todavía atadas a la rechazada: el aviso sigue y un toast dice qué falta.
+      fireEvent.click(within(aviso).getByText("Recargar la lista"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+      await waitFor(() =>
+        expect(toast.info).toHaveBeenCalledWith(
+          "Las estadías de la factura rechazada todavía no aparecen pendientes. Descartala en Facturación y volvé a tocar «Recargar la lista»."
+        )
+      );
+      const sigue = screen.getByLabelText("ARCA rechazó la factura");
+      await waitFor(() =>
+        expect(within(sigue).getByText("Recargar la lista").closest("button")).toBeEnabled()
+      );
+
+      // Descartada: la recarga las trae pendientes y el aviso, que decía que no se podían
+      // volver a facturar, se cierra solo.
+      fireEvent.click(within(sigue).getByText("Recargar la lista"));
+      await waitFor(() =>
+        expect(screen.queryByLabelText("ARCA rechazó la factura")).not.toBeInTheDocument()
+      );
+      expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(4);
+      expect(toast.info).toHaveBeenCalledTimes(1);
+      // Lo cargado sigue: la dejada afuera a mano, afuera; la nota, escrita.
+      expect(filaCheckbox("1")).toBeChecked();
+      expect(filaCheckbox("2")).toBeChecked();
+      expect(filaCheckbox("3")).not.toBeChecked();
+      expect(campoNota()).toHaveValue("Orden de compra 4512");
+    });
+
+    it("rechazada: recargar con el botón de «Estadías de la cuenta» también cierra el aviso cuando las estadías vuelven a estar pendientes", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(tresPendientes)
+        .mockImplementationOnce(atadasALaRechazada)
+        .mockImplementationOnce(atadasALaRechazada)
+        .mockImplementationOnce(tresPendientes);
+      await emitirRechazada();
+
+      // Todavía atadas: el aviso sigue (y este botón no avisa nada: no es el del aviso).
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() => expect(loadCcAccountStaysAction).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.getByTitle("Recargar")).toBeEnabled());
+      expect(screen.getByLabelText("ARCA rechazó la factura")).toBeInTheDocument();
+      expect(toast.info).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTitle("Recargar"));
+      await waitFor(() =>
+        expect(screen.queryByLabelText("ARCA rechazó la factura")).not.toBeInTheDocument()
+      );
+      expect(filaCheckbox("3")).not.toBeChecked();
     });
 
     it("el aviso se va con la próxima emisión", async () => {

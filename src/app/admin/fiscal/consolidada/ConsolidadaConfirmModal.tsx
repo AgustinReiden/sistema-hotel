@@ -63,9 +63,9 @@ type Props = {
   /** El botón que abrió el cuadro: al cerrarse, el foco vuelve ahí. */
   focoAlCerrar?: RefObject<HTMLElement | null>;
   /**
-   * Avisos que se dibujan arriba de los botones. Lo deja preparado para la fase C de
-   * remitos (C2), que va a listar acá los remitos firmados que faltan y pedir el motivo
-   * para emitir igual.
+   * Avisos que se dibujan arriba de los botones. Hoy lleva las estadías que entraron
+   * tildadas solas al recargar la lista (ConsolidadaClient). La fase C de remitos (C2) va a
+   * sumar acá los remitos firmados que faltan y pedir el motivo para emitir igual.
    */
   avisos?: ReactNode;
   /**

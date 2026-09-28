@@ -156,7 +156,19 @@ type ResultadoSinAutorizar = {
   status: "pending" | "processing" | "rejected";
   /** El `userMessage` del emisor, terminado en punto; vacío si no vino. */
   motivo: string;
+  /** reservation_id de las estadías que iban en esa factura. */
+  emitidas: string[];
 };
+
+/**
+ * Las estadías de una factura rechazada volvieron a estar pendientes en la lista cargada:
+ * ya se la descartó en Facturación, que es lo que las suelta. Si alguna no está en la lista
+ * (un período la deja afuera), no se sabe, y no cuenta como suelta.
+ */
+function seLiberaron(emitidas: string[], data: CcAccountStayRow[]): boolean {
+  const pendientes = new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id));
+  return emitidas.length > 0 && emitidas.every((rid) => pendientes.has(rid));
+}
 
 /**
  * Título y texto del aviso de una factura que volvió sin autorizar. Cada estado dice sólo
@@ -174,8 +186,11 @@ function avisoSinAutorizar({ status, motivo }: ResultadoSinAutorizar): {
     return {
       titulo: "ARCA rechazó la factura",
       // Facturación se abre en otra pestaña (ver el link del aviso): al volver a esta, la
-      // lista todavía las muestra atadas a la rechazada hasta recargarla.
-      texto: `${motivo || "ARCA rechazó la factura."} Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y recargá la lista.`,
+      // lista todavía las muestra atadas a la rechazada hasta recargarla. El texto nombra el
+      // botón que está en el mismo aviso: el de «Estadías de la cuenta» es un ícono sin
+      // nombre a la vista, y lo obvio (F5, o tirar la pantalla para abajo en el celular)
+      // recarga la página entera y borra lo que la rechazada deja cargado para reintentar.
+      texto: `${motivo || "ARCA rechazó la factura."} Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y tocá «Recargar la lista», acá abajo. No recargues la página entera: se pierde lo que dejaste cargado.`,
     };
   }
   if (status === "processing") {
@@ -342,10 +357,11 @@ export default function ConsolidadaClient({
   // `salieron`, estadías tildadas que ya no están pendientes (por ejemplo, otra persona las
   // facturó); `entraron`, estadías pendientes que no estaban tildadas y entraron tildadas
   // (una estadía nueva, o las de una factura rechazada que se descartó en Facturación).
-  // Cuántas de cada una; null = no hay aviso.
+  // Cuántas salieron, y cuáles entraron (el cuadro las nombra); null = no hay aviso.
   const [cambioDeSeleccion, setCambioDeSeleccion] = useState<{
     salieron: number;
-    entraron: number;
+    /** reservation_id de las que entraron tildadas sin que nadie las eligiera. */
+    entraron: string[];
   } | null>(null);
   // Anti doble click de la emisión: el ref corta aunque el segundo click llegue antes
   // del render que deshabilita el botón.
@@ -450,8 +466,13 @@ export default function ConsolidadaClient({
    *
    * `yaFacturadas`: las estadías que se acaban de mandar a facturar. Si salen de la
    * selección porque ya no están pendientes, es lo esperado y no se avisa.
+   *
+   * `alAplicar`: se llama con la lista cuando esta carga es la que queda a la vista.
    */
-  const loadRows = useCallback((opciones?: { yaFacturadas?: string[] }): Promise<boolean> => {
+  const loadRows = useCallback((opciones?: {
+    yaFacturadas?: string[];
+    alAplicar?: (data: CcAccountStayRow[]) => void;
+  }): Promise<boolean> => {
     const numero = ++numeroCarga.current;
     const cliente = `${kind}:${id}`;
     const from = range.from;
@@ -518,6 +539,15 @@ export default function ConsolidadaClient({
         totalFijadoPor.current = numero;
         setTotalStays(data.length);
       }
+      // El aviso de una factura rechazada dice que sus estadías no se pueden volver a
+      // facturar hasta descartarla en Facturación. Si esta recarga las trae pendientes, ya
+      // se la descartó y el aviso dejó de ser cierto: se cierra solo. No en la recarga que
+      // sigue a la emisión (`yaFacturadas`): ahí el aviso recién sale y tiene que leerse.
+      if (!opciones?.yaFacturadas) {
+        setResultadoSinAutorizar((actual) =>
+          actual?.status === "rejected" && seLiberaron(actual.emitidas, data) ? null : actual
+        );
+      }
       // Por defecto se selecciona todo lo pendiente, menos lo que la persona destildó a
       // mano: el caso normal es "facturame todo lo que debe". Salvo la primera carga que
       // anda después de una emisión incierta: ahí no se tilda nada y cada estadía se
@@ -554,11 +584,14 @@ export default function ConsolidadaClient({
               (rid) => !tildadas.has(rid) && !aMano?.has(rid) && !esperadas.has(rid)
             ).length
           : 0;
-        const entraron = mismaLista ? [...tildadas].filter((rid) => !antes.has(rid)).length : 0;
+        const entraron = mismaLista ? [...tildadas].filter((rid) => !antes.has(rid)) : [];
         setPicked(tildadas);
-        setCambioDeSeleccion(salieron > 0 || entraron > 0 ? { salieron, entraron } : null);
+        setCambioDeSeleccion(
+          salieron > 0 || entraron.length > 0 ? { salieron, entraron } : null
+        );
       }
       listaAplicada.current = { cliente, from, to };
+      opciones?.alAplicar?.(data);
       return true;
     })();
     ultimaCarga.current = promesa;
@@ -680,6 +713,8 @@ export default function ConsolidadaClient({
     cerrar: () => void;
     /** El link a Facturación abre otra pestaña y deja esta como está. */
     facturacionEnOtraPestana: boolean;
+    /** «Recargar la lista», adentro del aviso; null si el aviso no manda a recargar. */
+    recargar: (() => void) | null;
   } | null =
     textoIncierto !== null
       ? {
@@ -689,8 +724,9 @@ export default function ConsolidadaClient({
           cerrable: !loading,
           cerrar: () => setEmisionIncierta(null),
           facturacionEnOtraPestana: false,
+          recargar: null,
         }
-      : sinAutorizar !== null
+      : resultadoSinAutorizar !== null && sinAutorizar !== null
         ? {
             // Un título por estado (ver avisoSinAutorizar): el mismo para los tres
             // afirmaba que no había salido una factura que en verificación pudo salir.
@@ -704,6 +740,25 @@ export default function ConsolidadaClient({
             // pierden lo destildado a mano, que al volver entra tildado sin aviso, y lo que
             // la rechazada deja cargado para reintentar. Como Huéspedes, en otra pestaña.
             facturacionEnOtraPestana: true,
+            // La rechazada manda a volver y recargar la lista: el botón va en el aviso, con
+            // el nombre que dice el texto. Recarga la lista, no la página (lo cargado queda),
+            // y si las estadías volvieron a estar pendientes el aviso se cierra (ver
+            // loadRows). Si no, lo dice: el botón no puede parecer que no hizo nada.
+            recargar:
+              resultadoSinAutorizar.status === "rejected"
+                ? () => {
+                    const { emitidas } = resultadoSinAutorizar;
+                    void loadRows({
+                      alAplicar: (data) => {
+                        if (!seLiberaron(emitidas, data)) {
+                          toast.info(
+                            "Las estadías de la factura rechazada todavía no aparecen pendientes. Descartala en Facturación y volvé a tocar «Recargar la lista»."
+                          );
+                        }
+                      },
+                    });
+                  }
+                : null,
           }
         : null;
 
@@ -741,6 +796,16 @@ export default function ConsolidadaClient({
   if (revisando && selectedRows.length === 0) {
     setRevisando(false);
   }
+
+  // Las que entraron tildadas solas con la última recarga (ver `cambioDeSeleccion`) y
+  // siguen tildadas: van en la factura sin que nadie las haya elegido. La línea que lo dice
+  // está arriba de la lista, y quien factura está abajo, en la barra (en el celular, o con
+  // 20 estadías, no la ve): el cuadro, que es lo último que se lee antes de emitir, las
+  // nombra. Una que se destildó después ya no va en la factura y no se nombra.
+  const entraronSolas =
+    cambioDeSeleccion === null || cambioDeSeleccion.entraron.length === 0
+      ? []
+      : selectedRows.filter((r) => cambioDeSeleccion.entraron.includes(r.reservation_id));
 
   const total = selectedRows.reduce((sum, r) => sum + r.amount, 0);
   // La empresa siempre se factura con CUIT. Un huésped, sólo si su ficha tiene
@@ -1153,6 +1218,7 @@ export default function ConsolidadaClient({
             ? outcome.status
             : "pending",
         motivo: motivo ? (/[.!?)]$/.test(motivo) ? motivo : `${motivo}.`) : "",
+        emitidas,
       });
     } else {
       toast.warning(
@@ -1231,6 +1297,17 @@ export default function ConsolidadaClient({
                   Ir a Facturación
                 </Link>
               )}
+              {avisoFijo.recargar !== null && (
+                <button
+                  type="button"
+                  onClick={avisoFijo.recargar}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 text-brand-700 hover:underline disabled:opacity-60"
+                >
+                  <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                  Recargar la lista
+                </button>
+              )}
               {/* Con la lista cargando, el aviso de la emisión incierta todavía no dice en
                   qué quedó cada estadía: cerrado ahí, esa conclusión no se vería nunca, y
                   el toast que sale al terminar la recarga manda a leerlo. */}
@@ -1294,7 +1371,10 @@ export default function ConsolidadaClient({
           {cambioDeSeleccion !== null && !loading && (
             <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
               <AlertTriangle size={13} className="shrink-0" />
-              {textoCambioDeSeleccion(cambioDeSeleccion)}
+              {textoCambioDeSeleccion({
+                salieron: cambioDeSeleccion.salieron,
+                entraron: cambioDeSeleccion.entraron.length,
+              })}
             </p>
           )}
 
@@ -1789,6 +1869,37 @@ export default function ConsolidadaClient({
           // Mismo criterio que el botón de la barra: con el receptor incompleto no se emite,
           // aunque haya quedado incompleto recién con el cuadro abierto.
           bloquearConfirmar={faltantesReceptor.length > 0}
+          avisos={
+            entraronSolas.length > 0 ? (
+              <div
+                aria-label="Estadías que entraron solas a esta factura"
+                className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3"
+              >
+                <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs font-semibold text-amber-800 space-y-1">
+                  <p>
+                    {entraronSolas.length === 1
+                      ? "Al recargar la lista, entró a la selección 1 estadía pendiente que no tenías tildada, y va en esta factura:"
+                      : `Al recargar la lista, entraron a la selección ${entraronSolas.length} estadías pendientes que no tenías tildadas, y van en esta factura:`}
+                  </p>
+                  <ul className="list-disc pl-4">
+                    {entraronSolas.map((r) => (
+                      <li key={r.reservation_id}>
+                        Hab. {r.room_number ?? "—"} · {shortDate(r.fch_desde)} → {shortDate(r.fch_hasta)}
+                        {" · "}
+                        {formatAmount(r.amount)}
+                      </li>
+                    ))}
+                  </ul>
+                  <p>
+                    {entraronSolas.length === 1
+                      ? "Si no tiene que ir, tocá «Volver» y destildala en la lista."
+                      : "Si alguna no tiene que ir, tocá «Volver» y destildala en la lista."}
+                  </p>
+                </div>
+              </div>
+            ) : undefined
+          }
           onConfirm={() => void emitConfirmado()}
           onCancel={() => setRevisando(false)}
           focoAlCerrar={botonRevisarRef}
