@@ -1,5 +1,5 @@
 import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const H = vi.hoisted(() => ({
   // Un solo objeto, como el router de Next: si cambiara en cada render, el efecto se
@@ -98,6 +98,14 @@ function servidorColgado() {
       })
   );
 }
+
+// El hook mira si un cuadro se ve con `getComputedStyle`, y en jsdom la primera llamada del
+// archivo es cara (arma la hoja de estilos por defecto: cientos de milisegundos, más con la
+// máquina cargada). Se paga acá, con el margen de los hooks, y no dentro de los 5 s del primer
+// test que abre un cuadro.
+beforeAll(() => {
+  window.getComputedStyle(document.body);
+});
 
 beforeEach(() => {
   vi.useFakeTimers();

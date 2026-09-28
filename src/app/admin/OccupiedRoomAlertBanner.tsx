@@ -11,6 +11,7 @@ import {
   regularizeOccupiedRoomAction,
 } from "./actions";
 import { occupancyCheckInDateKey } from "@/lib/arrivals";
+import { formatAmount } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { AssignWalkInPayload, AssociatedClient, RoomOccupancyAlert } from "@/lib/types";
 
@@ -36,6 +37,13 @@ const PENDIENTES_KEY = "hotelsync:avisos-ocupada-sin-cerrar";
  * "Cerrar el aviso" (fallaría siempre igual) ni "Cargar la estadía" (la cobraría dos veces).
  */
 const SIN_CIERRE_KEY = "hotelsync:avisos-ocupada-cargada-sin-cierre";
+
+/**
+ * Dónde se guardan, en la pestaña, los avisos cuya estadía guardada se canceló después de
+ * cobrar algo (ver `estadiaCanceladaConCobro`): `{ [id del aviso]: lo cobrado }`. Así, al
+ * volver a armarse, la fila sigue avisando cuánto se cobró antes de ofrecer cargarla de nuevo.
+ */
+const CANCELADA_CON_COBRO_KEY = "hotelsync:avisos-ocupada-cancelada-con-cobro";
 
 /** Quién está mostrando lo guardado, para avisarle cuando cambia. */
 const pendientesListeners = new Set<() => void>();
@@ -65,6 +73,10 @@ function leerPendientesGuardados(): string | null {
 
 function leerSinCierreGuardados(): string | null {
   return leerGuardado(SIN_CIERRE_KEY);
+}
+
+function leerCanceladasGuardadas(): string | null {
+  return leerGuardado(CANCELADA_CON_COBRO_KEY);
 }
 
 /**
@@ -139,6 +151,43 @@ function guardarSinCierre(alertId: number, sinCierre: boolean) {
   escribirGuardado(SIN_CIERRE_KEY, siguientes.length === 0 ? null : JSON.stringify(siguientes));
 }
 
+/** Aviso -> lo cobrado en la estadía guardada que se canceló. */
+type CanceladasConCobro = Record<number, number>;
+
+/** Los avisos guardados como "se canceló con plata cobrada". Lo roto se ignora. */
+function parseCanceladasConCobro(raw: string | null): CanceladasConCobro {
+  if (!raw) return {};
+  try {
+    const data: unknown = JSON.parse(raw);
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return {};
+    const canceladas: CanceladasConCobro = {};
+    for (const [alertId, cobrado] of Object.entries(data)) {
+      const id = Number(alertId);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      if (typeof cobrado !== "number" || !Number.isFinite(cobrado) || cobrado <= 0) continue;
+      canceladas[id] = cobrado;
+    }
+    return canceladas;
+  } catch {
+    return {};
+  }
+}
+
+/** Guarda lo cobrado en la estadía cancelada de un aviso (null lo olvida). */
+function guardarCanceladaConCobro(alertId: number, cobrado: number | null) {
+  const canceladas = parseCanceladasConCobro(leerCanceladasGuardadas());
+  if (cobrado === null) {
+    if (!(alertId in canceladas)) return;
+    delete canceladas[alertId];
+  } else {
+    canceladas[alertId] = cobrado;
+  }
+  escribirGuardado(
+    CANCELADA_CON_COBRO_KEY,
+    Object.keys(canceladas).length === 0 ? null : JSON.stringify(canceladas)
+  );
+}
+
 /**
  * El código con el que la base rechaza el cierre porque la estadía guardada ya no sirve
  * para cerrarlo (`rpc_regularize_occupied_room`, mig 106): no está con el huésped adentro
@@ -158,11 +207,23 @@ const ESTADIA_YA_NO_SIRVE =
 
 /**
  * Lo que se dice cuando la estadía se canceló (por ejemplo, desde la tarjeta, para
- * corregirla): no sirve para cerrar el aviso, y esa noche no quedó cargada. La fila vuelve a
- * ofrecer "Cargar la estadía", como antes de cargarla.
+ * corregirla) sin nada cobrado: no sirve para cerrar el aviso, y esa noche no quedó cargada.
+ * La fila vuelve a ofrecer "Cargar la estadía", como antes de cargarla.
  */
 const ESTADIA_CANCELADA =
   "Esa estadía está cancelada, así que no sirve para cerrar este aviso. Si esa noche hay que cobrarla, cargala de nuevo con «Cargar la estadía».";
+
+/**
+ * Lo que se dice cuando la estadía se canceló después de cobrar algo: una seña o un pago a
+ * cuenta (la cancelación baja el total a lo pagado) o un check-out con cobro o a cuenta
+ * corriente (una cancelada que ya había salido conserva todo, mig 102). Esa plata sigue en
+ * los libros: cargar la noche entera de nuevo la cobraría dos veces. No se invita a cargarla:
+ * se dice cuánto se cobró y que la revisen antes. "Cargar la estadía" sigue, porque decidir
+ * el cobro es del admin (mig 106) y puede faltar cobrar una parte.
+ */
+function estadiaCanceladaConCobro(cobrado: number): string {
+  return `Esa estadía está cancelada, así que no sirve para cerrar este aviso, pero antes de cancelarse se cobraron ${formatAmount(cobrado)} (en caja o a cuenta corriente) y siguen registrados. Revisá esa estadía antes de volver a cargarla: si cargás la noche entera, lo ya cobrado se cobra dos veces.`;
+}
 
 /**
  * Lo que se dice si no se pudo ver en qué quedó la estadía: no se afirma que esté cargada
@@ -172,14 +233,21 @@ const ESTADIA_SIN_ESTADO =
   "No se pudo cerrar el aviso ni ver en qué quedó esa estadía. Probá de nuevo con «Cerrar el aviso».";
 
 /**
- * ¿La estadía guardada está cancelada? Se pregunta cuando la base rechaza el cierre con
+ * ¿La estadía guardada está cancelada, y cuánto se había cobrado (`paid_amount`: pagos más
+ * cargos a cuenta corriente, mig 89)? Se pregunta cuando la base rechaza el cierre con
  * `ESTADIA_YA_NO_SIRVE_CODE`. null si no se pudo leer.
  */
-async function estadiaCancelada(reservationId: string): Promise<boolean | null> {
+async function estadoDeLaEstadia(
+  reservationId: string
+): Promise<{ cancelada: boolean; cobrado: number } | null> {
   try {
     const result = await handleLoadReservationForEdit(reservationId);
     if (!result.success || !result.data) return null;
-    return result.data.status === "cancelled";
+    const cobrado = Number(result.data.paid_amount);
+    return {
+      cancelada: result.data.status === "cancelled",
+      cobrado: Number.isFinite(cobrado) && cobrado > 0 ? cobrado : 0,
+    };
   } catch {
     return null;
   }
@@ -248,11 +316,17 @@ type Props = {
  * llega resuelto, como la estadía guardada.
  *
  * SI LA ESTADÍA GUARDADA SE CANCELÓ (por ejemplo, desde la tarjeta, para corregirla), la
- * base rechaza el cierre con el mismo código, pero esa noche no quedó cargada: decir "ya
- * está cargada" sería mentira y dejaría la pieza sin cobrar. Por eso, ante ese código se
- * lee el estado de la estadía (`handleLoadReservationForEdit`, la acción que ya usa
- * "Editar"): cancelada, se descarta sin marca y la fila vuelve a ofrecer "Cargar la
- * estadía"; si no se pudo leer, no se afirma nada y queda guardada para reintentar.
+ * base rechaza el cierre con el mismo código, pero la estadía ya no cuenta como cargada:
+ * decir "ya está cargada" sería mentira y podría dejar la pieza sin cobrar. Por eso, ante ese
+ * código se lee el estado de la estadía (`handleLoadReservationForEdit`, la acción que ya usa
+ * "Editar"): cancelada, se descarta y la fila vuelve a ofrecer "Cargar la estadía"; si no se
+ * pudo leer, no se afirma nada y queda guardada para reintentar. Una cancelada puede haber
+ * cobrado algo antes (una seña, un pago a cuenta, un check-out con cobro o a cuenta
+ * corriente), y esa plata queda en los libros: si `paid_amount` es mayor que cero, la fila
+ * dice cuánto se cobró y que la revisen antes de volver a cargarla
+ * (`estadiaCanceladaConCobro`, guardado en la pestaña con `CANCELADA_CON_COBRO_KEY`), en vez
+ * de invitar a cargarla. Se olvida cuando se vuelve a cargar la estadía o el aviso llega
+ * resuelto.
  *
  * Se eligió guardar y no frenar la recarga de Hoy mientras haya uno sin cerrar: frenarla
  * dejaría Hoy sin ponerse al día (y sin la línea que lo avisa) todo el tiempo que el
@@ -292,6 +366,18 @@ export default function OccupiedRoomAlertBanner({
     () => new Set([...parseSinCierre(sinCierreGuardados), ...sinCierreEnPantalla]),
     [sinCierreGuardados, sinCierreEnPantalla]
   );
+  // Avisos cuya estadía guardada se canceló con plata cobrada (ver arriba): la fila dice
+  // cuánto. Lo de la pestaña más lo de esta pantalla, como la estadía guardada.
+  const canceladasGuardadas = useSyncExternalStore(
+    subscribePendientes,
+    leerCanceladasGuardadas,
+    () => null
+  );
+  const [canceladasEnPantalla, setCanceladasEnPantalla] = useState<CanceladasConCobro>({});
+  const canceladasConCobro = useMemo(
+    () => ({ ...parseCanceladasConCobro(canceladasGuardadas), ...canceladasEnPantalla }),
+    [canceladasGuardadas, canceladasEnPantalla]
+  );
 
   const abiertas = useMemo(() => alerts.filter((a) => a.resolved_at === null), [alerts]);
   const cerradas = useMemo(() => alerts.filter((a) => a.resolved_at !== null), [alerts]);
@@ -302,6 +388,7 @@ export default function OccupiedRoomAlertBanner({
     for (const a of cerradas) {
       guardarPendiente(a.alert_id, null);
       guardarSinCierre(a.alert_id, false);
+      guardarCanceladaConCobro(a.alert_id, null);
     }
   }, [cerradas]);
 
@@ -311,6 +398,19 @@ export default function OccupiedRoomAlertBanner({
 
   const checkInDateFor = (alert: RoomOccupancyAlert) =>
     occupancyCheckInDateKey(alert.detected_at, timezone);
+
+  // Lo cobrado en la estadía cancelada de ese aviso, en pantalla y en la pestaña (null lo
+  // olvida).
+  const marcarCanceladaConCobro = (alertId: number, cobrado: number | null) => {
+    setCanceladasEnPantalla((prev) => {
+      if (cobrado !== null) return { ...prev, [alertId]: cobrado };
+      if (!(alertId in prev)) return prev;
+      const next = { ...prev };
+      delete next[alertId];
+      return next;
+    });
+    guardarCanceladaConCobro(alertId, cobrado);
+  };
 
   const submitRegularization = async (data: AssignWalkInPayload) => {
     if (!target) return { success: false, error: "No hay ningún aviso abierto." };
@@ -329,6 +429,8 @@ export default function OccupiedRoomAlertBanner({
     if (!result.success) return { success: false, error: result.error };
 
     setTarget(null);
+    // Ya se decidió cómo cargarla: el aviso de lo cobrado en la cancelada deja de hacer falta.
+    marcarCanceladaConCobro(alertId, null);
     if (result.data?.alertPendiente) {
       const { reservationId } = result.data;
       setEnPantalla((prev) => ({ ...prev, [alertId]: reservationId }));
@@ -359,8 +461,8 @@ export default function OccupiedRoomAlertBanner({
       const result = await closeOccupancyAlertAction(alertId, reservationId);
       if (!result.success) {
         if (result.code === ESTADIA_YA_NO_SIRVE_CODE) {
-          const cancelada = await estadiaCancelada(reservationId);
-          if (cancelada === null) {
+          const estado = await estadoDeLaEstadia(reservationId);
+          if (estado === null) {
             // Sin saber si salió o se canceló no se afirma nada: queda guardada y el botón
             // sigue para volver a intentarlo.
             toast.error(ESTADIA_SIN_ESTADO);
@@ -368,9 +470,16 @@ export default function OccupiedRoomAlertBanner({
           }
           // Sale del bucle: la estadía guardada ya no sirve para cerrarlo, se descarta.
           olvidarPendiente(alertId);
-          if (cancelada) {
-            // No quedó cargada: la fila vuelve a ofrecer "Cargar la estadía".
-            toast.error(ESTADIA_CANCELADA, { duration: 12000 });
+          if (estado.cancelada) {
+            // Ya no cuenta como cargada: la fila vuelve a ofrecer "Cargar la estadía". Si se
+            // había cobrado algo, antes dice cuánto (esa plata quedó en los libros).
+            if (estado.cobrado > 0) {
+              marcarCanceladaConCobro(alertId, estado.cobrado);
+              toast.error(estadiaCanceladaConCobro(estado.cobrado), { duration: 12000 });
+            } else {
+              marcarCanceladaConCobro(alertId, null);
+              toast.error(ESTADIA_CANCELADA, { duration: 12000 });
+            }
             return;
           }
           // Salió o cambió de habitación: el aviso queda como "cargada, no se cierra desde
@@ -420,6 +529,12 @@ export default function OccupiedRoomAlertBanner({
               const noSeCierraDesdeAca = isAdmin && sinCierre.has(a.alert_id);
               const pendiente =
                 isAdmin && !noSeCierraDesdeAca ? pendientes[a.alert_id] : undefined;
+              // La estadía guardada se canceló después de cobrar algo: antes de ofrecer
+              // cargarla de nuevo, la fila dice cuánto se cobró.
+              const cobradoEnCancelada =
+                isAdmin && !noSeCierraDesdeAca && !pendiente
+                  ? canceladasConCobro[a.alert_id]
+                  : undefined;
               return (
                 <li
                   key={a.alert_id}
@@ -443,6 +558,11 @@ export default function OccupiedRoomAlertBanner({
                         {noSeCierraDesdeAca
                           ? ESTADIA_YA_NO_SIRVE
                           : "La estadía ya está cargada; falta cerrar el aviso. No la vuelvas a cargar."}
+                      </p>
+                    )}
+                    {cobradoEnCancelada !== undefined && (
+                      <p className="text-xs font-bold text-amber-700 mt-0.5">
+                        {estadiaCanceladaConCobro(cobradoEnCancelada)}
                       </p>
                     )}
                   </div>

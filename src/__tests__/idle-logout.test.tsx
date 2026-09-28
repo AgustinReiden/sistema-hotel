@@ -1,9 +1,14 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const H = vi.hoisted(() => ({ logout: vi.fn() }));
+// Desde #154 la inactividad cierra la sesión en todos los dispositivos (`logoutEverywhere`);
+// `logout` ("Salir") cierra solo este y no lo tiene que llamar.
+const H = vi.hoisted(() => ({ logoutEverywhere: vi.fn(), logout: vi.fn() }));
 
-vi.mock("@/app/login/actions", () => ({ logout: H.logout }));
+vi.mock("@/app/login/actions", () => ({
+  logoutEverywhere: H.logoutEverywhere,
+  logout: H.logout,
+}));
 
 import IdleLogout from "@/app/admin/IdleLogout";
 
@@ -27,6 +32,7 @@ function usar(evento: string) {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  H.logoutEverywhere.mockReset();
   H.logout.mockReset();
 });
 
@@ -41,10 +47,11 @@ describe("IdleLogout — cierre de sesión por inactividad", () => {
     render(<IdleLogout />);
 
     await vi.advanceTimersByTimeAsync(30 * MINUTO - 1);
-    expect(H.logout).not.toHaveBeenCalled();
+    expect(H.logoutEverywhere).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(H.logout).toHaveBeenCalledTimes(1);
+    expect(H.logoutEverywhere).toHaveBeenCalledTimes(1);
+    expect(H.logout).not.toHaveBeenCalled();
   });
 
   it("el desplazamiento que genera la recarga de Hoy (scroll cada 30 s) no posterga el cierre", async () => {
@@ -54,7 +61,7 @@ describe("IdleLogout — cierre de sesión por inactividad", () => {
       await vi.advanceTimersByTimeAsync(30_000);
       desplazarSolo();
     }
-    expect(H.logout).toHaveBeenCalledTimes(1);
+    expect(H.logoutEverywhere).toHaveBeenCalledTimes(1);
   });
 
   it.each(["wheel", "touchmove", "keydown", "pointermove", "pointerdown", "touchstart"])(
@@ -67,13 +74,13 @@ describe("IdleLogout — cierre de sesión por inactividad", () => {
 
       // A los 30 minutos de montarse ya no cierra: la usaron a los 20.
       await vi.advanceTimersByTimeAsync(10 * MINUTO);
-      expect(H.logout).not.toHaveBeenCalled();
+      expect(H.logoutEverywhere).not.toHaveBeenCalled();
 
       // Cierra a los 30 minutos de ese uso (50 desde que se montó).
       await vi.advanceTimersByTimeAsync(20 * MINUTO - 1);
-      expect(H.logout).not.toHaveBeenCalled();
+      expect(H.logoutEverywhere).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(H.logout).toHaveBeenCalledTimes(1);
+      expect(H.logoutEverywhere).toHaveBeenCalledTimes(1);
     }
   );
 
@@ -86,9 +93,9 @@ describe("IdleLogout — cierre de sesión por inactividad", () => {
     lista.dispatchEvent(new Event("wheel", { bubbles: false }));
 
     await vi.advanceTimersByTimeAsync(10 * MINUTO);
-    expect(H.logout).not.toHaveBeenCalled();
+    expect(H.logoutEverywhere).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(20 * MINUTO);
-    expect(H.logout).toHaveBeenCalledTimes(1);
+    expect(H.logoutEverywhere).toHaveBeenCalledTimes(1);
   });
 
   it("al desmontar no queda el conteo ni los listeners", async () => {
@@ -98,7 +105,7 @@ describe("IdleLogout — cierre de sesión por inactividad", () => {
 
     usar("keydown");
     await vi.advanceTimersByTimeAsync(60 * MINUTO);
-    expect(H.logout).not.toHaveBeenCalled();
+    expect(H.logoutEverywhere).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

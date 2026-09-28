@@ -79,10 +79,20 @@ const NO_ESTA_ADENTRO = {
   code: "22023",
 };
 
-/** Lo que devuelve la lectura de la estadía con ese estado. */
-function estadiaEn(status: string) {
-  return { success: true, data: { id: "r-1", status } };
+/**
+ * Lo que devuelve la lectura de la estadía con ese estado y lo cobrado (`paid_amount`: pagos
+ * más cargos a cuenta corriente).
+ */
+function estadiaEn(status: string, pagado = 0) {
+  return { success: true, data: { id: "r-1", status, paid_amount: pagado } };
 }
+
+/**
+ * Lo que dice cuando la estadía guardada se canceló después de cobrar algo: cuánto, que esa
+ * plata sigue registrada y que la revisen antes de volver a cargarla.
+ */
+const CANCELADA_CON_12000 =
+  "Esa estadía está cancelada, así que no sirve para cerrar este aviso, pero antes de cancelarse se cobraron $12.000,00 (en caja o a cuenta corriente) y siguen registrados. Revisá esa estadía antes de volver a cargarla: si cargás la noche entera, lo ya cobrado se cobra dos veces.";
 
 /** Todo lo guardado en la pestaña, junto, para ver si quedó una estadía. */
 function guardadoEnLaPestana(): string {
@@ -348,6 +358,35 @@ describe("OccupiedRoomAlertBanner", () => {
     expect(screen.getByText(/se cargaría desde el/)).toBeInTheDocument();
     // En la pestaña no queda ni la estadía ni la marca de "cargada".
     expect(guardadoEnLaPestana()).toBe("");
+    // Sin nada cobrado, no habla de plata.
+    expect(screen.queryByText(/se cobraron/)).not.toBeInTheDocument();
+  });
+
+  it("si la estadía guardada se canceló después de cobrar algo (una seña, un pago a cuenta, un check-out con cobro o a cuenta corriente), no invita a cargarla de nuevo: dice cuánto se cobró y que la revisen antes", async () => {
+    H.closeOccupancyAlertAction.mockResolvedValue(NO_ESTA_ADENTRO);
+    H.handleLoadReservationForEdit.mockResolvedValue(estadiaEn("cancelled", 12000));
+    renderBanner([abierta], true);
+    await cargarConAvisoSinCerrar();
+
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+
+    await waitFor(() =>
+      expect(H.toast.error).toHaveBeenCalledWith(CANCELADA_CON_12000, expect.anything())
+    );
+    // Nada de "cargala de nuevo": esa plata sigue en los libros.
+    expect(H.toast.error).not.toHaveBeenCalledWith(ESTADIA_CANCELADA, expect.anything());
+    expect(screen.queryByText(/cargala de nuevo/)).not.toBeInTheDocument();
+    // La fila lo sigue diciendo cuando se va el aviso de arriba, con el monto en pesos.
+    expect(screen.getByText(CANCELADA_CON_12000)).toBeInTheDocument();
+    // Tampoco dice "ya está cargada": se canceló.
+    expect(screen.queryByText("Ya está cargada")).not.toBeInTheDocument();
+    expect(screen.queryByText(ESTADIA_YA_NO_SIRVE)).not.toBeInTheDocument();
+    // Decidir si falta cobrar una parte es del admin: puede volver a cargarla después de
+    // revisarla. El cierre que falla, no.
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    // La estadía guardada se descarta.
+    expect(guardadoEnLaPestana()).not.toContain("r-1");
   });
 
   it.each([
@@ -498,6 +537,77 @@ describe("OccupiedRoomAlertBanner — la estadía sin asociar sobrevive a que la
     expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
     expect(screen.queryByText("Ya está cargada")).not.toBeInTheDocument();
     expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+  });
+
+  /** Carga la estadía, el aviso queda sin cerrar y el cierre falla porque se canceló con $12.000 cobrados. */
+  async function cargarYQueSeCanceloConCobro() {
+    H.closeOccupancyAlertAction.mockResolvedValue(NO_ESTA_ADENTRO);
+    H.handleLoadReservationForEdit.mockResolvedValue(estadiaEn("cancelled", 12000));
+    await cargarConAvisoSinCerrar();
+    fireEvent.click(screen.getByText("Cerrar el aviso"));
+    await waitFor(() => expect(H.toast.error).toHaveBeenCalledTimes(1));
+  }
+
+  it("si la estadía se canceló con plata cobrada, después de volver a armarse la fila sigue diciendo cuánto", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarYQueSeCanceloConCobro();
+    primera.unmount();
+
+    renderBanner([abierta], true);
+    expect(screen.getByText(CANCELADA_CON_12000)).toBeInTheDocument();
+    expect(screen.getByText("Cargar la estadía")).toBeInTheDocument();
+    expect(screen.queryByText("Ya está cargada")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();
+    // En la pestaña queda lo cobrado, no la estadía.
+    expect(guardadoEnLaPestana()).not.toContain("r-1");
+  });
+
+  it("lo cobrado en la cancelada se olvida cuando se vuelve a cargar la estadía", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarYQueSeCanceloConCobro();
+
+    H.regularizeOccupiedRoomAction.mockResolvedValue({
+      success: true,
+      data: { reservationId: "r-2", alertPendiente: false },
+    });
+    fireEvent.click(screen.getByText("Cargar la estadía"));
+    fireEvent.click(screen.getByText("Confirmar walk-in"));
+    await waitFor(() => expect(H.toast.success).toHaveBeenCalled());
+    expect(screen.queryByText(CANCELADA_CON_12000)).not.toBeInTheDocument();
+    primera.unmount();
+
+    // Aunque la lista todavía lo traiga abierto (la recarga de la acción no llegó).
+    renderBanner([abierta], true);
+    expect(screen.queryByText(CANCELADA_CON_12000)).not.toBeInTheDocument();
+    expect(guardadoEnLaPestana()).toBe("");
+  });
+
+  it("lo cobrado en la cancelada se olvida cuando el aviso llega resuelto, y no se aplica a otro aviso ni a recepción", async () => {
+    const primera = renderBanner([abierta], true);
+    await cargarYQueSeCanceloConCobro();
+    primera.unmount();
+
+    const otro = renderBanner([alerta({ alert_id: 20 })], true);
+    expect(screen.queryByText(CANCELADA_CON_12000)).not.toBeInTheDocument();
+    otro.unmount();
+
+    const recepcion = renderBanner([abierta], false);
+    expect(screen.queryByText(CANCELADA_CON_12000)).not.toBeInTheDocument();
+    expect(screen.getByText("Lo resuelve el administrador")).toBeInTheDocument();
+    recepcion.unmount();
+
+    const admin = renderBanner([abierta], true);
+    expect(screen.getByText(CANCELADA_CON_12000)).toBeInTheDocument();
+    admin.rerender(
+      <OccupiedRoomAlertBanner
+        alerts={[{ ...abierta, resolved_at: "2026-09-23T15:00:00.000Z", decision: null }]}
+        pricingByRoomId={pricingByRoomId}
+        associatedClients={[]}
+        timezone={TZ}
+        isAdmin
+      />
+    );
+    expect(guardadoEnLaPestana()).toBe("");
   });
 
   it("si la estadía ya salió y después el aviso llega resuelto (lo cerró otro admin), olvida también eso", async () => {
