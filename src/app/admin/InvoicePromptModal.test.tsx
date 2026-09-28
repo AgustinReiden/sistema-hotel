@@ -224,14 +224,31 @@ describe("InvoicePromptModal: si la emisión o el «no facturar» no vuelven (re
     emitirConsumidorFinal();
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    // Si salió, no se imprimió: recepción le avisa al admin, que la reimprime o la emite.
     expect(H.toast.warning).toHaveBeenCalledWith(
       FACTURA_INCIERTA,
       expect.objectContaining({
-        description: "Si no salió, le queda al administrador para revisar en Facturación.",
+        description:
+          "Avisale al administrador para que la revise en Facturación: si salió, no se imprimió y la reimprime desde ahí; si no salió, la emite él.",
       })
     );
     // No hay factura que imprimir: no se sabe si existe.
     expect(window.open).not.toHaveBeenCalled();
+  });
+
+  it("emitir sin respuesta: el aviso no se va solo, queda hasta «Entendido» (el recibo abre otra ventana encima)", async () => {
+    H.emitInvoiceForReservationAction.mockRejectedValue(sinRed());
+    const { onClose } = abrir(datos());
+
+    emitirConsumidorFinal();
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const opciones = H.toast.warning.mock.calls[0][1] as {
+      duration: number;
+      action: { label: string };
+    };
+    expect(opciones.duration).toBe(Infinity);
+    expect(opciones.action.label).toBe("Entendido");
   });
 
   it("emitir desde Facturación (startAtTipo): el aviso le dice al admin que revise antes de volver a emitir", async () => {

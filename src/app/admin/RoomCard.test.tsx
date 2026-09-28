@@ -841,6 +841,37 @@ describe("RoomCard: confirmar antes de actuar", () => {
     expect(screen.queryByText(/^¿Seguro\?/)).toBeNull();
   });
 
+  const dobleClick: {
+    boton: string;
+    si: string;
+    accion: () => ReturnType<typeof vi.fn>;
+    room: () => Room;
+    opciones?: Opciones;
+  }[] = [
+    { boton: "Hacer Check-In Automático", si: "Sí, hacer el check-in", accion: () => H.handleCheckIn, room: () => llegada() },
+    { boton: "Poner en Mantenimiento", si: "Sí, poner en mantenimiento", accion: () => H.handleSetMaintenance, room: () => libre(), opciones: { isAdmin: true } },
+    { boton: "Marcar Lista", si: "Sí, marcar lista", accion: () => H.handleMarkAvailable, room: () => libre({ status: "cleaning" }), opciones: { isAdmin: true } },
+    { boton: "Cobrar Medio Día", si: "Sí, cobrar medio día", accion: () => H.handleLateCheckOut, room: () => particular({ canChargeLateCheckout: true }) },
+  ];
+
+  it.each(dobleClick)(
+    "un doble click en $boton no confirma: el segundo click que cae en «Sí» no cuenta",
+    async ({ boton, si, accion, room, opciones }) => {
+      abrir(room(), opciones);
+
+      // El primer click pinta el cuadro; el segundo del doble click cae en «Sí».
+      fireEvent.click(screen.getByText(boton), { detail: 1 });
+      fireEvent.click(screen.getByText(si), { detail: 2 });
+
+      expect(screen.getByText(/^¿Seguro\?/)).toBeTruthy();
+      expect(accion()).not.toHaveBeenCalled();
+
+      // Un click suelto en «Sí», después de leer, confirma.
+      fireEvent.click(screen.getByText(si), { detail: 1 });
+      await waitFor(() => expect(accion()).toHaveBeenCalledTimes(1));
+    }
+  );
+
   it("la confirmación es un diálogo con su título y toma el foco en «Volver»", () => {
     const { container } = abrir(particular({ canChargeLateCheckout: true }));
 
@@ -1022,5 +1053,90 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
 
     await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
     expect(screen.queryByText(ALGUN_RENGLON)).toBeNull();
+  });
+
+  describe("Ampliar Reserva, que repetida suma las noches otra vez", () => {
+    const RENGLON_AMPLIAR =
+      "Hasta que la tarjeta muestre otra salida o recargues la página (F5), «Ampliar Reserva» queda frenado: ampliar de nuevo sumaría las noches otra vez.";
+    const SALIDA = "2026-10-01T13:00:00.000Z";
+
+    beforeEach(() => {
+      H.handleExtendReservation.mockReset();
+      H.handleExtendReservation.mockRejectedValue(sinRed());
+    });
+
+    /** Ampliar Reserva → una noche → Ampliar, sin respuesta. */
+    async function ampliarSinRespuesta() {
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+      fireEvent.click(screen.getByText("Ampliar"));
+      await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+    }
+
+    it("sin respuesta, el aviso dice que ampliar queda frenado y no deja volver a ampliar a ciegas", async () => {
+      abrir(particular({ check_out_target: SALIDA }));
+
+      await ampliarSinRespuesta();
+      expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
+      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      fireEvent.click(screen.getByText("Entendido"));
+
+      // La tarjeta sigue con la salida de antes: no se sabe si entró.
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+
+      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
+      expect(H.handleExtendReservation).toHaveBeenCalledTimes(1);
+    });
+
+    it("una actualización con los mismos datos no lo destraba", async () => {
+      const { actualizar } = abrir(particular({ check_out_target: SALIDA }));
+
+      await ampliarSinRespuesta();
+      fireEvent.click(screen.getByText("Entendido"));
+      actualizar(particular({ check_out_target: SALIDA }));
+
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
+    });
+
+    it("cuando la tarjeta muestra otra salida (la ampliación entró), se puede volver a ampliar", async () => {
+      const { actualizar } = abrir(particular({ check_out_target: SALIDA }));
+
+      await ampliarSinRespuesta();
+      fireEvent.click(screen.getByText("Entendido"));
+      actualizar(
+        particular({ check_out_target: "2026-10-02T13:00:00.000Z", totalPrice: 160000 })
+      );
+
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+    });
+
+    it("recargar la página (la tarjeta se monta de cero) también lo destraba", async () => {
+      const { unmount } = abrir(particular({ check_out_target: SALIDA }));
+
+      await ampliarSinRespuesta();
+      unmount();
+      abrir(particular({ check_out_target: SALIDA }));
+
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+    });
+
+    it("el medio día (que no se cobra dos veces) no frena la ampliación", async () => {
+      H.handleLateCheckOut.mockRejectedValue(sinRed());
+      abrir(particular({ check_out_target: SALIDA }));
+
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+      fireEvent.click(screen.getByText("Medio día"));
+      fireEvent.click(screen.getByText("Ampliar"));
+      await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
+      expect(screen.queryByText(RENGLON_AMPLIAR)).toBeNull();
+      fireEvent.click(screen.getByText("Entendido"));
+
+      fireEvent.click(screen.getByText("Ampliar Reserva"));
+      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+    });
   });
 });

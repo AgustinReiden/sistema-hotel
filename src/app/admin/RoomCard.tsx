@@ -176,6 +176,20 @@ type AvisoIncierto = { renglon: string | null };
 /** Cualquier otra acción de la tarjeta: el aviso va sin renglón. */
 const AVISO_ACCION: AvisoIncierto = { renglon: null };
 
+/**
+ * Ampliar por noches, repetida, vuelve a hacer efecto: suma las noches otra vez (el
+ * medio día, en cambio, no se cobra dos veces). Si no volvió, la tarjeta sigue con la
+ * salida de antes (la respuesta traía la nueva), así que ampliar queda frenado hasta
+ * ver datos nuevos. En main el rechazo rompía la pantalla y la recarga los traía.
+ */
+const AVISO_AMPLIAR: AvisoIncierto = {
+  renglon:
+    "Hasta que la tarjeta muestre otra salida o recargues la página (F5), «Ampliar Reserva» queda frenado: ampliar de nuevo sumaría las noches otra vez.",
+};
+
+/** Lo que mostraba la tarjeta cuando se amplió sin respuesta. */
+type AmpliacionIncierta = { reservationId: string; checkOut: string | null; total: number };
+
 export default function RoomCard({ room, associatedClients, isAdmin = false, timezone, standardCheckOutTime, fiscalEnabled = false }: RoomCardProps) {
   const [isPending, startTransition] = useTransition();
   const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
@@ -193,6 +207,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   const confirmacionTituloId = useId();
   const [avisoIncierto, setAvisoIncierto] = useState<AvisoIncierto | null>(null);
   const avisoTituloId = useId();
+  const [ampliacionIncierta, setAmpliacionIncierta] = useState<AmpliacionIncierta | null>(null);
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -303,6 +318,14 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   const isOverdueArrival = isConfirmedArrival && room.arrivalIsOverdue;
   // Cuando el cobro es "salida anticipada", el PaymentModal usa los montos recalculados.
   const early = checkoutMode === "early" ? earlyPreview?.breakdown ?? null : null;
+  // Una ampliación sin respuesta y la tarjeta igual que entonces: ampliar sería a
+  // ciegas. Cualquier dato nuevo (otra salida u otro total) ya muestra lo que hay; la
+  // recarga (F5) también, porque monta la tarjeta de cero.
+  const ampliarFrenado =
+    ampliacionIncierta !== null &&
+    ampliacionIncierta.reservationId === room.reservationId &&
+    ampliacionIncierta.checkOut === room.check_out_target &&
+    ampliacionIncierta.total === room.totalPrice;
 
   // Devuelve el preview de salida anticipada si el huésped se retira antes del día
   // reservado (hay al menos una noche que no va a usar); si no, null.
@@ -568,8 +591,15 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     e.preventDefault();
     const reservationId = room.reservationId;
     if (!reservationId) return;
+    const antes: AmpliacionIncierta = {
+      reservationId,
+      checkOut: room.check_out_target,
+      total: room.totalPrice,
+    };
 
     correr(async () => {
+      // El medio día no se cobra dos veces (el server lo avisa): sin respuesta, el
+      // aviso de siempre alcanza.
       if (extendMode === "half_day") {
         const result = await handleLateCheckOut(reservationId);
         if (!result.success) {
@@ -585,7 +615,16 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         return;
       }
 
-      const result = await handleExtendReservation(reservationId, extendNights);
+      let result: Awaited<ReturnType<typeof handleExtendReservation>>;
+      try {
+        result = await handleExtendReservation(reservationId, extendNights);
+      } catch {
+        // Sin respuesta: las noches pudieron haber entrado. Se guarda lo que mostraba
+        // la tarjeta para frenar otra ampliación hasta que muestre algo distinto.
+        setAmpliacionIncierta(antes);
+        avisarIncierto(AVISO_AMPLIAR);
+        return;
+      }
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -769,6 +808,10 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
               )}
               <button
                 onClick={() => {
+                  if (ampliarFrenado) {
+                    setAvisoIncierto(AVISO_AMPLIAR);
+                    return;
+                  }
                   setExtendMode("nights");
                   setExtendNights(1);
                   setIsExtendModalOpen(true);
@@ -1100,7 +1143,11 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
               <button
                 type="button"
                 className="px-4 py-2 text-white font-bold bg-brand-700 hover:bg-brand-800 rounded-lg transition-colors disabled:opacity-50"
-                onClick={() => {
+                onClick={(e) => {
+                  // El cuadro se pinta con el primer click de un doble click en el botón
+                  // de la tarjeta, y el segundo puede caer justo acá: ese no confirma.
+                  // El Enter o el espacio llegan con detail 0 y un click suelto con 1.
+                  if (e.detail > 1) return;
                   setConfirmacion(null);
                   confirmacionAbierta.accion();
                 }}

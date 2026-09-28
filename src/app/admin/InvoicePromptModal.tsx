@@ -187,12 +187,16 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       // No volvió respuesta (red cortada, o el servidor no contestó mientras esperaba
       // a ARCA): pudo haber salido o no. Se avisa y se cierra igual. Trabado en
       // "Emitiendo…" no había salida, y el recibo del check-out espera este cierre.
+      // Si salió, tampoco se imprimió (no volvió el id): recepción le avisa al admin,
+      // que la ve en Facturación. El aviso no se va solo: en el check-out sale junto
+      // con el recibo, que abre otra ventana encima.
       setEmitting(false);
       toast.warning("No sabemos si la factura salió porque se cortó la comunicación.", {
         description: startAtTipo
           ? "Antes de volver a emitirla, fijate en Facturación si quedó emitida, pendiente o rechazada."
-          : "Si no salió, le queda al administrador para revisar en Facturación.",
-        duration: 12000,
+          : "Avisale al administrador para que la revise en Facturación: si salió, no se imprimió y la reimprime desde ahí; si no salió, la emite él.",
+        duration: Infinity,
+        action: { label: "Entendido", onClick: () => {} },
       });
       onClose();
       return;
