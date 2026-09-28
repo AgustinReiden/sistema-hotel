@@ -4,13 +4,35 @@ import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import AdminLayout from "@/app/admin/layout";
 import AlertsPanel from "@/app/admin/mantenimiento/AlertsPanel";
 import { MobileTabBar, MobileTopBar } from "@/app/admin/MobileNav";
 import OccupiedRoomAlertBanner from "@/app/admin/OccupiedRoomAlertBanner";
 import OpenShiftAgeAlert from "@/app/admin/OpenShiftAgeAlert";
+import Dashboard from "@/app/admin/page";
 import RoomCard from "@/app/admin/RoomCard";
 import Sidebar from "@/app/admin/Sidebar";
-import type { AdminAlert, RoomOccupancyAlert } from "@/lib/types";
+import {
+  countBillingPending,
+  getActiveAssociatedClients,
+  getActiveOpenShift,
+  getCurrentUserRole,
+  getDashboardData,
+  getFiscalSettings,
+  getPendingSolicitudesCount,
+  getRemitosSalud,
+  getUnresolvedAdminAlertsCount,
+  listRoomOccupancyAlerts,
+} from "@/lib/data";
+import { createClient } from "@/lib/supabase/server";
+import type {
+  AdminAlert,
+  AssociatedClient,
+  FiscalSettings,
+  HotelSettings,
+  Room,
+  RoomOccupancyAlert,
+} from "@/lib/types";
 import { comoChrome, conIcuCambiado, septiembreSinT, type CambioDeIcu } from "./icu-chrome";
 
 // Error #418 de React en el build de producción: el HTML del servidor no coincidía con
@@ -21,6 +43,23 @@ import { comoChrome, conIcuCambiado, septiembreSinT, type CambioDeIcu } from "./
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
   usePathname: () => "/admin",
+  redirect: vi.fn(),
+}));
+// La pantalla entera de Hoy (el marco del panel y la página) lee la sesión y los datos
+// en el servidor: acá salen de estos dobles.
+vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+vi.mock("@/lib/data", () => ({
+  countBillingPending: vi.fn(),
+  getActiveAssociatedClients: vi.fn(),
+  getActiveOpenShift: vi.fn(),
+  getCurrentUserRole: vi.fn(),
+  getDashboardData: vi.fn(),
+  getFiscalSettings: vi.fn(),
+  getPendingSolicitudesCount: vi.fn(),
+  getRemitosSalud: vi.fn(),
+  getShiftSummary: vi.fn(),
+  getUnresolvedAdminAlertsCount: vi.fn(),
+  listRoomOccupancyAlerts: vi.fn(),
 }));
 vi.mock("@/app/admin/mantenimiento/actions", () => ({
   authorizeOldTariffAction: vi.fn(),
@@ -209,6 +248,224 @@ function habitacion(overrides: Partial<Habitacion> = {}): Habitacion {
   };
 }
 
+// --- La pantalla entera de Hoy: lo que leen del servidor el marco del panel y la página.
+
+type DatosDeHoy = Awaited<ReturnType<typeof getDashboardData>>;
+type Reserva = DatosDeHoy["reservations"][number];
+
+function pieza(id: number, status: Room["status"] = "available"): Room {
+  return {
+    id,
+    category_id: null,
+    room_number: String(id),
+    room_type: "Doble",
+    status,
+    capacity: 2,
+    capacity_adults: 2,
+    capacity_children: 0,
+    beds_configuration: "1 cama doble",
+    amenities: [],
+    description: null,
+    image_url: null,
+    base_price: 80000,
+    half_day_price: 40000,
+    is_active: true,
+  };
+}
+
+function reserva(overrides: Partial<Reserva> = {}): Reserva {
+  return {
+    id: "res-1",
+    room_id: 1,
+    client_name: "Juan Prueba",
+    status: "checked_in",
+    check_in_target: "2026-09-25T17:00:00.000Z",
+    check_out_target: "2026-09-27T13:00:00.000Z",
+    late_check_out_until: null,
+    actual_check_in: null,
+    actual_check_out: null,
+    base_total_price: 80000,
+    discount_percent: 0,
+    discount_amount: 0,
+    total_price: 80000,
+    paid_amount: 0,
+    associated_client_id: null,
+    company_passenger_id: null,
+    client_dni: null,
+    ...overrides,
+  };
+}
+
+const EMPRESA: AssociatedClient = {
+  id: "emp-1",
+  display_name: "Empresa Ficticia SA",
+  document_id: "30123456781",
+  phone: null,
+  discount_percent: 10,
+  notes: null,
+  is_active: true,
+  cuenta_corriente_habilitada: true,
+  condicion_iva: "responsable_inscripto",
+  razon_social: null,
+  domicilio: null,
+  facturacion_modo: "consolidada",
+  robinet_id: null,
+  created_at: TARDE,
+  updated_at: TARDE,
+};
+
+const AJUSTES_DEL_HOTEL: HotelSettings = {
+  id: 1,
+  name: "Hotel de Prueba",
+  standard_check_in_time: "14:00",
+  standard_check_out_time: "10:00",
+  late_check_out_time: "18:00",
+  timezone: TZ,
+  currency: "ARS",
+  contact_email: null,
+  contact_phone: null,
+  address: null,
+  hero_title: "Hotel de Prueba",
+  hero_subtitle: "",
+};
+
+const FACTURACION: FiscalSettings = {
+  id: 1,
+  enabled: true,
+  environment: "homologacion",
+  cuit: null,
+  razon_social: null,
+  domicilio_fiscal: null,
+  iibb: null,
+  inicio_actividades: null,
+  punto_venta: null,
+  cbte_tipo: 6,
+  concepto: 2,
+  iva_pct: 21,
+  prefijo_archivos: null,
+  dias_vto_cuenta_corriente: 30,
+};
+
+/** Hoy a las 14:30 de un admin, con una habitación en cada estado y todos los avisos. */
+function prepararHoy() {
+  const reservas = [
+    // Ocupada, con deuda y el check-out de las 10:00 ya pasado.
+    reserva({
+      id: "res-2",
+      room_id: 2,
+      check_out_target: "2026-09-26T13:00:00.000Z",
+      paid_amount: 30000,
+    }),
+    // De una empresa, pagada, con tardío hasta las 14:00 de mañana.
+    reserva({
+      id: "res-3",
+      room_id: 3,
+      client_name: "Empresa Ficticia SA",
+      check_in_target: "2026-09-24T17:00:00.000Z",
+      late_check_out_until: "2026-09-27T17:00:00.000Z",
+      base_total_price: 240000,
+      total_price: 240000,
+      paid_amount: 240000,
+      associated_client_id: EMPRESA.id,
+      company_passenger_id: "pas-1",
+    }),
+    // Llegada de ayer que nadie registró, de la empresa y sin pasajero cargado.
+    reserva({
+      id: "res-4",
+      room_id: 4,
+      client_name: "Empresa Ficticia SA",
+      status: "confirmed",
+      associated_client_id: EMPRESA.id,
+    }),
+    // Llega hoy.
+    reserva({
+      id: "res-5",
+      room_id: 5,
+      client_name: "Ana Prueba",
+      status: "confirmed",
+      check_in_target: "2026-09-26T17:00:00.000Z",
+    }),
+  ];
+
+  vi.mocked(createClient).mockResolvedValue({
+    auth: {
+      getUser: async () => ({ data: { user: { id: "u-admin", email: "admin@example.com" } } }),
+    },
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          single: async () => ({ data: { role: "admin", full_name: "Admin Prueba" } }),
+        }),
+      }),
+    }),
+  } as unknown as Awaited<ReturnType<typeof createClient>>);
+  vi.mocked(getActiveOpenShift).mockResolvedValue({
+    id: "turno-1",
+    shift_number: 12,
+    // Abierta hace dos días: sale el aviso de turno viejo (recién después de montar).
+    opened_at: "2026-09-24T11:00:00.000Z",
+    closed_at: null,
+    opened_by: "u-admin",
+    closed_by: null,
+    opening_cash: 0,
+    expected_cash: null,
+    actual_cash: null,
+    discrepancy: null,
+    notes: null,
+    status: "open",
+  });
+  vi.mocked(countBillingPending).mockResolvedValue({ falta: 2, pendiente_consolidada: 1, dias: 60 });
+  vi.mocked(getRemitosSalud).mockResolvedValue({
+    ultima_ingesta_at: TARDE,
+    ultima_evaluacion_at: TARDE,
+    evaluando_viejos: 0,
+    a_revisar: 2,
+    piezas_abiertas: 1,
+    umbral_confianza: 0.8,
+    controlar_desde: 1,
+    max_intentos_firma: 3,
+    vencidos: 1,
+    a_revisar_vencidos: 0,
+    horas_vencimiento: 72,
+    alertar_desde: "2026-09-01",
+  });
+  vi.mocked(getDashboardData).mockResolvedValue({
+    rooms: [
+      pieza(1),
+      pieza(2, "occupied"),
+      pieza(3, "occupied"),
+      pieza(4),
+      pieza(5),
+      pieza(6, "cleaning"),
+      pieza(7, "maintenance"),
+    ],
+    reservations: reservas,
+    accountCreditByReservation: { "res-3": true, "res-4": true },
+    facturacionModoByReservation: { "res-3": "consolidada", "res-4": "consolidada" },
+    invoicePrefillByReservation: {},
+    priorPaymentMethodsByReservation: { "res-2": ["cash"], "res-3": ["cuenta_corriente"] },
+    todayIncome: 0,
+    hotelSettings: AJUSTES_DEL_HOTEL,
+  });
+  vi.mocked(getActiveAssociatedClients).mockResolvedValue([EMPRESA]);
+  vi.mocked(getCurrentUserRole).mockResolvedValue("admin");
+  vi.mocked(getPendingSolicitudesCount).mockResolvedValue(2);
+  vi.mocked(getUnresolvedAdminAlertsCount).mockResolvedValue(3);
+  vi.mocked(getFiscalSettings).mockResolvedValue(FACTURACION);
+  vi.mocked(listRoomOccupancyAlerts).mockResolvedValue([
+    piezaOcupada(),
+    piezaOcupada({
+      alert_id: 2,
+      room_id: 5,
+      room_number: "5",
+      resolved_at: TARDE,
+      decision: "regularizada",
+      resolved_by_name: "Admin Prueba",
+      resolved_notes: "Se cargó la estadía",
+    }),
+  ]);
+}
+
 describe("hidratación: lo que dibuja el servidor coincide con el navegador", () => {
   it("la simulación cambia de verdad la zona del proceso", async () => {
     const corrimiento = () => new Date(TARDE).getTimezoneOffset();
@@ -357,5 +614,46 @@ describe("hidratación: lo que dibuja el servidor coincide con el navegador", ()
 
     expect(errores).toEqual([]);
     expect(container.textContent).toContain("Turno de caja abierto hace");
+  });
+
+  // Hoy entera, como la arma Next: el marco del panel (layout.tsx) con la página
+  // (page.tsx) adentro, los dos calculados una sola vez "en el servidor", y todo lo de
+  // cliente dibujado de nuevo "en el navegador". Cubre también lo que escriben los
+  // componentes de servidor (títulos, avisos, contadores) y cómo anidan las etiquetas:
+  // una etiqueta mal anidada el navegador la reacomoda al leer el HTML y también da #418.
+  it("la pantalla entera de Hoy (el marco del panel y la página) hidrata sin diferencias", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TARDE));
+    try {
+      prepararHoy();
+      const pantalla = await enZona(ZONA_DEL_SERVIDOR, async () =>
+        AdminLayout({ children: await Dashboard() })
+      );
+
+      // El ICU de Chrome medido, y otro que además abrevia distinto el mes (con el
+      // time.ts de main, este segundo fallaba por el aviso de pieza ocupada).
+      const cambios: CambioDeIcu[] = [comoChrome, (texto) => septiembreSinT(comoChrome(texto))];
+      for (const cambio of cambios) {
+        const { container, errores } = await hidratar(pantalla, cambio);
+
+        expect(errores).toEqual([]);
+        const texto = container.textContent ?? "";
+        expect(texto).toContain("Vista Global: sábado, 26 sept");
+        expect(texto).toContain("Hay 1 habitación usada sin estadía cargada");
+        expect(texto).toContain("26 sept 14:30");
+        expect(texto).toContain("Tenés 3 avisos sin revisar");
+        expect(texto).toContain("Tenés 2 solicitudes pendientes");
+        expect(texto).toContain("Retraso Check-out");
+        expect(texto).toContain("$50.000,00");
+        expect(texto).toContain("Late Check-out");
+        expect(texto).toContain("Falta Check-In");
+        expect(texto).toContain("Llega Hoy");
+        expect(texto).toContain("Limpieza");
+        expect(texto).toContain("Mantenimiento");
+        expect(texto).toContain("Turno de caja abierto hace 54h 30m");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
