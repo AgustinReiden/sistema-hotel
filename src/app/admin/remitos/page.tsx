@@ -23,6 +23,8 @@ const SALUD_VACIA: RemitosSalud = {
   piezas_abiertas: 0, umbral_confianza: 0.95, controlar_desde: 1, max_intentos_firma: 5,
   vencidos: 0, a_revisar_vencidos: 0, horas_vencimiento: 48, alertar_desde: "2026-09-24",
 };
+const QUE_SALUD = "el estado de la ingesta";
+const QUE_VENCIDOS = "los remitos vencidos";
 
 export default async function RemitosPage({
   searchParams,
@@ -59,23 +61,31 @@ export default async function RemitosPage({
   const [periodo, piezas, salud, accounts, paquetes] = await Promise.all([
     cargar(listRemitos(desde, hasta, clientKind, clientId), [], "los remitos"),
     cargar(listRemitoPiezas(false), [], "las piezas a revisar"),
-    cargar(getRemitosSalud(), SALUD_VACIA, "el estado de la ingesta"),
+    cargar(getRemitosSalud(), SALUD_VACIA, QUE_SALUD),
     cargar(getCtaCteAccounts(), [], "los clientes"),
     clientKind && clientId
       ? cargar(listRemitoPaquetes(clientKind, clientId), [], "los paquetes")
       : Promise.resolve([] as RemitoPaqueteFactura[]),
   ]);
 
-  // Los vencidos van en su propia lista, arriba: la de a revisar no los repite.
-  const rows = aRevisar ? remitosARevisar(periodo, salud, ahora.getTime()) : periodo;
-
   // Los vencidos no dependen del mes elegido. Solo se buscan si la salud dice que hay.
   const vencidos =
     salud.vencidos > 0
-      ? (await cargar(listRemitos(salud.alertar_desde, hoyKey), [], "los remitos vencidos"))
+      ? (await cargar(listRemitos(salud.alertar_desde, hoyKey), [], QUE_VENCIDOS))
           .filter((r) => esVencido(r, salud, ahora.getTime()))
           .sort((a, b) => a.created_at.localeCompare(b.created_at))
       : [];
+
+  // Los vencidos van en su propia lista, arriba: la de a revisar no los repite. Pero si
+  // esa lista no se pudo armar (sin la salud no se sabe el plazo real, y sin la búsqueda
+  // no están), la de a revisar los trae a todos: sacarlos escondería un remito a revisar
+  // que no aparece en ninguna parte.
+  const vencidosALaVista = !errores.includes(QUE_SALUD) && !errores.includes(QUE_VENCIDOS);
+  const rows = !aRevisar
+    ? periodo
+    : vencidosALaVista
+      ? remitosARevisar(periodo, salud, ahora.getTime())
+      : periodo.filter((r) => r.estado === "a_revisar");
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -92,7 +102,11 @@ export default async function RemitosPage({
       </header>
       <div className="flex-1 overflow-auto p-3 md:p-5">
         <div className="max-w-[1400px] mx-auto">
+          {/* Next no vuelve a montar la página cuando cambian solo los parámetros de la
+              URL: sin la key, el filtro de arriba seguiría mostrando el cliente y el mes de
+              antes de tocar «Ver los N a revisar» o «Volver al mes». */}
           <RemitosClient
+            key={`${cliente ?? ""}|${mesFiltro}|${aRevisar ? "a_revisar" : "mes"}`}
             rows={rows}
             vencidos={vencidos}
             paquetes={paquetes}

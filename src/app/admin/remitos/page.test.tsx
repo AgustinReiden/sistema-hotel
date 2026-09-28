@@ -9,19 +9,24 @@ import type { RemitoEstado, RemitoPanelRow, RemitosSalud } from "@/lib/types";
 // page.tsx es un server component async: se lo llama como función. Los datos vienen de
 // la base, que acá no hay, y el panel queda como un marcador que guarda sus props, así
 // se ve qué le llega: el rango que se pidió y las filas que muestra.
-const H = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+// `montajes` cuenta las veces que el panel se monta de cero (el filtro arranca de las props).
+const H = vi.hoisted(() => ({ props: null as Record<string, unknown> | null, montajes: 0 }));
 
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     throw new Error(`NEXT_REDIRECT ${url}`);
   },
 }));
-vi.mock("./RemitosClient", () => ({
-  default: (props: Record<string, unknown>) => {
-    H.props = props;
-    return null;
-  },
-}));
+vi.mock("./RemitosClient", async () => {
+  const { useState } = await import("react");
+  return {
+    default: function PanelFalso(props: Record<string, unknown>) {
+      const [montaje] = useState(() => ++H.montajes);
+      H.props = { ...props, montaje };
+      return null;
+    },
+  };
+});
 
 const listRemitos = vi.fn();
 const getRemitosSalud = vi.fn();
@@ -74,6 +79,7 @@ describe("RemitosPage: lo que dice el menú es lo que se ve al abrir", () => {
     vi.setSystemTime(AHORA);
     vi.clearAllMocks();
     H.props = null;
+    H.montajes = 0;
     listRemitos.mockResolvedValue(TODOS);
     getRemitosSalud.mockResolvedValue(SALUD);
   });
@@ -103,5 +109,86 @@ describe("RemitosPage: lo que dice el menú es lo que se ve al abrir", () => {
     expect(listRemitos).toHaveBeenNthCalledWith(1, "2026-09-01", "2026-09-30", undefined, undefined);
     expect(props.aRevisar).toBe(false);
     expect(filas(props)).toEqual(TODOS.map((r) => r.movimiento_id));
+  });
+});
+
+// Si no se sabe qué venció, sacar los vencidos de la lista escondería un remito a revisar
+// que tampoco está en la lista de vencidos.
+describe("RemitosPage: ?ver=a_revisar cuando algo no carga", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(AHORA);
+    vi.clearAllMocks();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    H.props = null;
+    H.montajes = 0;
+    getRemitosSalud.mockResolvedValue(SALUD);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("si falla la salud, trae todos los a revisar (también el que venció) y lo dice", async () => {
+    listRemitos.mockResolvedValue(TODOS);
+    getRemitosSalud.mockRejectedValue(new Error("timeout"));
+    const props = await abrir({ ver: "a_revisar" });
+    expect(filas(props)).toEqual([DE_AGOSTO.movimiento_id, VENCIDO.movimiento_id]);
+    expect(props.vencidos).toEqual([]);
+    expect(props.errores).toEqual(["el estado de la ingesta"]);
+  });
+
+  it("si falla la búsqueda de los vencidos, la lista a revisar no los saca", async () => {
+    listRemitos.mockResolvedValueOnce(TODOS).mockRejectedValueOnce(new Error("timeout"));
+    const props = await abrir({ ver: "a_revisar" });
+    expect(filas(props)).toEqual([DE_AGOSTO.movimiento_id, VENCIDO.movimiento_id]);
+    expect(props.vencidos).toEqual([]);
+    expect(props.errores).toEqual(["los remitos vencidos"]);
+  });
+
+  it("si fallan los remitos, el panel recibe el error junto con la lista vacía", async () => {
+    listRemitos.mockRejectedValue(new Error("timeout"));
+    const props = await abrir({ ver: "a_revisar" });
+    expect(filas(props)).toEqual([]);
+    expect(props.errores).toContain("los remitos");
+  });
+});
+
+// Next no vuelve a montar la página si cambian solo los parámetros: el panel lleva una key
+// con el cliente, el mes y la lista, para que el filtro no quede mostrando los de antes.
+describe("RemitosPage: el filtro sigue a la URL", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(AHORA);
+    vi.clearAllMocks();
+    H.props = null;
+    H.montajes = 0;
+    listRemitos.mockResolvedValue(TODOS);
+    getRemitosSalud.mockResolvedValue(SALUD);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("al pasar a la lista a revisar y al volver al mes, el panel arranca de nuevo", async () => {
+    const pagina = (params: { cliente?: string; mes?: string; ver?: string }) =>
+      RemitosPage({ searchParams: Promise.resolve(params) });
+    const { rerender } = render(await pagina({ cliente: "company:c1", mes: "2026-08" }));
+    expect(H.props!.montaje).toBe(1);
+
+    rerender(await pagina({ ver: "a_revisar" }));
+    expect(H.props!.montaje).toBe(2);
+    expect(H.props!.cliente).toBe("");
+
+    rerender(await pagina({}));
+    expect(H.props!.montaje).toBe(3);
+    expect(H.props!.mes).toBe("2026-09");
+  });
+
+  it("con los mismos parámetros (router.refresh después de marcar) no se vuelve a montar", async () => {
+    const params = { cliente: "company:c1", mes: "2026-08" };
+    const { rerender } = render(await RemitosPage({ searchParams: Promise.resolve(params) }));
+    rerender(await RemitosPage({ searchParams: Promise.resolve(params) }));
+    expect(H.props!.montaje).toBe(1);
   });
 });

@@ -168,7 +168,36 @@ describe("RemitosClient: ver los remitos a revisar", () => {
 
   it("sin nada a revisar, la lista lo dice", () => {
     renderPanel({ aRevisar: true, cliente: "company:c1" });
-    expect(screen.getByTestId("semaforo")).toHaveTextContent("No quedan remitos a revisar.");
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("No quedan remitos a revisar de este cliente.");
     expect(screen.getByText("Volver al mes").closest("a")).toHaveAttribute("href", "/admin/remitos?cliente=company%3Ac1");
+  });
+
+  it("en la lista de a revisar el mes no se elige y «Ver» acota por cliente sin salir de la lista", () => {
+    renderPanel({ aRevisar: true, cliente: "company:c1" });
+    expect(screen.queryByLabelText("Mes")).toBeNull();
+    expect(screen.getByTestId("mes-todos")).toHaveTextContent("Todos los meses");
+    fireEvent.click(screen.getByText("Ver"));
+    expect(push).toHaveBeenCalledWith("/admin/remitos?ver=a_revisar&cliente=company%3Ac1");
+  });
+
+  it("en la tabla del mes «Ver» sigue mandando el cliente y el mes", () => {
+    renderPanel({ cliente: "company:c1", mes: "2026-08" });
+    expect(screen.getByLabelText("Mes")).toHaveValue("2026-08");
+    fireEvent.click(screen.getByText("Ver"));
+    expect(push).toHaveBeenCalledWith("/admin/remitos?cliente=company%3Ac1&mes=2026-08");
+  });
+
+  // Una lista vacía por un error no puede decir que no queda nada que revisar.
+  it("si algo no cargó, no dice que no quedan", () => {
+    renderPanel({ aRevisar: true, errores: ["los remitos"] });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("No se pudo armar la lista de remitos a revisar.");
+    expect(screen.queryByText(/No quedan/)).toBeNull();
+  });
+
+  it("si algo no cargó, avisa que puede haber más de los que muestra", () => {
+    renderPanel({ aRevisar: true, rows: [fila("a_revisar"), fila("a_revisar")], errores: ["el estado de la ingesta"] });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent(
+      "2 remitos a revisar, de todos los meses. Puede haber más: no se cargó todo."
+    );
   });
 });

@@ -145,13 +145,25 @@ export default function RemitosClient({ rows, vencidos = [], paquetes = [], piez
   const verARevisar =
     cuentaParaRevisar.remitos === 1 ? "Ver el remito a revisar" : `Ver los ${cuentaParaRevisar.remitos} a revisar`;
   const volverAlMes = `/admin/remitos${cliente ? `?${new URLSearchParams({ cliente })}` : ""}`;
+  // Si algo no cargó, la lista puede estar incompleta: no se afirma que no queda nada.
+  const cuantosARevisar = `${rows.length} ${rows.length === 1 ? "remito a revisar" : "remitos a revisar"}${cliente ? " de este cliente" : ""}`;
+  const textoListaARevisar =
+    errores.length > 0
+      ? rows.length === 0
+        ? "No se pudo armar la lista de remitos a revisar."
+        : `${cuantosARevisar}, de todos los meses. Puede haber más: no se cargó todo.`
+      : rows.length === 0
+        ? `No quedan remitos a revisar${cliente ? " de este cliente" : ""}.`
+        : `${cuantosARevisar}, de todos los meses.`;
   const avisos = useMemo(() => avisosSalud(salud, nowMs), [salud, nowMs]);
   const mostrarCliente = cliente === "";
 
   function aplicarFiltros() {
     const q = new URLSearchParams();
+    // En la lista a revisar el cliente la acota, pero sigue siendo de todos los meses.
+    if (aRevisar) q.set("ver", "a_revisar");
     if (clienteSel) q.set("cliente", clienteSel);
-    if (mesSel) q.set("mes", mesSel);
+    if (mesSel && !aRevisar) q.set("mes", mesSel);
     const qs = q.toString();
     router.push(`/admin/remitos${qs ? `?${qs}` : ""}`);
   }
@@ -256,12 +268,21 @@ export default function RemitosClient({ rows, vencidos = [], paquetes = [], piez
           {/* ClientFilter trae su propia etiqueta "Cliente". */}
           <ClientFilter accounts={accounts} value={clienteSel} onChange={setClienteSel} inputId="remitos-cliente" />
         </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="remitos-mes">
-            Mes
-          </label>
-          <input id="remitos-mes" type="month" value={mesSel} onChange={(e) => setMesSel(e.target.value)} className={inputClass} />
-        </div>
+        {aRevisar ? (
+          <div>
+            <span className="block text-xs font-bold text-slate-500 mb-1">Mes</span>
+            <p className="px-3 py-2 text-sm text-slate-600" data-testid="mes-todos">
+              Todos los meses
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1" htmlFor="remitos-mes">
+              Mes
+            </label>
+            <input id="remitos-mes" type="month" value={mesSel} onChange={(e) => setMesSel(e.target.value)} className={inputClass} />
+          </div>
+        )}
         <button type="button" onClick={aplicarFiltros} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg">
           Ver
         </button>
@@ -306,9 +327,7 @@ export default function RemitosClient({ rows, vencidos = [], paquetes = [], piez
       {aRevisar ? (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <p className="text-sm font-semibold text-slate-700" data-testid="semaforo">
-            {rows.length === 0
-              ? "No quedan remitos a revisar."
-              : `${rows.length} ${rows.length === 1 ? "remito a revisar" : "remitos a revisar"}, de todos los meses.`}
+            {textoListaARevisar}
           </p>
           <Link href={volverAlMes} className="text-sm font-semibold text-emerald-700 hover:underline">
             Volver al mes
