@@ -161,13 +161,21 @@ type ResultadoSinAutorizar = {
 };
 
 /**
- * Las estadías de una factura rechazada volvieron a estar pendientes en la lista cargada:
- * ya se la descartó en Facturación, que es lo que las suelta. Si alguna no está en la lista
- * (un período la deja afuera), no se sabe, y no cuenta como suelta.
+ * Qué se sabe de las estadías de una factura rechazada mirando la lista cargada:
+ * - "liberadas": todas vuelven a estar pendientes; ya se la descartó en Facturación, que
+ *   es lo que las suelta.
+ * - "atadas": alguna está en la lista y sigue atada a la factura (falta descartarla).
+ * - "fuera-del-periodo": las que están en la lista están pendientes, pero alguna no vino
+ *   (un período la deja afuera): no se puede saber, y no cuenta como suelta.
  */
-function seLiberaron(emitidas: string[], data: CcAccountStayRow[]): boolean {
-  const pendientes = new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id));
-  return emitidas.length > 0 && emitidas.every((rid) => pendientes.has(rid));
+function estadoDeLaRechazada(
+  emitidas: string[],
+  data: CcAccountStayRow[]
+): "liberadas" | "atadas" | "fuera-del-periodo" {
+  if (emitidas.length === 0) return "atadas";
+  const enLista = new Map(data.map((r) => [r.reservation_id, r.facturable]));
+  if (emitidas.some((rid) => enLista.get(rid) === false)) return "atadas";
+  return emitidas.every((rid) => enLista.has(rid)) ? "liberadas" : "fuera-del-periodo";
 }
 
 /**
@@ -336,6 +344,15 @@ export default function ConsolidadaClient({
   // Leyendo el nombre y el DNI del huésped antes de abrir el cuadro (ver revisar()).
   const [releyendo, setReleyendo] = useState(false);
   const [fichaAlRevisar, setFichaAlRevisar] = useState<FichaAlRevisar | null>(null);
+  // Las estadías de la factura rechazada cuyo aviso está a la vista: las eligió la persona
+  // para esa factura, así que si vuelven pendientes al descartarla no cuentan como «entraron
+  // solas» (ver loadRows). Se vacía al cerrar el aviso, con la próxima emisión y al cambiar
+  // de cliente.
+  const emitidasRechazada = useRef<Set<string>>(new Set());
+  // El aviso fijo se cerró (solo o a pedido) con el foco adentro: el foco pasa al título de
+  // la lista en vez de caer al body (ver el efecto de abajo).
+  const enfocarTituloDeLista = useRef(false);
+  const tituloListaRef = useRef<HTMLHeadingElement>(null);
   // El botón de la barra que abre el cuadro: al cerrarse, el foco vuelve ahí.
   const botonRevisarRef = useRef<HTMLButtonElement>(null);
   // Estadías que la persona destildó a mano (reservation_id), del cliente `cliente`. Cada
@@ -543,9 +560,17 @@ export default function ConsolidadaClient({
       // facturar hasta descartarla en Facturación. Si esta recarga las trae pendientes, ya
       // se la descartó y el aviso dejó de ser cierto: se cierra solo. No en la recarga que
       // sigue a la emisión (`yaFacturadas`): ahí el aviso recién sale y tiene que leerse.
-      if (!opciones?.yaFacturadas) {
-        setResultadoSinAutorizar((actual) =>
-          actual?.status === "rejected" && seLiberaron(actual.emitidas, data) ? null : actual
+      const rechazadas = new Set(emitidasRechazada.current);
+      if (
+        !opciones?.yaFacturadas &&
+        rechazadas.size > 0 &&
+        estadoDeLaRechazada([...rechazadas], data) === "liberadas"
+      ) {
+        emitidasRechazada.current = new Set();
+        enfocarTituloDeLista.current = true;
+        setResultadoSinAutorizar(null);
+        toast.success(
+          "Listo: las estadías de la factura rechazada ya están pendientes. Revisá lo tildado antes de emitir."
         );
       }
       // Por defecto se selecciona todo lo pendiente, menos lo que la persona destildó a
@@ -584,7 +609,10 @@ export default function ConsolidadaClient({
               (rid) => !tildadas.has(rid) && !aMano?.has(rid) && !esperadas.has(rid)
             ).length
           : 0;
-        const entraron = mismaLista ? [...tildadas].filter((rid) => !antes.has(rid)) : [];
+        // Las de la factura rechazada que se liberaron las eligió la persona: no entraron solas.
+        const entraron = mismaLista
+          ? [...tildadas].filter((rid) => !antes.has(rid) && !rechazadas.has(rid))
+          : [];
         setPicked(tildadas);
         setCambioDeSeleccion(
           salieron > 0 || entraron.length > 0 ? { salieron, entraron } : null
@@ -650,6 +678,7 @@ export default function ConsolidadaClient({
     setRevisando(false);
     setEmisionIncierta(null);
     setResultadoSinAutorizar(null);
+    emitidasRechazada.current = new Set();
     setCambioDeSeleccion(null);
     setFichaAlRevisar(null);
   }
@@ -700,6 +729,15 @@ export default function ConsolidadaClient({
     }
   }, [emisionIncierta, resultadoSinAutorizar]);
 
+  // Cuando el aviso se cierra (solo o a pedido) el botón que tenía el foco desaparece con
+  // él: el foco va a un destino estable, el título de la lista.
+  useEffect(() => {
+    if (emisionIncierta === null && resultadoSinAutorizar === null && enfocarTituloDeLista.current) {
+      enfocarTituloDeLista.current = false;
+      tituloListaRef.current?.focus();
+    }
+  }, [emisionIncierta, resultadoSinAutorizar]);
+
   // El aviso fijo de arriba de la lista: la emisión incierta, o la factura que volvió sin
   // autorizar. No pueden estar los dos: cada emisión borra los dos antes de empezar.
   const sinAutorizar = resultadoSinAutorizar !== null ? avisoSinAutorizar(resultadoSinAutorizar) : null;
@@ -722,7 +760,10 @@ export default function ConsolidadaClient({
           encabezado: null,
           texto: textoIncierto,
           cerrable: !loading,
-          cerrar: () => setEmisionIncierta(null),
+          cerrar: () => {
+            enfocarTituloDeLista.current = true;
+            setEmisionIncierta(null);
+          },
           facturacionEnOtraPestana: false,
           recargar: null,
         }
@@ -734,7 +775,11 @@ export default function ConsolidadaClient({
             encabezado: sinAutorizar.titulo,
             texto: sinAutorizar.texto,
             cerrable: true,
-            cerrar: () => setResultadoSinAutorizar(null),
+            cerrar: () => {
+              emitidasRechazada.current = new Set();
+              enfocarTituloDeLista.current = true;
+              setResultadoSinAutorizar(null);
+            },
             // El aviso manda a Facturación (a descartar la rechazada, a reintentar la
             // pendiente) y a volver acá. En la misma pestaña la consolidada se desmonta: se
             // pierden lo destildado a mano, que al volver entra tildado sin aviso, y lo que
@@ -750,9 +795,14 @@ export default function ConsolidadaClient({
                     const { emitidas } = resultadoSinAutorizar;
                     void loadRows({
                       alAplicar: (data) => {
-                        if (!seLiberaron(emitidas, data)) {
+                        const estado = estadoDeLaRechazada(emitidas, data);
+                        if (estado === "atadas") {
                           toast.info(
                             "Las estadías de la factura rechazada todavía no aparecen pendientes. Descartala en Facturación y volvé a tocar «Recargar la lista»."
+                          );
+                        } else if (estado === "fuera-del-periodo") {
+                          toast.info(
+                            "Con este período no se ven todas las estadías de la factura rechazada. Pasá a «Todo» y volvé a tocar «Recargar la lista»."
                           );
                         }
                       },
@@ -1089,6 +1139,7 @@ export default function ConsolidadaClient({
     // también termina así, vuelve a salir, con lo de esta.
     setEmisionIncierta(null);
     setResultadoSinAutorizar(null);
+    emitidasRechazada.current = new Set();
     const emitidas = selectedRows.map((r) => r.reservation_id);
     const cliente = selectedKey;
 
@@ -1212,6 +1263,7 @@ export default function ConsolidadaClient({
       // Pendiente, en verificación o rechazada: el motivo queda en el aviso fijo de arriba
       // de la lista, con el link a Facturación. Un toast se iba solo a los 4 s.
       const motivo = (outcome?.userMessage ?? "").trim();
+      if (outcome?.status === "rejected") emitidasRechazada.current = new Set(emitidas);
       setResultadoSinAutorizar({
         status:
           outcome?.status === "rejected" || outcome?.status === "processing"
@@ -1329,7 +1381,13 @@ export default function ConsolidadaClient({
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-bold text-slate-800">Estadías de la cuenta</h3>
+            <h3
+              ref={tituloListaRef}
+              tabIndex={-1}
+              className="text-base font-bold text-slate-800 outline-none"
+            >
+              Estadías de la cuenta
+            </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Se factura el cargo a cuenta corriente de cada estadía, no el total de la reserva.
             </p>

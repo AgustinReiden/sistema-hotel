@@ -2933,6 +2933,59 @@ describe("ConsolidadaClient", () => {
       expect(filaCheckbox("3")).not.toBeChecked();
     });
 
+    it("rechazada: las estadías que se liberan al descartarla no cuentan como «entraron solas», ni en la línea de arriba ni en el cuadro; el foco va al título de la lista", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(tresPendientes)
+        .mockImplementationOnce(atadasALaRechazada)
+        .mockImplementationOnce(tresPendientes);
+      const aviso = await emitirRechazada();
+      vi.mocked(toast.success).mockClear();
+
+      fireEvent.click(within(aviso).getByText("Recargar la lista"));
+      await waitFor(() =>
+        expect(screen.queryByLabelText("ARCA rechazó la factura")).not.toBeInTheDocument()
+      );
+      // El aviso se cerró solo con el botón adentro: el foco no queda perdido, va al título
+      // de la lista, y un toast dice qué pasó.
+      expect(toast.success).toHaveBeenCalledWith(
+        "Listo: las estadías de la factura rechazada ya están pendientes. Revisá lo tildado antes de emitir."
+      );
+      // (el efecto que mueve el foco corre un instante después de que sale el aviso)
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByText("Estadías de la cuenta"))
+      );
+
+      // Las eligió la persona para esa factura: no hay alarma de «entraron sin que las
+      // eligieras», y el cuadro no las nombra como ajenas.
+      expect(screen.queryByText(/entraron a la selección/)).not.toBeInTheDocument();
+      const cuadro = abrirCuadro();
+      expect(within(cuadro).queryByText(/entraron a la selección/)).not.toBeInTheDocument();
+      expect(
+        within(cuadro).queryByLabelText("Estadías que entraron solas a esta factura")
+      ).not.toBeInTheDocument();
+      fireEvent.click(within(cuadro).getByText("Volver"));
+    });
+
+    it("rechazada: si el período deja afuera alguna de sus estadías, no dice que falta descartarla", async () => {
+      loadCcAccountStaysAction
+        .mockImplementationOnce(tresPendientes)
+        .mockImplementationOnce(atadasALaRechazada)
+        // Un período «Este mes» deja afuera la hab. 1: no se puede saber.
+        .mockImplementationOnce(() => lista([makeRow("r2", "2"), makeRow("r3", "3")]));
+      const aviso = await emitirRechazada();
+
+      fireEvent.click(within(aviso).getByText("Recargar la lista"));
+      await waitFor(() =>
+        expect(toast.info).toHaveBeenCalledWith(
+          "Con este período no se ven todas las estadías de la factura rechazada. Pasá a «Todo» y volvé a tocar «Recargar la lista»."
+        )
+      );
+      expect(toast.info).not.toHaveBeenCalledWith(
+        expect.stringContaining("todavía no aparecen pendientes")
+      );
+      expect(screen.getByLabelText("ARCA rechazó la factura")).toBeInTheDocument();
+    });
+
     it("el aviso se va con la próxima emisión", async () => {
       emitConsolidatedInvoiceAction.mockResolvedValueOnce({
         success: true,
