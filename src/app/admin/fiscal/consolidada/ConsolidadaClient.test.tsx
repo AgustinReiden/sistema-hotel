@@ -186,8 +186,9 @@ const plata = (n: number) =>
 // Los botones y la barra se buscan por su texto o su aria-label, no con getByRole sobre
 // toda la pantalla: getByRole calcula el nombre accesible de cada botón y llama a
 // getComputedStyle de jsdom por cada ancestro, y esta pantalla es grande. Fue lo que
-// hizo pasar los 5 s a CuentasClient.test.tsx con la suite entera en paralelo. Adentro
-// de la barra (within) sí se usa getByRole: ahí el árbol es chico.
+// hizo pasar los 5 s a CuentasClient.test.tsx con la suite entera en paralelo. Tampoco
+// adentro de la barra (within): aun con el árbol chico, la primera búsqueda por rol del
+// archivo costaba ~1,4 s con la suite entera.
 const BARRA = "Resumen de la factura consolidada";
 const CUADRO = "Revisá antes de emitir";
 const REVISAR = "Revisar y emitir factura consolidada";
@@ -474,7 +475,7 @@ describe("ConsolidadaClient", () => {
     renderClient();
 
     const barra = await screen.findByLabelText(BARRA);
-    const revisar = within(barra).getByRole("button", { name: /Revisar y emitir factura consolidada/ });
+    const revisar = within(barra).getByText(REVISAR, { selector: "button" });
 
     // La ficha de Acme viene completa: se puede emitir.
     expect(revisar).toBeEnabled();
