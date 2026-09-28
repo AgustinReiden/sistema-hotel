@@ -1,6 +1,14 @@
+// @vitest-environment node
+// Ni DOM ni React: sólo textos, el módulo de la automatización y el PNG del QR. Con
+// jsdom, armar el entorno de este archivo era lo más caro de correrlo.
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+// La librería del QR se carga acá, al importar el archivo, y no adentro del test: con la
+// máquina cargada, cargarla en frío (qrcode + pngjs) era casi todo lo que tardaba el test
+// del PNG (hasta 8,5 s contra los 5 s de límite), y generar los dos QR son ~0,1 s.
+// remitoQrDataUrl la pide con import() y la encuentra ya cargada.
+import "qrcode";
 
 import { CSS_TICKET_COMPACTO, REMITO_QR_MM } from "@/app/admin/comprobante-cc/ticket-compacto";
 import { codigoRemito } from "@/lib/remito-codigo";
