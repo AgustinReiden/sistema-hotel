@@ -243,7 +243,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           match: [{ path: "/admin/remitos" }],
           // Es el total de la línea "Para revisar" del panel, de todo el historial: lo que
           // dice el menú es lo que se ve al abrir.
-          badge: countBadge(remitosPendientes, "warn", `${remitosPendientes} remitos o piezas para revisar`),
+          badge: countBadge(remitosPendientes, "warn", `Para revisar: ${remitosPendientes}`),
         },
       ],
     },

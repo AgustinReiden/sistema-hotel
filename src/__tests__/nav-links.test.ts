@@ -168,6 +168,10 @@ describe("menu: numeritos", () => {
     const soloRemitos = getNavSections("admin", { remitosPendientes: 3 }).find((s) => s.id === "facturacion")!;
     expect(sectionBadge(soloRemitos)).toMatchObject({ text: "3", tone: "warn" });
 
+    // El texto del numerito de Remitos no depende del singular o plural.
+    const unoSolo = getNavSections("admin", { remitosPendientes: 1 }).find((s) => s.id === "facturacion")!;
+    expect(sectionBadge(unoSolo)).toMatchObject({ text: "1", title: "Para revisar: 1" });
+
     const clientes = getNavSections("admin").find((s) => s.id === "clientes")!;
     expect(sectionBadge(clientes)).toBeUndefined();
   });
