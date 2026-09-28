@@ -59,7 +59,7 @@ const TZ = "America/Argentina/Buenos_Aires";
  * hacer (volver a cargarla la cobraría dos veces) y qué hacer.
  */
 const ESTADIA_YA_NO_SIRVE =
-  "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Para cerrar el aviso, avisale al encargado del sistema.";
+  "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Este aviso todavía no se puede cerrar desde el panel: dejalo así, no hace falta que hagas nada más.";
 
 /**
  * Lo que dice cuando la estadía guardada se canceló: la base rechaza el cierre con el mismo
@@ -92,7 +92,7 @@ function estadiaEn(status: string, pagado = 0) {
  * plata sigue registrada y que la revisen antes de volver a cargarla.
  */
 const CANCELADA_CON_12000 =
-  "Esa estadía está cancelada, así que no sirve para cerrar este aviso, pero antes de cancelarse se cobraron $12.000,00 (en caja o a cuenta corriente) y siguen registrados. Revisá esa estadía antes de volver a cargarla: si cargás la noche entera, lo ya cobrado se cobra dos veces.";
+  "Esa estadía está cancelada, así que no sirve para cerrar este aviso, pero antes de cancelarse se cobraron $12.000,00 (en caja o a cuenta corriente) y siguen registrados. Antes de volver a cargarla, revisala en Huéspedes, tocando «Ver cancelados» (buscá la de esta habitación): si cargás la noche entera, lo ya cobrado se cobra dos veces.";
 
 /** Todo lo guardado en la pestaña, junto, para ver si quedó una estadía. */
 function guardadoEnLaPestana(): string {
@@ -324,7 +324,7 @@ describe("OccupiedRoomAlertBanner", () => {
       expect(H.handleLoadReservationForEdit).toHaveBeenCalledWith("r-1");
       const aviso = H.toast.error.mock.calls[0][0] as string;
       expect(aviso).toBe(ESTADIA_YA_NO_SIRVE);
-      expect(aviso).toContain("avisale al encargado del sistema");
+      expect(aviso).toContain("todavía no se puede cerrar desde el panel");
       // La fila lo dice y ya no ofrece un botón que va a fallar siempre igual.
       expect(screen.getByText(ESTADIA_YA_NO_SIRVE)).toBeInTheDocument();
       expect(screen.queryByText("Cerrar el aviso")).not.toBeInTheDocument();

@@ -203,7 +203,7 @@ const ESTADIA_YA_NO_SIRVE_CODE = "22023";
  * hoy ninguna pantalla la pide: lo cierra quien administra el sistema.
  */
 const ESTADIA_YA_NO_SIRVE =
-  "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Para cerrar el aviso, avisale al encargado del sistema.";
+  "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Este aviso todavía no se puede cerrar desde el panel: dejalo así, no hace falta que hagas nada más.";
 
 /**
  * Lo que se dice cuando la estadía se canceló (por ejemplo, desde la tarjeta, para
@@ -222,7 +222,7 @@ const ESTADIA_CANCELADA =
  * el cobro es del admin (mig 106) y puede faltar cobrar una parte.
  */
 function estadiaCanceladaConCobro(cobrado: number): string {
-  return `Esa estadía está cancelada, así que no sirve para cerrar este aviso, pero antes de cancelarse se cobraron ${formatAmount(cobrado)} (en caja o a cuenta corriente) y siguen registrados. Revisá esa estadía antes de volver a cargarla: si cargás la noche entera, lo ya cobrado se cobra dos veces.`;
+  return `Esa estadía está cancelada, así que no sirve para cerrar este aviso, pero antes de cancelarse se cobraron ${formatAmount(cobrado)} (en caja o a cuenta corriente) y siguen registrados. Antes de volver a cargarla, revisala en Huéspedes, tocando «Ver cancelados» (buscá la de esta habitación): si cargás la noche entera, lo ya cobrado se cobra dos veces.`;
 }
 
 /**
