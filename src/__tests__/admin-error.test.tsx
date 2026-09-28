@@ -244,6 +244,11 @@ describe("Pantalla de error de /admin — el botón Reintentar", () => {
     const recargar = screen.getByText("Recargar");
     expect(recargar.tagName).toBe("BUTTON");
     expect(recargar.getAttribute("type")).toBe("button");
+    // Se toca con el dedo: 44 px de alto y de ancho como mínimo (jsdom no mide: se mira
+    // la clase).
+    expect(recargar.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["inline-flex", "min-h-11", "min-w-11"])
+    );
     expect(avisoDelBoton()).not.toContain("F5");
     expect(H.reloadPage).not.toHaveBeenCalled();
 

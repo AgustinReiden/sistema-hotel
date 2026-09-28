@@ -882,6 +882,52 @@ describe("shouldSkipRefresh — cuándo no conviene recargar", () => {
     expect(shouldSkipRefresh(document)).toBe(false);
   });
 
+  it("no saltea con el cajón del menú del celular montado pero oculto (se giró el teléfono o se agrandó la ventana)", () => {
+    // Lo que hace `md:hidden` de 768 px para arriba. Va en el body: el afterEach lo borra.
+    const anchoDeTablet = document.createElement("style");
+    anchoDeTablet.textContent = ".md\\:hidden { display: none; }";
+    const cajon = document.createElement("div");
+    cajon.className = "md:hidden fixed inset-0 z-50 flex";
+    document.body.append(anchoDeTablet, cajon);
+    expect(shouldSkipRefresh(document)).toBe(false);
+
+    // De vuelta a vertical: el cajón se ve y tapa Hoy.
+    anchoDeTablet.remove();
+    expect(shouldSkipRefresh(document)).toBe(true);
+  });
+
+  it("no saltea con un cuadro dentro de algo oculto, y sí cuando se ve", () => {
+    const contenedor = document.createElement("div");
+    contenedor.style.display = "none";
+    const conAriaModal = document.createElement("div");
+    conAriaModal.setAttribute("aria-modal", "true");
+    const capa = document.createElement("div");
+    capa.className = "fixed inset-0";
+    contenedor.append(conAriaModal, capa);
+    document.body.appendChild(contenedor);
+    expect(shouldSkipRefresh(document)).toBe(false);
+
+    contenedor.style.display = "";
+    expect(shouldSkipRefresh(document)).toBe(true);
+  });
+
+  it("con el cajón del menú oculto por el ancho, Hoy se sigue poniendo al día", async () => {
+    const anchoDeTablet = document.createElement("style");
+    anchoDeTablet.textContent = ".md\\:hidden { display: none; }";
+    const cajon = document.createElement("div");
+    cajon.className = "md:hidden fixed inset-0 z-50 flex";
+    document.body.append(anchoDeTablet, cajon);
+    renderHook(() => useAutoRefresh());
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Con el cajón a la vista, espera.
+    anchoDeTablet.remove();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("saltea sin red en la PC", () => {
     sinConexion = true;
     expect(shouldSkipRefresh(document)).toBe(true);
@@ -1130,6 +1176,11 @@ describe("AutoRefresh — avisa cuando Hoy no se actualiza", () => {
     const recargar = screen.getByText("Recargar");
     expect(recargar.tagName).toBe("BUTTON");
     expect(recargar.getAttribute("type")).toBe("button");
+    // Se toca con el dedo aunque la línea sea de letra chica: 44 px de alto y de ancho
+    // como mínimo (jsdom no mide: se mira la clase).
+    expect(recargar.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["inline-flex", "min-h-11", "min-w-11"])
+    );
     expect(lineaDelAviso()).not.toContain("F5");
     expect(H.reloadPage).not.toHaveBeenCalled();
 

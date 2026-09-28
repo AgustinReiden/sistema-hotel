@@ -31,6 +31,10 @@ const RELOAD_LABEL = "Recargar";
  * (no todos tienen F5): recarga la página entera, como F5, y el proxy lleva a la pantalla
  * de ingreso si la sesión no sirve. Si el que no contesta es el sistema, recargar tampoco
  * lo arregla: por eso "si sigue así".
+ *
+ * En el celular y la tablet es la única salida (el panel se desplaza en un div interno y
+ * "tirar para recargar" no anda), así que tiene forma de botón y 44 px de alto como mínimo
+ * para acertarle con el dedo, aunque la línea sea de letra chica.
  */
 export function SessionClosedNotice() {
   return (
@@ -39,7 +43,7 @@ export function SessionClosedNotice() {
       <button
         type="button"
         onClick={reloadPage}
-        className="cursor-pointer font-bold underline underline-offset-2"
+        className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg border border-current bg-white px-3 align-middle font-bold hover:bg-amber-100"
       >
         {RELOAD_LABEL}
       </button>

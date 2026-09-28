@@ -158,16 +158,39 @@ const ACTIVITY_LISTENER_OPTIONS: AddEventListenerOptions = { passive: true, capt
 const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 /**
- * La capa oscura que tapa toda la pantalla: la tienen todos los cuadros del panel.
- * Casi ninguno tiene todavía `aria-modal` (llega con F5-8), así que se los reconoce por ella.
+ * Un cuadro abierto: `aria-modal="true"` o la capa oscura que tapa toda la pantalla, que la
+ * tienen todos los cuadros del panel. Casi ninguno tiene todavía `aria-modal` (llega con
+ * F5-8), así que se los reconoce también por la capa.
  */
-const OVERLAY_SELECTOR = ".fixed.inset-0";
+const OPEN_DIALOG_SELECTOR = '[aria-modal="true"], .fixed.inset-0';
+
+/**
+ * ¿Se dibuja? Un cuadro montado pero oculto por CSS no está abierto: el cajón del menú del
+ * celular (`md:hidden fixed inset-0`) sigue montado si alguien lo abre y después gira el
+ * teléfono o agranda la ventana a más de 768 px, y ahí no se ve. Sin esto, Hoy dejaría de
+ * ponerse al día sin avisar (esperar a propósito no cuenta como falla). Mira el elemento y
+ * los de arriba, como `checkVisibility()`, que no está en todos los navegadores del hotel.
+ */
+function isDrawn(el: Element): boolean {
+  const view = el.ownerDocument.defaultView;
+  if (!view) return true;
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    if (view.getComputedStyle(node).display === "none") return false;
+  }
+  return true;
+}
+
+/** ¿Hay un cuadro abierto que se ve? */
+function hasOpenDialog(doc: Document): boolean {
+  return Array.from(doc.querySelectorAll(OPEN_DIALOG_SELECTOR)).some(isDrawn);
+}
 
 /**
  * ¿Conviene NO recargar ahora? Sí cuando:
  * - la pestaña está oculta (nadie la mira: se pone al día al volver),
  * - la PC no tiene red (`navigator.onLine`; el corte de internet lo ve `probeServer`),
- * - hay un cuadro abierto (`aria-modal="true"` o la capa `fixed inset-0`),
+ * - hay un cuadro abierto que se ve (`aria-modal="true"` o la capa `fixed inset-0`; uno
+ *   montado pero oculto por CSS no cuenta, ver `isDrawn`),
  * - el foco está en un campo (input, textarea, select o algo editable).
  *
  * Un cuadro abierto lee la tarjeta recién cuando se confirma: si la recarga le cambia la
@@ -191,8 +214,7 @@ function isOffline(doc: Document): boolean {
  */
 function shouldWait(doc: Document): boolean {
   if (doc.hidden) return true;
-  if (doc.querySelector('[aria-modal="true"]')) return true;
-  if (doc.querySelector(OVERLAY_SELECTOR)) return true;
+  if (hasOpenDialog(doc)) return true;
 
   const active = doc.activeElement;
   if (!active) return false;
