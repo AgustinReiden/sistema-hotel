@@ -5,7 +5,11 @@ import { CheckCircle2, DoorOpen, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import WalkInModal from "./WalkInModal";
-import { closeOccupancyAlertAction, regularizeOccupiedRoomAction } from "./actions";
+import {
+  closeOccupancyAlertAction,
+  handleLoadReservationForEdit,
+  regularizeOccupiedRoomAction,
+} from "./actions";
 import { occupancyCheckInDateKey } from "@/lib/arrivals";
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { AssignWalkInPayload, AssociatedClient, RoomOccupancyAlert } from "@/lib/types";
@@ -137,18 +141,49 @@ function guardarSinCierre(alertId: number, sinCierre: boolean) {
 
 /**
  * El código con el que la base rechaza el cierre porque la estadía guardada ya no sirve
- * para cerrarlo (`rpc_regularize_occupied_room`, mig 106): ya salió (no está con el huésped
- * adentro) o es de otra habitación (la cambiaron). Reintentar no lo arregla.
+ * para cerrarlo (`rpc_regularize_occupied_room`, mig 106): no está con el huésped adentro
+ * (salió, o se canceló) o es de otra habitación (la cambiaron). Reintentar no lo arregla.
+ * El código no dice cuál: salió o cambió de habitación es una estadía cargada, que se
+ * cobra; cancelada, no. Lo dice el estado de la estadía (`estadiaCancelada`).
  */
 const ESTADIA_YA_NO_SIRVE_CODE = "22023";
 
 /**
- * Lo que se dice cuando pasa eso: por qué no se cierra, que no la vuelvan a cargar y qué
- * hacer. Cerrar el aviso sin estadía pide una nota (mig 105) y hoy ninguna pantalla la pide:
- * lo cierra quien administra el sistema.
+ * Lo que se dice cuando la estadía salió o cambió de habitación: por qué no se cierra, que
+ * no la vuelvan a cargar y qué hacer. Cerrar el aviso sin estadía pide una nota (mig 105) y
+ * hoy ninguna pantalla la pide: lo cierra quien administra el sistema.
  */
 const ESTADIA_YA_NO_SIRVE =
   "Esa estadía ya salió o cambió de habitación, así que no sirve para cerrar este aviso. Ya está cargada: no la vuelvas a cargar. Para cerrar el aviso, avisale al encargado del sistema.";
+
+/**
+ * Lo que se dice cuando la estadía se canceló (por ejemplo, desde la tarjeta, para
+ * corregirla): no sirve para cerrar el aviso, y esa noche no quedó cargada. La fila vuelve a
+ * ofrecer "Cargar la estadía", como antes de cargarla.
+ */
+const ESTADIA_CANCELADA =
+  "Esa estadía está cancelada, así que no sirve para cerrar este aviso. Si esa noche hay que cobrarla, cargala de nuevo con «Cargar la estadía».";
+
+/**
+ * Lo que se dice si no se pudo ver en qué quedó la estadía: no se afirma que esté cargada
+ * ni que no, y la fila sigue ofreciendo "Cerrar el aviso" para volver a intentarlo.
+ */
+const ESTADIA_SIN_ESTADO =
+  "No se pudo cerrar el aviso ni ver en qué quedó esa estadía. Probá de nuevo con «Cerrar el aviso».";
+
+/**
+ * ¿La estadía guardada está cancelada? Se pregunta cuando la base rechaza el cierre con
+ * `ESTADIA_YA_NO_SIRVE_CODE`. null si no se pudo leer.
+ */
+async function estadiaCancelada(reservationId: string): Promise<boolean | null> {
+  try {
+    const result = await handleLoadReservationForEdit(reservationId);
+    if (!result.success || !result.data) return null;
+    return result.data.status === "cancelled";
+  } catch {
+    return null;
+  }
+}
 
 type Props = {
   alerts: RoomOccupancyAlert[];
@@ -201,7 +236,8 @@ type Props = {
  * (`reservations_no_active_overlap` rechaza dos estadías en la misma pieza y horario).
  *
  * SI LA ESTADÍA GUARDADA YA SALIÓ O CAMBIÓ DE HABITACIÓN, la base rechaza el cierre
- * (`ESTADIA_YA_NO_SIRVE_CODE`) y reintentar no lo arregla. La estadía guardada se descarta
+ * (`ESTADIA_YA_NO_SIRVE_CODE`, y el estado de la estadía no es "cancelada") y reintentar no
+ * lo arregla. La estadía guardada se descarta
  * (no hay con qué volver a intentarlo: sin eso, cada vez que la pantalla se vuelve a armar
  * la fila ofrecería de nuevo un "Cerrar el aviso" que falla siempre igual) y el aviso queda
  * marcado en la pestaña como "cargada, no se cierra desde acá" (`SIN_CIERRE_KEY`): la fila
@@ -210,6 +246,13 @@ type Props = {
  * aviso sin cargar la estadía pide una nota (mig 105), y ninguna pantalla la pide todavía:
  * ese camino queda pendiente, fuera de esta pantalla. La marca se olvida cuando el aviso
  * llega resuelto, como la estadía guardada.
+ *
+ * SI LA ESTADÍA GUARDADA SE CANCELÓ (por ejemplo, desde la tarjeta, para corregirla), la
+ * base rechaza el cierre con el mismo código, pero esa noche no quedó cargada: decir "ya
+ * está cargada" sería mentira y dejaría la pieza sin cobrar. Por eso, ante ese código se
+ * lee el estado de la estadía (`handleLoadReservationForEdit`, la acción que ya usa
+ * "Editar"): cancelada, se descarta sin marca y la fila vuelve a ofrecer "Cargar la
+ * estadía"; si no se pudo leer, no se afirma nada y queda guardada para reintentar.
  *
  * Se eligió guardar y no frenar la recarga de Hoy mientras haya uno sin cerrar: frenarla
  * dejaría Hoy sin ponerse al día (y sin la línea que lo avisa) todo el tiempo que el
@@ -316,9 +359,22 @@ export default function OccupiedRoomAlertBanner({
       const result = await closeOccupancyAlertAction(alertId, reservationId);
       if (!result.success) {
         if (result.code === ESTADIA_YA_NO_SIRVE_CODE) {
-          // Sale del bucle: la estadía guardada ya no sirve, se descarta, y el aviso queda
-          // como "cargada, no se cierra desde acá" (ni reintentar ni volver a cargarla).
+          const cancelada = await estadiaCancelada(reservationId);
+          if (cancelada === null) {
+            // Sin saber si salió o se canceló no se afirma nada: queda guardada y el botón
+            // sigue para volver a intentarlo.
+            toast.error(ESTADIA_SIN_ESTADO);
+            return;
+          }
+          // Sale del bucle: la estadía guardada ya no sirve para cerrarlo, se descarta.
           olvidarPendiente(alertId);
+          if (cancelada) {
+            // No quedó cargada: la fila vuelve a ofrecer "Cargar la estadía".
+            toast.error(ESTADIA_CANCELADA, { duration: 12000 });
+            return;
+          }
+          // Salió o cambió de habitación: el aviso queda como "cargada, no se cierra desde
+          // acá" (ni reintentar ni volver a cargarla).
           setSinCierreEnPantalla((prev) => (prev.includes(alertId) ? prev : [...prev, alertId]));
           guardarSinCierre(alertId, true);
           toast.error(ESTADIA_YA_NO_SIRVE, { duration: 12000 });
