@@ -627,16 +627,25 @@ describe("emitInvoice — el claim de número falla", () => {
     });
   });
 
+  // Así llega el error de una RPC: postgrest-js arma `error` con `JSON.parse` del
+  // cuerpo de la respuesta y sólo lo envuelve en `PostgrestError` con
+  // `throwOnError()`, que el repo no usa. `beginInvoiceEmission` hace `throw error`
+  // con ESTE objeto plano, que no es `instanceof Error`.
+  const errorPostgrest = (code: string, message: string) => ({
+    code,
+    details: null,
+    hint: null,
+    message,
+  });
+
   // Al emitir, la base vuelve a leer el DNI de la reserva y lo rechaza con P0022 y
   // el texto viejo ("Corregilo en la reserva"). Recepción no puede editar una
   // estadía cerrada: el aviso tiene que decir qué tiene que tener el DNI.
   it("P0022 del DNI de la reserva: avisa con DNI_INVALIDO_MSG, sin pedir CAE", async () => {
     facturas.set(INVOICE_ID, invoice());
-    beginError = Object.assign(
-      new Error(
-        "El DNI de la reserva no es valido para facturar (7 u 8 digitos). Corregilo en la reserva y reintenta."
-      ),
-      { code: "P0022" }
+    beginError = errorPostgrest(
+      "P0022",
+      "El DNI de la reserva no es valido para facturar (7 u 8 digitos). Corregilo en la reserva y reintenta."
     );
     wsfeCola = { FECompUltimoAutorizado: [xmlUltimoAutorizado(1234)] };
 
@@ -657,7 +666,7 @@ describe("emitInvoice — el claim de número falla", () => {
       "El DNI del receptor no es valido. Corregilo en la ficha y volve a generar el comprobante.",
     ]) {
       facturas.set(INVOICE_ID, invoice());
-      beginError = Object.assign(new Error(message), { code: "P0022" });
+      beginError = errorPostgrest("P0022", message);
       wsfeCola = { FECompUltimoAutorizado: [xmlUltimoAutorizado(1234)] };
 
       const outcome = await emitInvoice(INVOICE_ID);

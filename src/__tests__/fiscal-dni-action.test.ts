@@ -43,9 +43,13 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import { fixReservationDniAction } from "@/app/admin/fiscal/actions";
 
-/** Lo que tira PostgREST cuando la RPC hace RAISE con un SQLSTATE propio. */
+/**
+ * Lo que tira `fixReservationDniForInvoice` cuando la RPC hace RAISE con un
+ * SQLSTATE propio: el objeto plano de PostgREST (no un `Error`), tal como sale de
+ * `supabase.rpc(...)` sin `throwOnError()`.
+ */
 function rpcError(code: string, message: string) {
-  return Object.assign(new Error(message), { code });
+  return { code, details: null, hint: null, message };
 }
 
 describe("fixReservationDniAction", () => {

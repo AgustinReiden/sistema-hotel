@@ -510,18 +510,29 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
     // P0022 del DNI de la reserva (el claim re-lee el DNI y lo rechaza): el texto de
     // la base manda a "corregirlo en la reserva", que recepción no puede con la
     // estadía cerrada. Va el texto nuevo, que las pantallas reconocen para abrir
-    // "Corregir DNI". Los otros P0022 (CUIT, documento de la consolidada) quedan.
+    // "Corregir DNI". Los otros P0022 (CUIT, documento de la consolidada) salen con
+    // el texto de la base, que ya dice qué hacer.
+    //
+    // El error de la base NO es un `Error`: `beginInvoiceEmission` tira el objeto
+    // plano de PostgREST ({ code, message, details, hint }). El mensaje se lee del
+    // objeto, como en `parseActionError`; con `instanceof Error` no se traducía nunca.
     const pgCode = (error as { code?: string } | null)?.code;
+    const pgMessage = (error as { message?: unknown } | null)?.message;
+    const p0022 =
+      pgCode === "P0022" && typeof pgMessage === "string" && pgMessage !== ""
+        ? esErrorDniReserva(pgMessage)
+          ? DNI_INVALIDO_MSG
+          : pgMessage
+        : null;
     const message =
       pgCode === "23505"
         ? "Hay otra factura en verificación que quedó reteniendo el número. Reintentá esa primero desde Facturación (En verificación) y volvé a intentar esta."
-        : pgCode === "P0022" && error instanceof Error && esErrorDniReserva(error.message)
-          ? DNI_INVALIDO_MSG
-          : error instanceof ArcaNetworkError
+        : (p0022 ??
+          (error instanceof ArcaNetworkError
             ? "ARCA no está respondiendo. La factura quedó pendiente — reintentá desde Facturación."
             : error instanceof Error
               ? error.message
-              : "Error inesperado al emitir la factura.";
+              : "Error inesperado al emitir la factura."));
 
     // Mejor esfuerzo: si la invoice quedó en processing por un fallo previo al
     // envío, liberarla a pending para que el reintento no espere el TTL.
