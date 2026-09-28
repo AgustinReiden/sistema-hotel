@@ -138,6 +138,12 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const [guardandoDni, setGuardandoDni] = useState(false);
   /** Por qué no se guardó (otro turno, ya facturada…). Se lee al lado del campo. */
   const [dniError, setDniError] = useState<string | null>(null);
+  /**
+   * `corregirDni` se abrió porque ya hay un borrador de Factura B con el DNI
+   * rechazado. La base reusa ese borrador aunque se pida otro receptor, así que
+   * desde ahí no se ofrece pasar a CUIT: saldría otra vez la B.
+   */
+  const [dniConBorrador, setDniConBorrador] = useState(false);
   /** "¿El DNI está mal? Corregilo acá": abre el campo aunque el DNI tenga 7 u 8 dígitos. */
   const [editandoDni, setEditandoDni] = useState(false);
   /** Lo que se va a emitir, ya armado. Se mira en "confirmar" y recién ahí se emite. */
@@ -235,7 +241,7 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       // vuelve a confirmar. Cualquier otro error (CUIT, turno, ARCA) se muestra y
       // cierra como siempre.
       if (result.code === "P0022" && esErrorDniReserva(result.error)) {
-        pasarACorregirDni();
+        pasarACorregirDni(false);
         return;
       }
       toast.error(result.error);
@@ -246,13 +252,14 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     // Lo mismo si el borrador ya existía y el emisor lo dejó pendiente por el DNI
     // (al emitir, la base vuelve a leer el DNI de la reserva y lo rechaza).
     if (outcome.status === "pending" && esErrorDniReserva(outcome.userMessage)) {
-      pasarACorregirDni();
+      pasarACorregirDni(true);
       return;
     }
     handleOutcome(outcome);
   };
 
-  const pasarACorregirDni = () => {
+  const pasarACorregirDni = (conBorrador: boolean) => {
+    setDniConBorrador(conBorrador);
     setDniError(null);
     setStep("corregirDni");
   };
@@ -287,7 +294,12 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     setDniActual(digits);
     setDniNuevo("");
     setEditandoDni(false);
-    if (volverAConfirmar) setStep("confirmar");
+    setDniConBorrador(false);
+    if (volverAConfirmar) {
+      // Con el DNI rechazado lo que se emite es la Factura B. Si la pantalla venía
+      // con otro receptor (una A), no se confirma ese: se revisa la B.
+      setStep(pending?.tipo === "B" ? "confirmar" : "formB");
+    }
   };
 
   /**
@@ -727,14 +739,21 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 </div>
               </div>
               {campoDni(true)}
-              <button
-                type="button"
-                onClick={() => setStep("formCuit")}
-                disabled={guardandoDni}
-                className="w-full text-xs font-semibold text-slate-400 hover:text-slate-600 disabled:opacity-50"
-              >
-                Facturar con CUIT en vez de DNI
-              </button>
+              {dniConBorrador ? (
+                <p className="text-[11px] text-slate-400">
+                  Para facturar con CUIT, el administrador tiene que descartar antes la factura
+                  pendiente en Facturación.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setStep("formCuit")}
+                  disabled={guardandoDni}
+                  className="w-full text-xs font-semibold text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                >
+                  Facturar con CUIT en vez de DNI
+                </button>
+              )}
             </div>
           ) : step === "formB" ? (
             // Consumidor Final: el ÚNICO dato que se escribe es el nombre. El documento

@@ -512,4 +512,62 @@ describe("InvoicePromptModal: el DNI se corrige ahí mismo", () => {
     expect(screen.queryByLabelText(CAMPO_DNI)).toBeNull();
     expect(H.fixReservationDniAction).not.toHaveBeenCalled();
   });
+
+  it("con un borrador B pendiente por el DNI no ofrece facturar con CUIT (la base reusaría la B)", async () => {
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: true,
+      data: { status: "pending", invoiceId: "inv-1", userMessage: DNI_INVALIDO_MSG },
+    });
+    abrir(datos());
+    irAConfirmarB();
+
+    fireEvent.click(botonEmitir());
+
+    expect(await screen.findByLabelText(CAMPO_DNI)).toBeTruthy();
+    expect(screen.queryByText("Facturar con CUIT en vez de DNI")).toBeNull();
+    expect(screen.getByText(/descartar antes la factura pendiente/)).toBeTruthy();
+  });
+
+  it("sin borrador (P0022 al crearlo) sí ofrece facturar con CUIT en vez de DNI", async () => {
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: false,
+      code: "P0022",
+      error: DNI_INVALIDO_MSG,
+    });
+    abrir(datos({ clientDni: null }));
+    irAConfirmarB();
+
+    fireEvent.click(botonEmitir());
+
+    expect(await screen.findByLabelText(CAMPO_DNI)).toBeTruthy();
+    expect(screen.getByText("Facturar con CUIT en vez de DNI")).toBeTruthy();
+  });
+
+  it("si venía con una Factura A y el borrador B quedó por el DNI, después de guardarlo no confirma la A", async () => {
+    H.emitInvoiceForReservationAction.mockResolvedValue({
+      success: true,
+      data: { status: "pending", invoiceId: "inv-1", userMessage: DNI_INVALIDO_MSG },
+    });
+    H.fixReservationDniAction.mockResolvedValue({ success: true });
+    abrir(
+      datos({
+        suggestA: true,
+        prefillComplete: true,
+        aPrefill: {
+          razonSocial: "Empresa Ficticia SA",
+          cuit: "30123456781",
+          condicionIva: "responsable_inscripto",
+          domicilio: "Calle Falsa 123",
+        },
+      })
+    );
+    fireEvent.click(screen.getByText("SÍ"));
+    fireEvent.click(botonEmitir());
+
+    fireEvent.change(await screen.findByLabelText(CAMPO_DNI), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByText("Guardar DNI"));
+
+    expect(await screen.findByText("Nombre para la factura")).toBeTruthy();
+    expect(screen.queryByText("Revisá antes de emitir")).toBeNull();
+  });
 });
