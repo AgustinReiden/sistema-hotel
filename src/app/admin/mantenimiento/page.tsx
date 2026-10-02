@@ -168,9 +168,6 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
         <div className="max-w-5xl mx-auto">
           <AlertsPanel alerts={alerts} hotelTimezone={tz} />
 
-          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-            En el período · {range.label}
-          </p>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             {cards.map((card) => (
               <div
@@ -182,6 +179,7 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
                   {card.label}
                 </div>
                 <p className="text-2xl font-bold text-slate-900">{card.count}</p>
+                <p className="text-[11px] font-medium text-slate-500">En el período</p>
               </div>
             ))}
           </div>
