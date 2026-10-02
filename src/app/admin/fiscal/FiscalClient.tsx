@@ -34,7 +34,7 @@ import { buildCsv, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
 import { formatAmount } from "@/lib/format";
 import { formatHotelShortDateTime } from "@/lib/time";
-import { FISCAL_VIEWS, type FiscalView } from "./views";
+import type { FiscalView } from "./views";
 import type {
   AuthorizedInvoiceRow,
   EmitInvoiceOutcome,
@@ -203,15 +203,6 @@ export default function FiscalClient({
     window.history.replaceState(null, "", `/admin/fiscal?${params.toString()}`);
   };
 
-  // El periodo, el tipo y la búsqueda eligidos sobreviven al cambio de solapa.
-  const buildHref = (nextView: FiscalView) => {
-    const params = new URLSearchParams({ view: nextView });
-    if (from) params.set("desde", from);
-    if (to) params.set("hasta", to);
-    if (tipo) params.set("tipo", tipo);
-    if (qFiltro) params.set("q", qFiltro);
-    return `/admin/fiscal?${params.toString()}`;
-  };
   const [busyId, setBusyId] = useState<string | null>(null);
   // Mini-form de "Corregir DNI" abierto para una factura puntual.
   const [dniEditId, setDniEditId] = useState<string | null>(null);
@@ -324,28 +315,8 @@ export default function FiscalClient({
 
   return (
     <div className="space-y-8">
-      {/* Solapas. El recepcionista ve una sola lista: una sola solapa no es una solapa,
-          asi que no se le pinta la barra (ver el gate `isAdmin` en Props). */}
-      {isAdmin && (
-        <div className="flex flex-wrap gap-2">
-          {FISCAL_VIEWS.map((v) => {
-            const isActive = view === v.value;
-            return (
-              <a
-                key={v.value}
-                href={buildHref(v.value)}
-                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
-                  isActive
-                    ? "bg-emerald-600 text-white border-emerald-600"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
-                }`}
-              >
-                {v.label}
-              </a>
-            );
-          })}
-        </div>
-      )}
+      {/* Las solapas (Por facturar, Con error, Emitidas, Remitos) van arriba de todo, en la
+          barra del panel (AdminTopBar): acá solo queda la lista de la solapa activa. */}
 
       {/* Pendientes / con error */}
       {view === "pendientes" && (

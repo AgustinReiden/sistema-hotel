@@ -13,7 +13,7 @@ export default async function CategoriesPage() {
         <div className="p-8">
             <div className="mb-8 flex justify-between items-end">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Categorias de Habitaciones</h1>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Categorías de habitaciones</h1>
                     <p className="text-slate-500">
                         Administra las caracteristicas comerciales y visuales que heredan las habitaciones fisicas.
                     </p>

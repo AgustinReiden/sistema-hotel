@@ -27,7 +27,7 @@ export default async function RoomsPage() {
                         href="/admin/categorias"
                         className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-colors"
                     >
-                        Gestionar Categorias
+                        Gestionar categorías
                     </Link>
                     <div className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg font-bold text-sm">
                         Total: {rooms.length} habitaciones

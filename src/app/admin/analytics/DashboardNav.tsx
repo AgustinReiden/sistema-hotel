@@ -1,9 +1,8 @@
-// Navegación compartida de los tableros: pestañas General / Por habitación, presets de
-// rango y filtro de fechas. Server component (solo Links + <form method="GET">); conserva
-// el rango activo al cambiar de pestaña.
+// Navegación compartida de los tableros: presets de rango y filtro de fechas. Server
+// component (solo Links + <form method="GET">). Las pestañas General / Por habitación
+// están en la barra del panel (AdminTopBar), que conserva el rango al cambiar de pestaña.
 
 import Link from "next/link";
-import { BarChart3, BedDouble } from "lucide-react";
 import type { RangePreset } from "./shared";
 
 const BASE = "/admin/analytics";
@@ -20,38 +19,9 @@ export default function DashboardNav({
   presets: RangePreset[];
 }) {
   const basePath = activeTab === "general" ? BASE : `${BASE}/habitaciones`;
-  const tabs = [
-    { key: "general" as const, label: "General", href: `${BASE}?from=${fromKey}&to=${toKey}`, icon: BarChart3 },
-    {
-      key: "rooms" as const,
-      label: "Por habitación",
-      href: `${BASE}/habitaciones?from=${fromKey}&to=${toKey}`,
-      icon: BedDouble,
-    },
-  ];
-
   return (
     <div className="mb-8 space-y-4">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        {/* Pestañas */}
-        <div className="inline-flex self-start rounded-xl bg-slate-100 p-1">
-          {tabs.map((t) => {
-            const Icon = t.icon;
-            const active = t.key === activeTab;
-            return (
-              <Link
-                key={t.key}
-                href={t.href}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                  active ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <Icon size={16} /> {t.label}
-              </Link>
-            );
-          })}
-        </div>
-
         {/* Filtro de fechas */}
         <form method="GET" action={basePath} className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col">
