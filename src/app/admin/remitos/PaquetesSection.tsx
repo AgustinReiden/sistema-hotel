@@ -13,6 +13,18 @@ import { pedirPaqueteAction } from "./actions";
 
 type Props = { facturas: RemitoPaqueteFactura[]; clienteElegido: boolean; nowMs: number };
 
+/**
+ * Fecha de comprobante (columna `date`, sin hora ni zona). Se parte el string en vez
+ * de usar formatHotelDate: "2026-09-17" pasado por una zona UTC-3 sale como el 16.
+ * Mismo helper que el recibo de cta. cte. y el impreso de la factura.
+ */
+function formatDateCol(value: string | null): string {
+  if (!value) return "—";
+  const [y, m, d] = value.split("-");
+  if (!y || !m || !d) return value;
+  return `${d}/${m}/${y}`;
+}
+
 /** PDF con los remitos firmados de cada consolidada del cliente (mig 124, lo arma n8n). */
 export default function PaquetesSection({ facturas, clienteElegido, nowMs }: Props) {
   const router = useRouter();
@@ -57,7 +69,7 @@ export default function PaquetesSection({ facturas, clienteElegido, nowMs }: Pro
                   <p className="text-sm">
                     <span className="font-mono font-semibold">{f.factura_texto}</span>
                     <span className="text-slate-600">
-                      {f.cbte_fch ? ` · ${formatHotelDate(f.cbte_fch)}` : ""} · {formatAmount(f.imp_total)}
+                      {f.cbte_fch ? ` · ${formatDateCol(f.cbte_fch)}` : ""} · {formatAmount(f.imp_total)}
                     </span>
                   </p>
                   <p className="text-xs text-slate-700">{`${f.remitos_firmados} de ${f.remitos_total} firmados`}</p>

@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { logout } from "@/app/login/actions";
+import { logoutEverywhere } from "@/app/login/actions";
 
 // Cierre de sesión por inactividad para recepción. Se cierra la SESIÓN (no la caja: la caja
 // es del hotel y sobrevive). Evita que otro opere con la sesión de un recepcionista que se fue.
+// La cierra en todos sus dispositivos, no solo en este (a diferencia de "Salir"): una sesión
+// suya que siguiera abierta en otra PC o en el celular podría caer en la rendición forzada de
+// la caja que abre la siguiente.
 const IDLE_MS = 30 * 60 * 1000;
 const THROTTLE_MS = 5000;
 
@@ -16,7 +19,7 @@ export default function IdleLogout() {
     const arm = () => {
       if (timer.current) window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => {
-        void logout();
+        void logoutEverywhere();
       }, IDLE_MS);
     };
 

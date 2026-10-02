@@ -1,27 +1,49 @@
 // Helpers para formatear tiempos en la timezone del hotel (por default Tucumán).
 // Evitan que `toLocaleString` use la zona del navegador o del servidor.
+//
+// Ojo con el ICU: lo que dibuja un componente de cliente se calcula dos veces, una en
+// el servidor (Node) y otra en el navegador al hidratar, y cada uno trae su propio ICU.
+// Si el texto no da exactamente igual, React tira el HTML del servidor y redibuja todo
+// (error #418). Por eso la hora de 12 h se arma a mano y no depende del ICU. Con un ICU
+// 74 o posterior (CLDR 44 en adelante: Node 22 y los Chrome de hoy), es-AR escribe la
+// hora en 12 h, pero el de Node pone "p.", espacio duro (U+00A0), "m.", y el de Chrome
+// "p. m." con espacio común. Con un ICU 73 o anterior (CLDR 43), es-AR la escribía en
+// 24 h ("14:30"): un servidor así imprimía "14:30" y estos helpers escriben "02:30 p. m.".
+// Y el mes abreviado sale de una tabla: cada versión del ICU trae sus propios nombres
+// ("sept" o "sep"), y el Node del servidor y el Chrome de la recepción no tienen por qué
+// coincidir.
 
 export const DEFAULT_TZ = "America/Argentina/Tucuman";
 
-export function formatHotelTime(iso: string | null | undefined, timezone?: string): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timezone || DEFAULT_TZ,
-  });
+/** Fecha que no se puede leer: sin esto, `formatToParts` corta el dibujo con un RangeError. */
+function isValidInstant(iso: string): boolean {
+  return !Number.isNaN(new Date(iso).getTime());
 }
 
+// "a. m." y "p. m." con el espacio duro que pone el ICU 74+ de Node entre las dos letras:
+// en pantalla se ve igual que un espacio común, y en el ticket térmico la hora no se
+// corta entre "p." y "m." cuando el renglón no alcanza.
+const AM = "a.\xa0m.";
+const PM = "p.\xa0m.";
+
+// "14:30" -> "02:30 p. m.": la hora de 12 h de es-AR con ICU 74+, sin pasar por el ICU.
+function toHotelClock12(timeKey: string): string {
+  const [hours, minutes] = timeKey.split(":");
+  const h = Number(hours);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h12).padStart(2, "0")}:${minutes} ${h < 12 ? AM : PM}`;
+}
+
+export function formatHotelTime(iso: string | null | undefined, timezone?: string): string {
+  if (!iso || !isValidInstant(iso)) return "—";
+  return toHotelClock12(hotelTimeKey(iso, timezone));
+}
+
+// "26/09/2026, 02:30 p. m.", como la escribe toLocaleString("es-AR") con ICU 74+.
 export function formatHotelDateTime(iso: string | null | undefined, timezone?: string): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: timezone || DEFAULT_TZ,
-  });
+  if (!iso || !isValidInstant(iso)) return "—";
+  const [year, month, day] = hotelDateKey(iso, timezone).split("-");
+  return `${day}/${month}/${year}, ${toHotelClock12(hotelTimeKey(iso, timezone))}`;
 }
 
 export function formatHotelDate(iso: string | null | undefined, timezone?: string): string {
@@ -34,24 +56,38 @@ export function formatHotelDate(iso: string | null | undefined, timezone?: strin
   });
 }
 
-// Formato corto tipo "25 jun 13:00" en la zona del hotel. Se arma con formatToParts
-// para evitar comas/puntos que mete el locale y para forzar 24 hs.
+// Los meses abreviados que ya se veían en es-AR, sin el punto. De una tabla y no del ICU:
+// ver el comentario de arriba.
+const MESES_CORTOS = [
+  "ene",
+  "feb",
+  "mar",
+  "abr",
+  "may",
+  "jun",
+  "jul",
+  "ago",
+  "sept",
+  "oct",
+  "nov",
+  "dic",
+];
+
+// Día, mes abreviado y año de la fecha en la zona del hotel: "26", "sept", "2026".
+function hotelShortDateParts(iso: string, timezone?: string) {
+  const [year, month, day] = hotelDateKey(iso, timezone).split("-");
+  return { day, month: MESES_CORTOS[Number(month) - 1], year };
+}
+
+// Formato corto tipo "25 jun 13:00" en la zona del hotel, 24 hs y sin las comas ni los
+// puntos que mete el locale. Da lo mismo en el servidor y en el navegador.
 export function formatHotelShortDateTime(
   iso: string | null | undefined,
   timezone?: string
 ): string {
-  if (!iso) return "—";
-  const parts = new Intl.DateTimeFormat("es-AR", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: timezone || DEFAULT_TZ,
-  }).formatToParts(new Date(iso));
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const month = get("month").replace(".", "");
-  return `${get("day")} ${month} ${get("hour")}:${get("minute")}`;
+  if (!iso || !isValidInstant(iso)) return "—";
+  const { day, month } = hotelShortDateParts(iso, timezone);
+  return `${day} ${month} ${hotelTimeKey(iso, timezone)}`;
 }
 
 // Fecha con día de semana en la zona del hotel, tipo "lunes, 06 jul". Se arma con
@@ -123,18 +159,13 @@ export function addDaysToDateKey(dateKey: string, days: number): string {
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
 }
 
-// Fecha corta tipo "25 jun 26" en la zona del hotel.
+// Fecha corta tipo "25 jun 26" en la zona del hotel. Como la de arriba, da lo mismo en
+// el servidor y en el navegador.
 export function formatHotelShortDate(
   iso: string | null | undefined,
   timezone?: string
 ): string {
-  if (!iso) return "—";
-  const parts = new Intl.DateTimeFormat("es-AR", {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    timeZone: timezone || DEFAULT_TZ,
-  }).formatToParts(new Date(iso));
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${get("day")} ${get("month").replace(".", "")} ${get("year")}`;
+  if (!iso || !isValidInstant(iso)) return "—";
+  const { day, month, year } = hotelShortDateParts(iso, timezone);
+  return `${day} ${month} ${year.slice(-2)}`;
 }

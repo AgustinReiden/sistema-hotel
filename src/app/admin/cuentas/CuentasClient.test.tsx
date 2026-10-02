@@ -40,8 +40,10 @@ vi.mock("./actions", () => ({
 // pantalla. getByRole calcula el nombre accesible de cada botón y llama a
 // getComputedStyle de jsdom por cada ancestro: con el listado de fondo más la ficha
 // abierta eran 100–300 ms por búsqueda (casi 2 s en frío con la máquina cargada), y
-// con la suite entera en paralelo el test del filtro de fecha pasaba los 5 s. Adentro
-// de una fila o una solapa (within) sí se usa getByRole: ahí el árbol es chico.
+// con la suite entera en paralelo el test del filtro de fecha pasaba los 5 s. Tampoco
+// adentro de una fila o una solapa (within): aun con el árbol chico, la primera búsqueda
+// por rol del archivo costaba ~1,4 s con la suite entera, y era lo más caro del test de
+// la solapa Facturas. Las filas y la tabla se cuentan por etiqueta.
 
 const accounts: CtaCteAccount[] = [
   { kind: "company", id: "acme", name: "Acme SA", document_id: "20111111112", balance: 15000 },
@@ -166,7 +168,8 @@ describe("CuentasClient — FichaClienteModal", () => {
 
     // Sólo la solapa: detrás del modal sigue estando la tabla del listado de saldos.
     await waitFor(() => expect(screen.getByTestId("solapa-facturas")).toBeTruthy());
-    const solapa = within(screen.getByTestId("solapa-facturas"));
+    const solapaEl = screen.getByTestId("solapa-facturas");
+    const solapa = within(solapaEl);
 
     // Letra + número armados con cbteLetra/formatCbteNumero, no a mano.
     await waitFor(() => expect(solapa.getByText("Factura A 00008-00000001")).toBeTruthy());
@@ -176,7 +179,8 @@ describe("CuentasClient — FichaClienteModal", () => {
     expect(solapa.getByText("Consolidada · 3 estadías")).toBeTruthy();
     expect(solapa.getAllByText("Factura A 00008-00000001")).toHaveLength(1);
 
-    expect(solapa.getAllByRole("row")).toHaveLength(3); // encabezado + 2 comprobantes
+    // encabezado + 2 comprobantes
+    expect(solapaEl.querySelectorAll('tr, [role="row"]')).toHaveLength(3);
     expect(solapa.getByText("Emitida")).toBeTruthy();
     expect(solapa.getByText("Anulada por nota de crédito")).toBeTruthy();
   });
@@ -186,16 +190,17 @@ describe("CuentasClient — FichaClienteModal", () => {
 
     await abrirSolapaFacturas();
 
-    const solapa = within(screen.getByTestId("solapa-facturas"));
+    const solapaEl = screen.getByTestId("solapa-facturas");
+    const solapa = within(solapaEl);
     await waitFor(() =>
       expect(
         solapa.getByText("Todavía no se le emitió ninguna factura a este cliente.")
       ).toBeTruthy()
     );
     // Lo que no puede pasar: encabezados de tabla sin una sola fila debajo.
-    expect(solapa.queryByRole("table")).toBeNull();
-    // Y tiene que decir dónde se factura, no sólo que no hay nada.
-    expect(solapa.getByRole("link", { name: "Facturar" })).toBeTruthy();
+    expect(solapaEl.querySelector('table, [role="table"]')).toBeNull();
+    // Y tiene que decir dónde se factura, no sólo que no hay nada (un enlace de verdad).
+    expect(solapa.getByText("Facturar", { selector: "a[href]" })).toBeTruthy();
   });
 });
 
@@ -472,7 +477,7 @@ describe("CuentasClient — pagos aplicados a una estadía", () => {
     expect(fila.getByText(/pasó a su factura/)).toBeTruthy();
     expect(fila.queryByText(/desimputada/)).toBeNull();
     // Y a la mudada no se le ofrece desimputar: ya está revertida.
-    expect(fila.getAllByRole("button", { name: "Desimputar" })).toHaveLength(1);
+    expect(fila.getAllByLabelText("Desimputar", { selector: "button" })).toHaveLength(1);
   });
 });
 
@@ -508,7 +513,7 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     await abrirSolapaPagos();
 
     const fila = within(await screen.findByTestId("fila-pago"));
-    expect(fila.getAllByRole("button", { name: "Desimputar" })).toHaveLength(1);
+    expect(fila.getAllByLabelText("Desimputar", { selector: "button" })).toHaveLength(1);
   });
 
   it("no deja confirmar sin motivo y manda el que se escribió", async () => {
