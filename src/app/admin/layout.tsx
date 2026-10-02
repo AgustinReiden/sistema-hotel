@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Sidebar from './Sidebar';
+import AdminTopBar from './AdminTopBar';
 import { MobileTabBar, MobileTopBar } from './MobileNav';
 import type { NavState } from "./nav-links";
 import { redirect } from "next/navigation";
@@ -173,6 +174,13 @@ export default async function AdminLayout({
                     <Sidebar role={role} userEmail={userEmail} {...navState} />
                 </Suspense>
                 <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+                    {/* Las pestañas de la sección van arriba de todo y fuera del wrapper que
+                        scrollea: son parte del marco, no del contenido. Lee la ruta y ?view=
+                        como los menús, así que también pide su <Suspense>; no ocupa lugar
+                        mientras carga porque con una sola pestaña no se dibuja. */}
+                    <Suspense fallback={null}>
+                        <AdminTopBar role={role} {...navState} />
+                    </Suspense>
                     <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
                     {/* El que scrollea es este wrapper y no <main> para dejar el aviso de turno
                         viejo FUERA del área scrolleable: adentro, cualquier página con h-full

@@ -70,6 +70,12 @@ export type NavTab = {
   /** Solo la ve el dueño. `getNavSections` ya las saca para recepción. */
   adminOnly?: boolean;
   badge?: NavBadge;
+  /**
+   * Parámetros de la URL actual que se llevan al pasar a esta pestaña: el rango del
+   * Tablero, el período de Facturación. Solo los que la pantalla de destino lee; los
+   * demás (la página, un filtro de otra lista) no viajan.
+   */
+  keepParams?: string[];
 };
 
 export type NavSectionId = "hoy" | "reservas" | "caja" | "facturacion" | "clientes" | "tablero" | "configuracion";
@@ -100,6 +106,11 @@ export type NavState = {
 function countBadge(count: number, tone: NavBadge["tone"], title: string, urgent = false): NavBadge | undefined {
   return count > 0 ? { text: String(count), tone, title, urgent } : undefined;
 }
+
+/** El rango del Tablero (?from=&to=) sobrevive al pasar de General a Por habitación. */
+const TABLERO_KEEP_PARAMS = ["from", "to"];
+/** El período, el tipo y la búsqueda de Facturación sobreviven al cambio de pestaña. */
+const FISCAL_KEEP_PARAMS = ["desde", "hasta", "tipo", "q"];
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 
@@ -218,6 +229,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           href: "/admin/fiscal?view=pendientes",
           icon: AlertTriangle,
           match: [{ path: "/admin/fiscal", exact: true, param: { name: "view", value: "pendientes", isDefault: !isAdmin } }],
+          keepParams: FISCAL_KEEP_PARAMS,
           // Urgente: con Facturación cerrada, le gana al rojo de Por facturar.
           badge: countBadge(
             facturasConError,
@@ -233,6 +245,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           icon: FileCheck,
           adminOnly: true,
           match: [{ path: "/admin/fiscal", exact: true, param: { name: "view", value: "emitidas" } }],
+          keepParams: FISCAL_KEEP_PARAMS,
         },
         {
           id: "remitos",
@@ -296,6 +309,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           href: "/admin/analytics",
           icon: LayoutDashboard,
           match: [{ path: "/admin/analytics" }],
+          keepParams: TABLERO_KEEP_PARAMS,
         },
         {
           id: "por_habitacion",
@@ -303,6 +317,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           href: "/admin/analytics/habitaciones",
           icon: BedDouble,
           match: [{ path: "/admin/analytics/habitaciones" }],
+          keepParams: TABLERO_KEEP_PARAMS,
         },
         {
           id: "cobros",

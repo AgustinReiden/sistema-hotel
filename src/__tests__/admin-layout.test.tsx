@@ -110,6 +110,8 @@ vi.mock("@/app/admin/MobileNav", () => ({
   MobileTabBar: () => null,
 }));
 vi.mock("@/app/admin/OpenShiftAgeAlert", () => ({ default: () => null }));
+// La barra de las pestañas lee la ruta de la URL: acá solo importa dónde la pone el layout.
+vi.mock("@/app/admin/AdminTopBar", () => ({ default: () => <span data-testid="barra-pestanas" /> }));
 
 import AdminLayout from "@/app/admin/layout";
 
@@ -177,6 +179,26 @@ describe("layout del panel: cierre de sesión por inactividad", () => {
     expect(screen.queryByText("Menú del panel")).toBeNull();
     expect(H.idleMounts).toBe(1);
     expect(H.idleUnmounts).toBe(0);
+  });
+});
+
+// Las pestañas de la sección son parte del marco: dentro de <main> y fuera del wrapper que
+// scrollea, para que no se vayan con el contenido. Y no existen en la rendición forzada.
+describe("layout del panel: barra de pestañas", () => {
+  it("va dentro de <main>, antes y fuera del área que scrollea", async () => {
+    H.openedBy = "u-actual";
+    const { container } = await renderLayout();
+    const barra = screen.getByTestId("barra-pestanas");
+    const main = container.querySelector("main")!;
+    const scroll = container.querySelector("[data-admin-scroll]")!;
+    expect(main).toContainElement(barra);
+    expect(scroll).not.toContainElement(barra);
+    expect(barra.compareDocumentPosition(scroll) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("la rendición forzada no la lleva", async () => {
+    await renderLayout();
+    expect(screen.queryByTestId("barra-pestanas")).toBeNull();
   });
 });
 
