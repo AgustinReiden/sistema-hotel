@@ -678,7 +678,7 @@ describe("RoomCard: los cuadros se cierran si cambia la reserva", () => {
     {
       cuadro: "Ampliar Reserva",
       boton: "Ampliar Reserva",
-      abierto: "Noches Adicionales",
+      abierto: /^Ampliar 1 noche/,
       desde: () => particular(),
       hacia: () => particular({ reservationId: "res-2" }),
     },
@@ -1070,7 +1070,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     /** Ampliar Reserva → una noche → Ampliar, sin respuesta. */
     async function ampliarSinRespuesta() {
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      fireEvent.click(screen.getByText("Ampliar"));
+      fireEvent.click(screen.getByText(/^Ampliar 1 noche/));
       await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
     }
 
@@ -1079,13 +1079,13 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
 
       await ampliarSinRespuesta();
       expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
-      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.queryByLabelText("Noches adicionales")).toBeNull();
       fireEvent.click(screen.getByText("Entendido"));
 
       // La tarjeta sigue con la salida de antes: no se sabe si entró.
       fireEvent.click(screen.getByText("Ampliar Reserva"));
 
-      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.queryByLabelText("Noches adicionales")).toBeNull();
       expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
       expect(H.handleExtendReservation).toHaveBeenCalledTimes(1);
     });
@@ -1098,7 +1098,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       actualizar(particular({ check_out_target: SALIDA }));
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.queryByLabelText("Noches adicionales")).toBeNull();
       expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
     });
 
@@ -1112,7 +1112,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       );
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+      expect(screen.getByLabelText("Noches adicionales")).toBeTruthy();
     });
 
     it("recargar la página (la tarjeta se monta de cero) también lo destraba", async () => {
@@ -1123,7 +1123,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       abrir(particular({ check_out_target: SALIDA }));
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+      expect(screen.getByLabelText("Noches adicionales")).toBeTruthy();
     });
 
     it("el medio día (que no se cobra dos veces) no frena la ampliación", async () => {
@@ -1138,7 +1138,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       fireEvent.click(screen.getByText("Entendido"));
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+      expect(screen.getByLabelText("Noches adicionales")).toBeTruthy();
     });
   });
 });
