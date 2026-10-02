@@ -9,7 +9,8 @@ import {
   listAdminAlerts,
 } from "@/lib/data";
 import { localToISO } from "@/lib/format";
-import { formatHotelDateTime } from "@/lib/time";
+import { addDaysToDateKey, formatHotelDateTime, hotelDateKey } from "@/lib/time";
+import { resolveCleaningRange } from "@/lib/date-range";
 import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
 import type { CleaningCategory, CleaningLogSummary } from "@/lib/types";
 import AlertsPanel from "./AlertsPanel";
@@ -33,15 +34,6 @@ function categoryLabel(
     default:
       return { label: "—", color: "bg-slate-100 text-slate-500 border-slate-200" };
   }
-}
-
-// "YYYY-MM-DD" + 1 día (para usar como límite superior exclusivo del rango).
-function addOneDay(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + 1);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
 }
 
 function summaryCards(summary: CleaningLogSummary) {
@@ -96,6 +88,7 @@ type PageProps = {
   searchParams: Promise<{
     from?: string;
     to?: string;
+    todo?: string;
     page?: string;
     category?: string;
     room?: string;
@@ -111,13 +104,16 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
   const hotelSettings = await getHotelSettings().catch(() => null);
   const tz = hotelSettings?.timezone || "America/Argentina/Tucuman";
 
-  const from = sp.from ?? "";
-  const to = sp.to ?? "";
+  // El mismo período rige para las tarjetas y para la tabla; sin nada en la URL es el
+  // mes en curso, y el acumulado de siempre hay que pedirlo ("Todo el historial").
+  const range = resolveCleaningRange(sp, hotelDateKey(new Date(), tz));
+  const from = range.fromKey ?? "";
+  const to = range.toKey ?? "";
   const category = sp.category && ALLOWED_CATEGORIES.has(sp.category) ? sp.category : "";
   const room = sp.room ?? "";
   const page = parsePageParam(sp.page);
   const fromIso = from ? localToISO(from, "00:00", tz) : undefined;
-  const toIso = to ? localToISO(addOneDay(to), "00:00", tz) : undefined;
+  const toIso = to ? localToISO(addDaysToDateKey(to, 1), "00:00", tz) : undefined;
   const roomIdParsed = room ? Number(room) : NaN;
   const roomId = Number.isInteger(roomIdParsed) ? roomIdParsed : undefined;
 
@@ -142,8 +138,11 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
 
   const buildHref = (p: number) => {
     const params = new URLSearchParams();
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
+    if (range.isAll) params.set("todo", "1");
+    else if (!range.isDefault) {
+      params.set("from", from);
+      params.set("to", to);
+    }
     if (category) params.set("category", category);
     if (room) params.set("room", room);
     if (p > 1) params.set("page", String(p));
@@ -158,7 +157,10 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
           <div className="p-2 bg-slate-100 rounded-lg">
             <Sparkles size={20} className="text-slate-600" />
           </div>
-          <h1 className="text-xl font-bold text-slate-800">Mantenimiento</h1>
+          <div>
+            <h1 className="text-xl font-bold text-slate-800">Limpiezas</h1>
+            <p className="text-xs text-slate-500">{range.label}</p>
+          </div>
         </div>
       </header>
 
@@ -166,6 +168,9 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
         <div className="max-w-5xl mx-auto">
           <AlertsPanel alerts={alerts} hotelTimezone={tz} />
 
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            En el período · {range.label}
+          </p>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             {cards.map((card) => (
               <div
@@ -188,10 +193,10 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
                   <Sparkles size={18} />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-800">Histórico de limpiezas</h2>
+                  <h2 className="text-lg font-bold text-slate-800">Limpiezas del período</h2>
                   <p className="text-xs text-slate-500">
                     {total === 0
-                      ? "No hay limpiezas en el rango seleccionado."
+                      ? "No hay limpiezas en el período seleccionado."
                       : `Mostrando ${firstIndex}–${lastIndex} de ${total}. Las de "ocupada sin reserva" (naranja) requieren revisión.`}
                   </p>
                 </div>
@@ -199,6 +204,8 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
               <CleaningLogFilters
                 from={from}
                 to={to}
+                isAll={range.isAll}
+                isDefault={range.isDefault}
                 category={category}
                 room={room}
                 rooms={rooms}

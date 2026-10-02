@@ -9,6 +9,10 @@ type RoomOption = { id: number; room_number: string };
 type Props = {
   from: string;
   to: string;
+  /** Todo el historial: sin límites de fecha. */
+  isAll: boolean;
+  /** Sin rango en la URL: rige el mes en curso. */
+  isDefault: boolean;
   category: string;
   room: string;
   rooms: RoomOption[];
@@ -23,24 +27,50 @@ const CATEGORY_OPTIONS: { value: string; label: string }[] = [
   { value: "no_key", label: "Sin llave" },
 ];
 
-export default function CleaningLogFilters({ from, to, category, room, rooms }: Props) {
+export default function CleaningLogFilters({
+  from,
+  to,
+  isAll,
+  isDefault,
+  category,
+  room,
+  rooms,
+}: Props) {
   const router = useRouter();
   const [desde, setDesde] = useState(from);
   const [hasta, setHasta] = useState(to);
   const [cat, setCat] = useState(category);
   const [hab, setHab] = useState(room);
 
-  const apply = () => {
-    const params = new URLSearchParams();
-    if (desde) params.set("from", desde);
-    if (hasta) params.set("to", hasta);
+  // Al filtrar se vuelve a la primera página. Sin rango en la URL rige el mes en curso.
+  const go = (rango: Record<string, string>) => {
+    const params = new URLSearchParams(rango);
     if (cat) params.set("category", cat);
     if (hab) params.set("room", hab);
-    // Al filtrar se vuelve a la primera página.
     const qs = params.toString();
     router.push(qs ? `/admin/mantenimiento?${qs}` : "/admin/mantenimiento");
   };
 
+  const apply = () => {
+    const rango: Record<string, string> = {};
+    if (desde) rango.from = desde;
+    if (hasta) rango.to = hasta;
+    go(rango);
+  };
+
+  const mesEnCurso = () => {
+    setDesde("");
+    setHasta("");
+    go({});
+  };
+
+  const todoElHistorial = () => {
+    setDesde("");
+    setHasta("");
+    go({ todo: "1" });
+  };
+
+  // "Limpiar" vuelve al mes en curso y saca también la categoría y la habitación.
   const clear = () => {
     setDesde("");
     setHasta("");
@@ -49,12 +79,34 @@ export default function CleaningLogFilters({ from, to, category, room, rooms }: 
     router.push("/admin/mantenimiento");
   };
 
-  const hasFilter = Boolean(from || to || category || room);
+  const hasFilter = Boolean(!isDefault || isAll || category || room);
+  const quickClass = (active: boolean) =>
+    `px-3 py-2 rounded-lg border text-sm font-bold transition-colors ${
+      active
+        ? "bg-slate-800 border-slate-800 text-white"
+        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+    }`;
   const selectClass =
     "px-3 py-2 rounded-lg border border-slate-200 focus:border-emerald-500 outline-none text-sm bg-white";
 
   return (
     <div className="flex flex-wrap items-end gap-3">
+      <button
+        type="button"
+        onClick={mesEnCurso}
+        aria-pressed={isDefault}
+        className={quickClass(isDefault)}
+      >
+        Mes en curso
+      </button>
+      <button
+        type="button"
+        onClick={todoElHistorial}
+        aria-pressed={isAll}
+        className={quickClass(isAll)}
+      >
+        Todo el historial
+      </button>
       <div className="flex flex-col gap-1">
         <label htmlFor="from" className="text-xs font-bold text-slate-500 uppercase tracking-wide">
           Desde
