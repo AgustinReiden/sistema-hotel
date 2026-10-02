@@ -21,8 +21,10 @@ elegido un criterio único.
 1. El **Control de facturación** pasa a ser la pantalla dueña de esa pregunta. Abre mostrando
    las 286, sin que toques ningún filtro.
 2. El **numerito rojo del menú** ahora dice 286, el mismo número que la pantalla que abre.
-3. **Facturación** (la de recepción) dice que muestra sólo los últimos 10 días, y tiene un link
-   a la lista completa.
+3. ~~**Facturación** (la de recepción) dice que muestra sólo los últimos 10 días, y tiene un link
+   a la lista completa.~~ Actualizado el 2026-09-23: la solapa "Sin facturar" de `/admin/fiscal`
+   ya no existe. Quedó una sola lista, la de Por facturar (el Control), con el atajo
+   **Últimos 10 días** que el dueño usaba.
 4. Se borraron una consulta, dos botones y tres criterios de fecha que sobraban.
 
 **Qué te queda a vos.** Una sola cosa, y no es de programación: **hay 286 estadías sin
@@ -249,14 +251,33 @@ PROD, 2026-09-08).
 
 | Se elimina | Se convierte en link | Se queda como está |
 |---|---|---|
-| `DIAS_HISTORICO = 3650` y su consulta `countBillingPending(3650)` en el control | `/admin/fiscal` → `/admin/fiscal/control?estado=pendiente`, sólo para admin | El bloque "Check-outs sin facturar" y su SQL: es la cola del turno |
+| `DIAS_HISTORICO = 3650` y su consulta `countBillingPending(3650)` en el control | `/admin/fiscal` → `/admin/fiscal/control?estado=pendiente`, sólo para admin | ~~El bloque "Check-outs sin facturar"~~ (se eliminó de `/admin/fiscal` el 2026-09-23). Su SQL se queda por el cierre de caja |
 | El aviso "histórico" y su botón "Ver todas" | "Facturar" de `/admin/cuentas` y de la ficha (ya lo eran) | "Emitidas" y la solapa "Facturas" (ver §2) |
 | `currentMonthRange()` del control | "Consolidar" por fila del control (ya lo era) | La consolidada entera: es el taller de emisión |
 | El botón "Factura consolidada" sin parámetros del control | | Toda migración y todo el circuito de emisión |
 | El "60 días" del badge | | |
+| La solapa "Sin facturar" de `/admin/fiscal` (2026-09-23): es el atajo **Últimos 10 días** del Control. `?view=sin_facturar` del dueño redirige. | | `rpc_list_invoiceable_checkouts` y `listInvoiceableCheckouts`: los usa el cierre de caja (`getCloseShiftBlockers`) |
 
 **Ninguna ruta se elimina**, así que no hace falta ningún redirect: los links guardados siguen
 funcionando.
 
 El saldo es **una consulta menos** por carga del control, y **un solo número**: el badge y la
 pantalla que abre dicen los mismos 286.
+
+---
+
+## Nota del 2026-09-23: "Sin facturar" pasa a ser "Últimos 10 días"
+
+Había dos listas de "qué falta facturar" con criterios distintos: la solapa "Sin facturar" de
+`/admin/fiscal` (solo por check-out, `NOW() - 10 días`) y el Control. Queda una sola, la del
+Control, con el atajo **Últimos 10 días** (hoy y los 9 días anteriores, en días del hotel).
+
+- `/admin/fiscal?view=sin_facturar` del dueño redirige a
+  `/admin/fiscal/control?desde=<hoy-9>&hasta=<hoy>&estado=pendiente`, que abre con el atajo marcado.
+- `/admin/fiscal` sin solapa abre "Con error" para los dos roles.
+- El barrido de facturas trabadas (`sweepStaleInvoices`) corre también al abrir Por facturar;
+  sigue corriendo en `/admin/fiscal`.
+- El número no coincide exacto con el de la solapa vieja: aquella miraba `NOW() - 10 días`
+  solo por check-out; el atajo cuenta días del hotel y suma lo que espera la consolidada.
+- `rpc_list_invoiceable_checkouts` y `listInvoiceableCheckouts` se quedan: el cierre de caja
+  las usa (`getCloseShiftBlockers`).
