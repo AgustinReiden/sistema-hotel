@@ -25,7 +25,10 @@ describe("buildCheckoutCsv", () => {
     expect(lines[0]).toBe("Fecha;Hora;Cliente;Cod. Cliente;Monto;Forma de pago;Turno");
     const fields = lines[1].split(";");
     expect(fields[0]).toBe("03/07/2026");
-    expect(fields[1]).toMatch(/^10:30/); // "10:30" o "10:30 a. m." según ICU
+    // Hora de 12 h, como la escribe PROD (Agustín lo confirmó el 27/09), con el espacio
+    // duro del ICU 74+ de Node. El helper la arma sin pasar por el ICU: ya no cambia con
+    // la versión de Node del servidor.
+    expect(fields[1]).toBe("10:30 a. m.");
     expect(fields.slice(2)).toEqual(["Juan Pérez", "30123456", "50000,00", "Efectivo", "000042"]);
   });
 
