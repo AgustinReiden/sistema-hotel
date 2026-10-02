@@ -161,12 +161,11 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           ),
         },
         {
-          // Solo del dueño hasta F1-8, que se la abre a recepción en solo lectura.
+          // Recepción la ve en solo lectura; el Historial y el Directorio siguen siendo del dueño.
           id: "por_llegar",
           label: "Por llegar",
           href: "/admin/guests?view=por_llegar",
           icon: UserCheck,
-          adminOnly: true,
           match: [{ path: "/admin/guests", exact: true, param: { name: "view", value: "por_llegar" } }],
           keepParams: GUESTS_KEEP_PARAMS,
         },
