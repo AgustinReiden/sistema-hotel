@@ -111,6 +111,10 @@ function countBadge(count: number, tone: NavBadge["tone"], title: string, urgent
 const TABLERO_KEEP_PARAMS = ["from", "to"];
 /** El período, el tipo y la búsqueda de Facturación sobreviven al cambio de pestaña. */
 const FISCAL_KEEP_PARAMS = ["desde", "hasta", "tipo", "q"];
+/** Por facturar solo lee el período: lo conserva como hacía la pastilla "Sin facturar". */
+const CONTROL_KEEP_PARAMS = ["desde", "hasta"];
+/** La búsqueda, el período y el orden de Huéspedes sobreviven al cambio de vista, como con las pastillas. */
+const GUESTS_KEEP_PARAMS = ["q", "desde", "hasta", "orden"];
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 
@@ -164,6 +168,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           icon: UserCheck,
           adminOnly: true,
           match: [{ path: "/admin/guests", exact: true, param: { name: "view", value: "por_llegar" } }],
+          keepParams: GUESTS_KEEP_PARAMS,
         },
         {
           id: "historial",
@@ -172,6 +177,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           icon: History,
           adminOnly: true,
           match: [{ path: "/admin/guests", exact: true, param: { name: "view", value: "historial" } }],
+          keepParams: GUESTS_KEEP_PARAMS,
         },
       ],
     },
@@ -218,6 +224,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
             { path: "/admin/fiscal/consolidada" },
             { path: "/admin/fiscal", exact: true, param: { name: "view", value: "sin_facturar", isDefault: true } },
           ],
+          keepParams: CONTROL_KEEP_PARAMS,
           // Sin ventana en el texto: el número es de todo el historial, y es el mismo que
           // muestra el control al abrir.
           badge: countBadge(unbilledCount, "alert", plural(unbilledCount, "estadía sin facturar", "estadías sin facturar")),
@@ -272,6 +279,7 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           href: "/admin/guests",
           icon: Users,
           match: [{ path: "/admin/guests", exact: true, param: { name: "view", value: "directorio", isDefault: true } }],
+          keepParams: GUESTS_KEEP_PARAMS,
         },
         {
           id: "empresas",

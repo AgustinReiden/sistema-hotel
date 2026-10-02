@@ -106,6 +106,32 @@ describe("barra de arriba con las pestañas de la sección", () => {
     expect(params.get("q")).toBe("prueba");
   });
 
+  it("en Facturación, Por facturar conserva el período pero no el tipo ni la búsqueda", () => {
+    en("/admin/fiscal?view=emitidas&desde=2026-09-01&hasta=2026-09-10&tipo=6&q=prueba");
+    const { container } = render(<AdminTopBar role="admin" />);
+    const [ruta, query] = pestana(container, "Por facturar").getAttribute("href")!.split("?");
+    expect(ruta).toBe("/admin/fiscal/control");
+    const params = new URLSearchParams(query);
+    expect(params.get("desde")).toBe("2026-09-01");
+    expect(params.get("hasta")).toBe("2026-09-10");
+    expect(params.has("tipo")).toBe(false);
+    expect(params.has("q")).toBe(false);
+  });
+
+  it("en Reservas, pasar de Por llegar a Historial conserva la búsqueda, el período y el orden", () => {
+    en("/admin/guests?view=por_llegar&q=gomez&desde=2026-09-01&hasta=2026-09-10&orden=nombre&page=3");
+    const { container } = render(<AdminTopBar role="admin" />);
+    const [ruta, query] = pestana(container, "Historial").getAttribute("href")!.split("?");
+    expect(ruta).toBe("/admin/guests");
+    const params = new URLSearchParams(query);
+    expect(params.get("view")).toBe("historial");
+    expect(params.get("q")).toBe("gomez");
+    expect(params.get("desde")).toBe("2026-09-01");
+    expect(params.get("hasta")).toBe("2026-09-10");
+    expect(params.get("orden")).toBe("nombre");
+    expect(params.has("page")).toBe(false);
+  });
+
   it("sin rango en la URL, los links quedan limpios", () => {
     en("/admin/analytics");
     const { container } = render(<AdminTopBar role="admin" />);
