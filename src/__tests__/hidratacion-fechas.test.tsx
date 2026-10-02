@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import AdminLayout from "@/app/admin/layout";
 import AdminAlertsList from "@/app/admin/AdminAlertsList";
 import { MobileTabBar, MobileTopBar } from "@/app/admin/MobileNav";
+import { MobileMenuProvider } from "@/app/admin/MobileMenuContext";
 import OccupiedRoomAlertBanner from "@/app/admin/OccupiedRoomAlertBanner";
 import OpenShiftAgeAlert from "@/app/admin/OpenShiftAgeAlert";
 import Dashboard from "@/app/admin/page";
@@ -597,7 +598,7 @@ describe("hidratación: lo que dibuja el servidor coincide con el navegador", ()
   // El marco del panel, que se dibuja en todas las pantallas (Hoy y Mantenimiento).
   it("los menús y el aviso de turno viejo hidratan sin diferencias", async () => {
     const { container, errores } = await hidratar(
-      <>
+      <MobileMenuProvider>
         <MobileTopBar
           role="admin"
           userEmail="admin@example.com"
@@ -614,8 +615,8 @@ describe("hidratación: lo que dibuja el servidor coincide con el navegador", ()
         />
         {/* Abierto hace días: el aviso sale recién después de montar, en los dos lados. */}
         <OpenShiftAgeAlert openedAt="2026-09-20T11:00:00.000Z" />
-        <MobileTabBar hasOpenShift />
-      </>
+        <MobileTabBar role="admin" hasOpenShift />
+      </MobileMenuProvider>
     );
 
     expect(errores).toEqual([]);

@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Sidebar from './Sidebar';
 import AdminTopBar from './AdminTopBar';
 import { MobileTabBar, MobileTopBar } from './MobileNav';
+import { MobileMenuProvider } from './MobileMenuContext';
 import type { NavState } from "./nav-links";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -159,6 +160,9 @@ export default async function AdminLayout({
         // nada: el shell queda igual.
         <>
             {role === "receptionist" && <IdleLogout />}
+            {/* El provider va dentro del fragmento y no por fuera: IdleLogout tiene que seguir
+                siendo el primer hijo de la raíz, como en la rendición forzada. */}
+            <MobileMenuProvider>
             <div data-admin-shell className="h-dvh bg-slate-50 flex flex-col md:flex-row overflow-hidden">
                 {/* Los dos menús leen ?view= con useSearchParams, y eso pide un <Suspense>
                     alrededor o `next build` falla. Los reemplazos ocupan el mismo lugar
@@ -207,8 +211,21 @@ export default async function AdminLayout({
                         {children}
                     </div>
                 </main>
-                <MobileTabBar hasOpenShift={!!openShift} />
+                {/* Lee la ruta y ?view= para marcar la sección actual, así que pide su
+                    <Suspense>; el reemplazo ocupa el alto de la barra (con padding de 10 px
+                    + icono de 20 + texto: unos 56 px) para que nada salte al cargar. */}
+                <Suspense
+                    fallback={
+                        <div
+                            aria-hidden
+                            className="md:hidden shrink-0 h-14 border-t border-slate-800 bg-slate-900 print:hidden"
+                        />
+                    }
+                >
+                    <MobileTabBar role={role} {...navState} />
+                </Suspense>
             </div>
+            </MobileMenuProvider>
         </>
     );
 }

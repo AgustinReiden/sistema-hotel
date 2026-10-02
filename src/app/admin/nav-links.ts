@@ -462,46 +462,19 @@ export function findActiveNav(
 }
 
 // ─── Barra inferior del celular ────────────────────────────────────────────────
-// Sigue con sus cinco accesos de siempre hasta F1-2, que la arma por sección y rol.
 
-export type NavItem = {
-  href: string;
-  label: string;
-  /** Etiqueta corta para la barra inferior del celular, donde entran ~11 caracteres. */
-  shortLabel?: string;
-  icon: LucideIcon;
-  badge?: NavBadge;
-  /** El icono queda resaltado aunque no haya badge (turno abierto). */
-  highlighted?: boolean;
+/**
+ * Las secciones que van como accesos fijos en la barra de abajo del celular. Recepción
+ * tiene lo que usa todo el día; el dueño cambia Facturación por el Tablero, y el resto del
+ * menú queda detrás del botón "Más" (que abre el mismo cajón que la hamburguesa).
+ */
+const MOBILE_BAR_IDS: Record<"admin" | "receptionist", NavSectionId[]> = {
+  admin: ["hoy", "reservas", "caja", "tablero"],
+  receptionist: ["hoy", "reservas", "caja", "facturacion"],
 };
 
-/**
- * Lo que recepción usa todos los días. Es también lo que va en la barra inferior del
- * celular: cinco accesos al alcance del pulgar, sin abrir ningún menú.
- */
-export function getReceptionItems({ hasOpenShift }: NavState = {}): NavItem[] {
-  return [
-    { href: "/admin", label: "Dashboard Hoy", shortLabel: "Hoy", icon: CalendarCheck },
-    { href: "/admin/calendario", label: "Calendario", icon: CalendarDays },
-    { href: "/admin/solicitudes", label: "Solicitudes", icon: ClipboardList },
-    {
-      href: "/admin/caja",
-      label: "Caja",
-      icon: CircleDollarSign,
-      highlighted: Boolean(hasOpenShift),
-      badge: hasOpenShift
-        ? { text: "ABIERTA", tone: "ok", title: "Turno abierto" }
-        : { text: "CERRADA", tone: "warn", title: "Sin turno" },
-    },
-    { href: "/admin/fiscal", label: "Facturación", icon: FileText },
-  ];
-}
-
-/**
- * ¿Este link es el de la pantalla actual? "/admin" tiene que comparar exacto: con
- * startsWith se prendería en todas las pantallas del panel, porque todas cuelgan de ahí.
- */
-export function isNavItemActive(href: string, pathname: string): boolean {
-  if (href === "/admin") return pathname === "/admin";
-  return pathname === href || pathname.startsWith(`${href}/`);
+export function getMobileBarSections(role: string, state: NavState = {}): NavSection[] {
+  const ids = MOBILE_BAR_IDS[role === "admin" ? "admin" : "receptionist"];
+  const sections = getNavSections(role, state);
+  return ids.flatMap((id) => sections.filter((s) => s.id === id));
 }
