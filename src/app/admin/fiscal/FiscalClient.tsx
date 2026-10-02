@@ -2,10 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   AlertTriangle,
-  ClipboardCheck,
   FileMinus,
   FileText,
   Loader2,
@@ -23,38 +21,34 @@ import {
   fixInvoiceDniAndRetryAction,
   retryInvoiceAction,
 } from "./actions";
-import InvoicePromptModal, { type InvoicePromptData } from "../InvoicePromptModal";
 import DateRangeFilter from "../DateRangeFilter";
 import DownloadCsvButton from "../DownloadCsvButton";
 import PaginationFooter from "../PaginationFooter";
 import { usePagination } from "../usePagination";
-import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito, isValidCuit } from "@/lib/arca/amounts";
+import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito } from "@/lib/arca/amounts";
 import { AUTHORIZED_INVOICES_LIMIT } from "@/lib/billing";
 import { buildCsv, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
 import { formatAmount } from "@/lib/format";
-import { formatHotelShortDateTime } from "@/lib/time";
 import type { FiscalView } from "./views";
 import type {
   AuthorizedInvoiceRow,
   EmitInvoiceOutcome,
-  InvoiceableCheckoutRow,
   PendingInvoiceRow,
 } from "@/lib/types";
 
 type Props = {
   enabled: boolean;
   pending: PendingInvoiceRow[];
-  invoiceable: InvoiceableCheckoutRow[];
   authorized: AuthorizedInvoiceRow[];
   from: string;
   to: string;
   today: string;
   /**
-   * Los check-outs sin facturar son del administrador. El recepcionista acá sólo
-   * ve —y reintenta— las facturas que no salieron por ARCA o por la red, y sólo
-   * mientras su turno esté abierto (el gate real vive en las RPC del listado).
-   * Decisión de Agustín, 18/09/2026.
+   * Lo que falta facturar es del administrador y vive en Por facturar. El
+   * recepcionista acá sólo ve —y reintenta— las facturas que no salieron por ARCA o
+   * por la red, y sólo mientras su turno esté abierto (el gate real vive en las RPC
+   * del listado). Decisión de Agustín, 18/09/2026.
    */
   isAdmin: boolean;
   /** Solapa activa. Viaja en la URL como ?view=; la resuelve el servidor. */
@@ -125,7 +119,6 @@ const STATUS_LABEL: Record<string, string> = {
 export default function FiscalClient({
   enabled,
   pending,
-  invoiceable,
   authorized,
   from,
   to,
@@ -145,14 +138,13 @@ export default function FiscalClient({
   // navega: es un cambio discreto, igual que el rango de fechas o la solapa.
   const [qFiltro, setQFiltro] = useState(q);
 
-  // Una paginacion por solapa: son tres listados distintos, cada uno con la suya.
+  // Una paginacion por solapa: son listados distintos, cada uno con la suya.
   // El CSV de "Emitidas" sigue leyendo lo filtrado entero, no la pagina.
   //
   // `view` va en el resetKey: cambiar de solapa no desmonta este componente (es la
   // misma ruta con otro querystring), asi que sin eso la solapa nueva se abriria en la
   // pagina 7 de la anterior, muchas veces vacia.
   const pendingPage = usePagination(pending, view);
-  const invoiceablePage = usePagination(invoiceable, view);
 
   // El tipo y la búsqueda se aplican en el cliente, sobre las filas que ya trajo
   // listAuthorizedInvoices para el rango elegido: no hay una consulta nueva por
@@ -207,8 +199,6 @@ export default function FiscalClient({
   // Mini-form de "Corregir DNI" abierto para una factura puntual.
   const [dniEditId, setDniEditId] = useState<string | null>(null);
   const [dniValue, setDniValue] = useState("");
-  // Modal A/B para emitir un check-out sin facturar (empresa o consumidor final).
-  const [invoicePrompt, setInvoicePrompt] = useState<InvoicePromptData | null>(null);
   // Comprobante que se va a anular con nota de crédito (confirmación previa).
   const [ncTarget, setNcTarget] = useState<AuthorizedInvoiceRow | null>(null);
 
@@ -246,26 +236,6 @@ export default function FiscalClient({
     }
     setNcTarget(null);
     handleOutcome(result.data!);
-  };
-
-  // Abre el modal A/B para un check-out sin facturar. El CUIT (si la reserva es de
-  // empresa) llega en client_dni; la condición IVA la elige el que factura.
-  const openEmitModal = (c: InvoiceableCheckoutRow) => {
-    const dniDigits = (c.client_dni ?? "").replace(/\D/g, "");
-    const isCuit = isValidCuit(dniDigits);
-    setInvoicePrompt({
-      reservationId: c.reservation_id,
-      clientName: c.client_name,
-      clientDni: c.client_dni,
-      total: c.total_price,
-      aPrefill: {
-        razonSocial: c.client_name ?? "",
-        cuit: isCuit ? dniDigits : "",
-        condicionIva: "",
-        domicilio: "",
-      },
-      suggestA: isCuit,
-    });
   };
 
   const fixDni = async (invoiceId: string, reservationId: string) => {
@@ -446,80 +416,6 @@ export default function FiscalClient({
           el check-out; si ARCA o la red fallan, la factura te queda acá arriba para
           reintentarla mientras tu turno esté abierto.
         </p>
-      )}
-
-      {/* Check-outs sin facturar. Sólo el administrador: el recepcionista factura en
-          el check-out, y si algo falla lo reintenta arriba. Ver el comentario de
-          `isAdmin` en Props. */}
-      {isAdmin && view === "sin_facturar" && (
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          {/* Este bloque NO es la lista de todo lo que falta facturar: la RPC lo
-              recorta a los últimos 10 días y además sólo trae clientes que facturan
-              por check-out. Decirlo importa — leído como la lista completa, hace
-              creer que no quedó nada. La lista entera vive en el control de
-              facturación, a un link de acá.
-              Ver docs/solapamiento-cuentas-facturacion.md. */}
-          <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <h3 className="text-base font-bold text-slate-800">Check-outs sin facturar</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Las salidas de los <strong>últimos 10 días</strong> que nadie facturó.
-                  Emitirlas desde acá es cosa del administrador: revisá bien a nombre de
-                  quién sale antes de confirmar.
-                </p>
-              </div>
-              <Link
-                href="/admin/fiscal/control?estado=pendiente"
-                className="shrink-0 inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2"
-              >
-                <ClipboardCheck size={14} /> Ver todo lo que falta facturar
-              </Link>
-            </div>
-          </div>
-          <div className="p-5">
-            {invoiceable.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-2">
-                No hay check-outs sin facturar en los últimos 10 días.
-              </p>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {invoiceablePage.rows.map((c) => (
-                  <li key={c.reservation_id} className="py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-800 truncate">
-                        Hab. {c.room_number} — {c.client_name} — {formatAmount(c.total_price)}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Check-out: {formatHotelShortDateTime(c.actual_check_out)}
-                        {c.client_dni ? ` · DNI ${c.client_dni}` : ""}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => openEmitModal(c)}
-                      disabled={busyId !== null}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shrink-0"
-                    >
-                      <FileText size={14} />
-                      Emitir factura
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <PaginationFooter
-              page={invoiceablePage.page}
-              totalPages={invoiceablePage.totalPages}
-              total={invoiceablePage.total}
-              firstIndex={invoiceablePage.firstIndex}
-              lastIndex={invoiceablePage.lastIndex}
-              noun="estadías"
-              onPageChange={invoiceablePage.setPage}
-            />
-          </div>
-        </section>
       )}
 
       {/* Emitidas recientes */}
@@ -703,16 +599,6 @@ export default function FiscalClient({
           </div>
         </div>
       )}
-
-      <InvoicePromptModal
-        key={invoicePrompt?.reservationId ?? "none"}
-        data={invoicePrompt}
-        startAtTipo
-        onClose={() => {
-          setInvoicePrompt(null);
-          router.refresh();
-        }}
-      />
     </div>
   );
 }
