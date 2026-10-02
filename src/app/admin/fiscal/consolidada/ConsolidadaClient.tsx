@@ -27,8 +27,15 @@ import type {
   InvoiceReceptorPrefill,
   ReceptorCondicionCuit,
 } from "@/lib/types";
-import { emitConsolidatedInvoiceAction, loadCcAccountStaysAction } from "./actions";
-import ConsolidadaConfirmModal, { type ConsolidadaDocumento } from "./ConsolidadaConfirmModal";
+import {
+  emitConsolidatedInvoiceAction,
+  loadCcAccountStaysAction,
+  loadGuestDocumentAction,
+} from "./actions";
+import ConsolidadaConfirmModal, {
+  textoDetalle,
+  type ConsolidadaDocumento,
+} from "./ConsolidadaConfirmModal";
 
 /** Lo de la configuración fiscal que dice el cuadro "Revisá antes de emitir". */
 export type ConsolidadaFiscal = Pick<
@@ -109,6 +116,112 @@ function listarFaltantes(campos: string[]): string {
   if (campos.length <= 1) return campos[0] ?? "";
   return `${campos.slice(0, -1).join(", ")} y ${campos[campos.length - 1]}`;
 }
+
+/** 1 → "1 estadía"; 3 → "3 estadías". */
+function estadiasTexto(n: number): string {
+  return `${n} ${n === 1 ? "estadía" : "estadías"}`;
+}
+
+/**
+ * La línea que avisa que una recarga de la misma lista cambió la selección sola (ver
+ * loadRows). Si entró alguna estadía, pide revisar lo tildado: la barra ahora suma algo
+ * que nadie eligió.
+ */
+function textoCambioDeSeleccion({ salieron, entraron }: { salieron: number; entraron: number }): string {
+  const partes: string[] = [];
+  if (salieron > 0) {
+    partes.push(
+      salieron === 1
+        ? "1 estadía que tenías tildada ya no está pendiente y salió de la selección"
+        : `${salieron} estadías que tenías tildadas ya no están pendientes y salieron de la selección`
+    );
+  }
+  if (entraron > 0) {
+    partes.push(
+      entraron === 1
+        ? "entró a la selección 1 estadía pendiente que no tenías tildada"
+        : `entraron a la selección ${entraron} estadías pendientes que no tenías tildadas`
+    );
+  }
+  const revisar = entraron > 0 ? " Revisá lo tildado antes de emitir." : "";
+  return `Al recargar, ${partes.join(", y ")}.${revisar}`;
+}
+
+/**
+ * La emisión volvió sin la factura autorizada: pendiente, en verificación o rechazada. El
+ * motivo (`userMessage` del emisor) va al aviso fijo de arriba de la lista, no a un toast
+ * que se va solo a los 4 s sin que nadie lo haya leído.
+ */
+type ResultadoSinAutorizar = {
+  status: "pending" | "processing" | "rejected";
+  /** El `userMessage` del emisor, terminado en punto; vacío si no vino. */
+  motivo: string;
+  /** reservation_id de las estadías que iban en esa factura. */
+  emitidas: string[];
+};
+
+/**
+ * Qué se sabe de las estadías de una factura rechazada mirando la lista cargada:
+ * - "liberadas": todas vuelven a estar pendientes; ya se la descartó en Facturación, que
+ *   es lo que las suelta.
+ * - "atadas": alguna está en la lista y sigue atada a la factura (falta descartarla).
+ * - "fuera-del-periodo": las que están en la lista están pendientes, pero alguna no vino
+ *   (un período la deja afuera): no se puede saber, y no cuenta como suelta.
+ */
+function estadoDeLaRechazada(
+  emitidas: string[],
+  data: CcAccountStayRow[]
+): "liberadas" | "atadas" | "fuera-del-periodo" {
+  if (emitidas.length === 0) return "atadas";
+  const enLista = new Map(data.map((r) => [r.reservation_id, r.facturable]));
+  if (emitidas.some((rid) => enLista.get(rid) === false)) return "atadas";
+  return emitidas.every((rid) => enLista.has(rid)) ? "liberadas" : "fuera-del-periodo";
+}
+
+/**
+ * Título y texto del aviso de una factura que volvió sin autorizar. Cada estado dice sólo
+ * lo que se sabe de él: en verificación ARCA no contestó a tiempo y pudo haberle dado el
+ * CAE (el emisor lo recupera después con FECompConsultar), y una pendiente todavía se
+ * reintenta. Sólo de la rechazada se sabe que no salió, y el aviso dice qué la destraba:
+ * mientras no se la descarte, sus estadías siguen atadas a ella («Factura en proceso») y
+ * no se pueden volver a facturar.
+ */
+function avisoSinAutorizar({ status, motivo }: ResultadoSinAutorizar): {
+  titulo: string;
+  texto: string;
+} {
+  if (status === "rejected") {
+    return {
+      titulo: "ARCA rechazó la factura",
+      // Facturación se abre en otra pestaña (ver el link del aviso): al volver a esta, la
+      // lista todavía las muestra atadas a la rechazada hasta recargarla. El texto nombra el
+      // botón que está en el mismo aviso: el de «Estadías de la cuenta» es un ícono sin
+      // nombre a la vista, y lo obvio (F5, o tirar la pantalla para abajo en el celular)
+      // recarga la página entera y borra lo que la rechazada deja cargado para reintentar.
+      texto: `${motivo || "ARCA rechazó la factura."} Revisala en Facturación: mientras no la descartes ahí, estas estadías no se pueden volver a facturar. Cuando la descartes, volvé a esta pestaña y tocá «Recargar la lista», acá abajo. No recargues la página entera: se pierde lo que dejaste cargado.`,
+    };
+  }
+  if (status === "processing") {
+    return {
+      titulo: "Todavía no sabemos si ARCA la autorizó",
+      texto: motivo || "Quedó en verificación: fijate en Facturación en unos minutos.",
+    };
+  }
+  return {
+    titulo: "La factura quedó pendiente",
+    texto: motivo || "Revisala en Facturación.",
+  };
+}
+
+/** Nombre y DNI del huésped consumidor final que muestra el cuadro (ver revisar()). */
+type FichaAlRevisar = {
+  /** `kind:id` del cliente al que corresponde. */
+  cliente: string;
+  nombre: string;
+  dni: string | null;
+  /** False si no se pudo volver a leer y son los de cuando se abrió la página. */
+  releida: boolean;
+};
 
 /**
  * Texto del aviso fijo de una emisión con resultado incierto. No deja que quien lo lee
@@ -221,9 +334,52 @@ export default function ConsolidadaClient({
   // factura puede estar atendiendo a alguien; este aviso queda arriba de la lista hasta la
   // próxima emisión o hasta que lo cierren.
   const [emisionIncierta, setEmisionIncierta] = useState<string[] | null>(null);
+  // La emisión volvió con la factura pendiente, en verificación o rechazada: el motivo
+  // queda en el mismo aviso fijo, hasta la próxima emisión o hasta que lo cierren.
+  const [resultadoSinAutorizar, setResultadoSinAutorizar] =
+    useState<ResultadoSinAutorizar | null>(null);
   // Cuadro "Revisá antes de emitir" abierto. El botón de la barra sólo lo abre: a ARCA
   // se va recién desde "Confirmar y emitir en ARCA".
   const [revisando, setRevisando] = useState(false);
+  // Leyendo el nombre y el DNI del huésped antes de abrir el cuadro (ver revisar()).
+  const [releyendo, setReleyendo] = useState(false);
+  const [fichaAlRevisar, setFichaAlRevisar] = useState<FichaAlRevisar | null>(null);
+  // Las estadías de la factura rechazada cuyo aviso está a la vista: las eligió la persona
+  // para esa factura, así que si vuelven pendientes al descartarla no cuentan como «entraron
+  // solas» (ver loadRows). Se vacía al cerrar el aviso, con la próxima emisión y al cambiar
+  // de cliente.
+  const emitidasRechazada = useRef<Set<string>>(new Set());
+  // El aviso fijo se cerró (solo o a pedido) con el foco adentro: el foco pasa al título de
+  // la lista en vez de caer al body (ver el efecto de abajo).
+  const enfocarTituloDeLista = useRef(false);
+  const tituloListaRef = useRef<HTMLHeadingElement>(null);
+  // El botón de la barra que abre el cuadro: al cerrarse, el foco vuelve ahí.
+  const botonRevisarRef = useRef<HTMLButtonElement>(null);
+  // Estadías que la persona destildó a mano (reservation_id), del cliente `cliente`. Cada
+  // recarga de la lista vuelve a tildar lo pendiente MENOS estas: antes, una estadía que
+  // se dejaba afuera a propósito volvía a entrar sin aviso con «Recargar», con un error
+  // de emisión o al cambiar el período. Las nuevas que aparecen entran tildadas, como
+  // siempre, y una línea lo avisa (ver `cambioDeSeleccion`). Es un ref porque lo lee
+  // `loadRows` y no se pinta; lleva el cliente para que lo destildado de otro no cuente,
+  // sin tener que borrarlo durante el render.
+  const destildadas = useRef<{ cliente: string; ids: Set<string> }>({
+    cliente: `${preselectKind}:${preselectId}`,
+    ids: new Set(),
+  });
+  // Lo tildado en el último render, para que una recarga sepa qué había antes de ella.
+  const tildadasAntes = useRef<Set<string>>(new Set());
+  // Cliente y período de la lista que está a la vista (la última carga que se pintó).
+  const listaAplicada = useRef<{ cliente: string; from: string; to: string } | null>(null);
+  // Una recarga de la MISMA lista cambió la selección sin que nadie tildara ni destildara:
+  // `salieron`, estadías tildadas que ya no están pendientes (por ejemplo, otra persona las
+  // facturó); `entraron`, estadías pendientes que no estaban tildadas y entraron tildadas
+  // (una estadía nueva, o las de una factura rechazada que se descartó en Facturación).
+  // Cuántas salieron, y cuáles entraron (el cuadro las nombra); null = no hay aviso.
+  const [cambioDeSeleccion, setCambioDeSeleccion] = useState<{
+    salieron: number;
+    /** reservation_id de las que entraron tildadas sin que nadie las eligiera. */
+    entraron: string[];
+  } | null>(null);
   // Anti doble click de la emisión: el ref corta aunque el segundo click llegue antes
   // del render que deshabilita el botón.
   const emisionEnCurso = useRef(false);
@@ -251,6 +407,9 @@ export default function ConsolidadaClient({
       montado.current = false;
     };
   }, []);
+  useEffect(() => {
+    tildadasAntes.current = picked;
+  }, [picked]);
 
   // Rango del listado. Vacío = "Todo", que es el default a propósito: el caso
   // normal sigue siendo "facturame todo lo que debe", y un rango puesto de
@@ -282,6 +441,15 @@ export default function ConsolidadaClient({
   const [condicionIva, setCondicionIva] = useState<ReceptorCondicionCuit | "">(profile?.condicionIva ?? "");
   const [domicilio, setDomicilio] = useState(profile?.domicilio ?? "");
 
+  // Lo tildado y el receptor del último render. revisar() los vuelve a mirar después de
+  // leer la ficha del huésped: la lista y el receptor siguen andando mientras lee, y si
+  // cambiaron, lo que se pidió revisar ya no es lo que hay (ver revisar()).
+  const receptorClave = `${condicionIva}|${cuit}|${razonSocial}|${domicilio}`;
+  const vigenteAlRevisar = useRef({ picked, receptor: receptorClave });
+  useEffect(() => {
+    vigenteAlRevisar.current = { picked, receptor: receptorClave };
+  }, [picked, receptorClave]);
+
   // Detalle impreso: texto por estadía + nota al pie (mig 93). Los importes NO se
   // editan, salen del cargo de cuenta corriente.
   // Se guardan sólo los textos que el admin cambió; el resto se deriva en el
@@ -312,18 +480,28 @@ export default function ConsolidadaClient({
    *
    * Si mientras tanto se pidió otra carga, esta respuesta se descarta (ver ultimaCarga)
    * y lo que devuelve es lo de esa otra, que es la lista que va a quedar a la vista.
+   *
+   * `yaFacturadas`: las estadías que se acaban de mandar a facturar. Si salen de la
+   * selección porque ya no están pendientes, es lo esperado y no se avisa.
+   *
+   * `alAplicar`: se llama con la lista cuando esta carga es la que queda a la vista.
    */
-  const loadRows = useCallback((): Promise<boolean> => {
+  const loadRows = useCallback((opciones?: {
+    yaFacturadas?: string[];
+    alAplicar?: (data: CcAccountStayRow[]) => void;
+  }): Promise<boolean> => {
     const numero = ++numeroCarga.current;
     const cliente = `${kind}:${id}`;
+    const from = range.from;
+    const to = range.to;
     clienteUltimaCarga.current = cliente;
     // Sin rango, lo que vuelva ES la cuenta entera: es la única carga que puede fijar el
     // "de M" del contador.
-    const sinRango = !range.from && !range.to;
+    const sinRango = !from && !to;
     const promesa = (async (): Promise<boolean> => {
       setLastClickedIndex(null);
-      // La recarga vuelve a tildar todo lo pendiente (abajo): un cuadro de revisión
-      // abierto pasaría a decir otra cosa que lo que se revisó. Se cierra.
+      // La recarga vuelve a armar lo tildado (abajo): un cuadro de revisión abierto
+      // pasaría a decir otra cosa que lo que se revisó. Se cierra.
       setRevisando(false);
       setLoading(true);
       setErrorCarga(false);
@@ -331,12 +509,7 @@ export default function ConsolidadaClient({
       try {
         // Los vacíos van como undefined, no como "": el filtro por período es
         // opcional en la RPC (mig 90) y sin rango devuelve la cuenta entera.
-        result = await loadCcAccountStaysAction(
-          kind,
-          id,
-          range.from || undefined,
-          range.to || undefined
-        );
+        result = await loadCcAccountStaysAction(kind, id, from || undefined, to || undefined);
       } catch {
         result = {
           success: false,
@@ -373,6 +546,8 @@ export default function ConsolidadaClient({
         setRows([]);
         setPicked(new Set());
         setErrorCarga(true);
+        setCambioDeSeleccion(null);
+        listaAplicada.current = null;
         return false;
       }
       const data = result.data ?? [];
@@ -381,15 +556,70 @@ export default function ConsolidadaClient({
         totalFijadoPor.current = numero;
         setTotalStays(data.length);
       }
-      // Por defecto se selecciona todo lo pendiente: el caso normal es
-      // "facturame todo lo que debe". Salvo la primera carga que anda después de una
-      // emisión incierta: ahí no se tilda nada y cada estadía se vuelve a elegir a mano.
+      // El aviso de una factura rechazada dice que sus estadías no se pueden volver a
+      // facturar hasta descartarla en Facturación. Si esta recarga las trae pendientes, ya
+      // se la descartó y el aviso dejó de ser cierto: se cierra solo. No en la recarga que
+      // sigue a la emisión (`yaFacturadas`): ahí el aviso recién sale y tiene que leerse.
+      const rechazadas = new Set(emitidasRechazada.current);
+      if (
+        !opciones?.yaFacturadas &&
+        rechazadas.size > 0 &&
+        estadoDeLaRechazada([...rechazadas], data) === "liberadas"
+      ) {
+        emitidasRechazada.current = new Set();
+        enfocarTituloDeLista.current = true;
+        setResultadoSinAutorizar(null);
+        toast.success(
+          "Listo: las estadías de la factura rechazada ya están pendientes. Revisá lo tildado antes de emitir."
+        );
+      }
+      // Por defecto se selecciona todo lo pendiente, menos lo que la persona destildó a
+      // mano: el caso normal es "facturame todo lo que debe". Salvo la primera carga que
+      // anda después de una emisión incierta: ahí no se tilda nada y cada estadía se
+      // vuelve a elegir a mano.
       if (sinTildarEnLaProximaCarga.current) {
         sinTildarEnLaProximaCarga.current = false;
         setPicked(new Set());
+        setCambioDeSeleccion(null);
       } else {
-        setPicked(new Set(data.filter((r) => r.facturable).map((r) => r.reservation_id)));
+        const aMano = destildadas.current.cliente === cliente ? destildadas.current.ids : null;
+        const tildadas = new Set(
+          data
+            .filter((r) => r.facturable && !aMano?.has(r.reservation_id))
+            .map((r) => r.reservation_id)
+        );
+        // Con la misma lista (cliente y período) que estaba a la vista, la selección cambia
+        // sola en dos casos, y se avisa en una línea: una estadía que estaba tildada y ya
+        // no queda tildada, sin que nadie la destilde, dejó de estar pendiente; y una
+        // pendiente que no estaba tildada entra tildada (una nueva, o una que se liberó).
+        // La segunda importa tanto como la primera: la selección armada a mano sobrevive a
+        // la recarga y se confía en ella, y una estadía que entra sola iría en la factura
+        // sin que nadie la haya elegido. Con otro período no: ahí lo que entra y sale lo
+        // decide el período, y lo dice el contador.
+        const anterior = listaAplicada.current;
+        const mismaLista =
+          anterior !== null &&
+          anterior.cliente === cliente &&
+          anterior.from === from &&
+          anterior.to === to;
+        const esperadas = new Set(opciones?.yaFacturadas ?? []);
+        const antes = tildadasAntes.current;
+        const salieron = mismaLista
+          ? [...antes].filter(
+              (rid) => !tildadas.has(rid) && !aMano?.has(rid) && !esperadas.has(rid)
+            ).length
+          : 0;
+        // Las de la factura rechazada que se liberaron las eligió la persona: no entraron solas.
+        const entraron = mismaLista
+          ? [...tildadas].filter((rid) => !antes.has(rid) && !rechazadas.has(rid))
+          : [];
+        setPicked(tildadas);
+        setCambioDeSeleccion(
+          salieron > 0 || entraron.length > 0 ? { salieron, entraron } : null
+        );
       }
+      listaAplicada.current = { cliente, from, to };
+      opciones?.alAplicar?.(data);
       return true;
     })();
     ultimaCarga.current = promesa;
@@ -442,9 +672,15 @@ export default function ConsolidadaClient({
     setConceptoUnicoModo(false);
     setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
     // Un cuadro de revisión abierto era del cliente anterior, y el aviso de emisión
-    // incierta habla de su lista.
+    // incierta habla de su lista (lo mismo el de una factura sin autorizar y el de lo que
+    // cambió en la selección). Lo destildado a mano también era de él: `destildadas` lleva
+    // el cliente y deja de contar sola.
     setRevisando(false);
     setEmisionIncierta(null);
+    setResultadoSinAutorizar(null);
+    emitidasRechazada.current = new Set();
+    setCambioDeSeleccion(null);
+    setFichaAlRevisar(null);
   }
 
   const facturables = useMemo(() => rows.filter((r) => r.facturable), [rows]);
@@ -485,11 +721,96 @@ export default function ConsolidadaClient({
   // El aviso se lleva el foco apenas aparece, y el foco lo trae a la vista: va arriba de
   // todo, y en un celular scrolleado hasta el receptor quedaba fuera de la pantalla toda
   // la recarga (el toast recién sale cuando termina). Además, el cuadro que se cerró se
-  // llevó el botón que tenía el foco.
-  const avisoInciertoRef = useRef<HTMLDivElement>(null);
+  // llevó el botón que tenía el foco. Lo mismo con una factura que no quedó autorizada.
+  const avisoFijoRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (emisionIncierta !== null) avisoInciertoRef.current?.focus();
-  }, [emisionIncierta]);
+    if (emisionIncierta !== null || resultadoSinAutorizar !== null) {
+      avisoFijoRef.current?.focus();
+    }
+  }, [emisionIncierta, resultadoSinAutorizar]);
+
+  // Cuando el aviso se cierra (solo o a pedido) el botón que tenía el foco desaparece con
+  // él: el foco va a un destino estable, el título de la lista.
+  useEffect(() => {
+    if (emisionIncierta === null && resultadoSinAutorizar === null && enfocarTituloDeLista.current) {
+      enfocarTituloDeLista.current = false;
+      tituloListaRef.current?.focus();
+    }
+  }, [emisionIncierta, resultadoSinAutorizar]);
+
+  // El aviso fijo de arriba de la lista: la emisión incierta, o la factura que volvió sin
+  // autorizar. No pueden estar los dos: cada emisión borra los dos antes de empezar.
+  const sinAutorizar = resultadoSinAutorizar !== null ? avisoSinAutorizar(resultadoSinAutorizar) : null;
+  const avisoFijo: {
+    titulo: string;
+    /** El título a la vista, arriba del texto; null si el texto ya arranca diciéndolo. */
+    encabezado: string | null;
+    texto: string;
+    /** Con la lista cargando, el de la emisión incierta todavía no concluyó nada. */
+    cerrable: boolean;
+    cerrar: () => void;
+    /** El link a Facturación abre otra pestaña y deja esta como está. */
+    facturacionEnOtraPestana: boolean;
+    /** «Recargar la lista», adentro del aviso; null si el aviso no manda a recargar. */
+    recargar: (() => void) | null;
+  } | null =
+    textoIncierto !== null
+      ? {
+          titulo: "No sabemos si la factura salió",
+          encabezado: null,
+          texto: textoIncierto,
+          cerrable: !loading,
+          cerrar: () => {
+            enfocarTituloDeLista.current = true;
+            setEmisionIncierta(null);
+          },
+          facturacionEnOtraPestana: false,
+          recargar: null,
+        }
+      : resultadoSinAutorizar !== null && sinAutorizar !== null
+        ? {
+            // Un título por estado (ver avisoSinAutorizar): el mismo para los tres
+            // afirmaba que no había salido una factura que en verificación pudo salir.
+            titulo: sinAutorizar.titulo,
+            encabezado: sinAutorizar.titulo,
+            texto: sinAutorizar.texto,
+            cerrable: true,
+            cerrar: () => {
+              emitidasRechazada.current = new Set();
+              enfocarTituloDeLista.current = true;
+              setResultadoSinAutorizar(null);
+            },
+            // El aviso manda a Facturación (a descartar la rechazada, a reintentar la
+            // pendiente) y a volver acá. En la misma pestaña la consolidada se desmonta: se
+            // pierden lo destildado a mano, que al volver entra tildado sin aviso, y lo que
+            // la rechazada deja cargado para reintentar. Como Huéspedes, en otra pestaña.
+            facturacionEnOtraPestana: true,
+            // La rechazada manda a volver y recargar la lista: el botón va en el aviso, con
+            // el nombre que dice el texto. Recarga la lista, no la página (lo cargado queda),
+            // y si las estadías volvieron a estar pendientes el aviso se cierra (ver
+            // loadRows). Si no, lo dice: el botón no puede parecer que no hizo nada.
+            recargar:
+              resultadoSinAutorizar.status === "rejected"
+                ? () => {
+                    const { emitidas } = resultadoSinAutorizar;
+                    void loadRows({
+                      alAplicar: (data) => {
+                        const estado = estadoDeLaRechazada(emitidas, data);
+                        if (estado === "atadas") {
+                          toast.info(
+                            "Las estadías de la factura rechazada todavía no aparecen pendientes. Descartala en Facturación y volvé a tocar «Recargar la lista»."
+                          );
+                        } else if (estado === "fuera-del-periodo") {
+                          toast.info(
+                            "Con este período no se ven todas las estadías de la factura rechazada. Pasá a «Todo» y volvé a tocar «Recargar la lista»."
+                          );
+                        }
+                      },
+                    });
+                  }
+                : null,
+          }
+        : null;
 
   // Cambiar el filtro de estado reordena `visible` (otra lista, no sólo otra
   // página de la misma). El índice del ancla quedaría apuntando a una fila
@@ -505,7 +826,9 @@ export default function ConsolidadaClient({
   // de `rows`, nunca se acumula aparte. Al angostar el rango, las estadías que
   // salen de la lista dejan de contar solas: no se puede emitir un comprobante
   // con algo que no está a la vista. Si esto pasara a ser un estado propio
-  // (p. ej. "guardar la selección entre filtros"), se podría facturar a ciegas.
+  // (p. ej. "guardar la selección entre filtros"), se podría facturar a ciegas. Lo que
+  // sí se guarda entre cargas es lo destildado a mano (`destildadas`), que sólo resta:
+  // nunca tilda algo que no vino en la lista.
   //
   // Las líneas se muestran en el mismo orden en que se van a imprimir (la factura
   // ordena por fecha de entrada), no en el de la lista, que va del más reciente.
@@ -517,6 +840,22 @@ export default function ConsolidadaClient({
         .sort((a, b) => a.fch_desde.localeCompare(b.fch_desde)),
     [rows, picked]
   );
+
+  // El cuadro no puede quedar pedido sin estar a la vista: sin nada tildado no se pinta, y
+  // aparecería solo al tildar algo más tarde, sin que nadie haya apretado el botón.
+  if (revisando && selectedRows.length === 0) {
+    setRevisando(false);
+  }
+
+  // Las que entraron tildadas solas con la última recarga (ver `cambioDeSeleccion`) y
+  // siguen tildadas: van en la factura sin que nadie las haya elegido. La línea que lo dice
+  // está arriba de la lista, y quien factura está abajo, en la barra (en el celular, o con
+  // 20 estadías, no la ve): el cuadro, que es lo último que se lee antes de emitir, las
+  // nombra. Una que se destildó después ya no va en la factura y no se nombra.
+  const entraronSolas =
+    cambioDeSeleccion === null || cambioDeSeleccion.entraron.length === 0
+      ? []
+      : selectedRows.filter((r) => cambioDeSeleccion.entraron.includes(r.reservation_id));
 
   const total = selectedRows.reduce((sum, r) => sum + r.amount, 0);
   // La empresa siempre se factura con CUIT. Un huésped, sólo si su ficha tiene
@@ -563,6 +902,21 @@ export default function ConsolidadaClient({
   }, [requiereCuit, condicionIva, cuit, razonSocial, domicilio]);
 
   /**
+   * Anota lo que la persona tildó o destildó a mano, para que la próxima recarga lo
+   * respete (ver `destildadas`). Sólo se llama desde los clicks, nunca en el render.
+   */
+  const marcarAMano = (reservationIds: string[], tildar: boolean) => {
+    if (destildadas.current.cliente !== selectedKey) {
+      destildadas.current = { cliente: selectedKey, ids: new Set() };
+    }
+    const aMano = destildadas.current.ids;
+    for (const reservationId of reservationIds) {
+      if (tildar) aMano.delete(reservationId);
+      else aMano.add(reservationId);
+    }
+  };
+
+  /**
    * Un solo camino para marcar/desmarcar: el onClick vive en el <li> y el
    * checkbox va controlado con un onChange no-op. Apretar Espacio con el checkbox
    * enfocado dispara un click que burbujea hasta el <li>, así que el teclado sigue
@@ -594,14 +948,18 @@ export default function ConsolidadaClient({
     const extiende = shiftKey && anchorEnPagina;
     const desde = extiende ? Math.min(lastClickedIndex as number, index) : index;
     const hasta = extiende ? Math.max(lastClickedIndex as number, index) : index;
+    const tramo: string[] = [];
+    for (let i = desde; i <= hasta; i++) {
+      const r = visible[i];
+      if (r?.facturable) tramo.push(r.reservation_id);
+    }
 
+    marcarAMano(tramo, value);
     setPicked((current) => {
       const next = new Set(current);
-      for (let i = desde; i <= hasta; i++) {
-        const r = visible[i];
-        if (!r?.facturable) continue;
-        if (value) next.add(r.reservation_id);
-        else next.delete(r.reservation_id);
+      for (const reservationId of tramo) {
+        if (value) next.add(reservationId);
+        else next.delete(reservationId);
       }
       return next;
     });
@@ -609,11 +967,11 @@ export default function ConsolidadaClient({
   };
 
   const toggleAll = () => {
-    setPicked((current) =>
-      current.size === facturables.length
-        ? new Set()
-        : new Set(facturables.map((r) => r.reservation_id))
-    );
+    // «Seleccionar todo» y «Deseleccionar todo» también son elegir a mano.
+    const tildarTodas = picked.size !== facturables.length;
+    const ids = facturables.map((r) => r.reservation_id);
+    marcarAMano(ids, tildarTodas);
+    setPicked(tildarTodas ? new Set(ids) : new Set());
   };
 
   // `indeterminate` no es un atributo de HTML, sólo una propiedad del nodo: hay
@@ -683,22 +1041,28 @@ export default function ConsolidadaClient({
   // la RPC cae en la condición de la ficha y, con la ficha en RI/monotributo/exento,
   // emitiría con CUIT aunque el cuadro diga DNI (decisión del 24/09, la misma regla que
   // la mig 112 en la factura de check-out: la ficha precarga, no decide el comprobante).
-  const receptorNombre = requiereCuit ? razonSocial.trim() : cuenta?.name ?? "";
+  // El nombre y el DNI son los que revisar() volvió a leer de la ficha al abrir el
+  // cuadro, no los de cuando se abrió la página.
+  const fichaHuesped =
+    !requiereCuit && fichaAlRevisar?.cliente === selectedKey ? fichaAlRevisar : null;
+  const receptorNombre = requiereCuit
+    ? razonSocial.trim()
+    : fichaHuesped?.nombre ?? cuenta?.name ?? "";
   const documento: ConsolidadaDocumento = requiereCuit
     ? { tipo: "CUIT", numero: cuit.replace(/\D/g, "") }
-    : { tipo: "DNI", numero: cuenta?.document_id ?? null };
+    : { tipo: "DNI", numero: fichaHuesped ? fichaHuesped.dni : cuenta?.document_id ?? null };
   const condicionIvaLabel = condicionIva ? CONDICION_IVA_LABEL[condicionIva] : "Consumidor Final";
 
   /**
    * El botón de la barra: valida y abre "Revisá antes de emitir". No manda nada a
-   * ARCA. Se llama con `void revisar()` para que pueda volverse async sin tocar el
-   * botón: la fase C de remitos (C2) va a consultar acá los remitos faltantes antes
-   * de abrir el cuadro.
+   * ARCA. Se llama con `void revisar()`: es async porque, con un huésped consumidor
+   * final, vuelve a leer su nombre y su DNI antes de abrir el cuadro. La fase C de
+   * remitos (C2) va a consultar acá también los remitos faltantes.
    */
-  const revisar = () => {
+  const revisar = async () => {
     // Con la lista recargándose, la selección está por cambiar (la recarga vuelve a
-    // tildar todo lo pendiente): no se revisa algo que no es lo que va a quedar.
-    if (loading) return;
+    // armar lo tildado): no se revisa algo que no es lo que va a quedar.
+    if (loading || releyendo) return;
     if (selectedRows.length === 0) {
       toast.error("Seleccioná al menos una estadía.");
       return;
@@ -709,6 +1073,51 @@ export default function ConsolidadaClient({
     if (faltantesReceptor.length > 0) {
       toast.error(faltantesReceptor[0].mensaje);
       return;
+    }
+    if (!requiereCuit) {
+      // Consumidor final (sólo un huésped: la empresa siempre va con CUIT). La RPC emite
+      // con el nombre y el DNI que tenga la ficha al emitir, y la página los leyó al
+      // abrirse: si los corrigieron en Huéspedes con la consolidada abierta, el cuadro
+      // mostraba los viejos, y un DNI viejo inválido lo trababa hasta recargar la página,
+      // que pierde lo tildado y los textos. Se vuelven a leer cada vez que se abre.
+      const cliente = selectedKey;
+      const carga = numeroCarga.current;
+      const tildadas = picked;
+      const receptor = receptorClave;
+      setReleyendo(true);
+      let leida: Awaited<ReturnType<typeof loadGuestDocumentAction>> | null = null;
+      try {
+        leida = await loadGuestDocumentAction(id);
+      } catch {
+        // Se cortó la red o hubo un deploy: se sigue con lo que había, avisándolo.
+      }
+      if (!montado.current) return;
+      setReleyendo(false);
+      // Mientras leía arrancó otra carga de la lista (otro cliente, otro período,
+      // «Recargar»): lo tildado puede haber cambiado. No se abre; se vuelve a apretar.
+      if (numeroCarga.current !== carga) return;
+      // Mientras leía, la lista y el receptor siguieron andando. Si cambió lo tildado o el
+      // receptor, lo que se pidió revisar ya no es lo que hay: no se abre, se avisa y se
+      // vuelve a apretar. Abrirlo igual dejaba el cuadro pedido sin nada tildado (no se
+      // pintaba, y aparecía solo al tildar algo más tarde) o lo abría con «Confirmar»
+      // trabado por un receptor incompleto, sin decir por qué.
+      const vigente = vigenteAlRevisar.current;
+      if (vigente.picked !== tildadas || vigente.receptor !== receptor) {
+        toast.info(
+          "Cambiaste lo tildado o el receptor mientras leíamos la ficha del huésped. Revisalo y volvé a apretar «Revisar y emitir»."
+        );
+        return;
+      }
+      setFichaAlRevisar(
+        leida?.success && leida.data
+          ? { cliente, nombre: leida.data.fullName, dni: leida.data.documentId, releida: true }
+          : {
+              cliente,
+              nombre: cuenta?.name ?? "",
+              dni: cuenta?.document_id ?? null,
+              releida: false,
+            }
+      );
     }
     setRevisando(true);
   };
@@ -726,9 +1135,11 @@ export default function ConsolidadaClient({
       return;
     }
     emisionEnCurso.current = true;
-    // El aviso de una emisión incierta anterior queda viejo: si esta también se corta,
-    // vuelve a salir, con las estadías de esta.
+    // El aviso de una emisión anterior (incierta o sin autorizar) queda viejo: si esta
+    // también termina así, vuelve a salir, con lo de esta.
     setEmisionIncierta(null);
+    setResultadoSinAutorizar(null);
+    emitidasRechazada.current = new Set();
     const emitidas = selectedRows.map((r) => r.reservation_id);
     const cliente = selectedKey;
 
@@ -827,13 +1238,48 @@ export default function ConsolidadaClient({
     }
 
     const outcome = result.data;
-    if (outcome?.status === "authorized" && outcome.invoiceId) {
-      toast.success(`Factura ${letra} ${outcome.numero ?? ""} emitida (${outcome.count} estadías).`);
-      openInvoicePrint(outcome.invoiceId);
-    } else {
-      toast.warning(outcome?.userMessage ?? "La factura quedó pendiente. Revisala en Facturación.");
+    // Con la emisión en camino la URL pudo pasar a otro cliente: lo de abajo es de la
+    // pantalla de este, y no se toca la del otro.
+    const mismoCliente = montado.current && clienteUltimaCarga.current === cliente;
+    // Lo que se cargó para esta factura no pasa a la siguiente del mismo cliente: la nota
+    // al pie (una orden de compra, por ejemplo), la forma del detalle y los textos de las
+    // líneas son de cada factura (mig 102). Si no, la segunda salía con la orden de compra
+    // de la primera, y una factura emitida sólo se corrige con nota de crédito.
+    // Se reinicia cuando la factura ya existe: autorizada, pendiente o en verificación (esas
+    // dos se autorizan o se reintentan desde Facturación, no desde acá; lo cargado ya viaja
+    // en ellas). Con la rechazada, no: no salió, y se corrige lo que haga falta y se vuelve
+    // a emitir desde acá con lo mismo (antes se la descarta en Facturación, que es lo que
+    // suelta sus estadías). Con un error de la acción, tampoco (se sale antes, arriba).
+    if (mismoCliente && outcome?.status !== "rejected") {
+      setNota("");
+      setDetalleOverrides({});
+      setConceptoUnicoModo(false);
+      setConceptoUnicoTexto(CONCEPTO_UNICO_DEFAULT);
     }
-    await loadRows();
+    if (outcome?.status === "authorized") {
+      toast.success(`Factura ${letra} ${outcome.numero ?? ""} emitida (${estadiasTexto(outcome.count)}).`);
+      if (outcome.invoiceId) openInvoicePrint(outcome.invoiceId);
+    } else if (mismoCliente) {
+      // Pendiente, en verificación o rechazada: el motivo queda en el aviso fijo de arriba
+      // de la lista, con el link a Facturación. Un toast se iba solo a los 4 s.
+      const motivo = (outcome?.userMessage ?? "").trim();
+      if (outcome?.status === "rejected") emitidasRechazada.current = new Set(emitidas);
+      setResultadoSinAutorizar({
+        status:
+          outcome?.status === "rejected" || outcome?.status === "processing"
+            ? outcome.status
+            : "pending",
+        motivo: motivo ? (/[.!?)]$/.test(motivo) ? motivo : `${motivo}.`) : "",
+        emitidas,
+      });
+    } else {
+      toast.warning(
+        outcome?.userMessage ?? "La factura consolidada quedó pendiente. Revisala en Facturación.",
+        { duration: 15000 }
+      );
+    }
+    // Las que se acaban de facturar salen de lo pendiente: eso no es un aviso.
+    await loadRows({ yaFacturadas: emitidas });
   };
 
   if (!enabled) {
@@ -870,31 +1316,57 @@ export default function ConsolidadaClient({
         </Link>
       </section>
 
-      {/* Emisión con resultado incierto: queda a la vista aunque el toast ya se haya ido.
-          El texto sigue a la lista: dice en qué quedó cada estadía que se emitía y, si la
-          lista no se pudo cargar o está cargando, no concluye nada. */}
-      {textoIncierto !== null && (
+      {/* Emisión con resultado incierto, o factura que volvió pendiente, en verificación o
+          rechazada: queda a la vista hasta que la cierren (un toast se va solo). En la
+          incierta, el texto sigue a la lista: dice en qué quedó cada estadía que se emitía
+          y, si la lista no se pudo cargar o está cargando, no concluye nada. */}
+      {avisoFijo !== null && (
         <div
-          ref={avisoInciertoRef}
+          ref={avisoFijoRef}
           tabIndex={-1}
           role="alert"
-          aria-label="No sabemos si la factura salió"
+          aria-label={avisoFijo.titulo}
           className="flex items-start gap-3 bg-rose-50 border border-rose-200 rounded-2xl p-4 outline-none"
         >
           <AlertTriangle size={18} className="text-rose-600 shrink-0 mt-0.5" />
           <div className="min-w-0 flex-1 space-y-2">
-            <p className="text-sm font-semibold text-rose-800">{textoIncierto}</p>
+            {avisoFijo.encabezado !== null && (
+              <p className="text-sm font-bold text-rose-900">{avisoFijo.encabezado}</p>
+            )}
+            <p className="text-sm font-semibold text-rose-800">{avisoFijo.texto}</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
-              <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
-                Ir a Facturación
-              </Link>
-              {/* Con la lista cargando, el aviso todavía no dice en qué quedó cada estadía:
-                  cerrado ahí, esa conclusión no se vería nunca, y el toast que sale al
-                  terminar la recarga manda a leerlo. */}
-              {!loading && (
+              {avisoFijo.facturacionEnOtraPestana ? (
+                <Link
+                  href="/admin/fiscal"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-700 hover:underline"
+                >
+                  Abrir Facturación en otra pestaña
+                </Link>
+              ) : (
+                <Link href="/admin/fiscal" className="text-brand-700 hover:underline">
+                  Ir a Facturación
+                </Link>
+              )}
+              {avisoFijo.recargar !== null && (
                 <button
                   type="button"
-                  onClick={() => setEmisionIncierta(null)}
+                  onClick={avisoFijo.recargar}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 text-brand-700 hover:underline disabled:opacity-60"
+                >
+                  <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                  Recargar la lista
+                </button>
+              )}
+              {/* Con la lista cargando, el aviso de la emisión incierta todavía no dice en
+                  qué quedó cada estadía: cerrado ahí, esa conclusión no se vería nunca, y
+                  el toast que sale al terminar la recarga manda a leerlo. */}
+              {avisoFijo.cerrable && (
+                <button
+                  type="button"
+                  onClick={avisoFijo.cerrar}
                   className="text-rose-700 underline hover:text-rose-900"
                 >
                   Cerrar el aviso
@@ -909,7 +1381,13 @@ export default function ConsolidadaClient({
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-bold text-slate-800">Estadías de la cuenta</h3>
+            <h3
+              ref={tituloListaRef}
+              tabIndex={-1}
+              className="text-base font-bold text-slate-800 outline-none"
+            >
+              Estadías de la cuenta
+            </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Se factura el cargo a cuenta corriente de cada estadía, no el total de la reserva.
             </p>
@@ -940,10 +1418,23 @@ export default function ConsolidadaClient({
             <p
               className={`text-xs mt-2 ${rangoActivo ? "font-semibold text-amber-700" : "text-slate-400"}`}
             >
-              Mostrando {rows.length} de {totalStays ?? rows.length} estadías de la cuenta
+              Mostrando {rows.length} de {estadiasTexto(totalStays ?? rows.length)} de la cuenta
               {rangoActivo ? " (hay un período puesto)." : "."}
             </p>
           </div>
+
+          {/* La recarga respeta lo destildado a mano; si igual cambió la selección (una
+              estadía tildada dejó de estar pendiente, o una pendiente entró tildada), se
+              dice acá. */}
+          {cambioDeSeleccion !== null && !loading && (
+            <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
+              <AlertTriangle size={13} className="shrink-0" />
+              {textoCambioDeSeleccion({
+                salieron: cambioDeSeleccion.salieron,
+                entraron: cambioDeSeleccion.entraron.length,
+              })}
+            </p>
+          )}
 
           {/* Filtro de estado: abre en "Pendientes" para no aterrizar en dos
               años de historial. Va afuera del if de carga por lo mismo que el
@@ -993,8 +1484,9 @@ export default function ConsolidadaClient({
                 )
               ) : (
                 <>
-                  No hay estadías pendientes de facturar: las {rows.length} de esta cuenta ya
-                  están cubiertas.{" "}
+                  {rows.length === 1
+                    ? "No hay estadías pendientes de facturar: la única de esta cuenta ya está cubierta."
+                    : `No hay estadías pendientes de facturar: las ${rows.length} de esta cuenta ya están cubiertas.`}{" "}
                   <button
                     type="button"
                     onClick={() => setEstadoFiltro("todas")}
@@ -1024,7 +1516,8 @@ export default function ConsolidadaClient({
                   {todasTildadas ? "Deseleccionar todo" : "Seleccionar todo"}
                 </label>
                 <span className="text-xs text-slate-400">
-                  {facturables.length} sin facturar · {rows.length - facturables.length} ya cubiertas
+                  {facturables.length} sin facturar · {rows.length - facturables.length}{" "}
+                  {rows.length - facturables.length === 1 ? "ya cubierta" : "ya cubiertas"}
                 </span>
               </div>
               <ul className="divide-y divide-slate-100">
@@ -1129,7 +1622,9 @@ export default function ConsolidadaClient({
             <p className="text-[11px] text-slate-500 mt-2">
               {conceptoUnicoModo
                 ? "Sale UNA línea por el total: no figuran las habitaciones ni las fechas de cada estadía. El período sí, al pie."
-                : "Sale una línea por estadía, con su habitación y sus fechas."}
+                : // La misma frase que el cuadro: dice cuántas líneas llevan texto escrito a
+                  // mano, que salen tal cual, sin la habitación ni las fechas.
+                  textoDetalle(null, selectedRows.length, lineasEditadas)}
             </p>
           </div>
 
@@ -1219,8 +1714,15 @@ export default function ConsolidadaClient({
                 <option value="monotributo">Monotributo</option>
                 <option value="exento">IVA Sujeto Exento</option>
               </select>
+              {/* Lo que hace la RPC con el huésped (mig 103, igual en la 125): la condición
+                  elegida vale para esta factura; con una condición con CUIT, en la ficha se
+                  guarda sólo si no tenía una (COALESCE), y una que ya tenía no se pisa;
+                  consumidor final no guarda nada. */}
               <p className="text-[11px] text-slate-500 mt-1">
-                Sale precargada de la ficha del huésped. Si la cambiás acá, queda guardada.
+                Sale precargada de la ficha del huésped. La que elijas acá vale para esta
+                factura. Si la ficha no tenía condición y elegís una con CUIT, se guarda en la
+                ficha; si ya tenía una, la ficha sigue igual: para cambiarla, editala en
+                Huéspedes.
               </p>
             </div>
           )}
@@ -1270,6 +1772,19 @@ export default function ConsolidadaClient({
                     <option value="monotributo">Monotributo</option>
                     <option value="exento">IVA Sujeto Exento</option>
                   </select>
+                  {/* La precarga deja vacía una condición que no sirve para la consolidada:
+                      la ficha puede no tener ninguna o decir Consumidor Final (Empresas /
+                      Convenios lo ofrece). La RPC la guarda sólo si estaba vacía (COALESCE, en
+                      la 103 y en la 125): en Consumidor Final queda igual aunque se emita con
+                      otra. Se mira la precarga (`profile`), no lo elegido: habla de la ficha. */}
+                  {!profile?.condicionIva && (
+                    <p className="text-[11px] text-amber-700 mt-1">
+                      La ficha no trae una condición con CUIT: está vacía o dice Consumidor
+                      Final. La que elijas vale para esta factura y se guarda en la ficha solo si
+                      estaba vacía. Si dice Consumidor Final, la ficha sigue así: para cambiarla,
+                      editala en Empresas / Convenios.
+                    </p>
+                  )}
                 </div>
               )}
               <div>
@@ -1284,16 +1799,40 @@ export default function ConsolidadaClient({
                   className={inputClass}
                 />
               </div>
+              {/* Lo que la RPC guarda en la ficha (mig 125, aplicada en PROD el 27/09), dicho
+                  entero para que nadie corrija acá un dato de la ficha creyendo que la
+                  arregla (la trampa del DNI):
+                  · Empresa: el CUIT sólo si la ficha no tenía uno válido; uno válido no se
+                    pisa nunca, y otro escrito acá vale sólo para esta factura. La condición
+                    y el domicilio sólo si estaban vacíos.
+                  · Huésped con CUIT: el CUIT, la condición y el domicilio fiscal sólo si
+                    estaban vacíos (COALESCE): un CUIT que ya tiene no se pisa.
+                  · La razón social nunca. Una condición en Consumidor Final no está vacía:
+                    ver el aviso debajo del select. */}
               <p className="md:col-span-2 text-[11px] text-slate-500">
-                Se precargan de la ficha. Lo que completes acá queda guardado en la ficha.
+                {isCompany
+                  ? "Se precargan de la ficha. Lo que cargues acá vale para esta factura. El CUIT se guarda en la ficha solo si no tenía uno válido: si ya tenía uno válido y escribís otro, el nuevo vale solo para esta factura. La condición frente al IVA y el domicilio se guardan solo si la ficha los tenía vacíos, y la razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Empresas / Convenios."
+                  : "Se precargan de la ficha. Lo que cargues acá vale para esta factura. El CUIT, la condición frente al IVA y el domicilio fiscal se guardan en la ficha solo si estaban vacíos: si la ficha ya tenía un CUIT y escribís otro, el nuevo vale solo para esta factura. La razón social no se guarda. Para cambiar un dato que la ficha ya tiene, editala en Huéspedes."}
               </p>
             </div>
           ) : (
-            // El DNI se lee al abrir la página (`accounts`): corregido en Huéspedes, esta
-            // pantalla sigue con el viejo, y el cuadro lo sigue trabando, hasta que se recarga.
+            // El nombre y el DNI se vuelven a leer de la ficha cada vez que se abre el cuadro
+            // (revisar()): corregidos en Huéspedes, no hace falta recargar la página. Pero en
+            // otra pestaña: ir desde el menú saca de la consolidada, y al volver arranca de
+            // cero (vuelve a tildar todo lo pendiente y se pierden los textos).
             <p className="text-sm text-slate-500">
-              Se emite <strong>Factura B</strong> con el DNI de la ficha del huésped. Si el DNI está
-              mal, corregilo en Huéspedes y después recargá esta página: el DNI se lee al abrirla.
+              Se emite <strong>Factura B</strong> con el nombre y el DNI de la ficha del huésped:
+              se vuelven a leer cada vez que abrís «Revisar y emitir». Si el DNI está mal,
+              corregilo en Huéspedes en otra pestaña, así no perdés lo tildado ni lo que
+              escribiste acá. Como consumidor final, no se guarda nada en la ficha.{" "}
+              <Link
+                href="/admin/guests"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-brand-700 hover:underline"
+              >
+                Abrir Huéspedes en otra pestaña
+              </Link>
             </p>
           )}
         </section>
@@ -1342,14 +1881,23 @@ export default function ConsolidadaClient({
             )}
             {/* No emite: abre "Revisá antes de emitir". A ARCA se va desde el cuadro. */}
             <button
+              ref={botonRevisarRef}
               type="button"
               onClick={() => void revisar()}
               disabled={
-                emitting || loading || selectedRows.length === 0 || faltantesReceptor.length > 0
+                emitting ||
+                loading ||
+                releyendo ||
+                selectedRows.length === 0 ||
+                faltantesReceptor.length > 0
               }
               className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-2"
             >
-              {emitting ? <Loader2 className="animate-spin" size={16} /> : <FileText size={16} />}
+              {emitting || releyendo ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : (
+                <FileText size={16} />
+              )}
               Revisar y emitir factura consolidada
             </button>
           </div>
@@ -1361,6 +1909,7 @@ export default function ConsolidadaClient({
           letra={letra}
           receptorNombre={receptorNombre}
           documento={documento}
+          documentoSinReleer={fichaHuesped !== null && !fichaHuesped.releida}
           condicionIvaLabel={condicionIvaLabel}
           estadias={selectedRows.length}
           total={total}
@@ -1378,8 +1927,40 @@ export default function ConsolidadaClient({
           // Mismo criterio que el botón de la barra: con el receptor incompleto no se emite,
           // aunque haya quedado incompleto recién con el cuadro abierto.
           bloquearConfirmar={faltantesReceptor.length > 0}
+          avisos={
+            entraronSolas.length > 0 ? (
+              <div
+                aria-label="Estadías que entraron solas a esta factura"
+                className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3"
+              >
+                <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs font-semibold text-amber-800 space-y-1">
+                  <p>
+                    {entraronSolas.length === 1
+                      ? "Al recargar la lista, entró a la selección 1 estadía pendiente que no tenías tildada, y va en esta factura:"
+                      : `Al recargar la lista, entraron a la selección ${entraronSolas.length} estadías pendientes que no tenías tildadas, y van en esta factura:`}
+                  </p>
+                  <ul className="list-disc pl-4">
+                    {entraronSolas.map((r) => (
+                      <li key={r.reservation_id}>
+                        Hab. {r.room_number ?? "—"} · {shortDate(r.fch_desde)} → {shortDate(r.fch_hasta)}
+                        {" · "}
+                        {formatAmount(r.amount)}
+                      </li>
+                    ))}
+                  </ul>
+                  <p>
+                    {entraronSolas.length === 1
+                      ? "Si no tiene que ir, tocá «Volver» y destildala en la lista."
+                      : "Si alguna no tiene que ir, tocá «Volver» y destildala en la lista."}
+                  </p>
+                </div>
+              </div>
+            ) : undefined
+          }
           onConfirm={() => void emitConfirmado()}
           onCancel={() => setRevisando(false)}
+          focoAlCerrar={botonRevisarRef}
         />
       )}
     </div>
