@@ -46,6 +46,40 @@ export function dniWithDots(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
+/**
+ * Filtro previo en la base (`.or(...)`) para las personas sin ficha. Es un superconjunto
+ * del que decide matchesClient: la base solo recorta y la regla en memoria decide.
+ * - Texto: la palabra más larga, con las vocales y la n como comodín de un carácter, para
+ *   que "jose perez" encuentre "JOSÉ PÉREZ" (ilike distingue tildes) y el orden no importe.
+ * - DNI: con y sin puntos. CUIT: con y sin guiones y el DNI que lleva adentro.
+ * - Otro número: los dígitos en orden con cualquier cosa en el medio (puntos, guiones).
+ */
+export function sinFichaDbFilter(query: SearchQuery): string {
+  if (query.kind === "texto") {
+    const word = [...query.value.split(" ")].sort((a, b) => b.length - a.length)[0] ?? "";
+    return `client_name.ilike.%${word.replace(/[aeiounáéíóú]/g, "_")}%`;
+  }
+  if (query.kind === "numero") {
+    return `client_dni.ilike.%${query.value.split("").join("%")}%`;
+  }
+  const values = new Set<string>([query.value]);
+  const dniDigits: string[] = [];
+  if (query.kind === "dni") {
+    dniDigits.push(query.value);
+  } else {
+    const v = query.value;
+    values.add(`${v.slice(0, 2)}-${v.slice(2, 10)}-${v.slice(10)}`);
+    const dni = v.slice(2, 10);
+    dniDigits.push(dni, dni.replace(/^0+/, ""));
+  }
+  for (const d of dniDigits) {
+    if (d.length < 7) continue;
+    values.add(d);
+    values.add(dniWithDots(d));
+  }
+  return [...values].map((v) => `client_dni.ilike.%${v}%`).join(",");
+}
+
 const ROOM_PREFIX = /^hab(?:itaci[oó]n)?\.?\s*(\d{1,3})$/i;
 
 /**

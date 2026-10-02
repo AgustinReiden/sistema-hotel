@@ -10,6 +10,7 @@ import {
   dniWithDots,
   GLOBAL_SEARCH_PER_GROUP,
   matchesClient,
+  sinFichaDbFilter,
   matchesRoomNumber,
   summarizeStays,
   type GlobalSearchMatches,
@@ -1900,16 +1901,10 @@ export async function searchGlobal(term: string): Promise<GlobalSearchMatches> {
   }
 
   // Personas sin ficha: las reservas por nombre o DNI que no están enlazadas a una ficha
-  // de huésped ni son de una empresa (esas salen como pasajeros). Es el único filtro en
-  // la base, así que va con sanitizeSearchTerm.
-  const search = sanitizeSearchTerm(term);
-  const sinFichaFilter =
-    query.kind === "texto"
-      ? `client_name.ilike.%${search.replace(/ /g, "%")}%`
-      : [
-          `client_dni.ilike.%${query.value}%`,
-          ...(query.kind === "dni" ? [`client_dni.ilike.%${dniWithDots(query.value)}%`] : []),
-        ].join(",");
+  // de huésped ni son de una empresa (esas salen como pasajeros). El filtro de la base es
+  // más flojo que matchesClient (tildes, orden de las palabras, puntos del DNI); lo decide
+  // matchesClient en memoria.
+  const sinFichaFilter = sinFichaDbFilter(query);
 
   const [guestsRes, companiesRes, passengersRes, sinFichaRes] = await Promise.all([
     supabase
@@ -1927,7 +1922,7 @@ export async function searchGlobal(term: string): Promise<GlobalSearchMatches> {
       .is("guest_id", null)
       .or(sinFichaFilter)
       .order("check_in_target", { ascending: false })
-      .limit(8),
+      .limit(40),
   ]);
   if (guestsRes.error) throw guestsRes.error;
   if (companiesRes.error) throw companiesRes.error;

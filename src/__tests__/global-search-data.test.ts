@@ -14,7 +14,7 @@ const H = vi.hoisted(() => ({
 }));
 
 function likeToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*");
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
   return new RegExp(`^${escaped}$`, "i");
 }
 
@@ -206,6 +206,16 @@ describe("searchGlobal", () => {
     expect(result.huespedes[0].nombre).toBe("Carla Sinficha");
     expect(result.huespedes[0].detalle).toContain("Sin ficha");
     expect(result.huespedes[0].facts).toMatchObject({ descuento: 0, saldoCuenta: null });
+  });
+
+  it("una persona sin ficha se encuentra sin tildes ni orden, y por CUIT o parte del DNI con puntos", async () => {
+    H.tables.reservations.push(
+      stay({ client_name: "PÉREZ JOSÉ", client_dni: "20-30.999.888-3", status: "checked_out", check_in_target: "2026-06-01T17:00:00Z", check_out_target: "2026-06-02T13:00:00Z" })
+    );
+    for (const term of ["jose perez", "perez jose", "20-30999888-3", "30999888", "9998"]) {
+      const result = await searchGlobal(term);
+      expect(result.huespedes.map((h) => h.nombre), term).toEqual(["PÉREZ JOSÉ"]);
+    }
   });
 
   it("si no opera a cuenta corriente el saldo es null", async () => {
