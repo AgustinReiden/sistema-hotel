@@ -3974,14 +3974,18 @@ export async function rejectOldTariff(alertId: number): Promise<void> {
   if (error) throw error;
 }
 
-export async function getUnresolvedAdminAlertsCount(): Promise<number> {
+/**
+ * Avisos del admin sin resolver (como mucho 100: la RPC tiene LIMIT 100). Con `cache()`
+ * porque lo piden la campana (layout) y el cartel de Hoy en la misma carga.
+ */
+export const getUnresolvedAdminAlertsCount = cache(async (): Promise<number> => {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("rpc_list_admin_alerts", {
     p_only_unresolved: true,
   });
   if (error) return 0;
   return (data ?? []).length;
-}
+});
 
 /**
  * Solicitudes web sin responder. Con `cache()` porque la piden el menú (layout) y Hoy
