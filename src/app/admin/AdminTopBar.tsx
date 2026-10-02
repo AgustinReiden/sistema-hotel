@@ -2,20 +2,23 @@
 
 import type { ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import GlobalSearch from './GlobalSearch';
 import SectionTabs from './SectionTabs';
 import { findActiveNav, getNavSections, type NavState } from './nav-links';
 
 type AdminTopBarProps = NavState & {
     role: string;
-    /** A la derecha de la fila: la campana (F1-3) y el buscador (F1-5b). */
+    /** A la derecha de la fila, después del buscador: la campana del admin (F1-3). */
     actions?: ReactNode;
 };
 
 // La barra de arriba del contenido: la sección donde estás y sus pestañas a la izquierda,
-// y a la derecha un lugar para acciones del panel. Con una sola pestaña no hay nada que
-// elegir y no se dibuja (recepción en Facturación, Hoy); tampoco en un comprobante para
+// y a la derecha el buscador global (F1-5b, para los dos roles) y las acciones del panel
+// (la campana del admin). Con una sola pestaña no hay nada que elegir, pero la fila se
+// dibuja igual en el escritorio por el buscador; no se dibuja en un comprobante para
 // imprimir, que no es ninguna pantalla del menú. En el celular queda solo la fila de
-// pestañas: el nombre de la sección ya lo dice el menú de arriba.
+// pestañas (con una sola, nada): el nombre de la sección ya lo dice el menú de arriba y
+// el buscador es la lupa de esa barra.
 //
 // No busca datos: los numeritos los calcula el layout y llegan por props, igual que en los
 // menús. `print:hidden` porque los recibos y las facturas se reimprimen desde el panel.
@@ -26,10 +29,10 @@ export default function AdminTopBar({ role, actions, ...navState }: AdminTopBarP
     const active = findActiveNav(sections, pathname, searchParams);
 
     const showTabs = !!active && active.section.tabs.length > 1;
-    if (!active || (!showTabs && !actions)) return null;
+    if (!active) return null;
 
-    // Sin pestañas, en el celular la fila quedaría vacía: la campana del admin ahí va en
-    // la barra negra de arriba (MobileTopBar), así que solo se dibuja en el escritorio.
+    // Sin pestañas, en el celular la fila quedaría vacía: el buscador y la campana del admin
+    // ahí van en la barra negra de arriba (MobileTopBar), así que solo se dibuja en el escritorio.
     return (
         <div
             data-admin-topbar
@@ -41,7 +44,10 @@ export default function AdminTopBar({ role, actions, ...navState }: AdminTopBarP
                 </span>
                 {showTabs && <SectionTabs tabs={active.section.tabs} activeTabId={active.tab.id} />}
             </div>
-            {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+            <div className="flex shrink-0 items-center gap-2">
+                <GlobalSearch placement="desktop" />
+                {actions}
+            </div>
         </div>
     );
 }

@@ -49,16 +49,24 @@ describe("barra de arriba con las pestañas de la sección", () => {
     expect(within(barra(container)!).getByText("Facturación")).toBeInTheDocument();
   });
 
-  it("recepción en Facturación tiene una sola pestaña: no se dibuja la fila", () => {
+  // Desde F1-5b la fila también lleva el buscador (para los dos roles): con una sola pestaña
+  // no hay pestañas que dibujar, pero en el escritorio la fila queda por el buscador. En el
+  // celular no se dibuja: allá el buscador es la lupa de la barra negra de arriba.
+  it("recepción en Facturación tiene una sola pestaña: sin pestañas, solo el buscador y solo en el escritorio", () => {
     en("/admin/fiscal?view=pendientes");
     const { container } = render(<AdminTopBar role="receptionist" />);
-    expect(barra(container)).toBeNull();
+    expect(barra(container)!.querySelectorAll("a")).toHaveLength(0);
+    expect(barra(container)!.querySelector("nav")).toBeNull();
+    expect(barra(container)).toHaveClass("hidden", "md:flex");
+    expect(barra(container)!.querySelector("input[role='combobox']")).not.toBeNull();
   });
 
-  it("Hoy tiene una sola pestaña: no se dibuja la fila", () => {
+  it("Hoy tiene una sola pestaña: sin pestañas, solo el buscador y solo en el escritorio", () => {
     en("/admin");
     const { container } = render(<AdminTopBar role="admin" />);
-    expect(barra(container)).toBeNull();
+    expect(barra(container)!.querySelectorAll("a")).toHaveLength(0);
+    expect(barra(container)).toHaveClass("hidden", "md:flex");
+    expect(barra(container)!.querySelector("input[role='combobox']")).not.toBeNull();
   });
 
   it("en un comprobante para imprimir no hay barra", () => {

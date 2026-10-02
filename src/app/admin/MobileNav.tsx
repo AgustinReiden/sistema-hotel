@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { BedDouble, Menu, MoreHorizontal, X } from "lucide-react";
 
+import GlobalSearch from "./GlobalSearch";
 import LogoutButton from "./LogoutButton";
 import { useMobileMenu } from "./MobileMenuContext";
 import {
@@ -44,7 +45,7 @@ function Badge({ badge }: { badge: NavBadge }) {
 type MobileNavProps = NavState & {
   role: string;
   userEmail: string;
-  /** A la izquierda de la hamburguesa: la campana de avisos del admin (F1-3). */
+  /** A la izquierda de la hamburguesa, después de la lupa: la campana de avisos del admin (F1-3). */
   actions?: ReactNode;
 };
 
@@ -90,6 +91,7 @@ export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNa
           </span>
         </Link>
         <div className="flex items-center gap-1">
+          <GlobalSearch placement="mobile" />
           {actions}
           <button
             type="button"
