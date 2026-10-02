@@ -6,13 +6,11 @@ import {
   getCleaningLog,
   getCurrentUserRole,
   getHotelSettings,
-  listAdminAlerts,
 } from "@/lib/data";
 import { localToISO } from "@/lib/format";
 import { formatHotelDateTime } from "@/lib/time";
 import { PAGE_SIZE, parsePageParam } from "@/lib/pagination";
 import type { CleaningCategory, CleaningLogSummary } from "@/lib/types";
-import AlertsPanel from "./AlertsPanel";
 import PaginationFooter from "../PaginationFooter";
 import CleaningLogFilters from "./CleaningLogFilters";
 
@@ -103,7 +101,8 @@ type PageProps = {
 };
 
 export default async function MantenimientoAdminPage({ searchParams }: PageProps) {
-  // Sólo admin: los avisos de arriba (tarifas a autorizar, cierres de turno) son suyos.
+  // Sólo admin. Los avisos (tarifas a autorizar, cierres de turno) ya no van acá: están
+  // en la campana de arriba, en cualquier pantalla.
   const role = await getCurrentUserRole();
   if (role !== "admin") redirect("/forbidden");
 
@@ -121,7 +120,7 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
   const roomIdParsed = room ? Number(room) : NaN;
   const roomId = Number.isInteger(roomIdParsed) ? roomIdParsed : undefined;
 
-  const [logResult, alerts, rooms] = await Promise.all([
+  const [logResult, rooms] = await Promise.all([
     getCleaningLog({
       fromIso,
       toIso,
@@ -130,7 +129,6 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
       page,
       pageSize: PAGE_SIZE,
     }),
-    listAdminAlerts(true),
     getActiveRoomsBrief(),
   ]);
 
@@ -164,8 +162,6 @@ export default async function MantenimientoAdminPage({ searchParams }: PageProps
 
       <div className="flex-1 overflow-auto p-4 md:p-8 bg-slate-50">
         <div className="max-w-5xl mx-auto">
-          <AlertsPanel alerts={alerts} hotelTimezone={tz} />
-
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             {cards.map((card) => (
               <div
