@@ -42,6 +42,8 @@ export default function AdminAlertsBell({ initialCount, placement }: Props) {
   const [timezone, setTimezone] = useState(DEFAULT_TZ);
   const requestRef = useRef(0);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
@@ -69,6 +71,15 @@ export default function AdminAlertsBell({ initialCount, placement }: Props) {
 
   const closePanel = () => setOpen(false);
 
+  // Una nota a medio escribir no se pierde por un Escape o un toque en el fondo.
+  const hasDraft = () =>
+    Array.from(dialogRef.current?.querySelectorAll("textarea") ?? []).some(
+      (t) => t.value.trim() !== "",
+    );
+  const closeUnlessDraft = () => {
+    if (!hasDraft()) closePanel();
+  };
+
   // "Ver avisos" (Hoy) la abre desde cualquier parte.
   useEffect(() => {
     const onOpen = () => {
@@ -84,12 +95,49 @@ export default function AdminAlertsBell({ initialCount, placement }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    const bell = bellRef.current;
     closeRef.current?.focus();
+    // En el celular la hoja tapa todo: la página de atrás no se mueve (como MobileNav).
+    const isDesktop =
+      typeof window.matchMedia === "function" && window.matchMedia(DESKTOP_QUERY).matches;
+    const previousOverflow = document.body.style.overflow;
+    if (!isDesktop) document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        const draft = Array.from(dialogRef.current?.querySelectorAll("textarea") ?? []).some(
+          (t) => t.value.trim() !== "",
+        );
+        if (!draft) setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      // Trampa de foco: el diálogo es modal.
+      const items = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href]",
+        ) ?? [],
+      );
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!dialogRef.current?.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      bell?.focus();
+    };
   }, [open]);
 
   const handleResolved = (alertId: number) => {
@@ -105,6 +153,7 @@ export default function AdminAlertsBell({ initialCount, placement }: Props) {
   return (
     <div className={`relative ${visibility}`}>
       <button
+        ref={bellRef}
         type="button"
         onClick={() => (open ? closePanel() : openPanel())}
         aria-label={label}
@@ -134,10 +183,11 @@ export default function AdminAlertsBell({ initialCount, placement }: Props) {
             type="button"
             tabIndex={-1}
             aria-label="Cerrar avisos"
-            onClick={closePanel}
+            onClick={closeUnlessDraft}
             className="fixed inset-0 z-40 cursor-default bg-slate-900/40 md:bg-transparent"
           />
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label="Avisos sin revisar"
@@ -163,9 +213,16 @@ export default function AdminAlertsBell({ initialCount, placement }: Props) {
                 </p>
               )}
               {!loading && error && (
-                <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-                  {error}
-                </p>
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+                  <p>{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => void load()}
+                    className="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                  >
+                    Reintentar
+                  </button>
+                </div>
               )}
               {!loading && !error && alerts && (
                 <AdminAlertsList

@@ -153,6 +153,38 @@ describe("campana de avisos del admin: el panel", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
+
+  it("al cerrar el foco vuelve a la campana", async () => {
+    const { container } = render(<AdminAlertsBell initialCount={3} />);
+    await abrir();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector("button[aria-haspopup]"));
+  });
+
+  it("Tab no se escapa del diálogo", async () => {
+    conAvisos([PAGO]);
+    const { container } = render(<AdminAlertsBell initialCount={1} />);
+    await abrir();
+    await screen.findByText("Pago de más");
+    const dialog = container.querySelector('[role="dialog"]')!;
+    const botones = Array.from(dialog.querySelectorAll("button"));
+    botones[botones.length - 1].focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(botones[0]);
+  });
+
+  it("si la lista no se pudo leer, Reintentar la vuelve a pedir", async () => {
+    H.listAdminAlertsAction.mockResolvedValueOnce({ success: false, error: "Sin conexión." });
+    render(<AdminAlertsBell initialCount={1} />);
+    await abrir();
+    await screen.findByText("Sin conexión.");
+    conAvisos([PAGO]);
+    await act(async () => {
+      fireEvent.click(screen.getByText("Reintentar"));
+    });
+    expect(await screen.findByText("Pago de más")).toBeInTheDocument();
+  });
 });
 
 describe("campana de avisos del admin: las acciones", () => {
@@ -230,6 +262,23 @@ describe("campana de avisos del admin: las acciones", () => {
       fireEvent.click(confirmar);
     });
     expect(H.resolveAdminAlertAction).toHaveBeenCalledWith(12, "nota");
+  });
+
+  it("con una nota escrita, Escape y el fondo no cierran el panel", async () => {
+    conAvisos([OCUPADA]);
+    const { container } = render(<AdminAlertsBell initialCount={1} />);
+    await abrir();
+    fireEvent.click(await screen.findByText("Cerrar sin cargar"));
+    const nota = screen.getByLabelText("Por qué se cierra sin cargar la estadía");
+    fireEvent.change(nota, { target: { value: "nota a medias" } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    fireEvent.click(container.querySelector('button[tabindex="-1"]')!);
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    // Vaciada la nota, Escape vuelve a cerrar.
+    fireEvent.change(nota, { target: { value: "" } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 });
 
