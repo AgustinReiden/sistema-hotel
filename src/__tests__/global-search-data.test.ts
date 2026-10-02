@@ -46,6 +46,7 @@ function orMatches(row: Row, filter: string): boolean {
       const list = value.slice(1, -1).split(",").map((v) => v.replace(/^"|"$/g, ""));
       return list.includes(String(row[col]));
     }
+    if (op === "imatch") return new RegExp(value, "i").test(String(row[col] ?? ""));
     throw new Error(`filtro no soportado: ${part}`);
   });
 }
@@ -216,6 +217,30 @@ describe("searchGlobal", () => {
       const result = await searchGlobal(term);
       expect(result.huespedes.map((h) => h.nombre), term).toEqual(["PÉREZ JOSÉ"]);
     }
+  });
+
+  it("una palabra corta no pierde una coincidencia vieja detrás de 40 reservas sin ficha más recientes", async () => {
+    const nombres = ["Luis Moreno", "Jorge Lopez", "Juan Soto", "Mario Gil"];
+    for (let i = 0; i < 45; i++) {
+      H.tables.reservations.push(
+        stay({
+          client_name: `${nombres[i % 4]} ${i}`,
+          client_dni: `2${String(i).padStart(7, "0")}`,
+          status: "checked_out",
+          check_in_target: `2026-09-${String((i % 28) + 1).padStart(2, "0")}T17:00:00Z`,
+          check_out_target: `2026-09-${String((i % 28) + 1).padStart(2, "0")}T20:00:00Z`,
+        })
+      );
+    }
+    H.tables.reservations.push(
+      stay({ client_name: "ANA GÓMEZ", client_dni: "31.222.333", status: "checked_out", check_in_target: "2025-01-01T17:00:00Z", check_out_target: "2025-01-02T13:00:00Z" })
+    );
+    const result = await searchGlobal("ana gomez");
+    expect(result.huespedes.map((h) => h.nombre)).toContain("ANA GÓMEZ");
+    const corta = await searchGlobal("ana");
+    expect(corta.huespedes.map((h) => h.nombre)).toContain("ANA GÓMEZ");
+    const porNumero = await searchGlobal("31222");
+    expect(porNumero.huespedes.map((h) => h.nombre)).toContain("ANA GÓMEZ");
   });
 
   it("si no opera a cuenta corriente el saldo es null", async () => {

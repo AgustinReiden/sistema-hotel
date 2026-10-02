@@ -46,21 +46,35 @@ export function dniWithDots(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
+/** Cada letra con sus variantes con tilde, para armar la expresión regular del filtro. */
+const ACCENT_CLASS: Record<string, string> = {
+  a: "[aáàâäãå]",
+  e: "[eéèêë]",
+  i: "[iíìîï]",
+  o: "[oóòôöõ]",
+  u: "[uúùûü]",
+  n: "[nñ]",
+  c: "[cç]",
+};
+
 /**
  * Filtro previo en la base (`.or(...)`) para las personas sin ficha. Es un superconjunto
  * del que decide matchesClient: la base solo recorta y la regla en memoria decide.
- * - Texto: la palabra más larga, con las vocales y la n como comodín de un carácter, para
+ * - Texto: la palabra más larga, con cada letra acentuable como clase (`j[oó]s[eé]`), para
  *   que "jose perez" encuentre "JOSÉ PÉREZ" (ilike distingue tildes) y el orden no importe.
+ *   Una clase deja pasar solo sus variantes: con comodines `_` una palabra corta ("ana")
+ *   coincidía con casi cualquier nombre y el tope de 40 escondía las coincidencias reales.
  * - DNI: con y sin puntos. CUIT: con y sin guiones y el DNI que lleva adentro.
- * - Otro número: los dígitos en orden con cualquier cosa en el medio (puntos, guiones).
+ * - Otro número: los dígitos en orden con solo no-dígitos en el medio (puntos, guiones).
  */
 export function sinFichaDbFilter(query: SearchQuery): string {
   if (query.kind === "texto") {
     const word = [...query.value.split(" ")].sort((a, b) => b.length - a.length)[0] ?? "";
-    return `client_name.ilike.%${word.replace(/[aeiounáéíóú]/g, "_")}%`;
+    const pattern = [...word].map((ch) => ACCENT_CLASS[ch] ?? ch).join("");
+    return `client_name.imatch.${pattern}`;
   }
   if (query.kind === "numero") {
-    return `client_dni.ilike.%${query.value.split("").join("%")}%`;
+    return `client_dni.imatch.${query.value.split("").join("[^0-9]*")}`;
   }
   const values = new Set<string>([query.value]);
   const dniDigits: string[] = [];
