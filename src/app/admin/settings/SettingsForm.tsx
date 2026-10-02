@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { updateHotelSettings } from "./actions";
+import { useFormDirty } from "./useUnsavedChangesGuard";
 import type { HotelSettings } from "@/lib/types";
 import {
     CONFIRMATION_MESSAGE_PLACEHOLDERS,
@@ -20,8 +21,16 @@ const PREVIEW_RESERVATION = {
     hotel_phone: "+54 9 364 438-6455",
 };
 
-export default function SettingsForm({ settings }: { settings: HotelSettings }) {
+export default function SettingsForm({
+    settings,
+    onDirtyChange,
+}: {
+    settings: HotelSettings;
+    /** Avisa a la pantalla si hay cambios sin guardar (para preguntar antes de irse). */
+    onDirtyChange?: (dirty: boolean) => void;
+}) {
     const [isPending, startTransition] = useTransition();
+    const { formRef, dirty, check, markSaved } = useFormDirty(onDirtyChange);
     const whatsappPhone = settings?.contact_whatsapp_phone || settings?.contact_phone || "";
     const fixedPhone = settings?.contact_fixed_phone || "";
     const initialConfirmationTemplate =
@@ -40,6 +49,12 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
         [confirmationTemplate, whatsappPhone]
     );
 
+    // El mensaje es un campo controlado y "Restaurar sugerido" lo cambia sin que se tipee
+    // nada: se vuelve a comparar cada vez que cambia. Al montar saca la foto inicial.
+    useEffect(() => {
+        check();
+    }, [confirmationTemplate, check]);
+
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const formData = new FormData(e.currentTarget);
@@ -48,6 +63,7 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
             const result = await updateHotelSettings(formData);
             if (result.success) {
                 toast.success("Ajustes guardados correctamente");
+                markSaved();
             } else {
                 toast.error(result.error);
             }
@@ -55,7 +71,7 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
     };
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
+        <form ref={formRef} onSubmit={handleSubmit} onChange={check} className="space-y-6 max-w-4xl bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
             <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-slate-800 border-b pb-2">Información General</h3>
 
@@ -252,7 +268,10 @@ export default function SettingsForm({ settings }: { settings: HotelSettings }) 
                 </div>
             </div>
 
-            <div className="pt-4 flex justify-end">
+            <div className="pt-4 flex items-center justify-end gap-4">
+                {dirty && (
+                    <span className="text-sm font-medium text-amber-700">Cambios sin guardar</span>
+                )}
                 <button
                     type="submit"
                     disabled={isPending}

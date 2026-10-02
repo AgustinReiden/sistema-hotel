@@ -12,7 +12,12 @@ type EditState = {
   role: UserRole;
 };
 
-export default function UsersPanel() {
+export default function UsersPanel({
+  onDirtyChange,
+}: {
+  /** Avisa a la pantalla si alguna fila tiene cambios sin guardar. */
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const [users, setUsers] = useState<ManageableProfile[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +63,11 @@ export default function UsersPanel() {
       e.role !== current.role
     );
   };
+
+  const anyDirty = (users ?? []).some((u) => isDirty(u.id, u));
+  useEffect(() => {
+    onDirtyChange?.(anyDirty);
+  }, [anyDirty, onDirtyChange]);
 
   const save = async (user: ManageableProfile) => {
     const e = edits[user.id];

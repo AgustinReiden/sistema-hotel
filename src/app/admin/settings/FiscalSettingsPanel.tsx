@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   Activity,
@@ -17,6 +17,7 @@ import {
   type ArcaHealthReport,
 } from "../fiscal/actions";
 import type { FiscalSettings } from "@/lib/types";
+import { useFormDirty } from "./useUnsavedChangesGuard";
 
 function HealthRow({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
   return (
@@ -34,11 +35,24 @@ function HealthRow({ ok, label, detail }: { ok: boolean; label: string; detail: 
   );
 }
 
-export default function FiscalSettingsPanel({ settings }: { settings: FiscalSettings | null }) {
+export default function FiscalSettingsPanel({
+  settings,
+  onDirtyChange,
+}: {
+  settings: FiscalSettings | null;
+  /** Avisa a la pantalla si hay cambios sin guardar (para preguntar antes de irse). */
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const [isPending, startTransition] = useTransition();
+  const { formRef, dirty, check, markSaved } = useFormDirty(onDirtyChange);
   const [testing, setTesting] = useState(false);
   const [health, setHealth] = useState<ArcaHealthReport | null>(null);
   const [enabled, setEnabled] = useState(settings?.enabled ?? false);
+
+  // Solo mide los cambios (no toca el guardado): al montar saca la foto inicial.
+  useEffect(() => {
+    check();
+  }, [enabled, check]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -47,6 +61,7 @@ export default function FiscalSettingsPanel({ settings }: { settings: FiscalSett
       const result = await updateFiscalSettingsAction(formData);
       if (result.success) {
         toast.success("Configuración fiscal guardada.");
+        markSaved();
       } else {
         toast.error(result.error);
       }
@@ -67,6 +82,8 @@ export default function FiscalSettingsPanel({ settings }: { settings: FiscalSett
 
   return (
     <form
+      ref={formRef}
+      onChange={check}
       onSubmit={handleSubmit}
       className="space-y-6 max-w-4xl bg-white p-8 rounded-xl border border-slate-200 shadow-sm mt-8"
     >
@@ -219,7 +236,8 @@ export default function FiscalSettingsPanel({ settings }: { settings: FiscalSett
         del servidor se sincroniza sola.
       </div>
 
-      <div className="flex gap-3 justify-end border-t pt-4">
+      <div className="flex items-center gap-3 justify-end border-t pt-4">
+        {dirty && <span className="text-sm font-medium text-amber-700">Cambios sin guardar</span>}
         <button
           type="button"
           onClick={handleTest}
