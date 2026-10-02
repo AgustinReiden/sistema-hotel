@@ -50,6 +50,12 @@ function renderPanel(props: Partial<Parameters<typeof RemitosClient>[0]> = {}) {
   );
 }
 
+// Los botones se buscan por su texto (con selector "button") y los avisos por su
+// atributo role, no con getByRole sobre toda la pantalla: getByRole calcula el rol y el
+// nombre accesible de cada elemento y llama a getComputedStyle de jsdom por cada
+// ancestro (PR #131). Con la máquina cargada, "sin remito exige nota" pasaba los 5 s.
+const boton = (texto: string) => screen.getByText(texto, { selector: "button" });
+
 describe("RemitosClient", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -64,15 +70,17 @@ describe("RemitosClient", () => {
   });
 
   it("avisa en rojo si la ingesta no corre hace mas de una hora", () => {
-    renderPanel({ salud: { ...SALUD, ultima_ingesta_at: "2026-09-22T12:00:00Z" } });
-    expect(screen.getByRole("alert")).toHaveTextContent("no corre desde hace 3 h");
+    const { container } = renderPanel({ salud: { ...SALUD, ultima_ingesta_at: "2026-09-22T12:00:00Z" } });
+    const alertas = container.querySelectorAll('[role="alert"]');
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0]).toHaveTextContent("no corre desde hace 3 h");
   });
 
   it("sin remito exige nota antes de confirmar", async () => {
     markRemitoAction.mockResolvedValue({ success: true });
     renderPanel({ rows: [fila("sin_escanear")] });
-    fireEvent.click(screen.getAllByRole("button", { name: "Sin remito" })[0]);
-    const confirmar = screen.getByRole("button", { name: "Confirmar" });
+    fireEvent.click(screen.getAllByText("Sin remito", { selector: "button" })[0]);
+    const confirmar = boton("Confirmar");
     expect(confirmar).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/Nota/), { target: { value: "se perdio en la habitacion" } });
     expect(confirmar).toBeEnabled();
@@ -89,11 +97,11 @@ describe("RemitosClient", () => {
     });
     assignRemitoPiezaAction.mockResolvedValue({ success: true });
     renderPanel({ piezas: [pieza("codigo_ilegible")] });
-    fireEvent.click(screen.getByRole("button", { name: "Asignar a un remito" }));
-    const vincular = screen.getByRole("button", { name: "Vincular" });
+    fireEvent.click(boton("Asignar a un remito"));
+    const vincular = boton("Vincular");
     expect(vincular).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Número del remito"), { target: { value: "158" } });
-    fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+    fireEvent.click(boton("Buscar"));
     expect(await screen.findByTestId("remito-encontrado")).toHaveTextContent("R-000158 · Empresa de prueba");
     fireEvent.click(vincular);
     await waitFor(() => expect(assignRemitoPiezaAction).toHaveBeenCalledWith("p-codigo_ilegible", 158));
@@ -101,7 +109,7 @@ describe("RemitosClient", () => {
 
   it("una pieza con tickets pegados no se puede asignar y muestra que tiene adentro", () => {
     renderPanel({ piezas: [pieza("forma_no_reconocida", { numeros_leidos: ["R-000001", "R-000002"] })] });
-    expect(screen.queryByRole("button", { name: "Asignar a un remito" })).toBeNull();
+    expect(screen.queryByText("Asignar a un remito", { selector: "button" })).toBeNull();
     expect(screen.getByText(/Adentro se leyó: R-000001, R-000002/)).toBeInTheDocument();
   });
 

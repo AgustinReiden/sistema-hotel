@@ -47,13 +47,25 @@ async function montar(guest: GuestRecord) {
   H.loadGuestRecordAction.mockResolvedValue({ success: true, data: guest });
   const onSaved = vi.fn();
   const onClose = vi.fn();
-  render(<GuestModal guestId={guest.id} onClose={onClose} onSaved={onSaved} />);
+  const { container } = render(<GuestModal guestId={guest.id} onClose={onClose} onSaved={onSaved} />);
   await waitFor(() => expect(screen.getByLabelText("Cuenta corriente")).toBeTruthy());
-  return { onSaved, onClose };
+  return { onSaved, onClose, container };
 }
 
 const cuentaCorriente = () => screen.getByLabelText("Cuenta corriente") as HTMLSelectElement;
 const facturacion = () => screen.getByLabelText("Facturación") as HTMLSelectElement;
+/** El recuadro de una nota o un aviso: el color vive en su clase (emerald o amber). */
+const recuadro = (texto: RegExp) => screen.getByText(texto).closest("p") as HTMLElement;
+/**
+ * El contenedor que anuncia la nota o el aviso de Facturación. Tiene que ser uno
+ * solo y estar siempre montado: el lector de pantalla anuncia los cambios de un
+ * role="status" que ya existía, no los de uno que aparece con el texto adentro.
+ */
+const estadoFacturacion = (container: HTMLElement) => {
+  const estados = container.querySelectorAll('[role="status"]');
+  expect(estados).toHaveLength(1);
+  return estados[0] as HTMLElement;
+};
 
 describe("GuestModal: cuenta corriente y modo de facturación", () => {
   beforeEach(() => {
@@ -137,5 +149,30 @@ describe("GuestModal: cuenta corriente y modo de facturación", () => {
     expect(facturacion().value).toBe("no_factura");
     expect(screen.queryByText(NOTA)).toBeNull();
     expect(screen.queryByText(AVISO)).toBeNull();
+  });
+
+  it("la nota (verde) y el aviso (ámbar) salen en un solo contenedor role=status siempre montado", async () => {
+    const { container } = await montar(huesped());
+
+    // Sin nada que decir, el contenedor ya está y está vacío.
+    const estado = estadoFacturacion(container);
+    expect(estado.textContent).toBe("");
+
+    fireEvent.change(cuentaCorriente(), { target: { value: "si" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toMatch(NOTA);
+    expect(recuadro(NOTA).className).toContain("emerald");
+    expect(recuadro(NOTA).className).not.toContain("amber");
+
+    fireEvent.change(facturacion(), { target: { value: "por_checkout" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toMatch(AVISO);
+    expect(estado.textContent).not.toMatch(NOTA);
+    expect(recuadro(AVISO).className).toContain("amber");
+    expect(recuadro(AVISO).className).not.toContain("emerald");
+
+    fireEvent.change(cuentaCorriente(), { target: { value: "no" } });
+    expect(estadoFacturacion(container)).toBe(estado);
+    expect(estado.textContent).toBe("");
   });
 });
