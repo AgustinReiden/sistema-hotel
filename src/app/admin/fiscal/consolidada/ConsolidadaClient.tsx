@@ -1286,7 +1286,7 @@ export default function ConsolidadaClient({
     return (
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 text-center">
         <p className="text-sm text-slate-500">
-          La facturación electrónica no está habilitada. Activala en Ajustes → Facturación electrónica.
+          La facturación electrónica no está habilitada. Activala en Configuración → ARCA.
         </p>
       </div>
     );
