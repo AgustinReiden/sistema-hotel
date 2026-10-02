@@ -1402,3 +1402,63 @@ export type RemitoLookup =
       estado: RemitoEstado;
       escaneos: number;
     };
+
+// ===========================================================================
+// Buscador global (F1-5a): lo que le llega a la pantalla, ya recortado por rol.
+// ===========================================================================
+
+/** Resumen de solo lectura de un cliente (decisión 4 del plan de reorden). */
+export type ClientSummary = {
+  /** Descuento personal o de la empresa, en %. 0 si no tiene. */
+  descuento: number;
+  /**
+   * Si debe en cuenta corriente (el saldo es SOLO el de cuenta corriente, decisión 1).
+   * null = no opera a cuenta corriente.
+   */
+  debe: boolean | null;
+  /** Saldo de cuenta corriente (positivo = debe). Solo para el admin: recepción recibe null. */
+  saldo: number | null;
+  /** "No debe", "Debe" (recepción) o "Debe $X en cuenta corriente" (admin). null si no opera a cuenta. */
+  saldoTexto: string | null;
+  /** Último check-out: cuándo salió (ISO) y de qué habitación. */
+  ultimaEstadia: { salida: string; habitacion: string | null } | null;
+  /** Estadía en curso (checked_in) o la próxima reserva confirmada que no venció. */
+  reservaActiva: {
+    estado: "checked_in" | "confirmed";
+    habitacion: string | null;
+    entrada: string;
+    salida: string;
+  } | null;
+};
+
+export type GlobalSearchHitKind = "habitacion" | "huesped" | "empresa" | "pasajero";
+
+/** Un resultado del buscador global. Los links solo vienen para el admin. */
+export type GlobalSearchHit = {
+  kind: GlobalSearchHitKind;
+  /** Único dentro de la respuesta (para las keys de React). */
+  key: string;
+  /** "Habitación 7", el nombre de la persona o de la empresa. */
+  titulo: string;
+  /** Segunda línea: estado y alojado, documento, o la empresa del pasajero. */
+  detalle: string | null;
+  /** Resumen del cliente; null en las habitaciones. */
+  resumen: ClientSummary | null;
+  /** Solo en las habitaciones. */
+  habitacion: {
+    estado: RoomStatus;
+    alojado: { nombre: string; entrada: string; salida: string } | null;
+  } | null;
+  /** Solo admin: Directorio o Empresas con el filtro puesto. */
+  href?: string;
+  /** Solo admin, y solo si opera a cuenta corriente. */
+  hrefCuenta?: string;
+};
+
+/** Respuesta del buscador global, agrupada. Tope de 5 por grupo. */
+export type GlobalSearchResult = {
+  habitaciones: GlobalSearchHit[];
+  huespedes: GlobalSearchHit[];
+  empresas: GlobalSearchHit[];
+  pasajeros: GlobalSearchHit[];
+};
