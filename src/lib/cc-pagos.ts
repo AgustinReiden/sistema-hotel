@@ -77,6 +77,17 @@ export function netoRecibido(pago: { amount: number } & Retenciones): number {
 }
 
 /**
+ * Lo que CANCELA de deuda a partir de lo que entró: la inversa de `netoRecibido`.
+ *
+ * Es lo que hace el modal de cobro desde F2-11: el admin tiene el extracto del banco
+ * en la mano y tipea lo que entró; el `amount` que viaja a la RPC (mig 109) se calcula
+ * acá, sumando las retenciones, en vez de pedirle que haga esa suma de cabeza.
+ */
+export function cancelaDesdeLoQueEntro(pago: { entro: number } & Retenciones): number {
+  return round2(num(pago.entro) + retencionesTotal(pago));
+}
+
+/**
  * Cuánto se pasan las retenciones del monto del pago, 0 si entran.
  * Espejo del CHECK `cc_mov_retenciones_no_superan_amount`.
  */
