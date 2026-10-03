@@ -230,9 +230,9 @@ const RENGLON = {
   factura:
     "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).",
   remito:
-    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero.",
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el remito: reimprimilo desde Caja mientras el turno siga abierto (después, solo un administrador desde la ficha del cliente, solapa Movimientos) para que lo firme el pasajero.",
   remitoYFactura:
-    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero. Tampoco salió la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).",
+    "Si la tarjeta ya figura en Limpieza, el check-out entró pero no salió el remito: reimprimilo desde Caja mientras el turno siga abierto (después, solo un administrador desde la ficha del cliente, solapa Movimientos) para que lo firme el pasajero. Tampoco salió la pregunta de factura: avisale al administrador (la estadía le queda en Por facturar).",
 };
 
 /** Cualquiera de los renglones del check-out. */
@@ -330,13 +330,15 @@ describe("RoomCard: check-out a cuenta corriente y el remito", () => {
       )
     ).toBeTruthy();
     expect(screen.getByText(/Falta el remito: el navegador bloqueó la ventana/)).toBeTruthy();
-    // Recepción no entra a Cuenta Corriente: el cuadro dice quién lo reimprime si se
-    // cierra, y el botón de cerrar dice que el papel no sale.
+    // Recepción no entra a Cuenta Corriente, pero lo reimprime desde Caja mientras el
+    // turno siga abierto: el cuadro dice dónde, y el botón de cerrar dice que el papel
+    // no sale.
     expect(
       screen.getByText(
-        /Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente/
+        /Si lo cerrás sin imprimir, lo podés reimprimir desde Caja mientras el turno siga abierto; después, solo un administrador desde la ficha del cliente/
       )
     ).toBeTruthy();
+    expect(screen.queryByText(/lo tiene que reimprimir un administrador/)).toBeNull();
     expect(screen.getByText("Cerrar sin imprimir")).toBeTruthy();
     // El foco arranca en «Imprimir remito»: un Enter imprime, no cierra sin imprimir.
     expect(document.activeElement).toBe(screen.getByText("Imprimir remito").closest("button"));

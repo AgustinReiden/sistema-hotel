@@ -125,7 +125,7 @@ function textosImpresoBloqueado(impreso: Impreso) {
     return {
       titulo: `El check-out quedó hecho y la estadía quedó a cuenta de ${impreso.holder}.`,
       detalle:
-        "Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente (solapa Movimientos).",
+        "Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo podés reimprimir desde Caja mientras el turno siga abierto; después, solo un administrador desde la ficha del cliente (solapa Movimientos).",
       botonLabel: "Imprimir remito",
     };
   }
@@ -160,7 +160,7 @@ function renglonCheckoutIncierto({ papel, pregunta }: SalidaCheckout): string | 
   const entro = "Si la tarjeta ya figura en Limpieza, el check-out entró pero";
   const porFacturar = "avisale al administrador (la estadía le queda en Por facturar)";
   if (papel === "remito") {
-    const remito = `${entro} no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero.`;
+    const remito = `${entro} no salió el remito: reimprimilo desde Caja mientras el turno siga abierto (después, solo un administrador desde la ficha del cliente, solapa Movimientos) para que lo firme el pasajero.`;
     return pregunta ? `${remito} Tampoco salió la pregunta de factura: ${porFacturar}.` : remito;
   }
   if (papel === "recibo") {
