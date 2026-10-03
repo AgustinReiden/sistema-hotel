@@ -72,6 +72,26 @@ describe("GuestModal: el botón dice qué falta", () => {
     expect(H.toast.error).not.toHaveBeenCalled();
   });
 
+  it("un descuento fuera de rango no se guarda en silencio", async () => {
+    const { container } = await montar("Juan Prueba");
+    const descuento = container.querySelector<HTMLInputElement>('input[type="number"][max="100"]')!;
+    fireEvent.change(descuento, { target: { value: "150" } });
+
+    fireEvent.click(boton(container));
+
+    expect(H.updateGuestAction).not.toHaveBeenCalled();
+  });
+
+  it("al faltar algo, el aviso se trae a la vista", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const { container } = await montar("");
+
+    fireEvent.click(boton(container));
+
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+  });
+
   it("con nombre guarda", async () => {
     const { container } = await montar("Juan Prueba");
 

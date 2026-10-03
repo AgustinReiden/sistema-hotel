@@ -65,6 +65,18 @@ describe("AssociatedClientModal: el botón dice qué falta", () => {
     expect(H.findCompaniesByDocumentAction).not.toHaveBeenCalled();
   });
 
+  it("un N° de Robinet inválido frena el envío en vez de borrarse en silencio", () => {
+    const { container, onSubmit } = montar();
+    fireEvent.change(nombre(container), { target: { value: "Empresa Ficticia SA" } });
+    fireEvent.change(documento(container), { target: { value: "30-12345678-1" } });
+    fireEvent.change(container.querySelector<HTMLInputElement>("#associated-robinet-id")!, { target: { value: "0" } });
+
+    fireEvent.click(boton(container));
+
+    expect(H.findCompaniesByDocumentAction).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("con nombre y documento sigue como antes: chequea el CUIT y guarda", async () => {
     const { container, onSubmit } = montar();
     fireEvent.change(nombre(container), { target: { value: "Empresa Ficticia SA" } });

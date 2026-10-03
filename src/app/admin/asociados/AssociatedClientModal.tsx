@@ -139,6 +139,13 @@ export default function AssociatedClientModal({
       focusFirst(pending);
       return;
     }
+    // noValidate apaga también min, max, step y los números mal escritos ("1e"), que el
+    // navegador deja en "" y se guardarían como 0 o como vacío. Se revisan acá.
+    const formEl = e.currentTarget as HTMLFormElement;
+    if (!formEl.checkValidity()) {
+      formEl.reportValidity();
+      return;
+    }
 
     // Primera pasada: si el CUIT ya lo tiene otra empresa, se avisa y se espera
     // confirmación. Ya confirmado (duplicados !== null) se guarda derecho.

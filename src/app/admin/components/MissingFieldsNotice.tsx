@@ -13,6 +13,14 @@ export function focusFirst(pending: FieldCheck[]): string | null {
     if (!element) continue;
     if ((element as HTMLInputElement).disabled) continue;
     element.focus();
+    // El foco sube la pantalla hasta el campo; si el aviso queda lejos, abajo y fuera
+    // de vista, se lo trae también. Va en el cuadro siguiente: en el primer intento
+    // el aviso recién se dibuja después de este foco.
+    requestAnimationFrame(() => {
+      document
+        .querySelector("[data-missing-notice]")
+        ?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    });
     return check.id;
   }
   return null;
@@ -27,6 +35,7 @@ export default function MissingFieldsNotice({ pending }: { pending: FieldCheck[]
   return (
     <div
       role="alert"
+      data-missing-notice
       className="flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800"
     >
       <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-600" />

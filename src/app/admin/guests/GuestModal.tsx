@@ -126,6 +126,13 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
       focusFirst(pending);
       return;
     }
+    // noValidate apaga también min, max, step y los números mal escritos ("1e"), que el
+    // navegador deja en "" y se guardarían como 0 o como vacío. Se revisan acá.
+    const formEl = e.currentTarget as HTMLFormElement;
+    if (!formEl.checkValidity()) {
+      formEl.reportValidity();
+      return;
+    }
     setIsSubmitting(true);
     try {
       const result = await updateGuestAction(guestId, form);
