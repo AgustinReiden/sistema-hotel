@@ -34,6 +34,7 @@ import { estadoPagoDeEstadia } from "@/lib/billing";
 import { buildCsv, csvField, formatAmountAr, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets, formatKey } from "@/lib/date-range";
 import { formatAmount, formatShiftCode } from "@/lib/format";
+import { paymentMethodLabel } from "@/lib/payment-methods";
 import { hotelDateKey } from "@/lib/time";
 import type {
   CcAccountStayRow,
@@ -68,7 +69,7 @@ function periodLabel(from: string, to: string): string {
  * de la cuenta completa, para que nadie confunda la suma del período con la deuda
  * total si el archivo queda cortado por el filtro.
  */
-function buildMovementsCsv(
+export function buildMovementsCsv(
   movements: CtaCteMovimiento[],
   accountName: string,
   balance: number,
@@ -78,7 +79,14 @@ function buildMovementsCsv(
   const columns: CsvColumn<CtaCteMovimiento>[] = [
     { header: "Fecha", type: "fecha", value: (m) => hotelDateKey(m.created_at) },
     { header: "Tipo", type: "plano", value: (m) => (m.tipo === "cargo" ? "Cargo" : "Pago") },
-    { header: "Concepto", type: "texto", value: (m) => (m.tipo === "cargo" ? "Estadía" : m.payment_method ?? "") },
+    {
+      header: "Concepto",
+      type: "texto",
+      // La etiqueta y no el valor de la base: el archivo se le manda al cliente y
+      // "bank_transfer" no le dice nada. Sin método queda la celda vacía.
+      value: (m) =>
+        m.tipo === "cargo" ? "Estadía" : m.payment_method ? paymentMethodLabel(m.payment_method) : "",
+    },
     { header: "Monto", type: "monto", value: (m) => (m.tipo === "cargo" ? m.amount : -m.amount) },
     { header: "Notas", type: "texto", value: (m) => m.notes ?? "" },
   ];
@@ -314,7 +322,7 @@ function SolapaMovimientos({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800">
                     {m.tipo === "cargo" ? "Cargo (estadía)" : "Pago a cuenta"}
-                    {m.payment_method ? ` · ${m.payment_method}` : ""}
+                    {m.payment_method ? ` · ${paymentMethodLabel(m.payment_method)}` : ""}
                   </p>
                   <p className="text-xs text-slate-500">
                     {new Date(m.created_at).toLocaleDateString("es-AR", {
@@ -586,17 +594,6 @@ function SolapaFacturas({ account }: { account: CtaCteAccount }) {
   );
 }
 
-/** Método del pago. El texto es libre en la base, así que lo desconocido se imprime tal cual. */
-const METODO_LABEL: Record<string, string> = {
-  cash: "Efectivo",
-  bank_transfer: "Transferencia",
-  mercado_pago: "Mercado Pago",
-  credit_card: "Tarjeta de crédito",
-  debit_card: "Tarjeta de débito",
-  cheque: "Cheque",
-  other: "Otro",
-};
-
 /**
  * Cómo se nombra en pantalla lo que un pago canceló: la factura, o la estadía que
  * todavía no tenía factura cuando se cobró (mig 114).
@@ -621,11 +618,6 @@ function nombreDeImputacion(imp: CcPagoImputacion): string {
     "  ",
     " "
   );
-}
-
-function metodoLabel(method: string | null): string {
-  if (!method) return "Sin método";
-  return METODO_LABEL[method] ?? method;
 }
 
 /**
@@ -659,7 +651,7 @@ function SolapaPagos({ account }: { account: CtaCteAccount }) {
   }, [account.kind, account.id]);
 
   /**
-   * Relectura después de desimputar. Sin esto la fila seguiría viéndose viva y el
+   * Relectura después de quitar una aplicación. Sin esto la fila seguiría viéndose viva y el
    * "quedaron a cuenta" mostraría el número viejo: el admin creería que la plata
    * sigue aplicada a una factura de la que ya la sacó.
    */
@@ -723,14 +715,14 @@ function FilaPago({
   onCambio: () => Promise<void>;
 }) {
   const retenciones = pago.retencion_ganancias + pago.retencion_iibb;
-  // Qué imputación está esperando confirmación, y el motivo que se está tipeando. Una
-  // sola a la vez a propósito: desimputar mueve plata, no es una casilla que se tilda
-  // al pasar.
+  // Qué aplicación está esperando confirmación, y el motivo que se está tipeando. Una
+  // sola a la vez a propósito: quitar una aplicación mueve plata, no es una casilla que
+  // se tilda al pasar.
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
   const [guardando, setGuardando] = useState(false);
 
-  async function desimputar(imp: CcPagoImputacion) {
+  async function quitarAplicacion(imp: CcPagoImputacion) {
     setGuardando(true);
     const result = await revertPaymentImputacionAction({
       imputacionId: imp.imputacion_id,
@@ -744,7 +736,7 @@ function FilaPago({
     // Se dice cuánto quedó libre y no un "listo" pelado: lo que el admin necesita
     // saber ahora es con cuánta plata cuenta para la factura de reemplazo.
     toast.success(
-      `Se desimputó ${formatAmount(result.data?.liberado ?? 0)}. Quedan ${formatAmount(
+      `Se quitaron ${formatAmount(result.data?.liberado ?? 0)}. Quedan ${formatAmount(
         result.data?.sinImputar ?? 0
       )} a cuenta.`
     );
@@ -763,7 +755,7 @@ function FilaPago({
               month: "2-digit",
               year: "numeric",
             })}{" "}
-            · {metodoLabel(pago.payment_method)}
+            · {paymentMethodLabel(pago.payment_method)}
           </p>
           <p className="text-xs text-slate-500">
             Recibo N°{" "}
@@ -824,13 +816,13 @@ function FilaPago({
       )}
 
       <div className="mt-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Imputado a</p>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Aplicado a</p>
         {pago.imputaciones.length === 0 ? (
-          // Un pago sin imputar no es un error: el cliente adelantó plata y la factura
-          // sale después. Decirlo evita que alguien lo "arregle" imputándolo a
+          // Un pago sin aplicar no es un error: el cliente adelantó plata y la factura
+          // sale después. Decirlo evita que alguien lo "arregle" aplicándolo a
           // cualquier cosa.
           <p className="text-xs text-slate-500 mt-0.5">
-            A cuenta, sin factura ni estadía asignada.
+            A cuenta, sin aplicar a ninguna factura ni estadía.
           </p>
         ) : (
           <ul className="mt-1 space-y-1">
@@ -840,7 +832,7 @@ function FilaPago({
                 className="flex flex-wrap justify-between gap-2 text-xs text-slate-600"
               >
                 <span>
-                  {/* Una imputación revertida (mig 111) se muestra tachada y no se
+                  {/* Una aplicación quitada (revertida, mig 111) se muestra tachada y no se
                       esconde —un recibo reimpreso dice lo mismo que el día que
                       salió—, pero su importe ya NO cancela esta factura: esa plata
                       volvió a quedar disponible en el pago. */}
@@ -852,12 +844,12 @@ function FilaPago({
                   {imp.anulada && (
                     <span className="ml-1.5 text-[11px] font-bold text-red-600">(anulada)</span>
                   )}
-                  {/* Mudada y desimputada se dicen distinto a propósito: las dos están
+                  {/* Mudada y quitada se dicen distinto a propósito: las dos están
                       revertidas, pero a la mudada no la soltó nadie — se la llevó la
                       factura de esa estadía (mig 114). */}
                   {imp.revertida && (
                     <span className="ml-1.5 text-[11px] font-bold text-slate-500">
-                      {imp.mudada ? "pasó a su factura" : "desimputada"}
+                      {imp.mudada ? "pasó a su factura" : "quitada"}
                       {imp.revertida_motivo ? `: ${imp.revertida_motivo}` : ""}
                     </span>
                   )}
@@ -882,8 +874,8 @@ function FilaPago({
                         setMotivo("");
                       }}
                       className="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors"
-                      title="Desimputar: esta plata deja de cancelar eso y vuelve a quedar a cuenta"
-                      aria-label="Desimputar"
+                      title="Quitar aplicación: esta plata deja de cancelar eso y vuelve a quedar a cuenta"
+                      aria-label="Quitar aplicación"
                     >
                       <RotateCcw size={14} />
                     </button>
@@ -892,7 +884,7 @@ function FilaPago({
                 {confirmando === imp.imputacion_id && (
                   <div className="w-full mt-1 p-3 rounded-lg border border-amber-200 bg-amber-50">
                     <p className="text-xs font-semibold text-amber-900">
-                      Se van a soltar {formatAmount(imp.imputado)}:{" "}
+                      Se van a quitar {formatAmount(imp.imputado)}:{" "}
                       {imp.destino === "factura" ? "esta factura" : "esta estadía"} deja de
                       estar cobrada por este pago y ese importe vuelve a quedar a cuenta.
                     </p>
@@ -900,14 +892,14 @@ function FilaPago({
                       type="text"
                       value={motivo}
                       onChange={(e) => setMotivo(e.target.value)}
-                      placeholder="Por qué se desimputa (obligatorio)"
+                      placeholder="Por qué se quita (obligatorio)"
                       className="mt-2 w-full px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         type="button"
                         disabled={guardando || motivo.trim() === ""}
-                        onClick={() => desimputar(imp)}
+                        onClick={() => quitarAplicacion(imp)}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                       >
                         {guardando && <Loader2 size={14} className="animate-spin" />}
