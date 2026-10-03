@@ -230,11 +230,11 @@ describe("PaymentModal: cobro a cuenta antes del check-out", () => {
     await waitFor(() => expect(H.toast.warning).toHaveBeenCalledTimes(1));
     expect(H.toast.warning.mock.calls[0][0]).toMatch(/Pudo haberse registrado/);
     expect(H.toast.warning.mock.calls[0][1]).toMatchObject({ duration: Infinity });
-    // No se da por cobrado (ni éxito ni recibo), pero el cuadro se cierra y se refresca
-    // la pantalla para que el pendiente muestre lo que pasó.
+    // No se da por cobrado (ni éxito ni recibo) y el cuadro se cierra. No se refresca
+    // (onSuccess): sin red, router.refresh() recarga la página y se perdería el aviso.
     expect(H.toast.success).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onSuccess).not.toHaveBeenCalled();
     expect(H.registerPaymentAction).toHaveBeenCalledTimes(1);
   });
 

@@ -195,14 +195,14 @@ export default function PaymentModal({
       } catch {
         // La respuesta no volvió (se cortó la red): el pago pudo haber entrado.
         // Repetirlo a ciegas lo duplicaría (un click con el monto y el medio puestos),
-        // así que, como en el check-out, el cuadro se cierra y queda el aviso. onSuccess
-        // refresca la pantalla para que el pendiente muestre lo que realmente pasó.
+        // así que, como en el check-out, el cuadro se cierra y queda el aviso. NO se llama
+        // a onSuccess: sin red, router.refresh() hace una navegación completa y se perdería
+        // el aviso. Hoy se actualiza solo (AutoRefresh, que hace ping antes de refrescar).
         setLoading(false);
         toast.warning(
           "No pudimos confirmar el cobro. Pudo haberse registrado: mirá el pendiente de la reserva y la caja antes de repetirlo.",
           { duration: Infinity, closeButton: true }
         );
-        onSuccess?.();
         onClose();
         return;
       }
