@@ -32,6 +32,13 @@ export default function CuentasClient({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
+  // Next conserva el estado del cliente cuando solo cambia ?q=: si llega otro filtro
+  // por link con la pantalla ya abierta, hay que tomarlo.
+  const [seenInitialQuery, setSeenInitialQuery] = useState(initialQuery);
+  if (seenInitialQuery !== initialQuery) {
+    setSeenInitialQuery(initialQuery);
+    setQuery(initialQuery);
+  }
   const [payTarget, setPayTarget] = useState<CtaCteAccount | null>(null);
   const [fichaTarget, setFichaTarget] = useState<CtaCteAccount | null>(null);
 

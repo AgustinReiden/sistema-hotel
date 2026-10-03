@@ -599,4 +599,16 @@ describe("CuentasClient — filtro que llega por link", () => {
     expect(container.textContent).toContain("Otra Persona Ficticia");
     expect(container.textContent).not.toContain("Acme SA");
   });
+
+  it("si ya está abierta y llega otro filtro por link, lo toma", () => {
+    const dos: CtaCteAccount[] = [
+      ...accounts,
+      { kind: "guest", id: "otro", name: "Otra Persona Ficticia", document_id: "30123456", balance: 100 },
+    ];
+    const { container, rerender } = render(<CuentasClient accounts={dos} initialQuery="Acme" />);
+    expect(container.textContent).not.toContain("Otra Persona Ficticia");
+    rerender(<CuentasClient accounts={dos} initialQuery="Otra Persona" />);
+    expect(container.textContent).toContain("Otra Persona Ficticia");
+    expect(container.textContent).not.toContain("Acme SA");
+  });
 });
