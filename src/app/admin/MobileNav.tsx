@@ -9,7 +9,7 @@
 // Arriba de 768px las dos desaparecen (md:hidden) y manda el <Sidebar>. Los links salen
 // de nav-links.ts, así que el menú se escribe en un solo lugar.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { BedDouble, Menu, X } from "lucide-react";
@@ -43,9 +43,11 @@ function Badge({ badge }: { badge: NavBadge }) {
 type MobileNavProps = NavState & {
   role: string;
   userEmail: string;
+  /** A la izquierda de la hamburguesa: la campana de avisos del admin (F1-3). */
+  actions?: ReactNode;
 };
 
-export function MobileTopBar({ role, userEmail, ...navState }: MobileNavProps) {
+export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNavProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // El cajón se cierra solo al navegar: en vez de un efecto que lo sincronice, se guarda
@@ -91,15 +93,18 @@ export function MobileTopBar({ role, userEmail, ...navState }: MobileNavProps) {
             El <span className="text-emerald-400">Refugio</span>
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={() => setOpenedOn(currentUrl)}
-          className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
-          aria-label="Abrir menú"
-          aria-expanded={isOpen}
-        >
-          <Menu size={22} />
-        </button>
+        <div className="flex items-center gap-1">
+          {actions}
+          <button
+            type="button"
+            onClick={() => setOpenedOn(currentUrl)}
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+            aria-label="Abrir menú"
+            aria-expanded={isOpen}
+          >
+            <Menu size={22} />
+          </button>
+        </div>
       </header>
 
       {isOpen && (

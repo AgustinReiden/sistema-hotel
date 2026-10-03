@@ -14,6 +14,9 @@ const H = vi.hoisted(() => ({
   falla: new Set<string>(),
   solicitudes: 0,
   facturas: [] as { status: string; created_at: string; last_attempt_at: string | null }[],
+  // Avisos del admin sin revisar (campana) y cuántas veces se pidieron.
+  avisos: 0,
+  avisosPedidos: 0,
 }));
 
 async function conteo<T>(nombre: string, valor: T): Promise<T> {
@@ -78,6 +81,10 @@ vi.mock("@/lib/data", () => ({
   getRemitosSalud: () => conteo("remitos", { a_revisar: 2, a_revisar_vencidos: 0, vencidos: 1, piezas_abiertas: 3 }),
   getPendingSolicitudesCount: () => conteo("solicitudes", H.solicitudes),
   listPendingInvoices: () => conteo("facturas", H.facturas),
+  getUnresolvedAdminAlertsCount: () => {
+    H.avisosPedidos += 1;
+    return conteo("avisos", H.avisos);
+  },
 }));
 
 // IdleLogout arranca el conteo de 30 minutos al montarse: el marcador cuenta cuántas
@@ -105,13 +112,31 @@ vi.mock("@/app/admin/caja/ForcedShiftHandover", () => ({
 vi.mock("@/app/admin/Sidebar", () => ({
   default: (props: Record<string, unknown>) => <span data-nav={JSON.stringify(props)}>Menú del panel</span>,
 }));
+// Las barras dibujan al lado lo que el layout les pasa en `actions` (la campana del admin).
 vi.mock("@/app/admin/MobileNav", () => ({
-  MobileTopBar: (props: Record<string, unknown>) => <span data-nav={JSON.stringify(props)}>Cajón del celular</span>,
+  MobileTopBar: ({ actions, ...props }: Record<string, unknown> & { actions?: React.ReactNode }) => (
+    <>
+      <span data-nav={JSON.stringify(props)}>Cajón del celular</span>
+      {actions}
+    </>
+  ),
   MobileTabBar: () => null,
 }));
 vi.mock("@/app/admin/OpenShiftAgeAlert", () => ({ default: () => null }));
 // La barra de las pestañas lee la ruta de la URL: acá solo importa dónde la pone el layout.
-vi.mock("@/app/admin/AdminTopBar", () => ({ default: () => <span data-testid="barra-pestanas" /> }));
+vi.mock("@/app/admin/AdminTopBar", () => ({
+  default: ({ actions }: { actions?: React.ReactNode }) => (
+    <>
+      <span data-testid="barra-pestanas" />
+      {actions}
+    </>
+  ),
+}));
+vi.mock("@/app/admin/AdminAlertsBell", () => ({
+  default: ({ initialCount, placement }: { initialCount: number; placement?: string }) => (
+    <span data-campana={placement}>Campana con {initialCount}</span>
+  ),
+}));
 
 import AdminLayout from "@/app/admin/layout";
 
@@ -132,6 +157,8 @@ beforeEach(() => {
   H.falla = new Set();
   H.solicitudes = 0;
   H.facturas = [];
+  H.avisos = 0;
+  H.avisosPedidos = 0;
 });
 
 // Una PC olvidada en Hoy pasa sola a la rendición forzada cuando otra recepcionista abre
@@ -277,5 +304,42 @@ describe("layout del panel: numeritos del menú", () => {
       solicitudesPendientes: 2,
       facturasConError: 0,
     });
+  });
+});
+
+// La campana de avisos (F1-3): solo para el dueño, en la barra de arriba del escritorio y
+// en la del celular, con el número que cuenta el layout.
+describe("layout del panel: campana de avisos", () => {
+  beforeEach(() => {
+    H.openedBy = "u-actual";
+    H.avisos = 4;
+  });
+
+  it("el dueño la tiene en las dos barras con los avisos sin revisar", async () => {
+    H.role = "admin";
+    const { container } = await renderLayout();
+    const campanas = Array.from(container.querySelectorAll("[data-campana]"));
+    expect(campanas.map((c) => c.getAttribute("data-campana")).sort()).toEqual(["desktop", "mobile"]);
+    campanas.forEach((c) => expect(c).toHaveTextContent("Campana con 4"));
+  });
+
+  it("recepción no la ve y ni se piden los avisos", async () => {
+    await renderLayout();
+    expect(screen.queryByText(/Campana con/)).toBeNull();
+    expect(H.avisosPedidos).toBe(0);
+  });
+
+  it("si contar los avisos falla, la campana queda en 0 y el panel sigue", async () => {
+    H.role = "admin";
+    H.falla = new Set(["avisos"]);
+    await renderLayout();
+    expect(screen.getByText("Contenido de la pantalla")).toBeInTheDocument();
+    expect(screen.getAllByText("Campana con 0")).toHaveLength(2);
+  });
+
+  it("la rendición forzada no la lleva", async () => {
+    H.openedBy = "otra-recepcionista";
+    await renderLayout();
+    expect(screen.queryByText(/Campana con/)).toBeNull();
   });
 });

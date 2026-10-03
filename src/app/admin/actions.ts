@@ -378,17 +378,18 @@ export async function searchCompanyPassengersAction(
 
 // Habitaciones libres para un rango de fechas (para el selector del modal "Nueva Reserva").
 // Misma semántica que valida el RPC al crear, así lo que se ofrece coincide con lo reservable.
+// null = no se pudo consultar: el modal no puede avisar "no está libre" por un error.
 export async function fetchAvailableRoomsAction(
   checkIn: string,
   checkOut: string
-): Promise<Room[]> {
+): Promise<Room[] | null> {
   try {
     if (!checkIn || !checkOut || new Date(checkOut).getTime() <= new Date(checkIn).getTime()) {
       return [];
     }
     return await getAvailableRooms(checkIn, checkOut);
   } catch {
-    return [];
+    return null;
   }
 }
 

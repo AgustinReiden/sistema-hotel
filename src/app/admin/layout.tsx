@@ -11,6 +11,7 @@ import {
     getPendingSolicitudesCount,
     getRemitosSalud,
     getShiftSummary,
+    getUnresolvedAdminAlertsCount,
     listPendingInvoices,
 } from "@/lib/data";
 import { BILLING_PENDING_DAYS, facturasConError, totalPendingBilling } from "@/lib/billing";
@@ -18,6 +19,7 @@ import { remitosParaRevisar } from "@/lib/remitos";
 import OpenShiftAgeAlert from "./OpenShiftAgeAlert";
 import IdleLogout from "./IdleLogout";
 import ForcedShiftHandover from "./caja/ForcedShiftHandover";
+import AdminAlertsBell from "./AdminAlertsBell";
 
 export default async function AdminLayout({
     children,
@@ -107,11 +109,14 @@ export default async function AdminLayout({
     // 15 minutos) van para los dos roles: a recepción la RPC ya le trae solo las de su
     // turno. Lo del dueño (falta facturar y remitos) no se le pide a recepción.
     //
-    // Las cuatro cuentas corren a la vez, y si una falla ese numerito queda en 0 y el
+    // Los avisos sin revisar de la campana son solo del dueño (`admin_alerts` tiene RLS de
+    // admin): a recepción ni se le piden ni se le dibuja la campana.
+    //
+    // Las cinco cuentas corren a la vez, y si una falla ese numerito queda en 0 y el
     // menú sigue: el layout envuelve todo el panel.
     const isAdmin = role === "admin";
     const now = new Date();
-    const [unbilledCount, remitosPendientes, solicitudesPendientes, facturasConErrorCount] = await Promise.all([
+    const [unbilledCount, remitosPendientes, solicitudesPendientes, facturasConErrorCount, adminAlertsCount] = await Promise.all([
         isAdmin
             ? countBillingPending(BILLING_PENDING_DAYS)
                   .then(totalPendingBilling)
@@ -126,6 +131,7 @@ export default async function AdminLayout({
         listPendingInvoices()
             .then((rows) => facturasConError(rows, now).length)
             .catch(() => 0),
+        isAdmin ? getUnresolvedAdminAlertsCount().catch(() => 0) : 0,
     ]);
     const navState: NavState = {
         hasOpenShift: !!openShift,
@@ -134,6 +140,10 @@ export default async function AdminLayout({
         solicitudesPendientes,
         facturasConError: facturasConErrorCount,
     };
+    // La campana va en los dos lugares (la barra de arriba en el escritorio y, en el
+    // celular, a la izquierda de la hamburguesa); cada una se esconde en el otro tamaño.
+    const alertsBell = (placement: "desktop" | "mobile") =>
+        isAdmin ? <AdminAlertsBell initialCount={adminAlertsCount} placement={placement} /> : undefined;
 
     return (
         // Shell de alto fijo: sin una altura definida en este ancestro, los h-full y los
@@ -161,7 +171,7 @@ export default async function AdminLayout({
                         />
                     }
                 >
-                    <MobileTopBar role={role} userEmail={userEmail} {...navState} />
+                    <MobileTopBar role={role} userEmail={userEmail} {...navState} actions={alertsBell("mobile")} />
                 </Suspense>
                 <Suspense
                     fallback={
@@ -179,7 +189,7 @@ export default async function AdminLayout({
                         como los menús, así que también pide su <Suspense>; no ocupa lugar
                         mientras carga porque con una sola pestaña no se dibuja. */}
                     <Suspense fallback={null}>
-                        <AdminTopBar role={role} {...navState} />
+                        <AdminTopBar role={role} {...navState} actions={alertsBell("desktop")} />
                     </Suspense>
                     <OpenShiftAgeAlert openedAt={openShift?.opened_at ?? null} />
                     {/* El que scrollea es este wrapper y no <main> para dejar el aviso de turno
