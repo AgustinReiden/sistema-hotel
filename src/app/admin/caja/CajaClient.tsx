@@ -17,6 +17,7 @@ import {
 
 import OpenShiftModal from "./OpenShiftModal";
 import CloseShiftModal from "./CloseShiftModal";
+import CreditChargesList from "./CreditChargesList";
 import { formatShiftCode } from "@/lib/format";
 import { formatHotelTime, formatHotelDateTime } from "@/lib/time";
 import type { ShiftSummary } from "@/lib/types";
@@ -239,21 +240,7 @@ export default function CajaClient({ summary, isAdmin, canSeeCash, hotelTimezone
                   <p className="text-xs text-slate-500 mb-3">
                     No es plata cobrada: queda en la cuenta del cliente.
                   </p>
-                  <ul className="space-y-2">
-                    {summary.creditCharges.map((c) => (
-                      <li key={c.id} className="flex items-center justify-between gap-3 text-xs">
-                        <span className="text-slate-600 truncate">
-                          {c.client_name}
-                          {c.room_number && (
-                            <span className="text-slate-400"> (Hab. {c.room_number})</span>
-                          )}
-                        </span>
-                        <span className="font-bold text-amber-800 shrink-0">
-                          ${formatMoney(c.amount)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <CreditChargesList charges={summary.creditCharges} />
                 </div>
               )}
             </div>
