@@ -24,9 +24,11 @@ import {
 import PaymentModal from "../components/PaymentModal";
 import InvoicePromptModal, { type InvoicePromptData } from "./InvoicePromptModal";
 import PrintBlockedModal from "./PrintBlockedModal";
+import NumberStepper from "./NumberStepper";
 import { calculateEarlyCheckoutBreakdown } from "@/lib/pricing";
 import { openPrintWindow } from "@/lib/print-window";
-import { formatHotelShortDate, hotelDateKey } from "@/lib/time";
+import { nochesYSalida } from "@/lib/stepper";
+import { addDaysToDateKey, formatHotelShortDate, hotelDateKey } from "@/lib/time";
 import { isBankPaymentMethod } from "@/lib/billing";
 import { formatAmount } from "@/lib/format";
 import type {
@@ -125,7 +127,7 @@ function textosImpresoBloqueado(impreso: Impreso) {
     return {
       titulo: `El check-out quedó hecho y la estadía quedó a cuenta de ${impreso.holder}.`,
       detalle:
-        "Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo tiene que reimprimir un administrador desde la ficha del cliente (solapa Movimientos).",
+        "Falta el remito: el navegador bloqueó la ventana. Apretá «Imprimir remito» para que salga y lo firme el pasajero. Si lo cerrás sin imprimir, lo podés reimprimir desde Caja mientras el turno siga abierto; después, solo un administrador desde la ficha del cliente (solapa Movimientos).",
       botonLabel: "Imprimir remito",
     };
   }
@@ -160,7 +162,7 @@ function renglonCheckoutIncierto({ papel, pregunta }: SalidaCheckout): string | 
   const entro = "Si la tarjeta ya figura en Limpieza, el check-out entró pero";
   const porFacturar = "avisale al administrador (la estadía le queda en Por facturar)";
   if (papel === "remito") {
-    const remito = `${entro} no salió el remito: pedile a un administrador que lo reimprima desde la ficha del cliente (solapa Movimientos) para que lo firme el pasajero.`;
+    const remito = `${entro} no salió el remito: reimprimilo desde Caja mientras el turno siga abierto (después, solo un administrador desde la ficha del cliente, solapa Movimientos) para que lo firme el pasajero.`;
     return pregunta ? `${remito} Tampoco salió la pregunta de factura: ${porFacturar}.` : remito;
   }
   if (papel === "recibo") {
@@ -1258,14 +1260,13 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
               </div>
               {extendMode === "nights" ? (
                 <div className="mb-6">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Noches Adicionales</label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberStepper
+                    id={`extend-nights-${room.id}`}
+                    label="Noches adicionales"
                     value={extendNights}
-                    onChange={(e) => setExtendNights(parseInt(e.target.value, 10) || 1)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-brand-500 focus:ring outline-none"
-                    required
+                    onChange={setExtendNights}
+                    min={1}
+                    max={30}
                   />
                 </div>
               ) : (
@@ -1288,7 +1289,15 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                   className="px-4 py-2 text-white font-bold bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                   disabled={isPending}
                 >
-                  Ampliar
+                  {/* Las noches y el nuevo día de salida, para que el error se vea antes de ampliar. */}
+                  {extendMode === "nights"
+                    ? `Ampliar ${nochesYSalida(
+                        extendNights,
+                        room.check_out_target
+                          ? addDaysToDateKey(hotelDateKey(room.check_out_target, timezone), extendNights)
+                          : null
+                      )}`
+                    : "Ampliar"}
                 </button>
               </div>
             </form>
