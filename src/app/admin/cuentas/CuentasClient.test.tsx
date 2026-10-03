@@ -423,6 +423,129 @@ describe("CuentasClient — solapa Pagos", () => {
 });
 
 /**
+ * El medio de pago y el vocabulario de la solapa Pagos. Hasta acá la ficha mostraba
+ * `bank_transfer` tal cual en Movimientos y en el CSV que se le manda al cliente, y la
+ * solapa Pagos hablaba de "imputar" y "desimputar", que nadie en recepción entiende.
+ */
+describe("CuentasClient — medio de pago legible y 'aplicar' en vez de 'imputar'", () => {
+  const movimientosConTransferencia: CtaCteMovimiento[] = [
+    ...movements,
+    {
+      ...movements[1],
+      id: "m3",
+      payment_method: "bank_transfer",
+      recibo_cc_numero: 2,
+    },
+  ];
+
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+    loadCtaCteAccountAction.mockReset();
+    loadCtaCteAccountAction.mockResolvedValue({
+      success: true,
+      data: { movements: movimientosConTransferencia, balance: 15000 },
+    });
+    loadClientInvoicesAction.mockReset();
+    loadClientInvoicesAction.mockResolvedValue({ success: true, data: [] });
+    loadClientPaymentsAction.mockReset();
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: pagos });
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: [] });
+    revertPaymentImputacionAction.mockReset();
+    revertPaymentImputacionAction.mockResolvedValue({
+      success: true,
+      data: { liberado: 60000, sinImputar: 100000 },
+    });
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  it("en Movimientos, un pago por transferencia dice 'Pago a cuenta · Transferencia', nunca bank_transfer", async () => {
+    render(<CuentasClient accounts={accounts} />);
+    fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
+
+    expect(await screen.findByText("Pago a cuenta · Transferencia")).toBeTruthy();
+    // Y los demás medios siguen legibles: el efectivo no pierde su etiqueta.
+    expect(screen.getByText("Pago a cuenta · Efectivo")).toBeTruthy();
+    expect(screen.queryByText(/bank_transfer/)).toBeNull();
+  });
+
+  it("el CSV de movimientos trae la etiqueta, no el valor interno, en la columna Concepto", () => {
+    const csv = buildMovementsCsv(movimientosConTransferencia, "Acme SA", 15000, "", "");
+
+    expect(csv).toContain(";Transferencia;");
+    expect(csv).toContain(";Efectivo;");
+    expect(csv).not.toContain("bank_transfer");
+    // El cargo sigue diciendo Estadía.
+    expect(csv).toContain(";Estadía;");
+  });
+
+  it("el CSV de un pago sin método deja la celda de Concepto vacía y no escribe 'Sin método'", () => {
+    const csv = buildMovementsCsv(
+      [{ ...movements[1], payment_method: null }],
+      "Acme SA",
+      0,
+      "",
+      ""
+    );
+
+    expect(csv).not.toContain("Sin método");
+  });
+
+  it("la solapa Pagos dice 'Aplicado a' y no habla de imputar", async () => {
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getByText("Aplicado a")).toBeTruthy();
+    expect(fila.getByText(/· Transferencia/)).toBeTruthy();
+    expect(fila.getByText(/\$40\.000,00 quedaron a cuenta, sin aplicar/)).toBeTruthy();
+    // El único "imput" que queda es el motivo que escribió una persona (dato, no texto
+    // de la pantalla).
+    const textoDeLaFila = (screen.getByTestId("fila-pago").textContent ?? "").replace(
+      "Se imputó a la factura equivocada",
+      ""
+    );
+    expect(textoDeLaFila).not.toMatch(/imput/i);
+  });
+
+  it("un pago a cuenta sin nada aplicado lo explica con 'sin aplicar a ninguna factura ni estadía'", async () => {
+    loadClientPaymentsAction.mockResolvedValue({
+      success: true,
+      data: [{ ...pagos[0], imputaciones: [], sin_imputar: 100000 }],
+    });
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getByText("A cuenta, sin aplicar a ninguna factura ni estadía.")).toBeTruthy();
+  });
+
+  it("el panel de confirmación dice 'quitar' y pide el motivo", async () => {
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
+
+    const panel = screen.getByPlaceholderText("Por qué se quita (obligatorio)").parentElement;
+    expect(panel?.textContent ?? "").not.toMatch(/imput/i);
+    expect(screen.getByText("Confirmar")).toBeDisabled();
+  });
+
+  it("el aviso de éxito dice cuánto se quitó y cuánto queda a cuenta", async () => {
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se quita/), {
+      target: { value: "Error de carga" },
+    });
+    fireEvent.click(screen.getByText("Confirmar"));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Se quitaron $60.000,00. Quedan $100.000,00 a cuenta."
+      )
+    );
+  });
+});
+
+/**
  * Lo que un pago canceló puede ser una factura o una ESTADÍA que todavía no tenía
  * factura cuando entró la plata (mig 114). Y cuando esa estadía se factura, la línea
  * no queda "desimputada": se mudó al comprobante, que no es lo mismo y no se puede
@@ -589,128 +712,5 @@ describe("CuentasClient — quitar la aplicación desde la solapa Pagos", () => 
 
     await waitFor(() => expect(revertPaymentImputacionAction).toHaveBeenCalled());
     expect(loadClientPaymentsAction).toHaveBeenCalledTimes(1);
-  });
-});
-
-/**
- * El medio de pago y el vocabulario de la solapa Pagos. Hasta acá la ficha mostraba
- * `bank_transfer` tal cual en Movimientos y en el CSV que se le manda al cliente, y la
- * solapa Pagos hablaba de "imputar" y "desimputar", que nadie en recepción entiende.
- */
-describe("CuentasClient — medio de pago legible y 'aplicar' en vez de 'imputar'", () => {
-  const movimientosConTransferencia: CtaCteMovimiento[] = [
-    ...movements,
-    {
-      ...movements[1],
-      id: "m3",
-      payment_method: "bank_transfer",
-      recibo_cc_numero: 2,
-    },
-  ];
-
-  beforeEach(() => {
-    vi.mocked(toast.success).mockClear();
-    loadCtaCteAccountAction.mockReset();
-    loadCtaCteAccountAction.mockResolvedValue({
-      success: true,
-      data: { movements: movimientosConTransferencia, balance: 15000 },
-    });
-    loadClientInvoicesAction.mockReset();
-    loadClientInvoicesAction.mockResolvedValue({ success: true, data: [] });
-    loadClientPaymentsAction.mockReset();
-    loadClientPaymentsAction.mockResolvedValue({ success: true, data: pagos });
-    loadCcAccountStaysAction.mockReset();
-    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: [] });
-    revertPaymentImputacionAction.mockReset();
-    revertPaymentImputacionAction.mockResolvedValue({
-      success: true,
-      data: { liberado: 60000, sinImputar: 100000 },
-    });
-    vi.stubGlobal("open", vi.fn());
-  });
-
-  it("en Movimientos, un pago por transferencia dice 'Pago a cuenta · Transferencia', nunca bank_transfer", async () => {
-    render(<CuentasClient accounts={accounts} />);
-    fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
-
-    expect(await screen.findByText("Pago a cuenta · Transferencia")).toBeTruthy();
-    // Y los demás medios siguen legibles: el efectivo no pierde su etiqueta.
-    expect(screen.getByText("Pago a cuenta · Efectivo")).toBeTruthy();
-    expect(screen.queryByText(/bank_transfer/)).toBeNull();
-  });
-
-  it("el CSV de movimientos trae la etiqueta, no el valor interno, en la columna Concepto", () => {
-    const csv = buildMovementsCsv(movimientosConTransferencia, "Acme SA", 15000, "", "");
-
-    expect(csv).toContain(";Transferencia;");
-    expect(csv).toContain(";Efectivo;");
-    expect(csv).not.toContain("bank_transfer");
-    // El cargo sigue diciendo Estadía.
-    expect(csv).toContain(";Estadía;");
-  });
-
-  it("el CSV de un pago sin método deja la celda de Concepto vacía y no escribe 'Sin método'", () => {
-    const csv = buildMovementsCsv(
-      [{ ...movements[1], payment_method: null }],
-      "Acme SA",
-      0,
-      "",
-      ""
-    );
-
-    expect(csv).not.toContain("Sin método");
-  });
-
-  it("la solapa Pagos dice 'Aplicado a' y no habla de imputar", async () => {
-    await abrirSolapaPagos();
-
-    const fila = within(await screen.findByTestId("fila-pago"));
-    expect(fila.getByText("Aplicado a")).toBeTruthy();
-    expect(fila.getByText(/· Transferencia/)).toBeTruthy();
-    expect(fila.getByText(/\$40\.000,00 quedaron a cuenta, sin aplicar/)).toBeTruthy();
-    // El único "imput" que queda es el motivo que escribió una persona (dato, no texto
-    // de la pantalla).
-    const textoDeLaFila = (screen.getByTestId("fila-pago").textContent ?? "").replace(
-      "Se imputó a la factura equivocada",
-      ""
-    );
-    expect(textoDeLaFila).not.toMatch(/imput/i);
-  });
-
-  it("un pago a cuenta sin nada aplicado lo explica con 'sin aplicar a ninguna factura ni estadía'", async () => {
-    loadClientPaymentsAction.mockResolvedValue({
-      success: true,
-      data: [{ ...pagos[0], imputaciones: [], sin_imputar: 100000 }],
-    });
-    await abrirSolapaPagos();
-
-    const fila = within(await screen.findByTestId("fila-pago"));
-    expect(fila.getByText("A cuenta, sin aplicar a ninguna factura ni estadía.")).toBeTruthy();
-  });
-
-  it("el panel de confirmación dice 'quitar' y pide el motivo", async () => {
-    await abrirSolapaPagos();
-
-    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
-
-    const panel = screen.getByPlaceholderText("Por qué se quita (obligatorio)").parentElement;
-    expect(panel?.textContent ?? "").not.toMatch(/imput/i);
-    expect(screen.getByText("Confirmar")).toBeDisabled();
-  });
-
-  it("el aviso de éxito dice cuánto se quitó y cuánto queda a cuenta", async () => {
-    await abrirSolapaPagos();
-
-    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
-    fireEvent.change(screen.getByPlaceholderText(/Por qué se quita/), {
-      target: { value: "Error de carga" },
-    });
-    fireEvent.click(screen.getByText("Confirmar"));
-
-    await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith(
-        "Se quitaron $60.000,00. Quedan $100.000,00 a cuenta."
-      )
-    );
   });
 });
