@@ -254,12 +254,14 @@ describe("findActiveNav", () => {
     expect(activo(admin, "/admin/guests?view=por_llegar")).toBe("reservas/por_llegar");
     expect(activo(admin, "/admin/guests?view=historial&page=2")).toBe("reservas/historial");
     expect(activo(admin, "/admin/fiscal?view=pendientes")).toBe("facturacion/con_error");
-    expect(activo(admin, "/admin/fiscal?view=sin_facturar")).toBe("facturacion/por_facturar");
   });
 
-  it("/admin/fiscal sin solapa: el dueño cae en Por facturar y recepción en Con error", () => {
-    expect(activo(admin, "/admin/fiscal")).toBe("facturacion/por_facturar");
+  it("/admin/fiscal sin solapa marca Con error para los dos roles", () => {
+    expect(activo(admin, "/admin/fiscal")).toBe("facturacion/con_error");
     expect(activo(recepcion, "/admin/fiscal")).toBe("facturacion/con_error");
+    // El alias de la solapa que ya no existe no marca Por facturar (la pantalla redirige
+    // antes de dibujar); con un valor que ninguna pestaña reconoce, vale la de por defecto.
+    expect(activo(admin, "/admin/fiscal?view=sin_facturar")).toBe("facturacion/con_error");
     // La pantalla le muestra a recepción su única solapa con cualquier ?view=.
     expect(activo(recepcion, "/admin/fiscal?view=emitidas")).toBe("facturacion/con_error");
   });

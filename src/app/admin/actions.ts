@@ -69,7 +69,6 @@ type CheckoutPayload = {
 
 function revalidateCalendarViews() {
   revalidatePath("/admin/calendario");
-  revalidatePath("/admin/timeline");
 }
 
 export async function handleLateCheckOut(

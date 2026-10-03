@@ -55,7 +55,6 @@ function abrir(pending: PendingInvoiceRow[]) {
     <FiscalClient
       enabled
       pending={pending}
-      invoiceable={[]}
       authorized={[]}
       from="2026-09-01"
       to="2026-09-27"

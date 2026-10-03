@@ -52,6 +52,22 @@ export function buildPresets(todayKey: string): RangePreset[] {
  */
 export const BILLING_EPOCH = "2020-01-01";
 
+const BILLING_LAST_10_DAYS_LABEL = "Últimos 10 días";
+
+/**
+ * Adónde lleva un marcador viejo a "Sin facturar" (`/admin/fiscal?view=sin_facturar`):
+ * a Por facturar con el atajo "Últimos 10 días" elegido y solo lo pendiente (lo que
+ * falta más lo que espera la consolidada, que es lo que cuenta el número rojo del menú).
+ */
+export function sinFacturarRedirectHref(todayKey: string): string {
+  const params = new URLSearchParams({
+    desde: addDaysToDateKey(todayKey, -9),
+    hasta: todayKey,
+    estado: "pendiente",
+  });
+  return `/admin/fiscal/control?${params.toString()}`;
+}
+
 /**
  * Presets para facturación: razonan por mes, no por "últimos N días" (a diferencia
  * de buildPresets, pensado para los tableros de ocupación).
@@ -68,6 +84,9 @@ export function buildBillingPresets(todayKey: string): RangePreset[] {
   const pmM = prevMonthLast.getUTCMonth() + 1;
   const yearStart = `${ty}-01-01`;
   return [
+    // Hoy y los 9 días anteriores, días del hotel: es lo que usaba el dueño en la solapa
+    // "Sin facturar" de /admin/fiscal, que ya no existe.
+    { label: BILLING_LAST_10_DAYS_LABEL, from: addDaysToDateKey(todayKey, -9), to: todayKey },
     { label: "Este mes", from: monthStart, to: todayKey },
     {
       label: "Mes anterior",

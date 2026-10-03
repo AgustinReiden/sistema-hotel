@@ -1,15 +1,10 @@
 import { after } from "next/server";
+import { redirect } from "next/navigation";
 import { FileText } from "lucide-react";
 
 import { sweepStaleInvoices } from "@/lib/arca/emitter";
-import {
-  getFiscalSettings,
-  getHotelSettings,
-  listAuthorizedInvoices,
-  listInvoiceableCheckouts,
-  listPendingInvoices,
-} from "@/lib/data";
-import { DATE_KEY } from "@/lib/date-range";
+import { getFiscalSettings, getHotelSettings, listAuthorizedInvoices, listPendingInvoices } from "@/lib/data";
+import { DATE_KEY, sinFacturarRedirectHref } from "@/lib/date-range";
 import { PageHeader } from "../PageShell";
 import { isCurrentUserAdmin } from "@/lib/server-auth";
 import { hotelDateKey } from "@/lib/time";
@@ -46,6 +41,12 @@ export default async function FiscalPage({ searchParams }: PageProps) {
   const todayKey = hotelDateKey(new Date(), hotelSettings?.timezone);
   const monthStartKey = `${todayKey.slice(0, 7)}-01`;
   const { desde, hasta, view: viewParam, tipo: tipoParam, q: qParam } = await searchParams;
+  // La solapa "Sin facturar" del dueño pasó a ser el atajo "Últimos 10 días" de Por
+  // facturar: un marcador viejo abre esa pantalla con el atajo elegido. A recepción no
+  // se la redirige: no tenía esa solapa y sigue entrando a "Con error".
+  if (isAdmin && viewParam === "sin_facturar") {
+    redirect(sinFacturarRedirectHref(todayKey));
+  }
   const view = parseFiscalView(viewParam, isAdmin);
   let fromKey = desde && DATE_KEY.test(desde) ? desde : monthStartKey;
   let toKey = hasta && DATE_KEY.test(hasta) ? hasta : todayKey;
@@ -56,16 +57,12 @@ export default async function FiscalPage({ searchParams }: PageProps) {
   const tipo = tipoParam && TIPO_FILTROS.has(tipoParam) ? tipoParam : "";
   const q = qParam ?? "";
 
-  // Cada solapa trae sólo su lista: las otras dos no se ven, así que pedirlas sería
-  // pagar tres consultas para pintar una.
-  const [settings, pending, invoiceable, authorized] = await Promise.all([
+  // Cada solapa trae sólo su lista: la otra no se ve, así que pedirla sería pagar dos
+  // consultas para pintar una. Al recepcionista, lo suyo son las pendientes/con error
+  // de su turno abierto.
+  const [settings, pending, authorized] = await Promise.all([
     getFiscalSettings().catch(() => null),
     view === "pendientes" ? listPendingInvoices().catch(() => []) : Promise.resolve([]),
-    // Los check-outs sin facturar son del administrador: al recepcionista ni se le
-    // piden. Lo suyo son las pendientes/con error de su turno abierto.
-    isAdmin && view === "sin_facturar"
-      ? listInvoiceableCheckouts().catch(() => [])
-      : Promise.resolve([]),
     view === "emitidas" ? listAuthorizedInvoices(fromKey, toKey).catch(() => []) : Promise.resolve([]),
   ]);
 
@@ -89,7 +86,6 @@ export default async function FiscalPage({ searchParams }: PageProps) {
           <FiscalClient
             enabled={Boolean(settings?.enabled)}
             pending={pending}
-            invoiceable={invoiceable}
             authorized={authorized}
             from={fromKey}
             to={toKey}

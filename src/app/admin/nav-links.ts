@@ -212,30 +212,27 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
       icon: FileText,
       tabs: [
         {
-          // /admin/fiscal sin solapa le muestra al dueño "Sin facturar", que es lo mismo
-          // que esta pestaña: por eso marca acá hasta que F1-7 lo unifique.
+          // La solapa "Sin facturar" de /admin/fiscal ya no existe: es el atajo "Últimos 10
+          // días" de esta pantalla, y ?view=sin_facturar redirige acá.
           id: "por_facturar",
           label: "Por facturar",
           href: "/admin/fiscal/control",
           icon: ClipboardCheck,
           adminOnly: true,
-          match: [
-            { path: "/admin/fiscal/control" },
-            { path: "/admin/fiscal/consolidada" },
-            { path: "/admin/fiscal", exact: true, param: { name: "view", value: "sin_facturar", isDefault: true } },
-          ],
+          match: [{ path: "/admin/fiscal/control" }, { path: "/admin/fiscal/consolidada" }],
           keepParams: CONTROL_KEEP_PARAMS,
           // Sin ventana en el texto: el número es de todo el historial, y es el mismo que
           // muestra el control al abrir.
           badge: countBadge(unbilledCount, "alert", plural(unbilledCount, "estadía sin facturar", "estadías sin facturar")),
         },
         {
-          // Recepción tiene solo esta solapa: /admin/fiscal le abre esto con cualquier ?view=.
+          // /admin/fiscal sin solapa (o con una desconocida) abre esto, para los dos roles; a
+          // recepción, que tiene solo esta solapa, le abre esto con cualquier ?view=.
           id: "con_error",
           label: "Con error",
           href: "/admin/fiscal?view=pendientes",
           icon: AlertTriangle,
-          match: [{ path: "/admin/fiscal", exact: true, param: { name: "view", value: "pendientes", isDefault: !isAdmin } }],
+          match: [{ path: "/admin/fiscal", exact: true, param: { name: "view", value: "pendientes", isDefault: true } }],
           keepParams: FISCAL_KEEP_PARAMS,
           // Urgente: con Facturación cerrada, le gana al rojo de Por facturar.
           badge: countBadge(

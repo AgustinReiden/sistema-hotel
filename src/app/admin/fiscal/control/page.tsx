@@ -1,6 +1,8 @@
+import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { ClipboardCheck } from "lucide-react";
 
+import { sweepStaleInvoices } from "@/lib/arca/emitter";
 import { getCtaCteAccounts, getCurrentUserRole, listBillingControl } from "@/lib/data";
 import { isBillingCobroFilter } from "@/lib/billing";
 import { BILLING_EPOCH } from "@/lib/date-range";
@@ -28,6 +30,12 @@ export default async function ControlFacturacionPage({
   if (role !== "admin") {
     redirect("/forbidden");
   }
+
+  // Barrido de facturas trabadas en ARCA. Antes solo lo disparaba /admin/fiscal; ahora
+  // que el dueño trabaja desde acá, abrir Por facturar alcanza para reconciliarlas (sigue
+  // también en /admin/fiscal). Va en `after()`: corre después de mandar la respuesta, así
+  // que no demora la pantalla aunque ARCA tarde. `sweepStaleInvoices` nunca lanza.
+  after(sweepStaleInvoices());
 
   const { desde, hasta, cliente, estado, cobro, rastro } = await searchParams;
   // El "hoy" del hotel se resuelve en el server y viaja como prop: si lo calculara
