@@ -204,6 +204,73 @@ describe("PaymentModal: cobro a cuenta antes del check-out", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
+  it("si la respuesta no vuelve (la acción tira), no queda girando y avisa que pudo haber entrado", async () => {
+    H.registerPaymentAction.mockRejectedValue(new Error("network"));
+    const { onSuccess, onClose } = abrirCobroACuenta();
+
+    cargarMonto("20.000");
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+
+    await waitFor(() => expect(screen.getByText(/Pudo haberse registrado/)).toBeTruthy());
+    expect(screen.getByText(/mirá la caja antes de repetir/)).toBeTruthy();
+    // No se cierra ni se da por hecho: el cuadro sigue y el botón vuelve a estar libre.
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      (screen.getByText("Registrar Pago").closest("button") as HTMLButtonElement).disabled
+    ).toBe(false);
+  });
+
+  it("mientras el cobro está en vuelo, la X y Cancelar no dejan cerrar el cuadro", async () => {
+    let resolver: (v: unknown) => void = () => {};
+    H.registerPaymentAction.mockReturnValue(new Promise((r) => (resolver = r)));
+    const { onClose } = abrirCobroACuenta();
+
+    cargarMonto("20.000");
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+
+    const cancelar = await waitFor(() => {
+      const b = screen.getByText("Cancelar").closest("button") as HTMLButtonElement;
+      expect(b.disabled).toBe(true);
+      return b;
+    });
+    fireEvent.click(cancelar);
+    const x = screen.getByLabelText("Cerrar") as HTMLButtonElement;
+    expect(x.disabled).toBe(true);
+    fireEvent.click(x);
+    expect(onClose).not.toHaveBeenCalled();
+
+    resolver({ success: true, data: { paymentId: null } });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("si el navegador bloquea el recibo, avisa y deja un botón para abrirlo", async () => {
+    const open = vi.fn().mockReturnValue(null);
+    vi.stubGlobal("open", open);
+    H.toast.warning.mockReset();
+    H.registerPaymentAction.mockResolvedValue({ success: true, data: { paymentId: "pay-9" } });
+    const { onSuccess } = abrirCobroACuenta();
+
+    cargarMonto("20.000");
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+
+    await waitFor(() => expect(H.toast.warning).toHaveBeenCalledTimes(1));
+    const [mensaje, opciones] = H.toast.warning.mock.calls[0];
+    expect(mensaje).toMatch(/bloque/);
+    // El botón es un click nuevo: ahí sí puede abrir la ventana.
+    open.mockReturnValue({} as Window);
+    opciones.action.onClick();
+    expect(open).toHaveBeenLastCalledWith(
+      "/admin/recibo/pay-9?autoprint=1&copy=original",
+      expect.any(String),
+      expect.any(String)
+    );
+    expect(onSuccess).toHaveBeenCalled();
+  });
+
   it("se abre encima del detalle del calendario (z-[60])", () => {
     const { container } = abrirCobroACuenta();
 

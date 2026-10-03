@@ -8,16 +8,16 @@ import { toast } from "sonner";
 import { registerPaymentAction } from "@/app/admin/finances/actions";
 import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
 import { formatAmount, formatAmountForInput, parseArMoney } from "@/lib/format";
+import { openPrintWindow } from "@/lib/print-window";
 import type { ActionResult, PaymentMethod } from "@/lib/types";
 
-function openReceipt(paymentId: string) {
+function openReceipt(paymentId: string): boolean {
   // Abre el recibo imprimible en una ventana nueva con auto-print.
   // En Chrome con --kiosk-printing imprime sin diálogo.
-  if (typeof window === "undefined") return;
-  window.open(
+  // Devuelve false si el navegador bloqueó la ventana: el pago ya está asentado.
+  return openPrintWindow(
     `/admin/recibo/${paymentId}?autoprint=1&copy=original`,
-    "recibo-" + paymentId,
-    "width=420,height=720"
+    "recibo-" + paymentId
   );
 }
 
@@ -109,6 +109,9 @@ export default function PaymentModal({
     numericDiscountPercent > 0 || numericDiscountAmount > 0;
 
   const [loading, setLoading] = useState(false);
+  // Con el cobro en vuelo (fuera del check-out, que tiene su propio control) no se
+  // cierra el cuadro: cerrarlo dejaba volver a cobrar mientras el primero seguía.
+  const closeLocked = loading && !isCheckoutMode;
   const [error, setError] = useState<string | null>(null);
   const [noOpenShift, setNoOpenShift] = useState(false);
   // Precargado ya formateado ("43.700,00"). Con debt.toString() un saldo con restos
@@ -187,7 +190,17 @@ export default function PaymentModal({
         return;
       }
 
-      result = await registerPaymentAction(reservationId, parsedAmount, method);
+      try {
+        result = await registerPaymentAction(reservationId, parsedAmount, method);
+      } catch {
+        // La respuesta no volvió (se cortó la red): el pago pudo haber entrado.
+        // Repetirlo a ciegas lo duplicaría, así que no se cierra ni se da por hecho.
+        setLoading(false);
+        setError(
+          "No pudimos confirmar el cobro. Pudo haberse registrado: mirá la caja antes de repetir."
+        );
+        return;
+      }
     }
 
     setLoading(false);
@@ -204,7 +217,15 @@ export default function PaymentModal({
       // check-out lo abre el padre, después de la pregunta de factura.
       const paymentId = (result.data as { paymentId?: string | null } | undefined)?.paymentId;
       if (paymentId && !isCheckoutMode) {
-        openReceipt(paymentId);
+        if (!openReceipt(paymentId)) {
+          // Ventana emergente bloqueada: el pago quedó, falta el papel. El botón es
+          // un click nuevo, así que el navegador sí deja abrirla.
+          toast.warning("El navegador bloqueó el recibo. El pago ya quedó registrado.", {
+            duration: Infinity,
+            closeButton: true,
+            action: { label: "Abrir recibo", onClick: () => openReceipt(paymentId) },
+          });
+        }
       }
       onSuccess?.();
       onClose();
@@ -245,7 +266,12 @@ export default function PaymentModal({
               <p className="text-slate-500 text-sm font-medium">{clientName}</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            disabled={closeLocked}
+            className="text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <X size={24} />
           </button>
         </div>
@@ -441,7 +467,8 @@ export default function PaymentModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+            disabled={closeLocked}
+            className="px-6 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancelar
           </button>
