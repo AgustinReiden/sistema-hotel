@@ -778,6 +778,25 @@ export type ReservadoSinCobrarGroup = {
 /** Cuántas empresas se muestran sueltas antes de juntar el resto en "Otras empresas". */
 export const RESERVADO_SIN_COBRAR_TOP = 5;
 
+/** Saldo de una reserva en centavos enteros (precio total − pagado). Puede ser ≤ 0. */
+function saldoReservadoCents(row: ReservadoSinCobrarRow): number {
+  return Math.round((Number(row.totalPrice) || 0) * 100) - Math.round((Number(row.paidAmount) || 0) * 100);
+}
+
+/**
+ * Total de "Reservado sin cobrar": suma de los saldos positivos, en centavos enteros.
+ * Es la misma cuenta que usa `agruparReservadoSinCobrar`, así el total de la tarjeta y la
+ * suma de su desglose salen del mismo cálculo y no pueden separarse.
+ */
+export function totalReservadoSinCobrar(rows: ReservadoSinCobrarRow[]): number {
+  let cents = 0;
+  for (const row of rows) {
+    const saldo = saldoReservadoCents(row);
+    if (saldo > 0) cents += saldo;
+  }
+  return cents / 100;
+}
+
 /**
  * Desglose por empresa del "reservado sin cobrar" (precio total − pagado de las
  * reservas activas). Solo cuentan los saldos positivos: lo pagado de más no resta.
@@ -790,8 +809,7 @@ export function agruparReservadoSinCobrar(rows: ReservadoSinCobrarRow[]): Reserv
   let particularesCents = 0;
 
   for (const row of rows) {
-    const saldoCents =
-      Math.round((Number(row.totalPrice) || 0) * 100) - Math.round((Number(row.paidAmount) || 0) * 100);
+    const saldoCents = saldoReservadoCents(row);
     if (!(saldoCents > 0)) continue;
     if (row.clientId === null || row.clientId === undefined) {
       particularesCents += saldoCents;

@@ -25,6 +25,7 @@ import {
   buildSalesSettlement,
   sumAccountMovements,
   agruparReservadoSinCobrar,
+  totalReservadoSinCobrar,
   type DailyOccupancy,
   type DailyTotal,
   type ClosedStay,
@@ -802,19 +803,21 @@ describe("agruparReservadoSinCobrar", () => {
       fila(2, "Otra Empresa Ficticia SA", 0.3, 0),
       fila(null, null, 0.1, 0),
       fila(null, null, 50, 60),
+      ...[3, 4, 5, 6, 7, 8].map((id) => fila(id, `Empresa Ficticia ${id}`, 10.1 * id, 0.3)),
     ];
-    // Mismo cálculo que accountsReceivable en getManagementDashboardData.
-    const totalTarjeta =
-      Math.round(
-        (filas.reduce((s, f) => {
-          const saldo = f.totalPrice - f.paidAmount;
-          return s + (saldo > 0 ? saldo : 0);
-        }, 0) +
-          Number.EPSILON) *
-          100
-      ) / 100;
+    // totalReservadoSinCobrar es lo que usa data.ts para la tarjeta: sale del mismo cálculo.
     const suma = agruparReservadoSinCobrar(filas).reduce((s, g) => s + Math.round(g.total * 100), 0) / 100;
-    expect(suma).toBe(totalTarjeta);
+    expect(suma).toBe(totalReservadoSinCobrar(filas));
+  });
+
+  it("totalReservadoSinCobrar ignora saldos ≤ 0 y acepta importes como texto", () => {
+    expect(totalReservadoSinCobrar([])).toBe(0);
+    expect(
+      totalReservadoSinCobrar([
+        { clientId: 3, clientName: "Empresa Ficticia SA", totalPrice: "1500.50", paidAmount: "500.25" },
+        fila(null, null, 50, 60),
+      ])
+    ).toBe(1000.25);
   });
 
   it("acepta importes como texto y devuelve vacío si no hay saldos", () => {

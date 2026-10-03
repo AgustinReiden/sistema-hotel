@@ -30,6 +30,7 @@ import {
   computeWindowKpis,
   sumAccountMovements,
   agruparReservadoSinCobrar,
+  totalReservadoSinCobrar,
   countDaysInclusive,
   hotelRangeToUtc,
   pctDelta,
@@ -3311,22 +3312,16 @@ export async function getManagementDashboardData(
     associated_clients: { display_name: string | null } | { display_name: string | null }[] | null;
   };
   const receivableRows = (receivableRes.data ?? []) as ReceivableRow[];
-  const accountsReceivable = round2(
-    receivableRows.reduce((sum, r) => {
-      const bal = (Number(r.total_price) || 0) - (Number(r.paid_amount) || 0);
-      return sum + (bal > 0 ? bal : 0);
-    }, 0)
-  );
-  const receivableByCompany = agruparReservadoSinCobrar(
-    receivableRows.map((r) => ({
-      clientId: r.associated_client_id,
-      clientName: Array.isArray(r.associated_clients)
-        ? r.associated_clients[0]?.display_name ?? null
-        : r.associated_clients?.display_name ?? null,
-      totalPrice: r.total_price,
-      paidAmount: r.paid_amount,
-    }))
-  );
+  const receivableItems = receivableRows.map((r) => ({
+    clientId: r.associated_client_id,
+    clientName: Array.isArray(r.associated_clients)
+      ? r.associated_clients[0]?.display_name ?? null
+      : r.associated_clients?.display_name ?? null,
+    totalPrice: r.total_price,
+    paidAmount: r.paid_amount,
+  }));
+  const accountsReceivable = totalReservadoSinCobrar(receivableItems);
+  const receivableByCompany = agruparReservadoSinCobrar(receivableItems);
   const debtors = (ccAccounts as CtaCteAccount[]).filter((a) => a.balance > 0);
   const currentAccountDebt = round2(debtors.reduce((sum, a) => sum + a.balance, 0));
   const topDebtors = debtors.slice(0, 5).map((a) => ({ name: a.name, balance: a.balance }));

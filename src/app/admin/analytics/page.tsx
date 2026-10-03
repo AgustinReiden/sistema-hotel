@@ -311,14 +311,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                     className="mt-3 pt-3 border-t border-slate-100 space-y-1.5"
                   >
                     {data.receivableByCompany.map((g, i) => (
-                      <li key={`${g.kind}-${i}`}className="flex items-baseline justify-between gap-2 text-xs">
+                      <li key={`${g.kind}-${i}`} className="flex flex-col gap-0.5 text-xs">
                         <span
-                          className={`truncate ${g.kind === "empresa" ? "text-slate-700 font-medium" : "text-slate-500 italic"}`}
-                          title={g.name}
+                          className={`break-words ${g.kind === "empresa" ? "text-slate-700 font-medium" : "text-slate-500 italic"}`}
                         >
                           {g.name}
                         </span>
-                        <span className="font-semibold text-slate-900 shrink-0">{money(g.total)}</span>
+                        <span className="font-semibold text-slate-900">{money(g.total)}</span>
                       </li>
                     ))}
                   </ul>
