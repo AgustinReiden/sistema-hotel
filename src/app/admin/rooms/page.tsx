@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getAllRooms, getCurrentUserRole, getRoomCategories } from "@/lib/data";
+import { roomsCountLabel } from "@/lib/rooms-count";
 import RoomsClientTable from "./RoomsClientTable";
-import Link from "next/link";
+import RoomsSubNav from "./RoomsSubNav";
 
 export default async function RoomsPage() {
     // Sólo admin: acá se activan, desactivan y renombran habitaciones.
@@ -15,6 +16,7 @@ export default async function RoomsPage() {
 
     return (
         <div className="p-8">
+            <RoomsSubNav current="habitaciones" />
             <div className="mb-8 flex justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">Gestión de Habitaciones</h1>
@@ -22,16 +24,8 @@ export default async function RoomsPage() {
                         Edita las características, cupos y comodidades de las habitaciones del hotel.
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
-                    <Link
-                        href="/admin/categorias"
-                        className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50 transition-colors"
-                    >
-                        Gestionar categorías
-                    </Link>
-                    <div className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg font-bold text-sm">
-                        Total: {rooms.length} habitaciones
-                    </div>
+                <div className="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg font-bold text-sm">
+                    {roomsCountLabel(rooms)}
                 </div>
             </div>
 

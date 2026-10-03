@@ -299,7 +299,7 @@ export default function FiscalClient({
         <FileText size={32} className="mx-auto mb-3 text-slate-300" />
         <p className="font-semibold">La facturación electrónica no está habilitada.</p>
         <p className="text-sm mt-1">
-          Un administrador puede configurarla en Ajustes → Facturación electrónica (ARCA).
+          Un administrador puede configurarla en Configuración → ARCA.
         </p>
       </div>
     );

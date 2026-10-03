@@ -66,7 +66,7 @@ describe("menu por secciones", () => {
     expect(labels("facturacion")).toEqual(["Por facturar", "Con error", "Emitidas", "Remitos"]);
     expect(labels("clientes")).toEqual(["Directorio", "Empresas y convenios", "Cuenta corriente", "Descuentos"]);
     expect(labels("tablero")).toEqual(["General", "Por habitación", "Cobros del día", "Limpiezas"]);
-    expect(labels("configuracion")).toEqual(["Ajustes", "Habitaciones y tarifas"]);
+    expect(labels("configuracion")).toEqual(["Hotel y mensajes", "Habitaciones y tarifas", "ARCA", "Usuarios"]);
   });
 
   it("recepción ve su caja: Mi turno y Mis rendiciones", () => {
@@ -112,6 +112,8 @@ describe("menu por secciones", () => {
       "/admin/mantenimiento",
       "/admin/settings",
       "/admin/rooms",
+      "/admin/settings?tab=arca",
+      "/admin/settings?tab=usuarios",
     ]);
   });
 
@@ -235,6 +237,13 @@ describe("findActiveNav", () => {
     expect(activo(admin, "/admin/rooms")).toBe("configuracion/habitaciones");
   });
 
+  it("Configuración marca su pestaña según ?tab=, y una desconocida cae en Hotel y mensajes", () => {
+    expect(activo(admin, "/admin/settings?tab=hotel")).toBe("configuracion/hotel");
+    expect(activo(admin, "/admin/settings?tab=arca")).toBe("configuracion/arca");
+    expect(activo(admin, "/admin/settings?tab=usuarios")).toBe("configuracion/usuarios");
+    expect(activo(admin, "/admin/settings?tab=cualquiera")).toBe("configuracion/hotel");
+  });
+
   it("los comprobantes para imprimir no marcan ninguna sección", () => {
     expect(activo(admin, "/admin/recibo/1")).toBeNull();
     expect(activo(recepcion, "/admin/recibo/1")).toBeNull();
@@ -248,7 +257,7 @@ describe("findActiveNav", () => {
     expect(activo(admin, "/admin/asociados")).toBe("clientes/empresas");
     expect(activo(admin, "/admin/finances")).toBe("tablero/cobros");
     expect(activo(admin, "/admin/mantenimiento")).toBe("tablero/limpiezas");
-    expect(activo(admin, "/admin/settings")).toBe("configuracion/ajustes");
+    expect(activo(admin, "/admin/settings")).toBe("configuracion/hotel");
   });
 
   it("con parámetro compara el valor, y la pestaña por defecto vale sin él", () => {

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserRole, getRoomCategoriesWithUsage } from "@/lib/data";
 import CategoriesClientTable from "./CategoriesClientTable";
+import RoomsSubNav from "../rooms/RoomsSubNav";
 
 export default async function CategoriesPage() {
     // Sólo admin: acá se cargan los precios de la noche y del medio día.
@@ -11,6 +12,7 @@ export default async function CategoriesPage() {
 
     return (
         <div className="p-8">
+            <RoomsSubNav current="categorias" />
             <div className="mb-8 flex justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">Categorías de habitaciones</h1>

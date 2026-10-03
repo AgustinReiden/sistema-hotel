@@ -12,6 +12,7 @@ import {
   FileText,
   HandCoins,
   History,
+  Landmark,
   LayoutDashboard,
   Percent,
   Receipt,
@@ -19,6 +20,7 @@ import {
   Signature,
   Sparkles,
   UserCheck,
+  UserCog,
   Users,
   Wallet,
   type LucideIcon,
@@ -346,11 +348,12 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
       adminOnly: true,
       tabs: [
         {
-          id: "ajustes",
-          label: "Ajustes",
+          id: "hotel",
+          label: "Hotel y mensajes",
           href: "/admin/settings",
           icon: Settings,
-          match: [{ path: "/admin/settings" }],
+          // Sin ?tab= (o con uno desconocido) la pantalla abre esta solapa.
+          match: [{ path: "/admin/settings", exact: true, param: { name: "tab", value: "hotel", isDefault: true } }],
         },
         {
           id: "habitaciones",
@@ -358,6 +361,20 @@ function todasLasSecciones(role: string, state: NavState): NavSection[] {
           href: "/admin/rooms",
           icon: BedDouble,
           match: [{ path: "/admin/rooms" }, { path: "/admin/categorias" }],
+        },
+        {
+          id: "arca",
+          label: "ARCA",
+          href: "/admin/settings?tab=arca",
+          icon: Landmark,
+          match: [{ path: "/admin/settings", exact: true, param: { name: "tab", value: "arca" } }],
+        },
+        {
+          id: "usuarios",
+          label: "Usuarios",
+          href: "/admin/settings?tab=usuarios",
+          icon: UserCog,
+          match: [{ path: "/admin/settings", exact: true, param: { name: "tab", value: "usuarios" } }],
         },
       ],
     },

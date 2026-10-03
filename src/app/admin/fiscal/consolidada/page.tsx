@@ -85,7 +85,7 @@ export default async function ConsolidadaPage({
             ? settings.environment === "homologacion"
               ? "Ambiente de PRUEBA (homologación): los comprobantes no tienen valor fiscal."
               : "Ambiente de PRODUCCIÓN: se emiten facturas reales."
-            : "La facturación electrónica no está habilitada (Ajustes → Facturación electrónica)."}
+            : "La facturación electrónica no está habilitada (Configuración → ARCA)."}
         </p>
       </header>
 
