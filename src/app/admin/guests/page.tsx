@@ -9,6 +9,7 @@ import {
 } from "@/lib/data";
 import { PAGE_SIZE, paginate, parsePageParam } from "@/lib/pagination";
 import { hotelDateKey } from "@/lib/time";
+import { resolveGuestsView, type GuestsView } from "@/lib/upcoming";
 import HistoryRangeFilter, { type HistoryOrder } from "./HistoryRangeFilter";
 import PaginationFooter from "../PaginationFooter";
 import GuestsClientTable from "./GuestsClientTable";
@@ -16,8 +17,6 @@ import GuestDirectoryTable from "./GuestDirectoryTable";
 import UpcomingGuestsTable from "./UpcomingGuestsTable";
 
 export const dynamic = "force-dynamic";
-
-type GuestsView = "directorio" | "historial" | "por_llegar";
 
 type GuestsPageProps = {
   searchParams: Promise<{
@@ -38,22 +37,27 @@ const VIEW_TITLES: Record<GuestsView, string> = {
   por_llegar: "Por llegar",
 };
 
-function parseView(value: string | undefined): GuestsView {
-  if (value === "historial" || value === "por_llegar") return value;
-  return "directorio";
-}
-
 export default async function GuestsPage({ searchParams }: GuestsPageProps) {
   const role = await getCurrentUserRole();
-  if (role !== "admin") {
+  if (role !== "admin" && role !== "receptionist") {
     redirect("/forbidden");
   }
 
   const params = await searchParams;
   const search = (params.q ?? "").trim();
-  const view = parseView(params.view);
-  const includeCancelled = params.cancelled === "1";
   const page = parsePageParam(params.page);
+
+  // Recepción solo ve Por llegar, en solo lectura: cualquier otra vista la manda ahí,
+  // conservando la búsqueda y la página.
+  const resolved = resolveGuestsView(params.view, role);
+  if (resolved.redirect) {
+    const parts = ["view=por_llegar"];
+    if (search) parts.push(`q=${encodeURIComponent(search)}`);
+    if (page > 1) parts.push(`page=${page}`);
+    redirect(`/admin/guests?${parts.join("&")}`);
+  }
+  const view = resolved.view;
+  const includeCancelled = params.cancelled === "1";
 
   const hotelSettings = await getHotelSettings().catch(() => null);
   const timezone = hotelSettings?.timezone || "America/Argentina/Tucuman";
@@ -173,6 +177,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
             guests={upcoming.rows}
             searchQuery={search}
             timezone={timezone}
+            todayKey={todayKey}
             footer={
               <PaginationFooter
                 page={upcoming.page}

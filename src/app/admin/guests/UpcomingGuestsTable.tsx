@@ -2,16 +2,26 @@ import type { ReactNode } from "react";
 
 import { formatHotelShortDateTime } from "@/lib/time";
 import type { UpcomingGuest } from "@/lib/types";
+import { upcomingStatus, type UpcomingStatus } from "@/lib/upcoming";
+
+const STATUS_BADGES: Record<UpcomingStatus, { label: string; className: string }> = {
+  solicitud: { label: "Solicitud web", className: "bg-amber-100 text-amber-800 border-amber-200" },
+  confirmada: { label: "Confirmada", className: "bg-blue-100 text-blue-800 border-blue-200" },
+  atrasada: { label: "Atrasada (no vino)", className: "bg-red-100 text-red-800 border-red-200" },
+};
 
 export default function UpcomingGuestsTable({
   guests,
   searchQuery,
   timezone,
+  todayKey,
   footer,
 }: {
   guests: UpcomingGuest[];
   searchQuery: string;
   timezone: string;
+  /** Hoy en hora del hotel ("YYYY-MM-DD"): decide quién figura como atrasada. */
+  todayKey: string;
   /** El pie de paginación, que la página arma y esto acomoda dentro de la tarjeta. */
   footer?: ReactNode;
 }) {
@@ -55,9 +65,16 @@ export default function UpcomingGuestsTable({
                 {formatHotelShortDateTime(guest.check_out_target, timezone)}
               </td>
               <td className="px-6 py-4">
-                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                  Por Llegar
-                </span>
+                {(() => {
+                  const status = STATUS_BADGES[upcomingStatus(guest, todayKey, timezone)];
+                  return (
+                    <span
+                      className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${status.className}`}
+                    >
+                      {status.label}
+                    </span>
+                  );
+                })()}
               </td>
             </tr>
           ))}

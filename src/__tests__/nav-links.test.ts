@@ -38,9 +38,11 @@ describe("menu por secciones", () => {
   it("recepción ve exactamente Hoy, Reservas, Caja y Facturación", () => {
     expect(getNavSections("receptionist").map((s) => s.id)).toEqual(["hoy", "reservas", "caja", "facturacion"]);
     const ids = tabsDe("receptionist").map((t) => t.id);
-    for (const oculta of ["historial", "por_llegar", "emitidas", "por_facturar", "remitos"]) {
+    for (const oculta of ["historial", "emitidas", "por_facturar", "remitos"]) {
       expect(ids).not.toContain(oculta);
     }
+    // Por llegar es la única pantalla de /admin/guests que recepción ve, en solo lectura.
+    expect(ids).toContain("por_llegar");
     const facturacion = getNavSections("receptionist").find((s) => s.id === "facturacion");
     expect(facturacion?.tabs.map((t) => t.label)).toEqual(["Con error"]);
   });
@@ -73,6 +75,7 @@ describe("menu por secciones", () => {
     expect(getNavSections("receptionist").find((s) => s.id === "reservas")?.tabs.map((t) => t.label)).toEqual([
       "Calendario",
       "Solicitudes",
+      "Por llegar",
     ]);
   });
 
@@ -266,9 +269,10 @@ describe("findActiveNav", () => {
     expect(activo(recepcion, "/admin/fiscal?view=emitidas")).toBe("facturacion/con_error");
   });
 
-  it("recepción no tiene marcada ninguna pantalla del dueño", () => {
+  it("recepción tiene marcada Por llegar y ninguna otra pantalla del dueño", () => {
+    expect(activo(recepcion, "/admin/guests?view=por_llegar")).toBe("reservas/por_llegar");
     expect(activo(recepcion, "/admin/cuentas")).toBeNull();
-    expect(activo(recepcion, "/admin/guests?view=por_llegar")).toBeNull();
+    expect(activo(recepcion, "/admin/guests?view=historial")).toBeNull();
     expect(activo(recepcion, "/admin/remitos")).toBeNull();
   });
 
