@@ -375,6 +375,60 @@ export const closeOccupancyAlertSchema = z.object({
   reservationId: z.string().uuid("La estadia a la que apunta el aviso es invalida."),
 });
 
+/**
+ * Medios que se pueden combinar en un check-out cobrado en varios pagos (F2-4, mig 119).
+ * Quedan afuera la cuenta corriente (fiar cierra la estadía entera, no es un medio de
+ * pago: mig 89) y el vale blanco (consumo interno, cubre el total de una sola vez: mig 73).
+ * La misma lista vive en rpc_staff_checkout_split, que vuelve a validar todo.
+ */
+export const CHECKOUT_SPLIT_METHODS = [
+  "cash",
+  "credit_card",
+  "debit_card",
+  "bank_transfer",
+  "mercado_pago",
+  "other",
+] as const;
+
+export type CheckoutSplitMethod = (typeof CHECKOUT_SPLIT_METHODS)[number];
+
+function hasAtMostTwoDecimals(value: number): boolean {
+  const cents = value * 100;
+  return Math.abs(cents - Math.round(cents)) < 1e-6;
+}
+
+const checkoutPaymentLineSchema = z.object({
+  method: z.enum(CHECKOUT_SPLIT_METHODS, {
+    error: (issue) => {
+      if (issue.input === "cuenta_corriente") {
+        return "La cuenta corriente no se combina con otros medios: si la estadía se fía, el check-out se cierra solo con cuenta corriente.";
+      }
+      if (issue.input === "vale_blanco") {
+        return "El vale blanco no se combina con otros medios: cubre el total de la estadía de una sola vez.";
+      }
+      return "Elegí un medio de pago válido para cada pago.";
+    },
+  }),
+  amount: z
+    .number({ error: "Cada pago tiene que tener un monto." })
+    .refine((v) => Number.isFinite(v) && v > 0, { message: "Cada monto tiene que ser mayor a 0." })
+    .refine(hasAtMostTwoDecimals, { message: "Los montos llevan como mucho 2 decimales (centavos)." }),
+});
+
+/** Los pagos de un check-out partido: de 2 a 4, en el orden en que se cargaron. */
+export const checkoutPaymentsSchema = z
+  .array(checkoutPaymentLineSchema)
+  .min(2, "Para cobrar en varios medios hacen falta al menos 2 pagos.")
+  .max(4, "Se puede cobrar en hasta 4 medios.");
+
+export const checkoutSplitSchema = z.object({
+  reservationId: z.string().uuid("La reserva seleccionada es invalida."),
+  payments: checkoutPaymentsSchema,
+  early: z.boolean().default(false),
+});
+
+export type CheckoutSplitInput = z.input<typeof checkoutSplitSchema>;
+
 export const SUPPORTED_PHONE_COUNTRY_CODES = [
   "54",
   "55",

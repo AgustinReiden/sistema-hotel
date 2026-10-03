@@ -4,6 +4,8 @@ import {
   assignWalkInSchema,
   associatedClientSchema,
   checkInSchema,
+  checkoutPaymentsSchema,
+  checkoutSplitSchema,
   createReservationSchema,
   hotelSettingsSchema,
   publicBookingSchema,
@@ -582,5 +584,143 @@ describe("hotelSettingsSchema", () => {
     expect(() =>
       hotelSettingsSchema.parse({ ...validSettings, contact_whatsapp_phone: "abcde" })
     ).toThrow();
+  });
+});
+
+// F2-4: check-out cobrado en varios medios. La base (rpc_staff_checkout_split, mig 119)
+// vuelve a validar todo; el schema corta antes y con el mensaje en castellano.
+describe("checkoutPaymentsSchema", () => {
+  function firstMessage(input: unknown): string | undefined {
+    const result = checkoutPaymentsSchema.safeParse(input);
+    return result.success ? undefined : result.error.issues[0]?.message;
+  }
+
+  it("acepta efectivo más tarjeta de crédito", () => {
+    const parsed = checkoutPaymentsSchema.parse([
+      { method: "cash", amount: 20000 },
+      { method: "credit_card", amount: 23700 },
+    ]);
+    expect(parsed).toEqual([
+      { method: "cash", amount: 20000 },
+      { method: "credit_card", amount: 23700 },
+    ]);
+  });
+
+  it("acepta hasta 4 medios y montos con centavos", () => {
+    expect(
+      checkoutPaymentsSchema.safeParse([
+        { method: "cash", amount: 1000.5 },
+        { method: "debit_card", amount: 2000.25 },
+        { method: "bank_transfer", amount: 3000 },
+        { method: "mercado_pago", amount: 0.01 },
+      ]).success
+    ).toBe(true);
+  });
+
+  it("rechaza un solo medio: ese check-out va por el camino de siempre", () => {
+    expect(firstMessage([{ method: "cash", amount: 43700 }])).toMatch(/al menos 2/i);
+  });
+
+  it("rechaza más de 4 medios", () => {
+    const five = Array.from({ length: 5 }, () => ({ method: "cash", amount: 100 }));
+    expect(firstMessage(five)).toMatch(/hasta 4/i);
+  });
+
+  it("rechaza la cuenta corriente combinada con otro medio", () => {
+    expect(
+      firstMessage([
+        { method: "cash", amount: 20000 },
+        { method: "cuenta_corriente", amount: 23700 },
+      ])
+    ).toMatch(/cuenta corriente/i);
+  });
+
+  it("rechaza el vale blanco combinado con otro medio", () => {
+    expect(
+      firstMessage([
+        { method: "vale_blanco", amount: 20000 },
+        { method: "cash", amount: 23700 },
+      ])
+    ).toMatch(/vale blanco/i);
+  });
+
+  it("rechaza un medio que no existe", () => {
+    expect(
+      firstMessage([
+        { method: "cash", amount: 20000 },
+        { method: "cheque", amount: 23700 },
+      ])
+    ).toMatch(/medio de pago/i);
+  });
+
+  it("rechaza un monto 0", () => {
+    expect(
+      firstMessage([
+        { method: "cash", amount: 0 },
+        { method: "credit_card", amount: 23700 },
+      ])
+    ).toMatch(/mayor a 0/i);
+  });
+
+  it("rechaza un monto negativo", () => {
+    expect(
+      firstMessage([
+        { method: "cash", amount: -100 },
+        { method: "credit_card", amount: 23700 },
+      ])
+    ).toMatch(/mayor a 0/i);
+  });
+
+  it("rechaza un monto con 3 decimales", () => {
+    expect(
+      firstMessage([
+        { method: "cash", amount: 20000.125 },
+        { method: "credit_card", amount: 23700 },
+      ])
+    ).toMatch(/centavos/i);
+  });
+
+  it("rechaza un monto que no es un número", () => {
+    expect(
+      checkoutPaymentsSchema.safeParse([
+        { method: "cash", amount: "20000" },
+        { method: "credit_card", amount: 23700 },
+      ]).success
+    ).toBe(false);
+    expect(
+      checkoutPaymentsSchema.safeParse([
+        { method: "cash", amount: Number.NaN },
+        { method: "credit_card", amount: 23700 },
+      ]).success
+    ).toBe(false);
+  });
+});
+
+describe("checkoutSplitSchema", () => {
+  const payments = [
+    { method: "cash", amount: 20000 },
+    { method: "credit_card", amount: 23700 },
+  ];
+
+  it("acepta la reserva, los pagos y si es salida anticipada", () => {
+    const parsed = checkoutSplitSchema.parse({
+      reservationId: "11111111-1111-4111-8111-111111111111",
+      payments,
+      early: true,
+    });
+    expect(parsed.early).toBe(true);
+    expect(parsed.payments).toHaveLength(2);
+  });
+
+  it("si no dice nada, no es salida anticipada", () => {
+    const parsed = checkoutSplitSchema.parse({
+      reservationId: "11111111-1111-4111-8111-111111111111",
+      payments,
+    });
+    expect(parsed.early).toBe(false);
+  });
+
+  it("rechaza una reserva que no es un id válido", () => {
+    expect(checkoutSplitSchema.safeParse({ reservationId: "abc", payments, early: false }).success).toBe(false);
   });
 });
