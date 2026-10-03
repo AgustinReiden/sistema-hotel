@@ -88,7 +88,7 @@ describe("globalSearchAction", () => {
     expect(huesped.resumen?.saldo).toBe(1500);
     expect(huesped.resumen?.saldoTexto).toContain("1.500");
     expect(huesped.href).toBe("/admin/guests?view=directorio&q=30.123.456");
-    expect(huesped.hrefCuenta).toBe("/admin/cuentas");
+    expect(huesped.hrefCuenta).toBe(`/admin/cuentas?q=${encodeURIComponent(huesped.titulo)}`);
     expect(result.data!.empresas[0].href).toBe("/admin/asociados?q=30-12345678-1");
   });
 

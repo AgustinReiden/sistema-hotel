@@ -248,7 +248,7 @@ describe("shapeGlobalSearch", () => {
     const huesped = result.huespedes[0];
     expect(huesped.resumen?.saldo).toBe(1500);
     expect(huesped.href).toBe("/admin/guests?view=directorio&q=30.123.456");
-    expect(huesped.hrefCuenta).toBe("/admin/cuentas");
+    expect(huesped.hrefCuenta).toBe(`/admin/cuentas?q=${encodeURIComponent(huesped.titulo)}`);
     const empresa = result.empresas[0];
     expect(empresa.href).toBe("/admin/asociados?q=30-12345678-1");
     expect(empresa.hrefCuenta).toBeUndefined();

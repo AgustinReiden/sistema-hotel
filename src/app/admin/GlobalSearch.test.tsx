@@ -302,3 +302,48 @@ describe("celular", () => {
     expect(input(container)).toBeNull();
   });
 });
+
+describe("texto que todavía no alcanza", () => {
+  it("con una sola letra explica qué escribir en vez de quedar en blanco", async () => {
+    const { container } = render(<GlobalSearch placement="desktop" />);
+    await escribir(container, "p");
+    expect(container.textContent).toContain("Escribí al menos 2 letras");
+    expect(H.globalSearchAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("links de la tarjeta", () => {
+  it("al tocar uno el buscador se cierra y se limpia (escritorio)", async () => {
+    H.globalSearchAction.mockResolvedValue(
+      respuesta({
+        empresas: [
+          persona({ kind: "empresa", key: "e-1", titulo: "Empresa Ficticia SA", href: "/admin/asociados?q=x" }),
+        ],
+      })
+    );
+    const { container } = render(<GlobalSearch placement="desktop" />);
+    await escribir(container, "empresa");
+    await pasar(250);
+    const link = container.querySelector<HTMLAnchorElement>("[data-search-card] a")!;
+    fireEvent.click(link);
+    expect(container.querySelector("[data-search-card]")).toBeNull();
+    expect(input(container).value).toBe("");
+  });
+
+  it("en el celular cierra la pantalla completa", async () => {
+    H.globalSearchAction.mockResolvedValue(
+      respuesta({
+        empresas: [
+          persona({ kind: "empresa", key: "e-1", titulo: "Empresa Ficticia SA", href: "/admin/asociados?q=x" }),
+        ],
+      })
+    );
+    const { container } = render(<GlobalSearch placement="mobile" />);
+    fireEvent.click(container.querySelector('[aria-label="Buscar"]')!);
+    await escribir(container, "empresa");
+    await pasar(250);
+    fireEvent.click(container.querySelector<HTMLAnchorElement>("[data-search-card] a")!);
+    expect(container.querySelector("[data-search-overlay]")).toBeNull();
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+});

@@ -588,3 +588,15 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     expect(loadClientPaymentsAction).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("CuentasClient — filtro que llega por link", () => {
+  it("con initialQuery abre con el buscador puesto y filtra las cuentas", () => {
+    const dos: CtaCteAccount[] = [
+      ...accounts,
+      { kind: "guest", id: "otro", name: "Otra Persona Ficticia", document_id: "30123456", balance: 100 },
+    ];
+    const { container } = render(<CuentasClient accounts={dos} initialQuery="Otra Persona" />);
+    expect(container.textContent).toContain("Otra Persona Ficticia");
+    expect(container.textContent).not.toContain("Acme SA");
+  });
+});

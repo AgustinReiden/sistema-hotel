@@ -6,12 +6,17 @@ import CuentasClient from "./CuentasClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function CuentasPage() {
+export default async function CuentasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   const role = await getCurrentUserRole();
   if (role !== "admin") {
     redirect("/forbidden");
   }
 
+  const params = await searchParams;
   const accounts = await getCtaCteAccounts();
   const deudores = accounts.filter((a) => a.balance > 0);
   const totalDeuda = deudores.reduce((sum, a) => sum + a.balance, 0);
@@ -47,7 +52,7 @@ export default async function CuentasPage() {
 
       <div className="flex-1 overflow-auto p-4 md:p-8">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <CuentasClient accounts={accounts} />
+          <CuentasClient accounts={accounts} initialQuery={(params.q ?? "").trim()} />
         </div>
       </div>
     </div>

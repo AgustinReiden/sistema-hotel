@@ -23,9 +23,15 @@ const ACCOUNTS_CSV_COLUMNS: CsvColumn<CtaCteAccount>[] = [
   { header: "Saldo", type: "monto", value: (a) => a.balance },
 ];
 
-export default function CuentasClient({ accounts }: { accounts: CtaCteAccount[] }) {
+export default function CuentasClient({
+  accounts,
+  initialQuery = "",
+}: {
+  accounts: CtaCteAccount[];
+  initialQuery?: string;
+}) {
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [payTarget, setPayTarget] = useState<CtaCteAccount | null>(null);
   const [fichaTarget, setFichaTarget] = useState<CtaCteAccount | null>(null);
 

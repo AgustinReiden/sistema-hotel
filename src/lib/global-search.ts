@@ -319,7 +319,7 @@ export function shapeGlobalSearch(
     };
     if (esAdmin) {
       hit.href = clientHref(match);
-      if (match.facts.saldoCuenta !== null) hit.hrefCuenta = "/admin/cuentas";
+      if (match.facts.saldoCuenta !== null) hit.hrefCuenta = `/admin/cuentas?q=${encodeURIComponent(match.nombre)}`;
     }
     return hit;
   };

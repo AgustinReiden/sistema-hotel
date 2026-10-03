@@ -48,7 +48,7 @@ function dateRange(entrada: string, salida: string): string {
   return `${formatHotelShortDate(entrada, DEFAULT_TZ)} al ${formatHotelShortDate(salida, DEFAULT_TZ)}`;
 }
 
-function SummaryCard({ hit }: { hit: GlobalSearchHit }) {
+function SummaryCard({ hit, onNavigate }: { hit: GlobalSearchHit; onNavigate: () => void }) {
   const summary = hit.resumen;
   const links: { href: string; label: string }[] = [];
   if (hit.href) {
@@ -124,6 +124,7 @@ function SummaryCard({ hit }: { hit: GlobalSearchHit }) {
             <Link
               key={link.href}
               href={link.href}
+              onClick={onNavigate}
               className="rounded-lg border border-brand-700 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50"
             >
               {link.label}
@@ -287,8 +288,9 @@ export default function GlobalSearch({ placement }: Props) {
     }
   };
 
-  const showPanel = panelOpen && (loading || error !== null || result !== null);
   const termReady = !!classifySearchTerm(query);
+  const showHint = panelOpen && query.trim() !== "" && !termReady;
+  const showPanel = panelOpen && (loading || error !== null || result !== null || showHint);
 
   const body = showPanel ? (
     <div
@@ -298,6 +300,11 @@ export default function GlobalSearch({ placement }: Props) {
           : "absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-[26rem] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl"
       }
     >
+      {showHint && (
+        <p className="px-2 py-4 text-center text-sm text-slate-500">
+          Escribí al menos 2 letras, el DNI, el CUIT o el número de la habitación.
+        </p>
+      )}
       {loading && (
         <p className="flex items-center justify-center gap-2 px-4 py-4 text-sm text-slate-500">
           <Loader2 size={16} className="animate-spin" />
@@ -362,7 +369,7 @@ export default function GlobalSearch({ placement }: Props) {
               );
             })}
           </div>
-          {activeHit && <SummaryCard hit={activeHit} />}
+          {activeHit && <SummaryCard hit={activeHit} onNavigate={clearAndClose} />}
         </>
       )}
     </div>
