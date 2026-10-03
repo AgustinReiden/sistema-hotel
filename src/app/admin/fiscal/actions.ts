@@ -30,6 +30,7 @@ import {
   updateFiscalSettings,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
+import { assertStaff } from "@/lib/server-auth";
 import type {
   ActionResult,
   EmitInvoiceOutcome,
@@ -93,6 +94,46 @@ export async function fixInvoiceDniAndRetryAction(
     return { success: true, data: outcome };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "No se pudo corregir el DNI.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * "Guardar DNI" de la pregunta de factura: corrige el DNI de la estadía (aunque ya
+ * esté cerrada) ANTES de emitir. No reintenta ninguna emisión: la factura sale
+ * recién cuando el que factura ve el DNI nuevo y aprieta "Confirmar y emitir".
+ *
+ * Quién puede corregir qué lo decide la RPC (mig 73): recepción, sólo estadías de
+ * su turno abierto; nadie, si ya hay CAE. Acá no se abre ni se endurece ese permiso:
+ * `assertStaff` corta antes a quien no es de mostrador y nada más.
+ */
+export async function fixReservationDniAction(
+  reservationId: string,
+  dni: string
+): Promise<ActionResult> {
+  try {
+    await assertStaff();
+    await fixReservationDniForInvoice(reservationId, dni);
+    revalidateFiscalViews();
+    return { success: true };
+  } catch (error: unknown) {
+    const parsed = parseActionError(error, "No se pudo corregir el DNI.");
+    if (parsed.code === "P0023") {
+      return {
+        success: false,
+        code: parsed.code,
+        error:
+          "Esta estadía no es de tu turno: el DNI no se puede cambiar desde acá. Pedile al administrador.",
+      };
+    }
+    if (parsed.code === "P0020") {
+      return {
+        success: false,
+        code: parsed.code,
+        error:
+          "Esta estadía tiene o tuvo una factura emitida: el DNI no se puede cambiar desde acá. Si la anulaste con nota de crédito, pedile al administrador que lo revise.",
+      };
+    }
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }
