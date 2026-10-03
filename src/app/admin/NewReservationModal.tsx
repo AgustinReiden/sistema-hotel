@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   BedDouble,
   Building2,
   Calendar as CalendarIcon,
@@ -55,6 +56,16 @@ type NewReservationModalProps = {
   standardCheckOutTime?: string;
 };
 
+// La habitación elegida que se sacó del selector porque no está libre para las fechas
+// consultadas (desde/hasta en el formato local del form). El número se busca en `rooms`.
+// `ocupada` es false si la consulta falló: no se sabe si está libre, así que no se avisa.
+type HabitacionQuitada = {
+  roomId: number;
+  desde: string;
+  hasta: string;
+  ocupada: boolean;
+};
+
 type ReservationFormState = {
   mode: ReservationMode;
   // Persona (huesped)
@@ -71,6 +82,7 @@ type ReservationFormState = {
   checkIn: string;
   checkOut: string;
   guestCount: number;
+  habitacionQuitada: HabitacionQuitada | null;
 };
 
 function parseHour(value: string | undefined, fallbackH: number, fallbackM: number): { h: number; m: number } {
@@ -119,6 +131,7 @@ function buildInitialState(
     checkIn: initialValues?.checkIn ?? defaults.checkIn,
     checkOut: initialValues?.checkOut ?? defaults.checkOut,
     guestCount: initialValues?.guestCount ?? 1,
+    habitacionQuitada: null,
   };
 }
 
@@ -126,6 +139,38 @@ function buildInitialState(
 function shortDate(local: string): string {
   if (!local) return "";
   return new Date(local).toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+}
+
+// "La Hab. 5 no está libre del 12 oct al 14 oct. Elegí otra o cambiá las fechas."
+function avisoHabitacionQuitada(numero: string | null, desde: string, hasta: string): string {
+  const fecha = (local: string) =>
+    new Date(local).toLocaleDateString("es-AR", { day: "numeric", month: "short" });
+  const habitacion = numero ? `La Hab. ${numero}` : "La habitación elegida";
+  return `${habitacion} no está libre del ${fecha(desde)} al ${fecha(hasta)}. Elegí otra o cambiá las fechas.`;
+}
+
+// Acomoda la habitación elegida con las libres para desde/hasta (`libres` null = la consulta
+// falló). Si no está libre, se saca del selector y se guarda para avisarlo: si se borra
+// callada, la recepcionista cree que reservó la que había elegido (también al entrar desde el
+// calendario). Si ya se había sacado y con las fechas nuevas está libre, vuelve a quedar elegida.
+function aplicarDisponibilidad(
+  current: ReservationFormState,
+  libres: Room[] | null,
+  desde: string,
+  hasta: string
+): ReservationFormState {
+  const elegida =
+    current.roomId !== "" ? Number(current.roomId) : current.habitacionQuitada?.roomId ?? null;
+  if (elegida === null) return current;
+  const libre = libres !== null && libres.some((r) => r.id === elegida);
+  if (libre) {
+    return current.roomId === "" ? { ...current, roomId: elegida, habitacionQuitada: null } : current;
+  }
+  return {
+    ...current,
+    roomId: "",
+    habitacionQuitada: { roomId: elegida, desde, hasta, ocupada: libres !== null },
+  };
 }
 
 function splitName(full: string): { first: string; last: string } {
@@ -181,18 +226,14 @@ export default function NewReservationModal({
     let active = true;
     setLoadingRooms(true);
     const timer = setTimeout(async () => {
-      const rooms = await fetchAvailableRoomsAction(
+      const libres = await fetchAvailableRoomsAction(
         new Date(checkIn).toISOString(),
         new Date(checkOut).toISOString()
       );
       if (!active) return;
-      setAvailableRooms(rooms);
+      setAvailableRooms(libres ?? []);
       setLoadingRooms(false);
-      setForm((current) =>
-        current.roomId !== "" && !rooms.some((r) => r.id === Number(current.roomId))
-          ? { ...current, roomId: "" }
-          : current
-      );
+      setForm((current) => aplicarDisponibilidad(current, libres, checkIn, checkOut));
     }, 250);
     return () => {
       active = false;
@@ -283,6 +324,21 @@ export default function NewReservationModal({
 
   const selectedRoom =
     form.roomId === "" ? null : rooms.find((room) => room.id === Number(form.roomId)) ?? null;
+  // El aviso se muestra solo si la consulta dijo que está ocupada y para las fechas que están
+  // en pantalla: al cambiarlas se va hasta que la consulta nueva confirme (o la vuelva a elegir).
+  const quitada =
+    form.habitacionQuitada?.ocupada &&
+    form.habitacionQuitada.desde === form.checkIn &&
+    form.habitacionQuitada.hasta === form.checkOut
+      ? form.habitacionQuitada
+      : null;
+  const avisoQuitada = quitada
+    ? avisoHabitacionQuitada(
+        rooms.find((room) => room.id === quitada.roomId)?.room_number ?? null,
+        quitada.desde,
+        quitada.hasta
+      )
+    : null;
   const selectedCompany =
     form.mode === "company"
       ? associatedClients.find((client) => client.id === form.associatedClientId) ?? null
@@ -552,6 +608,24 @@ export default function NewReservationModal({
             )}
           </div>
 
+          {/* Primero las fechas: la habitación se elige entre las libres para esas fechas. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <DateTimePickerField
+              id="checkIn"
+              label="Entrada"
+              icon={<CalendarIcon size={14} className="mr-1" />}
+              value={form.checkIn}
+              onChange={(value) => setForm((current) => ({ ...current, checkIn: value }))}
+            />
+            <DateTimePickerField
+              id="checkOut"
+              label="Salida"
+              icon={<ClockIcon size={14} className="mr-1" />}
+              value={form.checkOut}
+              onChange={(value) => setForm((current) => ({ ...current, checkOut: value }))}
+            />
+          </div>
+
           {/* Campo destacado: solo habitaciones libres para las fechas elegidas. */}
           <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/50 p-3.5">
             <div className="flex items-center justify-between mb-2">
@@ -574,12 +648,16 @@ export default function NewReservationModal({
               required
               value={form.roomId}
               disabled={loadingRooms || !hasValidDates}
-              onChange={(e) =>
+              aria-describedby={avisoQuitada ? "roomId-aviso" : undefined}
+              onChange={(e) => {
+                const value = e.target.value;
                 setForm((current) => ({
                   ...current,
-                  roomId: e.target.value ? Number(e.target.value) : "",
-                }))
-              }
+                  roomId: value ? Number(value) : "",
+                  // Elegir otra habitación cierra el aviso de la que se sacó.
+                  habitacionQuitada: value ? null : current.habitacionQuitada,
+                }));
+              }}
               className="w-full px-4 py-2.5 bg-white border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {!hasValidDates ? (
@@ -599,28 +677,21 @@ export default function NewReservationModal({
                 </>
               )}
             </select>
+            {avisoQuitada && (
+              <div
+                id="roomId-aviso"
+                role="alert"
+                className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900"
+              >
+                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                <p>{avisoQuitada}</p>
+              </div>
+            )}
             {hasValidDates && (
               <p className="mt-1.5 text-[11px] text-emerald-700/80">
                 Libres para {shortDate(form.checkIn)} → {shortDate(form.checkOut)}
               </p>
             )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <DateTimePickerField
-              id="checkIn"
-              label="Entrada"
-              icon={<CalendarIcon size={14} className="mr-1" />}
-              value={form.checkIn}
-              onChange={(value) => setForm((current) => ({ ...current, checkIn: value }))}
-            />
-            <DateTimePickerField
-              id="checkOut"
-              label="Salida"
-              icon={<ClockIcon size={14} className="mr-1" />}
-              value={form.checkOut}
-              onChange={(value) => setForm((current) => ({ ...current, checkOut: value }))}
-            />
           </div>
 
           <NumberStepper
