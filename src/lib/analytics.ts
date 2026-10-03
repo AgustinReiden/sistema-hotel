@@ -759,3 +759,84 @@ export function sumAccountMovements(
   }
   return { charged: round2(charged), collected: round2(collected) };
 }
+
+/** Una reserva activa (confirmada o alojada) con lo que cuesta y lo que ya pagó. */
+export type ReservadoSinCobrarRow = {
+  /** Id de la cuenta de empresa (no el CUIT: dos áreas de una misma empresa son dos cuentas). */
+  clientId: number | string | null;
+  clientName: string | null;
+  totalPrice: number | string | null;
+  paidAmount: number | string | null;
+};
+
+export type ReservadoSinCobrarGroup = {
+  name: string;
+  total: number;
+  kind: "empresa" | "otras" | "particulares";
+};
+
+/** Cuántas empresas se muestran sueltas antes de juntar el resto en "Otras empresas". */
+export const RESERVADO_SIN_COBRAR_TOP = 5;
+
+/** Saldo de una reserva en centavos enteros (precio total − pagado). Puede ser ≤ 0. */
+function saldoReservadoCents(row: ReservadoSinCobrarRow): number {
+  return Math.round((Number(row.totalPrice) || 0) * 100) - Math.round((Number(row.paidAmount) || 0) * 100);
+}
+
+/**
+ * Total de "Reservado sin cobrar": suma de los saldos positivos, en centavos enteros.
+ * Es la misma cuenta que usa `agruparReservadoSinCobrar`, así el total de la tarjeta y la
+ * suma de su desglose salen del mismo cálculo y no pueden separarse.
+ */
+export function totalReservadoSinCobrar(rows: ReservadoSinCobrarRow[]): number {
+  let cents = 0;
+  for (const row of rows) {
+    const saldo = saldoReservadoCents(row);
+    if (saldo > 0) cents += saldo;
+  }
+  return cents / 100;
+}
+
+/**
+ * Desglose por empresa del "reservado sin cobrar" (precio total − pagado de las
+ * reservas activas). Solo cuentan los saldos positivos: lo pagado de más no resta.
+ * Devuelve las 5 empresas con más saldo, "Otras empresas" si hay más y, al final,
+ * "Particulares" (reservas sin empresa). La suma de los grupos da el mismo total que
+ * la tarjeta: se acumula en centavos enteros para que no se escape ninguno.
+ */
+export function agruparReservadoSinCobrar(rows: ReservadoSinCobrarRow[]): ReservadoSinCobrarGroup[] {
+  const porEmpresa = new Map<string, { name: string; cents: number }>();
+  let particularesCents = 0;
+
+  for (const row of rows) {
+    const saldoCents = saldoReservadoCents(row);
+    if (!(saldoCents > 0)) continue;
+    if (row.clientId === null || row.clientId === undefined) {
+      particularesCents += saldoCents;
+      continue;
+    }
+    const key = String(row.clientId);
+    const actual = porEmpresa.get(key);
+    if (actual) actual.cents += saldoCents;
+    else porEmpresa.set(key, { name: row.clientName?.trim() || "Empresa sin nombre", cents: saldoCents });
+  }
+
+  const empresas = Array.from(porEmpresa.values()).sort(
+    (a, b) => b.cents - a.cents || a.name.localeCompare(b.name, "es")
+  );
+  const grupos: ReservadoSinCobrarGroup[] = empresas
+    .slice(0, RESERVADO_SIN_COBRAR_TOP)
+    .map((e) => ({ name: e.name, total: e.cents / 100, kind: "empresa" as const }));
+  const resto = empresas.slice(RESERVADO_SIN_COBRAR_TOP);
+  if (resto.length > 0) {
+    grupos.push({
+      name: "Otras empresas",
+      total: resto.reduce((sum, e) => sum + e.cents, 0) / 100,
+      kind: "otras",
+    });
+  }
+  if (particularesCents > 0) {
+    grupos.push({ name: "Particulares", total: particularesCents / 100, kind: "particulares" });
+  }
+  return grupos;
+}

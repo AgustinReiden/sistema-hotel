@@ -24,6 +24,8 @@ import {
   computeWindowKpis,
   buildSalesSettlement,
   sumAccountMovements,
+  agruparReservadoSinCobrar,
+  totalReservadoSinCobrar,
   type DailyOccupancy,
   type DailyTotal,
   type ClosedStay,
@@ -719,5 +721,110 @@ describe("sumAccountMovements", () => {
     ];
     expect(sumAccountMovements(movs, "2026-07-01", "2026-07-31", TZ).collected).toBe(10000);
     expect(sumAccountMovements(movs, "2026-08-01", "2026-08-31", TZ).collected).toBe(0);
+  });
+});
+
+describe("agruparReservadoSinCobrar", () => {
+  const fila = (
+    clientId: number | null,
+    clientName: string | null,
+    totalPrice: number,
+    paidAmount: number
+  ) => ({ clientId, clientName, totalPrice, paidAmount });
+
+  it("ignora los saldos en cero o negativos", () => {
+    const grupos = agruparReservadoSinCobrar([
+      fila(1, "Empresa Ficticia SA", 100000, 100000),
+      fila(1, "Empresa Ficticia SA", 80000, 90000),
+      fila(2, "Otra Empresa Ficticia SA", 50000, 20000),
+    ]);
+    expect(grupos).toEqual([{ name: "Otra Empresa Ficticia SA", total: 30000, kind: "empresa" }]);
+  });
+
+  it("suma por empresa y ordena de mayor a menor", () => {
+    const grupos = agruparReservadoSinCobrar([
+      fila(1, "Empresa Ficticia SA", 40000, 0),
+      fila(2, "Otra Empresa Ficticia SA", 90000, 0),
+      fila(1, "Empresa Ficticia SA", 30000, 10000),
+    ]);
+    expect(grupos).toEqual([
+      { name: "Otra Empresa Ficticia SA", total: 90000, kind: "empresa" },
+      { name: "Empresa Ficticia SA", total: 60000, kind: "empresa" },
+    ]);
+  });
+
+  it("junta las reservas sin empresa en Particulares, siempre al final", () => {
+    const grupos = agruparReservadoSinCobrar([
+      fila(null, null, 500000, 0),
+      fila(null, null, 20000, 5000),
+      fila(1, "Empresa Ficticia SA", 10000, 0),
+    ]);
+    expect(grupos).toEqual([
+      { name: "Empresa Ficticia SA", total: 10000, kind: "empresa" },
+      { name: "Particulares", total: 515000, kind: "particulares" },
+    ]);
+  });
+
+  it("dos empresas con el mismo nombre pero distinta cuenta no se mezclan", () => {
+    const grupos = agruparReservadoSinCobrar([
+      fila(1, "Empresa Ficticia SA", 10000, 0),
+      fila(2, "Empresa Ficticia SA", 20000, 0),
+    ]);
+    expect(grupos).toHaveLength(2);
+    expect(grupos.map((g) => g.total)).toEqual([20000, 10000]);
+  });
+
+  it("corta en 5 empresas y el resto va a Otras empresas", () => {
+    const filas = [1, 2, 3, 4, 5, 6, 7].map((id) => fila(id, `Empresa Ficticia ${id}`, id * 1000, 0));
+    const grupos = agruparReservadoSinCobrar([...filas, fila(null, null, 700, 0)]);
+    expect(grupos.map((g) => g.name)).toEqual([
+      "Empresa Ficticia 7",
+      "Empresa Ficticia 6",
+      "Empresa Ficticia 5",
+      "Empresa Ficticia 4",
+      "Empresa Ficticia 3",
+      "Otras empresas",
+      "Particulares",
+    ]);
+    expect(grupos[5]).toEqual({ name: "Otras empresas", total: 3000, kind: "otras" });
+  });
+
+  it("con exactamente 5 empresas no aparece Otras empresas", () => {
+    const filas = [1, 2, 3, 4, 5].map((id) => fila(id, `Empresa Ficticia ${id}`, 1000, 0));
+    const grupos = agruparReservadoSinCobrar(filas);
+    expect(grupos).toHaveLength(5);
+    expect(grupos.some((g) => g.kind === "otras")).toBe(false);
+  });
+
+  it("la suma del desglose coincide con el total de la tarjeta (sin errores de centavos)", () => {
+    const filas = [
+      fila(1, "Empresa Ficticia SA", 100.1, 0.2),
+      fila(1, "Empresa Ficticia SA", 200.2, 0.1),
+      fila(2, "Otra Empresa Ficticia SA", 0.3, 0),
+      fila(null, null, 0.1, 0),
+      fila(null, null, 50, 60),
+      ...[3, 4, 5, 6, 7, 8].map((id) => fila(id, `Empresa Ficticia ${id}`, 10.1 * id, 0.3)),
+    ];
+    // totalReservadoSinCobrar es lo que usa data.ts para la tarjeta: sale del mismo cálculo.
+    const suma = agruparReservadoSinCobrar(filas).reduce((s, g) => s + Math.round(g.total * 100), 0) / 100;
+    expect(suma).toBe(totalReservadoSinCobrar(filas));
+  });
+
+  it("totalReservadoSinCobrar ignora saldos ≤ 0 y acepta importes como texto", () => {
+    expect(totalReservadoSinCobrar([])).toBe(0);
+    expect(
+      totalReservadoSinCobrar([
+        { clientId: 3, clientName: "Empresa Ficticia SA", totalPrice: "1500.50", paidAmount: "500.25" },
+        fila(null, null, 50, 60),
+      ])
+    ).toBe(1000.25);
+  });
+
+  it("acepta importes como texto y devuelve vacío si no hay saldos", () => {
+    expect(agruparReservadoSinCobrar([])).toEqual([]);
+    const grupos = agruparReservadoSinCobrar([
+      { clientId: 3, clientName: "Empresa Ficticia SA", totalPrice: "1500.50", paidAmount: "500.25" },
+    ]);
+    expect(grupos).toEqual([{ name: "Empresa Ficticia SA", total: 1000.25, kind: "empresa" }]);
   });
 });
