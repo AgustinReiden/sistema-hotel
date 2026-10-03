@@ -117,7 +117,7 @@ export default function PaymentModal({
   // Precargado ya formateado ("43.700,00"). Con debt.toString() un saldo con restos
   // de coma flotante ("0.19999999999999998") tiene más de 2 decimales y
   // parseArMoney no lo acepta.
-  const [amount, setAmount] = useState(debt > 0 ? formatAmountForInput(debt) : "");
+  const [amount, setAmount] = useState(debt > 0 && !isPartialMode ? formatAmountForInput(debt) : "");
   // Sin medio de antemano (null): la recepcionista lo elige siempre. La única
   // excepción es fiar en el check-out de una empresa con cuenta corriente.
   const [method, setMethod] = useState<PaymentMethod | null>(
@@ -194,11 +194,16 @@ export default function PaymentModal({
         result = await registerPaymentAction(reservationId, parsedAmount, method);
       } catch {
         // La respuesta no volvió (se cortó la red): el pago pudo haber entrado.
-        // Repetirlo a ciegas lo duplicaría, así que no se cierra ni se da por hecho.
+        // Repetirlo a ciegas lo duplicaría (un click con el monto y el medio puestos),
+        // así que, como en el check-out, el cuadro se cierra y queda el aviso. onSuccess
+        // refresca la pantalla para que el pendiente muestre lo que realmente pasó.
         setLoading(false);
-        setError(
-          "No pudimos confirmar el cobro. Pudo haberse registrado: mirá la caja antes de repetir."
+        toast.warning(
+          "No pudimos confirmar el cobro. Pudo haberse registrado: mirá el pendiente de la reserva y la caja antes de repetirlo.",
+          { duration: Infinity, closeButton: true }
         );
+        onSuccess?.();
+        onClose();
         return;
       }
     }
@@ -348,7 +353,7 @@ export default function PaymentModal({
                   const parsed = parseArMoney(amount);
                   if (parsed !== null) setAmount(formatAmountForInput(parsed));
                 }}
-                placeholder="0"
+                placeholder={isPartialMode && debt > 0 ? `Lo que recibiste (hasta ${formatAmountForInput(debt)})` : "0"}
                 readOnly={!amountEditable}
                 className={`w-full px-4 py-3 rounded-xl border outline-none transition-all text-xl font-bold ${
                   amountEditable

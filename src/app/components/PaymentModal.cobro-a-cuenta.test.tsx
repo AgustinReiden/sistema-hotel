@@ -97,6 +97,20 @@ describe("PaymentModal: cobro a cuenta antes del check-out", () => {
     );
   });
 
+  it("el monto arranca vacío y sin monto no registra nada", async () => {
+    abrirCobroACuenta({ totalPrice: 43700, paidAmount: 0 });
+
+    const monto = screen.getByLabelText("Monto a abonar ($)") as HTMLInputElement;
+    expect(monto.value).toBe("");
+    expect(monto.placeholder).toContain("43.700,00");
+
+    fireEvent.click(screen.getByLabelText("Efectivo"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+    // El campo es obligatorio: el formulario no se envía vacío.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(H.registerPaymentAction).not.toHaveBeenCalled();
+  });
+
   it("tampoco ofrece Cta. Cte., aunque el cliente tenga cuenta", () => {
     const { container } = abrirCobroACuenta({
       accountCreditEnabled: true,
@@ -204,22 +218,24 @@ describe("PaymentModal: cobro a cuenta antes del check-out", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  it("si la respuesta no vuelve (la acción tira), no queda girando y avisa que pudo haber entrado", async () => {
+  it("si la respuesta no vuelve (la acción tira), cierra el cuadro y deja el aviso: repetir no es un click", async () => {
     H.registerPaymentAction.mockRejectedValue(new Error("network"));
+    H.toast.warning.mockReset();
     const { onSuccess, onClose } = abrirCobroACuenta();
 
     cargarMonto("20.000");
     fireEvent.click(screen.getByLabelText("Efectivo"));
     fireEvent.click(screen.getByText("Registrar Pago"));
 
-    await waitFor(() => expect(screen.getByText(/Pudo haberse registrado/)).toBeTruthy());
-    expect(screen.getByText(/mirá la caja antes de repetir/)).toBeTruthy();
-    // No se cierra ni se da por hecho: el cuadro sigue y el botón vuelve a estar libre.
-    expect(onSuccess).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    expect(
-      (screen.getByText("Registrar Pago").closest("button") as HTMLButtonElement).disabled
-    ).toBe(false);
+    await waitFor(() => expect(H.toast.warning).toHaveBeenCalledTimes(1));
+    expect(H.toast.warning.mock.calls[0][0]).toMatch(/Pudo haberse registrado/);
+    expect(H.toast.warning.mock.calls[0][1]).toMatchObject({ duration: Infinity });
+    // No se da por cobrado (ni éxito ni recibo), pero el cuadro se cierra y se refresca
+    // la pantalla para que el pendiente muestre lo que pasó.
+    expect(H.toast.success).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(H.registerPaymentAction).toHaveBeenCalledTimes(1);
   });
 
   it("mientras el cobro está en vuelo, la X y Cancelar no dejan cerrar el cuadro", async () => {

@@ -189,9 +189,11 @@ describe("RoomCard: Cobrar a cuenta antes del check-out", () => {
     expect(screen.getByText("Queda en tu caja. Lo que falte se cobra en el check-out.")).toBeTruthy();
     expect(screen.queryByText("Cobrar y Finalizar")).toBeNull();
     expect(screen.queryByText("Registrar y Cerrar")).toBeNull();
-    // Lo que falta: 43.700 - 10.000 (no el total ni el saldo de una salida anticipada).
+    // El monto arranca vacío (lo tipea quien recibió la plata). El tope es lo que
+    // falta: 43.700 - 10.000 (no el total ni el saldo de una salida anticipada).
     const monto = screen.getByLabelText("Monto a abonar ($)") as HTMLInputElement;
-    expect(monto.value).toBe("33.700,00");
+    expect(monto.value).toBe("");
+    expect(monto.placeholder).toContain("33.700,00");
     expect(monto.readOnly).toBe(false);
     expect(marcados(container)).toEqual([]);
   });

@@ -181,9 +181,10 @@ describe("Calendario: cobrar una seña o a cuenta desde el detalle", () => {
 
     expect(screen.getByText("Cobrar a cuenta")).toBeTruthy();
     expect(screen.getByText("Queda en tu caja. Lo que falte se cobra en el check-out.")).toBeTruthy();
-    expect((screen.getByLabelText("Monto a abonar ($)") as HTMLInputElement).value).toBe(
-      "33.700,00"
-    );
+    // El monto arranca vacío (lo tipea quien recibió la plata); lo que falta es el tope.
+    const monto = screen.getByLabelText("Monto a abonar ($)") as HTMLInputElement;
+    expect(monto.value).toBe("");
+    expect(monto.placeholder).toContain("33.700,00");
     // El detalle es z-[60]: el cobro tiene que quedar encima.
     const fondoCobro = container.querySelector("#payment-form")?.closest(".fixed");
     expect(fondoCobro?.classList.contains("z-[65]")).toBe(true);
