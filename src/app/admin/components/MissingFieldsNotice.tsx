@@ -13,13 +13,18 @@ export function focusFirst(pending: FieldCheck[]): string | null {
     if (!element) continue;
     if ((element as HTMLInputElement).disabled) continue;
     element.focus();
-    // El foco sube la pantalla hasta el campo; si el aviso queda lejos, abajo y fuera
-    // de vista, se lo trae también. Va en el cuadro siguiente: en el primer intento
-    // el aviso recién se dibuja después de este foco.
+    // El foco ya llevó la pantalla hasta el campo. El aviso se trae a la vista solo si
+    // entra junto con el campo: si está más lejos que el alto de la pantalla, se deja el
+    // campo a la vista (con su borde rojo) en vez de esconderlo. Va en el cuadro
+    // siguiente porque el aviso recién se dibuja después de este foco, y sin scroll
+    // suave, que en el celular compite con el teclado.
     requestAnimationFrame(() => {
-      document
-        .querySelector("[data-missing-notice]")
-        ?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+      const notice = document.querySelector("[data-missing-notice]");
+      if (!notice) return;
+      const span =
+        notice.getBoundingClientRect().bottom - element.getBoundingClientRect().top;
+      if (span > window.innerHeight) return;
+      notice.scrollIntoView?.({ block: "nearest" });
     });
     return check.id;
   }

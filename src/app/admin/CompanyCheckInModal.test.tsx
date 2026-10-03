@@ -83,3 +83,19 @@ describe("CompanyCheckInModal: el botón dice qué falta", () => {
     expect(screen.queryByText(/Falta completar/)).toBeNull();
   });
 });
+
+describe("CompanyCheckInModal: datos mal escritos no se pierden en silencio", () => {
+  it("una fecha de nacimiento a medio escribir frena la confirmación", () => {
+    const { container, onConfirm } = abrir({ name: "Juan Prueba", dni: "30123456" });
+    fireEvent.click(screen.getByText("Datos de registro (opcional)"));
+    const nacimiento = campo(container, "checkin-birth");
+    // jsdom no simula badInput: se marca el campo como inválido a mano.
+    nacimiento.setCustomValidity("Introducí un valor válido");
+    const reportar = vi.spyOn(container.querySelector("form")!, "reportValidity");
+
+    fireEvent.click(boton(container));
+
+    expect(reportar).toHaveBeenCalled();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+});

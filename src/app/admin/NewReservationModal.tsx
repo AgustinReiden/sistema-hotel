@@ -420,6 +420,13 @@ export default function NewReservationModal({
       focusFirst(pending);
       return;
     }
+    // noValidate apaga también el aviso del navegador: una fecha a medio escribir queda
+    // en "" y se guardaría vacía sin avisar. Se revisa acá.
+    const formEl = e.currentTarget as HTMLFormElement;
+    if (!formEl.checkValidity()) {
+      formEl.reportValidity();
+      return;
+    }
 
     setIsSubmitting(true);
     try {
