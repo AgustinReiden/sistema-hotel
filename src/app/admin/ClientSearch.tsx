@@ -107,7 +107,7 @@ export default function ClientSearch({
             setQuery(e.target.value);
           }}
           placeholder="Nombre o DNI/CUIT…"
-          autoComplete="off"
+          autoComplete="off" onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
           className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
         />
         {loading && (

@@ -10,7 +10,9 @@ import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
 import NumberStepper from "./NumberStepper";
 import { searchGuestsAction } from "./actions";
+import MissingFieldsNotice, { focusFirst } from "./components/MissingFieldsNotice";
 import { isEarlyMorning } from "@/lib/arrivals";
+import { invalidClass, pendingFields, type FieldCheck } from "@/lib/form-checks";
 import {
   calculateHalfDayPriceBreakdown,
   calculateWalkInPriceBreakdown,
@@ -92,9 +94,12 @@ export default function WalkInModal({
   const [guestCount, setGuestCount] = useState(1);
   const [registry, setRegistry] = useState<GuestRegistryInput>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Se apretó "Asignar" con algo sin completar: desde ahí el formulario marca qué falta.
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
+    setAttempted(false);
     setMode("person");
     setStayType("night");
     setLastNight(true);
@@ -228,26 +233,49 @@ export default function WalkInModal({
 
   const personComplete =
     Boolean(clientFirstName.trim()) && Boolean(clientLastName.trim()) && Boolean(clientDni.trim());
-  const companyComplete =
-    Boolean(associatedClientId) && Boolean(passengerName.trim()) && Boolean(passengerDni.trim());
-  const clientComplete = mode === "person" ? personComplete : companyComplete;
+
+  // Qué le falta al formulario, en el orden en que se ve. El botón nunca queda gris: al
+  // tocarlo con algo pendiente, el aviso lo dice y el cursor va al primero.
+  const checks: FieldCheck[] = [
+    {
+      id: "walkin-half-day-price",
+      label: "Precio de medio día",
+      ok: !(isHalfDay && halfDayPrice <= 0),
+      message: "Falta el precio de medio día de esta habitación: avisale al administrador.",
+    },
+    ...(mode === "person"
+      ? [
+          { id: "clientFirstName", label: "Nombre", ok: Boolean(clientFirstName.trim()) },
+          { id: "clientLastName", label: "Apellido", ok: Boolean(clientLastName.trim()) },
+          { id: "clientDni", label: "DNI", ok: Boolean(clientDni.trim()) },
+        ]
+      : [
+          { id: "walkinClientSearch", label: "Empresa o convenio", ok: Boolean(associatedClientId) },
+          { id: "walkinPassengerName", label: "Nombre del pasajero", ok: Boolean(passengerName.trim()) },
+          { id: "walkinPassengerDni", label: "DNI del pasajero", ok: Boolean(passengerDni.trim()) },
+        ]),
+  ];
+  const pending = pendingFields(checks);
+  const invalid = (id: string) => attempted && pending.some((check) => check.id === id);
+  const fieldProps = (id: string) => ({
+    "aria-invalid": invalid(id) || undefined,
+    className: invalidClass(inputClass, invalid(id)),
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isHalfDay && nights < 1) return;
-    if (mode === "person" && !personComplete) {
-      toast.error("Cargá nombre, apellido y DNI del huésped.");
+    if (pending.length > 0) {
+      setAttempted(true);
+      focusFirst(pending);
       return;
     }
-    if (mode === "company") {
-      if (!associatedClientId) {
-        toast.error("Seleccioná la empresa/convenio.");
-        return;
-      }
-      if (!passengerName.trim() || !passengerDni.trim()) {
-        toast.error("Cargá el nombre y el DNI del pasajero.");
-        return;
-      }
+    // noValidate apaga también el aviso del navegador: una fecha a medio escribir queda
+    // en "" y se guardaría vacía sin avisar. Se revisa acá.
+    const formEl = e.currentTarget as HTMLFormElement;
+    if (!formEl.checkValidity()) {
+      formEl.reportValidity();
+      return;
     }
 
     setIsSubmitting(true);
@@ -306,7 +334,7 @@ export default function WalkInModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
           {/* Tipo de estadía */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
@@ -418,7 +446,7 @@ export default function WalkInModal({
                       type="text"
                       value={clientFirstName}
                       onChange={(e) => setClientFirstName(e.target.value)}
-                      className={inputClass}
+                      {...fieldProps("clientFirstName")}
                       placeholder="Ej. Juan"
                     />
                   </div>
@@ -431,7 +459,7 @@ export default function WalkInModal({
                       type="text"
                       value={clientLastName}
                       onChange={(e) => setClientLastName(e.target.value)}
-                      className={inputClass}
+                      {...fieldProps("clientLastName")}
                       placeholder="Ej. Pérez"
                     />
                   </div>
@@ -447,7 +475,7 @@ export default function WalkInModal({
                       type="text"
                       value={clientDni}
                       onChange={(e) => setClientDni(e.target.value)}
-                      className={inputClass}
+                      {...fieldProps("clientDni")}
                       placeholder="Ej. 30123456"
                     />
                     {!guestId && (
@@ -513,7 +541,7 @@ export default function WalkInModal({
                           setPassengerName(e.target.value);
                           setCompanyPassengerId(null);
                         }}
-                        className={inputClass}
+                        {...fieldProps("walkinPassengerName")}
                         placeholder="Ej. María López"
                       />
                     </div>
@@ -529,7 +557,7 @@ export default function WalkInModal({
                           setPassengerDni(e.target.value);
                           setCompanyPassengerId(null);
                         }}
-                        className={inputClass}
+                        {...fieldProps("walkinPassengerDni")}
                         placeholder="Ej. 30123456"
                       />
                     </div>
@@ -613,6 +641,8 @@ export default function WalkInModal({
             </div>
           )}
 
+          {attempted && <MissingFieldsNotice pending={pending} />}
+
           <div className="pt-2 flex gap-3">
             <button
               type="button"
@@ -623,7 +653,7 @@ export default function WalkInModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || (isHalfDay && halfDayPrice <= 0) || !clientComplete}
+              disabled={isSubmitting}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
               {isSubmitting ? "Asignando..." : submitLabel}

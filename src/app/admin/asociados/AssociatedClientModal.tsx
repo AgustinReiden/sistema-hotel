@@ -5,7 +5,9 @@ import { AlertTriangle, CheckCircle2, CreditCard, Hash, Loader2, MapPin, Percent
 import { toast } from "sonner";
 
 import { isValidCuit } from "@/lib/arca/amounts";
+import MissingFieldsNotice, { focusFirst } from "../components/MissingFieldsNotice";
 import { avisoModoFacturacion, modoFacturacionAlCambiarCtaCte } from "@/lib/billing";
+import { invalidClass, pendingFields, type FieldCheck } from "@/lib/form-checks";
 import type { AssociatedClient, CondicionIva, FacturacionModo } from "@/lib/types";
 import { findCompaniesByDocumentAction } from "./actions";
 
@@ -80,10 +82,13 @@ export default function AssociatedClientModal({
   // mano, y si la cuenta vuelve a No se restaura (una ficha en consolidada sin
   // cuenta corriente saca sus check-outs de "Por facturar"). null = nadie lo cambió solo.
   const [modoPrevio, setModoPrevio] = useState<FacturacionModo | null>(null);
+  // Se apretó "Crear/Guardar" con algo sin completar: desde ahí el formulario marca qué falta.
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialClient));
+    setAttempted(false);
     setDuplicados(null);
     setModoPrevio(null);
   }, [isOpen, initialClient]);
@@ -115,8 +120,32 @@ export default function AssociatedClientModal({
     !isValidCuit(form.documentId);
   const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, form.facturacionModo);
 
+  // El botón no queda gris: con algo pendiente, el aviso dice qué falta y el cursor va al
+  // primero. Va antes del chequeo de CUIT repetido: sin documento no hay nada que chequear.
+  const checks: FieldCheck[] = [
+    { id: "associated-display-name", label: "Nombre", ok: Boolean(form.displayName.trim()) },
+    { id: "associated-document-id", label: "DNI o CUIT", ok: Boolean(form.documentId.trim()) },
+  ];
+  const pending = pendingFields(checks);
+  const invalid = (id: string) => attempted && pending.some((check) => check.id === id);
+  const fieldClass =
+    "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all";
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (pending.length > 0) {
+      setAttempted(true);
+      focusFirst(pending);
+      return;
+    }
+    // noValidate apaga también min, max, step y los números mal escritos ("1e"), que el
+    // navegador deja en "" y se guardarían como 0 o como vacío. Se revisan acá.
+    const formEl = e.currentTarget as HTMLFormElement;
+    if (!formEl.checkValidity()) {
+      formEl.reportValidity();
+      return;
+    }
 
     // Primera pasada: si el CUIT ya lo tiene otra empresa, se avisa y se espera
     // confirmación. Ya confirmado (duplicados !== null) se guarda derecho.
@@ -174,7 +203,7 @@ export default function AssociatedClientModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="associated-display-name">
@@ -186,10 +215,10 @@ export default function AssociatedClientModal({
               <input
                 id="associated-display-name"
                 type="text"
-                required
                 value={form.displayName}
                 onChange={(e) => setForm((current) => ({ ...current, displayName: e.target.value }))}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                aria-invalid={invalid("associated-display-name") || undefined}
+                className={invalidClass(fieldClass, invalid("associated-display-name"))}
                 placeholder="Ej. Transportes del Norte"
               />
             </div>
@@ -204,13 +233,13 @@ export default function AssociatedClientModal({
               <input
                 id="associated-document-id"
                 type="text"
-                required
                 value={form.documentId}
                 onChange={(e) => {
                   setDuplicados(null);
                   setForm((current) => ({ ...current, documentId: e.target.value }));
                 }}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                aria-invalid={invalid("associated-document-id") || undefined}
+                className={invalidClass(fieldClass, invalid("associated-document-id"))}
                 placeholder="Ej. 30-12345678-9"
               />
               {duplicados && duplicados.length > 0 && (
@@ -465,6 +494,8 @@ export default function AssociatedClientModal({
             reserva o check-in al seleccionar esta empresa/convenio.
           </div>
 
+          {attempted && <MissingFieldsNotice pending={pending} />}
+
           <div className="pt-4 border-t border-slate-100 flex gap-3">
             <button
               type="button"
@@ -475,9 +506,7 @@ export default function AssociatedClientModal({
             </button>
             <button
               type="submit"
-              disabled={
-                isSubmitting || chequeando || !form.displayName.trim() || !form.documentId.trim()
-              }
+              disabled={isSubmitting || chequeando}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
               {chequeando ? (
