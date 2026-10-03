@@ -1,7 +1,17 @@
+'use client';
+
 import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { BedDouble } from 'lucide-react';
 import LogoutButton from './LogoutButton';
-import { getNavSections, type NavBadge } from './nav-links';
+import {
+    findActiveNav,
+    getNavSections,
+    sectionBadge,
+    sectionHref,
+    type NavBadge,
+    type NavState,
+} from './nav-links';
 
 const BADGE_TONE: Record<NavBadge['tone'], string> = {
     ok: 'text-emerald-400 bg-emerald-950/40',
@@ -9,9 +19,26 @@ const BADGE_TONE: Record<NavBadge['tone'], string> = {
     alert: 'text-rose-300 bg-rose-950/50',
 };
 
-export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount = 0, remitosPendientes = 0 }: { role: string; userEmail: string; hasOpenShift?: boolean; unbilledCount?: number; remitosPendientes?: number }) {
+function Badge({ badge }: { badge: NavBadge }) {
+    return (
+        <span title={badge.title} className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${BADGE_TONE[badge.tone]}`}>
+            {badge.text}
+        </span>
+    );
+}
+
+type SidebarProps = NavState & { role: string; userEmail: string };
+
+// Menú lateral de escritorio: las secciones, con la de la pantalla actual marcada y sus
+// pestañas debajo (hasta que F1-1b las pase a una barra arriba del contenido). Es de
+// cliente porque la pantalla actual sale de la URL (ruta y ?view=); no busca datos: los
+// numeritos los calcula el layout y llegan por props.
+export default function Sidebar({ role, userEmail, ...navState }: SidebarProps) {
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const isAdmin = role === 'admin';
-    const sections = getNavSections(role, { hasOpenShift, unbilledCount, remitosPendientes });
+    const sections = getNavSections(role, navState);
+    const active = findActiveNav(sections, pathname, searchParams);
 
     // Sólo escritorio: abajo de 768px el menú lo manejan <MobileTopBar> y <MobileTabBar>.
     // Antes este mismo <aside> se estiraba a w-full y se apilaba arriba del contenido, así
@@ -31,38 +58,62 @@ export default function Sidebar({ role, userEmail, hasOpenShift, unbilledCount =
                 </Link>
             </div>
 
-            <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1">
-                {sections.map((section, sectionIndex) => (
-                    <div key={section.title}>
-                        <p className={`px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ${sectionIndex > 0 ? 'mt-6' : ''}`}>
-                            {section.title}
-                        </p>
-                        {section.items.map((item) => {
-                            const Icon = item.icon;
-                            return (
-                                <Link
-                                    key={item.href}
-                                    href={item.href}
-                                    className="flex items-center px-3 py-2.5 hover:bg-slate-800 rounded-lg group transition-colors"
-                                >
-                                    <Icon
-                                        size={18}
-                                        className={`mr-3 shrink-0 transition-colors ${item.highlighted ? 'text-emerald-400' : 'group-hover:text-emerald-400'}`}
-                                    />
-                                    <span className="font-medium flex-1">{item.label}</span>
-                                    {item.badge && (
-                                        <span
-                                            title={item.badge.title}
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${BADGE_TONE[item.badge.tone]}`}
-                                        >
-                                            {item.badge.text}
-                                        </span>
-                                    )}
-                                </Link>
-                            );
-                        })}
-                    </div>
-                ))}
+            <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1" aria-label="Secciones del panel">
+                {sections.map((section) => {
+                    const Icon = section.icon;
+                    const isActive = active?.section.id === section.id;
+                    // Las pestañas se ven solo en la sección activa; con una sola, la
+                    // sección ya es la pantalla y no hace falta repetirla.
+                    const showTabs = isActive && section.tabs.length > 1;
+                    // Con las pestañas a la vista cada una lleva su numerito; cerrada, la
+                    // sección muestra el más urgente.
+                    const badge = showTabs ? undefined : sectionBadge(section);
+                    return (
+                        <div key={section.id}>
+                            <Link
+                                href={sectionHref(section)}
+                                aria-current={isActive ? 'page' : undefined}
+                                className={`flex items-center px-3 py-2.5 rounded-lg group transition-colors ${
+                                    isActive ? 'bg-slate-800 text-white' : 'hover:bg-slate-800'
+                                }`}
+                            >
+                                <Icon
+                                    size={18}
+                                    className={`mr-3 shrink-0 transition-colors ${
+                                        section.highlighted || isActive ? 'text-emerald-400' : 'group-hover:text-emerald-400'
+                                    }`}
+                                />
+                                <span className="font-medium flex-1">{section.label}</span>
+                                {badge && <Badge badge={badge} />}
+                            </Link>
+                            {showTabs && (
+                                <ul className="mt-1 mb-2 ml-5 border-l border-slate-700 space-y-0.5">
+                                    {section.tabs.map((tab) => {
+                                        const TabIcon = tab.icon;
+                                        const tabActive = active?.tab.id === tab.id;
+                                        return (
+                                            <li key={tab.id}>
+                                                <Link
+                                                    href={tab.href}
+                                                    aria-current={tabActive ? 'page' : undefined}
+                                                    className={`-ml-px flex items-center border-l-2 pl-3 pr-2 py-1.5 text-sm transition-colors ${
+                                                        tabActive
+                                                            ? 'border-emerald-400 text-white font-semibold'
+                                                            : 'border-transparent text-slate-400 hover:text-white'
+                                                    }`}
+                                                >
+                                                    <TabIcon size={15} className="mr-2 shrink-0" />
+                                                    <span className="flex-1">{tab.label}</span>
+                                                    {tab.badge && <Badge badge={tab.badge} />}
+                                                </Link>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
+                    );
+                })}
             </nav>
 
             <div className="p-4 border-t border-slate-800">

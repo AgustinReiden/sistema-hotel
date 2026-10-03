@@ -7,6 +7,7 @@ import type {
   FacturacionModo,
   InvoiceReceptorInput,
   PaymentMethod,
+  PendingInvoiceRow,
 } from "./types";
 
 /**
@@ -539,5 +540,32 @@ export function estadoPagoDeEstadia(row: {
     facturada: true,
     impTotal: row.imp_total,
     imputado: row.imputado,
+  });
+}
+
+// ─── Facturas que no salieron ────────────────────────────────────────────────
+
+/** Cuánto puede tardar ARCA antes de que una factura en curso cuente como trabada. */
+export const FACTURA_TRABADA_MS = 15 * 60_000;
+
+/**
+ * Las facturas que no salieron: rechazadas, y pendientes o en proceso cuyo último
+ * intento (o su creación, si nunca se intentó) tiene más de 15 minutos. Una en curso
+ * de hace un momento no es un error: ARCA todavía puede contestar.
+ *
+ * Es el numerito de Facturación › Con error en el menú (`.length`) y, más adelante,
+ * las filas de "N facturas no salieron" en Hoy: si la regla cambia, cambian juntos.
+ * Recibe las filas de `listPendingInvoices`, que a recepción ya le trae solo las de
+ * su turno.
+ */
+export function facturasConError<
+  T extends Pick<PendingInvoiceRow, "status" | "last_attempt_at" | "created_at">,
+>(rows: readonly T[], now: Date | number): T[] {
+  const ahora = typeof now === "number" ? now : now.getTime();
+  return rows.filter((r) => {
+    if (r.status === "rejected") return true;
+    if (r.status !== "pending" && r.status !== "processing") return false;
+    const desde = Date.parse(r.last_attempt_at ?? r.created_at);
+    return ahora - desde > FACTURA_TRABADA_MS;
   });
 }

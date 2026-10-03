@@ -208,6 +208,19 @@ export function textoParaRevisar(p: ParaRevisar): string | null {
   return `Para revisar: ${lista}`;
 }
 
+/**
+ * La lista que abre «Ver los N a revisar» (/admin/remitos?ver=a_revisar): los remitos
+ * a revisar de todo el historial que no vencieron. Los vencidos ya tienen su lista
+ * arriba del panel; sin ellos, esta mide lo mismo que `remitosParaRevisar(salud).remitos`.
+ */
+export function remitosARevisar(
+  rows: RemitoPanelRow[],
+  aj: AjustesVencimiento,
+  ahoraMs: number
+): RemitoPanelRow[] {
+  return rows.filter((r) => r.estado === "a_revisar" && !esVencido(r, aj, ahoraMs));
+}
+
 export function haceCuanto(iso: string, ahoraMs: number): string {
   const horas = Math.floor((ahoraMs - Date.parse(iso)) / 3_600_000);
   if (horas < 72) return `hace ${Math.max(0, horas)} h`;

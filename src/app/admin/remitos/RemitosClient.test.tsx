@@ -133,3 +133,71 @@ describe("RemitosClient", () => {
     await waitFor(() => expect(saveRemitosAjustesAction).toHaveBeenCalledWith(95, 151, 72, "2026-09-24"));
   });
 });
+
+// Lo que dice el menú es lo que se ve al abrir: un remito a revisar de otro mes no está
+// en la tabla del mes, así que la línea "Para revisar" lleva a la lista de todos.
+describe("RemitosClient: ver los remitos a revisar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    n = 150;
+  });
+
+  it("la línea ofrece ver los N a revisar, sin contar los vencidos (tienen su lista)", () => {
+    renderPanel({ salud: { ...SALUD, a_revisar: 3, a_revisar_vencidos: 1, vencidos: 1, piezas_abiertas: 2 } });
+    expect(screen.getByTestId("para-revisar")).toHaveTextContent("Para revisar: 2 remitos, 1 vencido y 2 piezas");
+    expect(screen.getByText("Ver los 2 a revisar").closest("a")).toHaveAttribute("href", "/admin/remitos?ver=a_revisar");
+  });
+
+  it("con uno solo, en singular", () => {
+    renderPanel({ salud: { ...SALUD, a_revisar: 1 } });
+    expect(screen.getByText("Ver el remito a revisar").closest("a")).toHaveAttribute("href", "/admin/remitos?ver=a_revisar");
+  });
+
+  it("sin remitos a revisar (solo vencidos o piezas) no hay link", () => {
+    renderPanel({ salud: { ...SALUD, vencidos: 1, piezas_abiertas: 2 } });
+    expect(screen.getByTestId("para-revisar")).toBeInTheDocument();
+    expect(screen.queryByText(/a revisar$/)).toBeNull();
+  });
+
+  it("en la lista de a revisar lo dice y deja volver al mes", () => {
+    renderPanel({ aRevisar: true, rows: [fila("a_revisar"), fila("a_revisar")], salud: { ...SALUD, a_revisar: 2 } });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("2 remitos a revisar, de todos los meses");
+    expect(screen.queryByText("Ver los 2 a revisar")).toBeNull();
+    expect(screen.getByText("Volver al mes").closest("a")).toHaveAttribute("href", "/admin/remitos");
+  });
+
+  it("sin nada a revisar, la lista lo dice", () => {
+    renderPanel({ aRevisar: true, cliente: "company:c1" });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("No quedan remitos a revisar de este cliente.");
+    expect(screen.getByText("Volver al mes").closest("a")).toHaveAttribute("href", "/admin/remitos?cliente=company%3Ac1");
+  });
+
+  it("en la lista de a revisar el mes no se elige y «Ver» acota por cliente sin salir de la lista", () => {
+    renderPanel({ aRevisar: true, cliente: "company:c1" });
+    expect(screen.queryByLabelText("Mes")).toBeNull();
+    expect(screen.getByTestId("mes-todos")).toHaveTextContent("Todos los meses");
+    fireEvent.click(screen.getByText("Ver"));
+    expect(push).toHaveBeenCalledWith("/admin/remitos?ver=a_revisar&cliente=company%3Ac1");
+  });
+
+  it("en la tabla del mes «Ver» sigue mandando el cliente y el mes", () => {
+    renderPanel({ cliente: "company:c1", mes: "2026-08" });
+    expect(screen.getByLabelText("Mes")).toHaveValue("2026-08");
+    fireEvent.click(screen.getByText("Ver"));
+    expect(push).toHaveBeenCalledWith("/admin/remitos?cliente=company%3Ac1&mes=2026-08");
+  });
+
+  // Una lista vacía por un error no puede decir que no queda nada que revisar.
+  it("si algo no cargó, no dice que no quedan", () => {
+    renderPanel({ aRevisar: true, errores: ["los remitos"] });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent("No se pudo armar la lista de remitos a revisar.");
+    expect(screen.queryByText(/No quedan/)).toBeNull();
+  });
+
+  it("si algo no cargó, avisa que puede haber más de los que muestra", () => {
+    renderPanel({ aRevisar: true, rows: [fila("a_revisar"), fila("a_revisar")], errores: ["el estado de la ingesta"] });
+    expect(screen.getByTestId("semaforo")).toHaveTextContent(
+      "2 remitos a revisar, de todos los meses. Puede haber más: no se cargó todo."
+    );
+  });
+});

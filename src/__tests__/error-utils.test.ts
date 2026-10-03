@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { DNI_INVALIDO_MSG } from '@/lib/arca/amounts';
 import { parseActionError } from '@/lib/error-utils';
 
 // We import ZodError to simulate validation failures
@@ -131,5 +132,51 @@ describe('parseActionError', () => {
         expect(result.error).toBe('No tenés permiso para hacer esta operación.');
         expect(result.error).not.toContain('associated_clients');
         spy.mockRestore();
+    });
+});
+
+// P0022 lo usan varias validaciones fiscales. Solo el del DNI de la reserva se
+// traduce: el texto viejo de la base manda a "corregirlo en la reserva", y con la
+// estadía cerrada recepción no tiene dónde. Los demás dicen lo que hay que hacer.
+describe('parseActionError: el P0022 del DNI de la reserva', () => {
+    const DNI_VIEJO =
+        'El DNI de la reserva no es valido para facturar (7 u 8 digitos). Corregilo en la reserva y reintenta.';
+
+    it('un P0022 con el texto viejo del DNI devuelve DNI_INVALIDO_MSG', () => {
+        const result = parseActionError({ message: DNI_VIEJO, code: 'P0022' }, 'Fallback');
+        expect(result.error).toBe(DNI_INVALIDO_MSG);
+        expect(result.code).toBe('P0022');
+        expect(result.error).not.toMatch(/en la reserva/i);
+    });
+
+    it('también cuando llega como Error (PostgrestError extiende Error)', () => {
+        const pgError = Object.assign(new Error(DNI_VIEJO), { code: 'P0022' });
+        const result = parseActionError(pgError, 'Fallback');
+        expect(result.error).toBe(DNI_INVALIDO_MSG);
+        expect(result.code).toBe('P0022');
+    });
+
+    it('un P0022 con mensaje de CUIT devuelve el mensaje original', () => {
+        const cuit =
+            'El CUIT del receptor no es valido (11 digitos con digito verificador). Corregilo y reintenta.';
+        const result = parseActionError({ message: cuit, code: 'P0022' }, 'Fallback');
+        expect(result.error).toBe(cuit);
+        expect(result.code).toBe('P0022');
+    });
+
+    it('la condición de IVA faltante y el documento de la consolidada quedan como vienen', () => {
+        for (const message of [
+            'Carga la condicion frente al IVA de la empresa (responsable inscripto, monotributo o exento) para poder facturar.',
+            'El DNI del huesped no es valido para facturar (7 u 8 digitos). Corregilo en la ficha.',
+            'El DNI del receptor no es valido. Corregilo en la ficha y volve a generar el comprobante.',
+        ]) {
+            const result = parseActionError({ message, code: 'P0022' }, 'Fallback');
+            expect(result.error).toBe(message);
+        }
+    });
+
+    it('el texto del DNI con otro código no se toca', () => {
+        const result = parseActionError({ message: DNI_VIEJO, code: 'P0001' }, 'Fallback');
+        expect(result.error).toBe(DNI_VIEJO);
     });
 });

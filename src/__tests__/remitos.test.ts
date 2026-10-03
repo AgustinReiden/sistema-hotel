@@ -13,6 +13,7 @@ import {
   parseNumeroRemito,
   piezaAsignable,
   rangoDeMes,
+  remitosARevisar,
   remitosParaRevisar,
   resumirRemitos,
   textoParaRevisar,
@@ -136,6 +137,27 @@ describe("vencidos (mig 124)", () => {
     expect(textoParaRevisar(remitosParaRevisar(s))).toBe("Para revisar: 2 remitos, 4 vencidos y 1 pieza");
     expect(textoParaRevisar({ remitos: 0, vencidos: 1, piezas: 0, total: 1 })).toBe("Para revisar: 1 vencido");
     expect(textoParaRevisar({ remitos: 0, vencidos: 0, piezas: 0, total: 0 })).toBeNull();
+  });
+
+  it("para revisar: el total del menú suma remitos, vencidos y piezas", () => {
+    const s = { ...SALUD, a_revisar: 2, a_revisar_vencidos: 0, vencidos: 0, piezas_abiertas: 3 };
+    expect(remitosParaRevisar(s).total).toBe(5);
+    expect(textoParaRevisar(remitosParaRevisar(s))).toBe("Para revisar: 2 remitos y 3 piezas");
+  });
+
+  it("«Ver los N a revisar»: solo los a revisar sin vencer, que son los N que dice la línea", () => {
+    const rows = [
+      fila("a_revisar", { movimiento_id: "viejo", created_at: "2026-08-02T12:00:00Z" }),
+      fila("a_revisar", { movimiento_id: "reciente", created_at: hace(3) }),
+      fila("a_revisar", { movimiento_id: "vencido", created_at: hace(60) }),
+      fila("firmado", { created_at: hace(3) }),
+      fila("sin_escanear", { created_at: hace(3) }),
+    ];
+    const lista = remitosARevisar(rows, AJ, AHORA);
+    expect(lista.map((r) => r.movimiento_id)).toEqual(["viejo", "reciente"]);
+    // La salud cuenta 3 a revisar, uno de ellos vencido: la línea dice 2 remitos.
+    const s = { ...SALUD, ...AJ, a_revisar: 3, a_revisar_vencidos: 1, vencidos: 1, piezas_abiertas: 0 };
+    expect(remitosParaRevisar(s).remitos).toBe(lista.length);
   });
 
   it("hace cuánto salió: horas hasta 3 días, después días", () => {
