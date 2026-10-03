@@ -9,6 +9,7 @@ import {
   handleUpdateReservation,
 } from "./actions";
 import DateTimePickerField from "./DateTimePickerField";
+import NumberStepper from "./NumberStepper";
 import type { ReservationEditableRow } from "@/lib/data";
 import { formatAmountForInput, parseArMoney } from "@/lib/format";
 import ParsedAmountHint from "./ParsedAmountHint";
@@ -238,23 +239,14 @@ export default function EditReservationModal({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">
-                    Cantidad de pasajeros
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={guestCount}
-                    onChange={(e) =>
-                      setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring outline-none"
-                  />
-                </div>
-              </div>
+              <NumberStepper
+                id="edit-guest-count"
+                label="Cantidad de pasajeros"
+                value={guestCount}
+                onChange={setGuestCount}
+                min={1}
+                max={20}
+              />
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Notas</label>

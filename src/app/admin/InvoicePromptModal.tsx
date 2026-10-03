@@ -7,9 +7,10 @@ import { toast } from "sonner";
 import {
   declineInvoiceAction,
   emitInvoiceForReservationAction,
+  fixReservationDniAction,
   lookupReceptorByCuitAction,
 } from "./fiscal/actions";
-import { formatCuit, isValidCuit } from "@/lib/arca/amounts";
+import { DNI_INVALIDO_MSG, esErrorDniReserva, formatCuit, isValidCuit } from "@/lib/arca/amounts";
 import {
   initialInvoiceStep,
   letraDeReceptor,
@@ -57,6 +58,13 @@ type Props = {
 /** A dónde vuelve el botón "Volver" desde la pantalla de confirmación. */
 type ConfirmBack = "tipo" | "formB" | "formCuit";
 
+/**
+ * Los pasos del modal: los de `InvoiceStep` más `corregirDni`, al que se llega
+ * cuando la emisión vuelve con el DNI de la reserva rechazado. De ahí se vuelve a
+ * `confirmar`. Vive acá porque sólo lo recorre este modal.
+ */
+type Paso = InvoiceStep | "corregirDni";
+
 function formatMoney(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -91,6 +99,13 @@ function openInvoicePrint(invoiceId: string) {
  * Por facturar, y recepción ya no la ve. En /admin/fiscal y en Control (startAtTipo)
  * el que factura es el admin, que la sigue viendo en la lista: ahí la X cierra directo.
  *
+ * EL DNI SE CORRIGE ACÁ MISMO. Si el DNI de la reserva no tiene 7 u 8 dígitos, en
+ * vez de mandar a "corregirlo en la reserva" (recepción no puede editar una estadía
+ * cerrada) aparece el campo "DNI correcto" con "Guardar DNI". Si la emisión vuelve
+ * con el DNI rechazado, el modal no se cierra: pasa a `corregirDni` y después vuelve
+ * a confirmar. Quién puede corregir qué estadía lo decide la RPC (turno propio y
+ * sin CAE, mig 73).
+ *
  * El estado se inicializa desde `data` en el montaje; el padre pasa `key` (el
  * reservationId) para que se remonte fresco cada vez que abre un prompt nuevo.
  */
@@ -98,11 +113,11 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const mandatory = Boolean(data?.mandatory);
   const prefillComplete = Boolean(data?.prefillComplete);
 
-  const [step, setStep] = useState<InvoiceStep>(() =>
+  const [step, setStep] = useState<Paso>(() =>
     initialInvoiceStep({ startAtTipo, mandatory, prefillComplete })
   );
   /** Dónde estaba cuando pidió salir: "Volver a la factura" lo deja como estaba. */
-  const [stepAntesDeSalir, setStepAntesDeSalir] = useState<InvoiceStep>(step);
+  const [stepAntesDeSalir, setStepAntesDeSalir] = useState<Paso>(step);
   const [emitting, setEmitting] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupFuente, setLookupFuente] = useState<string | null>(null);
@@ -115,6 +130,22 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   // Nombre impreso en la Factura B: precargado con el de la reserva y editable
   // (el pasajero se anota apurado y la factura la quiere con el nombre completo).
   const [nombreB, setNombreB] = useState(() => data?.clientName ?? "");
+  // DNI que va a llevar la Factura B. Arranca con el de la reserva y cambia a la
+  // vista al corregirlo acá ("Guardar DNI"), sin volver a cargar la pantalla.
+  const [dniActual, setDniActual] = useState<string | null | undefined>(() => data?.clientDni);
+  /** Lo que se tipea en "DNI correcto": sólo dígitos, hasta 8. */
+  const [dniNuevo, setDniNuevo] = useState("");
+  const [guardandoDni, setGuardandoDni] = useState(false);
+  /** Por qué no se guardó (otro turno, ya facturada…). Se lee al lado del campo. */
+  const [dniError, setDniError] = useState<string | null>(null);
+  /**
+   * `corregirDni` se abrió porque ya hay un borrador de Factura B con el DNI
+   * rechazado. La base reusa ese borrador aunque se pida otro receptor, así que
+   * desde ahí no se ofrece pasar a CUIT: saldría otra vez la B.
+   */
+  const [dniConBorrador, setDniConBorrador] = useState(false);
+  /** "¿El DNI está mal? Corregilo acá": abre el campo aunque el DNI tenga 7 u 8 dígitos. */
+  const [editandoDni, setEditandoDni] = useState(false);
   /** Lo que se va a emitir, ya armado. Se mira en "confirmar" y recién ahí se emite. */
   const [pending, setPending] = useState<InvoiceReceptorInput | null>(() =>
     data && prefillComplete
@@ -135,10 +166,12 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
   const derivedLetra = form.condicionIva === "exento" ? "B" : form.condicionIva ? "A" : null;
 
   // DNI que va a llevar la Factura B. `undefined` = la pantalla no lo trajo: no se
-  // valida acá (el RPC igual rechaza un DNI que no sirve, con el mismo mensaje).
-  const dniDigits = (data.clientDni ?? "").replace(/\D/g, "");
-  const dniConocido = data.clientDni !== undefined && data.clientDni !== null;
+  // valida acá (el RPC igual rechaza un DNI que no sirve, y el modal pasa a
+  // "corregirDni" en vez de cerrarse).
+  const dniDigits = (dniActual ?? "").replace(/\D/g, "");
+  const dniConocido = dniActual !== undefined && dniActual !== null;
   const dniSirve = dniDigits.length === 7 || dniDigits.length === 8;
+  const dniNuevoSirve = dniNuevo.length === 7 || dniNuevo.length === 8;
 
   /**
    * La X y el "Cancelar" sin a dónde volver. Con startAtTipo cierra directo, como
@@ -204,12 +237,115 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
     setEmitting(false);
 
     if (!result.success) {
+      // El DNI de la reserva no sirve (P0022): no se cierra. Se corrige acá y se
+      // vuelve a confirmar. Cualquier otro error (CUIT, turno, ARCA) se muestra y
+      // cierra como siempre.
+      if (result.code === "P0022" && esErrorDniReserva(result.error)) {
+        pasarACorregirDni(false);
+        return;
+      }
       toast.error(result.error);
       onClose();
       return;
     }
-    handleOutcome(result.data!);
+    const outcome = result.data!;
+    // Lo mismo si el borrador ya existía y el emisor lo dejó pendiente por el DNI
+    // (al emitir, la base vuelve a leer el DNI de la reserva y lo rechaza).
+    if (outcome.status === "pending" && esErrorDniReserva(outcome.userMessage)) {
+      pasarACorregirDni(true);
+      return;
+    }
+    handleOutcome(outcome);
   };
+
+  const pasarACorregirDni = (conBorrador: boolean) => {
+    setDniConBorrador(conBorrador);
+    setDniError(null);
+    setStep("corregirDni");
+  };
+
+  /**
+   * "Guardar DNI": corrige el DNI de la estadía. No emite: el DNI cambia a la vista
+   * y se habilita "Confirmar y emitir". Si venía de una emisión rechazada por el
+   * DNI, vuelve a la confirmación para que se mire el DNI nuevo antes de emitir.
+   * Si no se puede (estadía de otro turno, ya facturada), el motivo queda al lado
+   * del campo y el DNI no cambia.
+   */
+  const guardarDni = async () => {
+    if (guardandoDni || !dniNuevoSirve) return;
+    const digits = dniNuevo;
+    const volverAConfirmar = step === "corregirDni";
+    setGuardandoDni(true);
+    setDniError(null);
+    let result: Awaited<ReturnType<typeof fixReservationDniAction>>;
+    try {
+      result = await fixReservationDniAction(data.reservationId, digits);
+    } catch {
+      setGuardandoDni(false);
+      setDniError("No se pudo guardar el DNI porque se cortó la comunicación. Probá de nuevo.");
+      return;
+    }
+    setGuardandoDni(false);
+    if (!result.success) {
+      setDniError(result.error);
+      return;
+    }
+    toast.success("DNI corregido");
+    setDniActual(digits);
+    setDniNuevo("");
+    setEditandoDni(false);
+    setDniConBorrador(false);
+    if (volverAConfirmar) {
+      // Con el DNI rechazado lo que se emite es la Factura B. Si la pantalla venía
+      // con otro receptor (una A), no se confirma ese: se revisa la B.
+      setStep(pending?.tipo === "B" ? "confirmar" : "formB");
+    }
+  };
+
+  /**
+   * El campo "DNI correcto" con "Guardar DNI". Va donde antes decía "Corregilo en
+   * la reserva": en la confirmación, en los datos de la B y en `corregirDni`.
+   */
+  const campoDni = (autoFocus: boolean) => (
+    <div className="space-y-1.5">
+      <label htmlFor="dni-correcto" className="block text-xs font-bold text-slate-600">
+        DNI correcto
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="dni-correcto"
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          autoFocus={autoFocus}
+          value={dniNuevo}
+          disabled={guardandoDni}
+          onChange={(e) => {
+            setDniNuevo(e.target.value.replace(/\D/g, "").slice(0, 8));
+            setDniError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void guardarDni();
+            }
+          }}
+          placeholder="7 u 8 dígitos, sin puntos"
+          className="min-w-0 flex-1 px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+        />
+        <button
+          type="button"
+          onClick={() => void guardarDni()}
+          disabled={guardandoDni || !dniNuevoSirve}
+          className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors"
+        >
+          {guardandoDni && <Loader2 size={14} className="animate-spin" />}
+          Guardar DNI
+        </button>
+      </div>
+      {dniError && <p className="text-xs font-semibold text-rose-700">{dniError}</p>}
+    </div>
+  );
 
   /**
    * "No facturar" queda REGISTRADO (mig 80): el playero no puede cambiarlo después,
@@ -269,6 +405,11 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
       toast.error("Ingresá el nombre que va en la factura.");
       return;
     }
+    // Un DNI escrito y sin guardar no viaja a la factura: que no se pierda sin avisar.
+    if (dniNuevo) {
+      toast.error("Tocá «Guardar DNI» antes de seguir, o borrá lo que escribiste.");
+      return;
+    }
     revisar({ tipo: "B", razonSocial: nombre }, "formB");
   };
 
@@ -313,7 +454,9 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
         ? "Revisá antes de emitir"
         : step === "confirmSalir"
           ? "¿Salir sin facturar?"
-          : "¿Emitir factura?";
+          : step === "corregirDni"
+            ? "Corregir DNI"
+            : "¿Emitir factura?";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-slate-900/50 backdrop-blur-sm text-left">
@@ -331,8 +474,9 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
             </div>
           </div>
           {/* En "¿Salir sin facturar?" no hay X: está en el mismo lugar, y un doble
-              click la cerraría sin haber leído la pregunta. */}
-          {!emitting && step !== "confirmSalir" && (
+              click la cerraría sin haber leído la pregunta. Mientras se guarda el
+              DNI tampoco: la respuesta cambia de paso. */}
+          {!emitting && !guardandoDni && step !== "confirmSalir" && (
             <button
               type="button"
               aria-label="Cerrar"
@@ -477,13 +621,19 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
               </div>
 
               {pending.tipo === "B" && dniConocido && !dniSirve && (
-                <div className="mt-3 flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-xl p-3">
-                  <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
-                  <p className="text-xs font-semibold text-rose-800">
-                    El documento de la reserva ({dniDigits || "vacío"}) no es un DNI de 7 u 8
-                    dígitos, así que ARCA la va a rechazar. Corregilo en la reserva, o volvé y
-                    facturá con CUIT.
-                  </p>
+                <div className="mt-3 space-y-3 bg-rose-50 border border-rose-200 rounded-xl p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={16} className="text-rose-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-rose-900">Corregir DNI</p>
+                      <p className="text-xs font-semibold text-rose-800 mt-0.5">
+                        El documento de la reserva ({dniDigits || "vacío"}) no es un DNI de 7 u 8
+                        dígitos, así que ARCA la va a rechazar. Escribí el DNI correcto y
+                        guardalo, o volvé y facturá con CUIT.
+                      </p>
+                    </div>
+                  </div>
+                  {campoDni(false)}
                 </div>
               )}
 
@@ -573,9 +723,42 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 {prefillComplete || !(startAtTipo || mandatory) ? "Volver" : "Cancelar"}
               </button>
             </>
+          ) : step === "corregirDni" ? (
+            // La emisión volvió con el DNI rechazado: no se cierra. Se corrige acá y
+            // se vuelve a la confirmación, que muestra el DNI nuevo antes de emitir.
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-2xl p-4">
+                <AlertTriangle size={18} className="text-rose-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-rose-900">La factura no salió.</p>
+                  <p className="text-xs font-semibold text-rose-800">{DNI_INVALIDO_MSG}</p>
+                  <p className="text-xs text-rose-800">
+                    Escribí el DNI correcto del huésped y guardalo. Después revisás la factura
+                    y la emitís.
+                  </p>
+                </div>
+              </div>
+              {campoDni(true)}
+              {dniConBorrador ? (
+                <p className="text-[11px] text-slate-400">
+                  Para facturar con CUIT, el administrador tiene que descartar antes la factura
+                  pendiente en Facturación.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setStep("formCuit")}
+                  disabled={guardandoDni}
+                  className="w-full text-xs font-semibold text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                >
+                  Facturar con CUIT en vez de DNI
+                </button>
+              )}
+            </div>
           ) : step === "formB" ? (
             // Consumidor Final: el ÚNICO dato que se escribe es el nombre. El documento
-            // sale de la reserva y no se toca acá (corregirlo es editar la reserva).
+            // sale de la reserva; si está mal se corrige acá mismo ("Guardar DNI"),
+            // porque recepción no puede editar una estadía cerrada.
             <div className="space-y-4">
               <div>
                 <label
@@ -599,17 +782,32 @@ export default function InvoicePromptModal({ data, onClose, startAtTipo = false 
                 </p>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
-                  Documento (sale de la reserva)
-                </p>
-                <p className="text-sm font-bold text-slate-700 font-mono mt-0.5">
-                  DNI {dniConocido ? dniDigits || "(sin cargar)" : "de la reserva"}
-                </p>
-                {dniConocido && !dniSirve && (
-                  <p className="text-[11px] font-semibold text-rose-600 mt-1">
-                    No es un DNI de 7 u 8 dígitos: corregilo en la reserva o facturá con CUIT.
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                <div>
+                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+                    Documento (sale de la reserva)
                   </p>
+                  <p className="text-sm font-bold text-slate-700 font-mono mt-0.5">
+                    DNI {dniConocido ? dniDigits || "(sin cargar)" : "de la reserva"}
+                  </p>
+                </div>
+                {dniConocido && !dniSirve ? (
+                  <>
+                    <p className="text-[11px] font-semibold text-rose-600">
+                      No es un DNI de 7 u 8 dígitos: corregilo acá abajo o facturá con CUIT.
+                    </p>
+                    {campoDni(false)}
+                  </>
+                ) : editandoDni ? (
+                  campoDni(true)
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditandoDni(true)}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 underline underline-offset-2"
+                  >
+                    ¿El DNI está mal? Corregilo acá
+                  </button>
                 )}
               </div>
 
