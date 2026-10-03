@@ -1,5 +1,7 @@
 import { ZodError } from "zod";
 
+import { DNI_INVALIDO_MSG, esErrorDniReserva } from "@/lib/arca/amounts";
+
 type MaybeErrorWithMessage = {
   message?: string;
   code?: string;
@@ -66,6 +68,14 @@ export function parseActionError(
     if (code && TECHNICAL_SQLSTATES.has(code)) {
       console.error("[parseActionError] Error técnico de DB:", code, error.message);
       return { error: GENERIC_MESSAGE, code };
+    }
+
+    // P0022 es "dato fiscal que no sirve": CUIT, condición de IVA, documento de la
+    // consolidada o DNI de la reserva. Sólo el último se traduce: su texto viejo
+    // manda a "corregirlo en la reserva", que recepción no puede con la estadía
+    // cerrada. Los demás ya dicen qué hacer y quedan como vienen.
+    if (code === "P0022" && esErrorDniReserva(String(error.message ?? ""))) {
+      return { error: DNI_INVALIDO_MSG, code };
     }
 
     if (error instanceof Error) {

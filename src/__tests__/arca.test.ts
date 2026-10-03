@@ -5,9 +5,12 @@ import {
   arcaDateFromDateKey,
   cbteLetra,
   cbteNombre,
+  DNI_INVALIDO_MSG,
+  esErrorDniReserva,
   formatArcaDate,
   formatCbteNumero,
   formatCuit,
+  humanizarErrorFiscal,
   isNotaCredito,
   isValidCuit,
   parseDniForArca,
@@ -80,6 +83,57 @@ describe("parseDniForArca", () => {
     expect("error" in parseDniForArca("12345")).toBe(true);
     expect("error" in parseDniForArca("123456789")).toBe(true);
     expect("error" in parseDniForArca(null)).toBe(true);
+  });
+
+  it("un DNI corto no manda a corregirlo «en la reserva»: dice qué tiene que tener", () => {
+    const r = parseDniForArca("12345");
+    expect(r).toEqual({ error: DNI_INVALIDO_MSG });
+    expect("error" in r && /en la reserva/i.test(r.error)).toBe(false);
+  });
+});
+
+// El texto viejo sigue en las RPC de la base (migs 72 a 112) y queda guardado en
+// last_error. Se traduce en la pantalla: reescribir funciones de PROD por un texto
+// no vale la pena.
+describe("error del DNI de la reserva", () => {
+  const DNI_VIEJO =
+    "El DNI de la reserva no es valido para facturar (7 u 8 digitos). Corregilo en la reserva y reintenta.";
+
+  it("humanizarErrorFiscal cambia el texto viejo de la base por «Usá «Corregir DNI».»", () => {
+    const humano = humanizarErrorFiscal(DNI_VIEJO);
+    expect(humano).toBe(`${DNI_INVALIDO_MSG} Usá «Corregir DNI».`);
+    expect(humano).not.toMatch(/en la reserva/i);
+  });
+
+  it("humanizarErrorFiscal deja pasar los demás errores tal cual", () => {
+    for (const raw of [
+      "10013: El campo DocNro no es valido",
+      "ARCA no está respondiendo. La factura quedó pendiente — reintentá desde Facturación.",
+      "El CUIT del receptor no es valido (11 digitos). Descarta la factura y volve a emitirla con el CUIT correcto.",
+      // La consolidada no tiene "Corregir DNI": su texto manda a la ficha y queda.
+      "El DNI del receptor no es valido. Corregilo en la ficha y volve a generar el comprobante.",
+    ]) {
+      expect(humanizarErrorFiscal(raw)).toBe(raw);
+    }
+  });
+
+  it("humanizarErrorFiscal con null devuelve null", () => {
+    expect(humanizarErrorFiscal(null)).toBeNull();
+  });
+
+  it("esErrorDniReserva reconoce el texto viejo y el nuevo, no los del CUIT ni los de la consolidada", () => {
+    expect(esErrorDniReserva(DNI_VIEJO)).toBe(true);
+    expect(esErrorDniReserva(DNI_INVALIDO_MSG)).toBe(true);
+    expect(
+      esErrorDniReserva(
+        "El CUIT del receptor no es valido (11 digitos con digito verificador). Corregilo y reintenta."
+      )
+    ).toBe(false);
+    expect(
+      esErrorDniReserva("El DNI del huesped no es valido para facturar (7 u 8 digitos). Corregilo en la ficha.")
+    ).toBe(false);
+    expect(esErrorDniReserva(null)).toBe(false);
+    expect(esErrorDniReserva(undefined)).toBe(false);
   });
 });
 
