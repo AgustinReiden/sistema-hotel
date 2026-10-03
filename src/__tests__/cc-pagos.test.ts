@@ -327,6 +327,9 @@ describe("lo que la pantalla NO deja mandar", () => {
 
     expect(problemas).toHaveLength(1);
     expect(problemas[0]).toContain("$10.000,00");
+    // Habla del vocabulario de la pantalla: lo que CANCELA el pago y lo que ENTRÓ.
+    expect(problemas[0]).toContain("más de lo que cancela este pago");
+    expect(problemas[0]).toContain("Subí lo que entró");
   });
 
   it("retenciones que se pasan del monto: el monto YA las incluye", () => {
@@ -361,8 +364,8 @@ describe("lo que la pantalla NO deja mandar", () => {
   });
 
   it("un monto vacío o en cero se explica, no se manda", () => {
-    expect(problemasDelPago({ amount: 0, imputaciones: [] })[0]).toContain("monto");
-    expect(problemasDelPago({ amount: Number.NaN, imputaciones: [] })[0]).toContain("monto");
+    expect(problemasDelPago({ amount: 0, imputaciones: [] })[0]).toContain("lo que entró");
+    expect(problemasDelPago({ amount: Number.NaN, imputaciones: [] })[0]).toContain("lo que entró");
   });
 
   it("una factura tildada sin importe pide el importe o que la destilden", () => {

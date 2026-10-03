@@ -24,7 +24,7 @@
  * no se pueda dar vuelta sin que algo se ponga rojo.
  */
 
-import { formatAmount } from "./format";
+import { formatAmount, parseArMoney } from "./format";
 import type { ImputacionDestino } from "./types";
 
 /** El redondeo de dinero del repo (mismo que `roundCurrency` en pricing.ts). */
@@ -347,6 +347,45 @@ export function aImputacionDestino(i: ImputacionElegida): ImputacionDestino {
     : { cargoMovimientoId: i.id, amount: i.amount };
 }
 
+/** El pago no cancela nada: lo que entró (con las retenciones) no llega a más de 0. */
+export const PAGO_EN_CERO =
+  "Lo que cancela el pago tiene que ser mayor a 0: escribí lo que entró.";
+
+/** El campo "Lo que entró" está vacío: hay que escribirlo, aunque sea un 0. */
+export const FALTA_LO_QUE_ENTRO = "Escribí lo que entró. Si fue solo retención, escribí 0.";
+
+/**
+ * Lo que está mal en los TEXTOS de los tres importes, antes de convertirlos en números.
+ *
+ * Un importe que `parseArMoney` no entiende ("$ 90.000,00", "90,000.00") valdría 0 en
+ * silencio, y con `amount` = lo que entró + las retenciones eso ya no queda frenado por
+ * el monto en cero: alcanza con que haya una retención para que se pueda guardar un
+ * cobro de "entraron $0", o con una retención ilegible para que lo que cancela baje de
+ * menos. Acá se pide corregirlo en vez de adivinar. "Lo que entró" vacío también se
+ * pide: un 0 tiene que ser un 0 escrito (un pago absorbido por la retención es válido).
+ * Las retenciones vacías valen 0: la mayoría no retiene.
+ */
+export function problemasDeLoTipeado(campos: {
+  entro: string;
+  retencionGanancias: string;
+  retencionIibb: string;
+}): string[] {
+  const problemas: string[] = [];
+  const sinEntender = (cual: string) =>
+    `No se entiende ${cual}. Escribilo así: 43.700 o 43.700,50.`;
+
+  if (!campos.entro.trim()) problemas.push(FALTA_LO_QUE_ENTRO);
+  else if (parseArMoney(campos.entro) === null) problemas.push(sinEntender("lo que entró"));
+
+  if (campos.retencionGanancias.trim() && parseArMoney(campos.retencionGanancias) === null) {
+    problemas.push(sinEntender("la retención de Ganancias"));
+  }
+  if (campos.retencionIibb.trim() && parseArMoney(campos.retencionIibb) === null) {
+    problemas.push(sinEntender("la retención de Ingresos Brutos"));
+  }
+  return problemas;
+}
+
 /**
  * Todo lo que está mal en el pago que se está cargando, dicho como una instrucción.
  *
@@ -372,7 +411,7 @@ export function problemasDelPago(input: {
   const iibb = num(input.retencionIibb);
 
   if (!Number.isFinite(Number(input.amount)) || amount <= 0) {
-    problemas.push("Escribí el monto del pago: tiene que ser mayor a 0.");
+    problemas.push(PAGO_EN_CERO);
   }
   if (rg < 0 || iibb < 0) {
     problemas.push("Las retenciones no pueden ser negativas. Escribí lo retenido, sin signo.");
@@ -380,10 +419,10 @@ export function problemasDelPago(input: {
 
   const sobranRetenciones = retencionExcedente({ amount, retencionGanancias: rg, retencionIibb: iibb });
   if (sobranRetenciones > 0) {
-    // El monto ya incluye lo retenido: el error típico es sumarle la retención al
-    // neto que llegó al banco en vez de partir del total que cancela.
+    // Lo que cancela ya incluye lo retenido (F2-11: la pantalla lo calcula sumando las
+    // retenciones, así que esto sólo salta si el amount llega de otro lado).
     problemas.push(
-      `Las retenciones se pasan ${formatAmount(sobranRetenciones)} del monto. El monto ya las incluye: subilo a ${formatAmount(round2(rg + iibb))} o bajá la retención.`
+      `Las retenciones se pasan ${formatAmount(sobranRetenciones)} de lo que cancela el pago. Lo que cancela ya las incluye: tiene que llegar a ${formatAmount(round2(rg + iibb))} o bajá la retención.`
     );
   }
 
@@ -403,7 +442,7 @@ export function problemasDelPago(input: {
   const sobraImputado = imputacionExcedente({ amount }, input.imputaciones);
   if (sobraImputado > 0) {
     problemas.push(
-      `Estás imputando ${formatAmount(sobraImputado)} más de lo que entra en el pago. Subí el monto o bajá lo imputado.`
+      `Estás imputando ${formatAmount(sobraImputado)} más de lo que cancela este pago. Subí lo que entró o bajá lo imputado.`
     );
   }
 

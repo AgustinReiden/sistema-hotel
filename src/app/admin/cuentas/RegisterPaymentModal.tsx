@@ -24,9 +24,12 @@ import {
   aImputacionDestino,
   cancelaDesdeLoQueEntro,
   claveDeuda,
+  PAGO_EN_CERO,
+  problemasDeLoTipeado,
   problemasDelPago,
   repartirMasViejoPrimero,
   resumenPago,
+  retencionesTotal,
   type DeudaAImputar,
   type ImputacionEnPantalla,
 } from "@/lib/cc-pagos";
@@ -196,7 +199,11 @@ export default function RegisterPaymentModal({
 }) {
   // Lo que entró, sin precarga: precargar el saldo invitaba a guardar un número que
   // nadie había mirado contra el extracto.
-  const [entro, setEntro] = useState("");
+  const [entroTipeado, setEntro] = useState("");
+  // "Paga todo el saldo" deja el campo atado al saldo: mientras nadie lo toque a mano,
+  // sigue valiendo saldo − retenciones aunque las retenciones se carguen DESPUÉS (el
+  // chip está arriba y se aprieta primero). Si se tipea, el campo pasa a ser del admin.
+  const [pagaTodo, setPagaTodo] = useState(false);
   // Sin medio preseleccionado: arrancar en "Efectivo" dejaba transferencias anotadas
   // como efectivo. Vacío hasta que alguien elija.
   const [method, setMethod] = useState("");
@@ -212,6 +219,17 @@ export default function RegisterPaymentModal({
    * render: el ref corta en el acto. Se suelta sólo si la acción falla.
    */
   const enviando = useRef(false);
+
+  /** Lo que se ve en el campo "Lo que entró": lo tipeado, o lo que pide el chip del saldo. */
+  const entro = useMemo(() => {
+    if (!pagaTodo) return entroTipeado;
+    const retenciones = retencionesTotal({
+      retencionGanancias: monto(retGanancias),
+      retencionIibb: monto(retIibb),
+    });
+    const falta = Math.max(0, account.balance - retenciones);
+    return formatAmountForInput(Math.round((falta + Number.EPSILON) * 100) / 100);
+  }, [pagaTodo, entroTipeado, retGanancias, retIibb, account.balance]);
 
   /** Lo que CANCELA de deuda: lo que entró + las retenciones. Es el `amount` (mig 109). */
   const amount = useMemo(
@@ -287,18 +305,25 @@ export default function RegisterPaymentModal({
     [amount, retGanancias, retIibb, imputaciones]
   );
 
-  const problemas = useMemo(
-    () => [
+  const problemas = useMemo(() => {
+    // Los importes que no se entienden valdrían 0 en silencio: se piden primero. Y si
+    // "lo que entró" no se leyó, el aviso genérico de "cancela 0" sobra: ya se dijo.
+    const entroLegible = parseArMoney(entro) !== null;
+    return [
+      ...problemasDeLoTipeado({
+        entro,
+        retencionGanancias: retGanancias,
+        retencionIibb: retIibb,
+      }),
       ...problemasDelPago({
         amount,
         retencionGanancias: monto(retGanancias),
         retencionIibb: monto(retIibb),
         imputaciones,
-      }),
+      }).filter((p) => entroLegible || p !== PAGO_EN_CERO),
       ...(method === "" ? [FALTA_METODO] : []),
-    ],
-    [amount, retGanancias, retIibb, imputaciones, method]
-  );
+    ];
+  }, [amount, entro, retGanancias, retIibb, imputaciones, method]);
 
   /** Retener sin anotar el certificado no rompe nada, pero deja el papel inútil. */
   const faltaCertificado = resumen.retenciones > 0 && certificado.trim() === "";
@@ -344,10 +369,7 @@ export default function RegisterPaymentModal({
    * el saldo menos lo que ya se cargó de retenciones. Nunca negativo: si la retención
    * se come el saldo, no entró nada.
    */
-  const pagaTodoElSaldo = () => {
-    const falta = Math.max(0, account.balance - resumen.retenciones);
-    setEntro(formatAmountForInput(Math.round((falta + Number.EPSILON) * 100) / 100));
-  };
+  const pagaTodoElSaldo = () => setPagaTodo(true);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -444,8 +466,13 @@ export default function RegisterPaymentModal({
               type="text"
               inputMode="decimal"
               value={entro}
-              onChange={(e) => setEntro(e.target.value)}
-              onBlur={() => alSalirDelCampo(entro, setEntro)}
+              onChange={(e) => {
+                setPagaTodo(false);
+                setEntro(e.target.value);
+              }}
+              onBlur={() => {
+                if (!pagaTodo) alSalirDelCampo(entroTipeado, setEntro);
+              }}
               className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-bold"
               placeholder="0,00"
               autoFocus

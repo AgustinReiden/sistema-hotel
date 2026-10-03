@@ -193,7 +193,8 @@ describe("RegisterPaymentModal", () => {
     fireEvent.click(screen.getByLabelText(`Aplicar a ${etiquetaNueva}`));
     fireEvent.change(montoDe(etiquetaNueva), { target: { value: "30000" } });
 
-    await waitFor(() => expect(problemas()).toContain("$20.000,00 más de lo que entra"));
+    await waitFor(() => expect(problemas()).toContain("$20.000,00 más de lo que cancela este pago"));
+    expect(problemas()).toContain("Subí lo que entró");
     expect(botonGuardar().disabled).toBe(true);
   });
 
@@ -377,6 +378,64 @@ describe("RegisterPaymentModal — se carga lo que entró (F2-11)", () => {
 
     expect(campoEntro().value).toBe("145.000,00");
     expect(cancelaDeDeuda()).toContain("$150.000,00");
+  });
+
+  it("'Paga todo el saldo' sigue al día si las retenciones se cargan DESPUÉS del chip", async () => {
+    // El chip está arriba y se aprieta primero: no puede dejar al cliente con plata a
+    // favor porque la retención llegó un campo más abajo.
+    await montar(vi.fn(), { ...account, balance: 150000 });
+
+    fireEvent.click(screen.getByText("Paga todo el saldo"));
+    expect(campoEntro().value).toBe("150.000,00");
+
+    fireEvent.change(screen.getByLabelText("Ganancias"), { target: { value: "10.000" } });
+    expect(campoEntro().value).toBe("140.000,00");
+    expect(cancelaDeDeuda()).toContain("$150.000,00");
+
+    // Si el admin lo toca a mano, el campo vuelve a ser suyo.
+    fireEvent.change(campoEntro(), { target: { value: "120.000" } });
+    fireEvent.change(screen.getByLabelText("Ganancias"), { target: { value: "5.000" } });
+    expect(campoEntro().value).toBe("120.000");
+    expect(cancelaDeDeuda()).toContain("$125.000,00");
+  });
+
+  it("lo que entró ilegible no se guarda aunque haya retenciones", async () => {
+    // "$ 90.000,00" no se entiende: antes valía 0 y quedaba un cobro de la sola retención.
+    await montar();
+    elegirMetodo("bank_transfer");
+
+    fireEvent.change(campoEntro(), { target: { value: "$ 90.000,00" } });
+    fireEvent.change(screen.getByLabelText("Ganancias"), { target: { value: "10.000" } });
+
+    expect(problemas()).toContain("No se entiende lo que entró");
+    expect(botonGuardar().disabled).toBe(true);
+    expect(registerAccountPaymentAction).not.toHaveBeenCalled();
+  });
+
+  it("lo que entró vacío con una retención cargada pide escribirlo (o un 0)", async () => {
+    await montar();
+    elegirMetodo("bank_transfer");
+
+    fireEvent.change(screen.getByLabelText("Ganancias"), { target: { value: "8.000" } });
+
+    expect(problemas()).toContain("Escribí lo que entró");
+    expect(botonGuardar().disabled).toBe(true);
+
+    // Un 0 escrito es deliberado: el pago absorbido entero por la retención es válido.
+    fireEvent.change(campoEntro(), { target: { value: "0" } });
+    expect(problemas()).not.toContain("Escribí lo que entró");
+    expect(botonGuardar().disabled).toBe(false);
+  });
+
+  it("una retención ilegible no se ignora en silencio", async () => {
+    await montar();
+    elegirMetodo("bank_transfer");
+
+    fireEvent.change(campoEntro(), { target: { value: "90.000" } });
+    fireEvent.change(screen.getByLabelText("Ganancias"), { target: { value: "$10.000" } });
+
+    expect(problemas()).toContain("No se entiende la retención de Ganancias");
+    expect(botonGuardar().disabled).toBe(true);
   });
 
   it("'Paga todo el saldo' no propone un negativo si la retención se come el saldo", async () => {

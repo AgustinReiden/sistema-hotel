@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { cancelaDesdeLoQueEntro, netoRecibido } from "@/lib/cc-pagos";
+import {
+  cancelaDesdeLoQueEntro,
+  FALTA_LO_QUE_ENTRO,
+  netoRecibido,
+  problemasDeLoTipeado,
+} from "@/lib/cc-pagos";
 
 /**
  * F2-11: el modal de cobro pide "lo que entró" (lo que dice el extracto del banco) y
@@ -45,5 +50,50 @@ describe("cancelaDesdeLoQueEntro", () => {
 
   it("un valor que no es número cuenta como cero, no como NaN", () => {
     expect(cancelaDesdeLoQueEntro({ entro: Number.NaN, retencionIibb: 5000 })).toBe(5000);
+  });
+});
+
+/**
+ * Los importes ilegibles no pueden valer 0 en silencio: con amount = lo que entró + las
+ * retenciones, un "lo que entró" que no se entiende dejaba pasar un cobro de $0 con solo
+ * la retención, y una retención que no se entiende bajaba lo que cancela.
+ */
+describe("problemasDeLoTipeado", () => {
+  const vacio = { entro: "90.000", retencionGanancias: "", retencionIibb: "" };
+
+  it("lo que se entiende, y las retenciones vacías, no tienen problema", () => {
+    expect(problemasDeLoTipeado(vacio)).toEqual([]);
+    expect(
+      problemasDeLoTipeado({ entro: "90000", retencionGanancias: "10.000,50", retencionIibb: "0" })
+    ).toEqual([]);
+  });
+
+  it("un 0 escrito es válido: un pago absorbido por la retención", () => {
+    expect(problemasDeLoTipeado({ ...vacio, entro: "0", retencionGanancias: "8.000" })).toEqual([]);
+  });
+
+  it("lo que entró vacío se pide, aunque haya retenciones", () => {
+    expect(problemasDeLoTipeado({ ...vacio, entro: "", retencionGanancias: "10.000" })).toEqual([
+      FALTA_LO_QUE_ENTRO,
+    ]);
+    expect(problemasDeLoTipeado({ ...vacio, entro: "   " })).toEqual([FALTA_LO_QUE_ENTRO]);
+  });
+
+  it.each(["$ 90.000,00", "90,000.00", "90.000,5,", "abc"])(
+    "lo que entró ilegible (%s) se avisa",
+    (entro) => {
+      const problemas = problemasDeLoTipeado({ ...vacio, entro });
+      expect(problemas).toHaveLength(1);
+      expect(problemas[0]).toContain("No se entiende lo que entró");
+    }
+  );
+
+  it("una retención ilegible se avisa con su nombre", () => {
+    const g = problemasDeLoTipeado({ ...vacio, retencionGanancias: "$10.000" });
+    expect(g).toHaveLength(1);
+    expect(g[0]).toContain("la retención de Ganancias");
+    const i = problemasDeLoTipeado({ ...vacio, retencionIibb: "10,000" });
+    expect(i).toHaveLength(1);
+    expect(i[0]).toContain("la retención de Ingresos Brutos");
   });
 });
