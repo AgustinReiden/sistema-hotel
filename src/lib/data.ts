@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { createClient } from "./supabase/server";
 import { isValidCuit } from "./arca/amounts";
 import { AUTHORIZED_INVOICES_LIMIT } from "./billing";
@@ -3985,7 +3986,11 @@ export async function getUnresolvedAdminAlertsCount(): Promise<number> {
   return (data ?? []).length;
 }
 
-export async function getPendingSolicitudesCount(): Promise<number> {
+/**
+ * Solicitudes web sin responder. Con `cache()` porque la piden el menú (layout) y Hoy
+ * en la misma carga: así es una sola consulta por pedido.
+ */
+export const getPendingSolicitudesCount = cache(async (): Promise<number> => {
   const supabase = await createClient();
   const { count, error } = await supabase
     .from("reservations")
@@ -3993,7 +3998,7 @@ export async function getPendingSolicitudesCount(): Promise<number> {
     .eq("status", "pending");
   if (error) return 0;
   return count ?? 0;
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Facturación electrónica ARCA (mig 72)

@@ -22,6 +22,7 @@ import {
   getPendingSolicitudesCount,
   getRemitosSalud,
   getUnresolvedAdminAlertsCount,
+  listPendingInvoices,
   listRoomOccupancyAlerts,
 } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
@@ -43,6 +44,7 @@ import { comoChrome, conIcuCambiado, septiembreSinT, type CambioDeIcu } from "./
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
   usePathname: () => "/admin",
+  useSearchParams: () => new URLSearchParams(),
   redirect: vi.fn(),
 }));
 // La pantalla entera de Hoy (el marco del panel y la página) lee la sesión y los datos
@@ -59,6 +61,7 @@ vi.mock("@/lib/data", () => ({
   getRemitosSalud: vi.fn(),
   getShiftSummary: vi.fn(),
   getUnresolvedAdminAlertsCount: vi.fn(),
+  listPendingInvoices: vi.fn(),
   listRoomOccupancyAlerts: vi.fn(),
 }));
 vi.mock("@/app/admin/mantenimiento/actions", () => ({
@@ -415,6 +418,7 @@ function prepararHoy() {
     status: "open",
   });
   vi.mocked(countBillingPending).mockResolvedValue({ falta: 2, pendiente_consolidada: 1, dias: 60 });
+  vi.mocked(listPendingInvoices).mockResolvedValue([]);
   vi.mocked(getRemitosSalud).mockResolvedValue({
     ultima_ingesta_at: TARDE,
     ultima_evaluacion_at: TARDE,

@@ -10,7 +10,16 @@ const H = vi.hoisted(() => ({
   openedBy: "otra-recepcionista" as string | null,
   idleMounts: 0,
   idleUnmounts: 0,
+  // Conteos del menú. `falla` hace que esa consulta lance.
+  falla: new Set<string>(),
+  solicitudes: 0,
+  facturas: [] as { status: string; created_at: string; last_attempt_at: string | null }[],
 }));
+
+async function conteo<T>(nombre: string, valor: T): Promise<T> {
+  if (H.falla.has(nombre)) throw new Error(`falló ${nombre}`);
+  return valor;
+}
 
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
@@ -65,8 +74,10 @@ vi.mock("@/lib/data", () => ({
     creditCharges: [],
     checkoutsCount: 0,
   }),
-  countBillingPending: async () => [],
-  getRemitosSalud: async () => ({ a_revisar: 0, piezas_abiertas: 0 }),
+  countBillingPending: () => conteo("unbilled", { falta: 4, pendiente_consolidada: 1, dias: 3650 }),
+  getRemitosSalud: () => conteo("remitos", { a_revisar: 2, a_revisar_vencidos: 0, vencidos: 1, piezas_abiertas: 3 }),
+  getPendingSolicitudesCount: () => conteo("solicitudes", H.solicitudes),
+  listPendingInvoices: () => conteo("facturas", H.facturas),
 }));
 
 // IdleLogout arranca el conteo de 30 minutos al montarse: el marcador cuenta cuántas
@@ -90,8 +101,14 @@ vi.mock("@/app/admin/caja/ForcedShiftHandover", () => ({
     <span>Rendición forzada de {currentUserName}</span>
   ),
 }));
-vi.mock("@/app/admin/Sidebar", () => ({ default: () => <span>Menú del panel</span> }));
-vi.mock("@/app/admin/MobileNav", () => ({ MobileTopBar: () => null, MobileTabBar: () => null }));
+// El menú deja a la vista (en data-nav) los numeritos que le pasa el layout.
+vi.mock("@/app/admin/Sidebar", () => ({
+  default: (props: Record<string, unknown>) => <span data-nav={JSON.stringify(props)}>Menú del panel</span>,
+}));
+vi.mock("@/app/admin/MobileNav", () => ({
+  MobileTopBar: (props: Record<string, unknown>) => <span data-nav={JSON.stringify(props)}>Cajón del celular</span>,
+  MobileTabBar: () => null,
+}));
 vi.mock("@/app/admin/OpenShiftAgeAlert", () => ({ default: () => null }));
 
 import AdminLayout from "@/app/admin/layout";
@@ -110,6 +127,9 @@ beforeEach(() => {
   H.openedBy = "otra-recepcionista";
   H.idleMounts = 0;
   H.idleUnmounts = 0;
+  H.falla = new Set();
+  H.solicitudes = 0;
+  H.facturas = [];
 });
 
 // Una PC olvidada en Hoy pasa sola a la rendición forzada cuando otra recepcionista abre
@@ -169,5 +189,71 @@ describe("layout del panel: con qué usuario se entró", () => {
     H.fullName = fullName;
     await renderLayout();
     expect(screen.getByText("Rendición forzada de juan@example.com")).toBeInTheDocument();
+  });
+});
+
+// Los numeritos del menú. Si una cuenta falla, el menú sigue con 0: el layout envuelve
+// todo el panel y no puede romper ninguna pantalla.
+describe("layout del panel: numeritos del menú", () => {
+  const navDe = (texto: string) => JSON.parse(screen.getByText(texto).getAttribute("data-nav") ?? "{}");
+  const hace = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+
+  beforeEach(() => {
+    H.openedBy = "u-actual";
+    H.solicitudes = 2;
+    H.facturas = [
+      { status: "rejected", created_at: hace(1), last_attempt_at: null },
+      { status: "processing", created_at: hace(30), last_attempt_at: null },
+      { status: "processing", created_at: hace(2), last_attempt_at: null },
+    ];
+  });
+
+  it("el dueño recibe los cuatro, y el de remitos es el total del panel", async () => {
+    H.role = "admin";
+    await renderLayout();
+    for (const menu of ["Menú del panel", "Cajón del celular"]) {
+      expect(navDe(menu)).toMatchObject({
+        role: "admin",
+        hasOpenShift: true,
+        unbilledCount: 5,
+        // 2 a revisar + 1 vencido + 3 piezas: lo mismo que suma la línea "Para revisar".
+        remitosPendientes: 6,
+        solicitudesPendientes: 2,
+        facturasConError: 2,
+      });
+    }
+  });
+
+  it("recepción recibe solicitudes y facturas con error; lo del dueño queda en 0", async () => {
+    await renderLayout();
+    expect(navDe("Menú del panel")).toMatchObject({
+      role: "receptionist",
+      unbilledCount: 0,
+      remitosPendientes: 0,
+      solicitudesPendientes: 2,
+      facturasConError: 2,
+    });
+  });
+
+  it("si una cuenta falla, ese numerito queda en 0 y el resto sigue", async () => {
+    H.role = "admin";
+    H.falla = new Set(["unbilled", "remitos", "solicitudes", "facturas"]);
+    await renderLayout();
+    expect(screen.getByText("Contenido de la pantalla")).toBeInTheDocument();
+    expect(navDe("Menú del panel")).toMatchObject({
+      unbilledCount: 0,
+      remitosPendientes: 0,
+      solicitudesPendientes: 0,
+      facturasConError: 0,
+    });
+
+    H.falla = new Set(["facturas"]);
+    await renderLayout();
+    const menus = screen.getAllByText("Menú del panel");
+    expect(JSON.parse(menus[menus.length - 1].getAttribute("data-nav") ?? "{}")).toMatchObject({
+      unbilledCount: 5,
+      solicitudesPendientes: 2,
+      facturasConError: 0,
+    });
   });
 });

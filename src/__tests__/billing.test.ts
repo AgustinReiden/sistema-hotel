@@ -6,6 +6,7 @@ import {
   DETALLE_NOTA_MAX,
   avisoModoFacturacion,
   defaultStayDescription,
+  facturasConError,
   initialInvoiceStep,
   isBankPaymentMethod,
   letraDeReceptor,
@@ -285,5 +286,52 @@ describe("avisoModoFacturacion", () => {
         }
       }
     }
+  });
+});
+
+// Lo que cuenta el numerito de Facturación › Con error del menú (y, después, la fila
+// "N facturas no salieron" de Hoy): rechazadas, y las que ARCA dejó colgadas.
+describe("facturasConError", () => {
+  const AHORA = new Date("2026-09-27T15:00:00Z");
+  const hace = (min: number) => new Date(AHORA.getTime() - min * 60_000).toISOString();
+  const factura = (
+    status: string,
+    created_at: string,
+    last_attempt_at: string | null = null
+  ): { status: string; created_at: string; last_attempt_at: string | null } => ({
+    status,
+    created_at,
+    last_attempt_at,
+  });
+
+  it("una rechazada cuenta siempre, aunque sea de recién", () => {
+    expect(facturasConError([factura("rejected", hace(1))], AHORA)).toHaveLength(1);
+  });
+
+  it("en proceso: la de hace 20 minutos sí, la de hace 2 no", () => {
+    expect(facturasConError([factura("processing", hace(20))], AHORA)).toHaveLength(1);
+    expect(facturasConError([factura("processing", hace(2))], AHORA)).toHaveLength(0);
+  });
+
+  it("pendiente: manda el último intento; si no hubo, la creación", () => {
+    expect(facturasConError([factura("pending", hace(60), hace(2))], AHORA)).toHaveLength(0);
+    expect(facturasConError([factura("pending", hace(60), hace(20))], AHORA)).toHaveLength(1);
+    expect(facturasConError([factura("pending", hace(20))], AHORA)).toHaveLength(1);
+  });
+
+  it("los 15 minutos justos todavía no cuentan", () => {
+    expect(facturasConError([factura("processing", hace(15))], AHORA)).toHaveLength(0);
+    expect(facturasConError([factura("processing", hace(16))], AHORA)).toHaveLength(1);
+  });
+
+  it("autorizadas y descartadas no son error", () => {
+    expect(facturasConError([factura("authorized", hace(90)), factura("discarded", hace(90))], AHORA)).toHaveLength(0);
+  });
+
+  it("devuelve las filas, no solo cuántas", () => {
+    const rechazada = factura("rejected", hace(5));
+    const reciente = factura("processing", hace(2));
+    expect(facturasConError([rechazada, reciente], AHORA)).toEqual([rechazada]);
+    expect(facturasConError([rechazada], AHORA.getTime())).toEqual([rechazada]);
   });
 });

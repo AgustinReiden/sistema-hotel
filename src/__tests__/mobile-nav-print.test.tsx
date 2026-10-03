@@ -1,7 +1,10 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/admin/comprobante-cc/1" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/comprobante-cc/1",
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("@/app/admin/LogoutButton", () => ({ default: () => null }));
 
 import { MobileTabBar, MobileTopBar } from "@/app/admin/MobileNav";
