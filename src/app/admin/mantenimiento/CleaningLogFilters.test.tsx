@@ -66,6 +66,13 @@ describe("CleaningLogFilters: período", () => {
     expect(push).toHaveBeenCalledWith("/admin/mantenimiento");
   });
 
+  it("'Aplicar' en 'Todo el historial' sin fechas conserva todo=1 junto con la categoría", () => {
+    montar({ from: "", to: "", isAll: true, isDefault: false });
+    fireEvent.change(screen.getByLabelText("Categoría"), { target: { value: "no_key" } });
+    fireEvent.click(screen.getByText("Aplicar"));
+    expect(push).toHaveBeenCalledWith("/admin/mantenimiento?todo=1&category=no_key");
+  });
+
   it("'Aplicar' con las fechas elegidas manda desde y hasta", () => {
     montar({ from: "2026-08-01", to: "2026-08-31", isDefault: false });
     fireEvent.click(screen.getByText("Aplicar"));

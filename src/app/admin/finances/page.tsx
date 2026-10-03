@@ -235,7 +235,7 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                         <h2 className="text-4xl font-bold tracking-tight">{formatAmount(reservados.total)}</h2>
                     </div>
                     <div className="relative z-10 mt-6 text-sm text-slate-200 opacity-90">
-                        Reservas que todavía no llegaron y no pagaron todo ({reservados.cantidad}).
+                        Reservas confirmadas que no pagaron todo ({reservados.cantidad}).
                     </div>
                 </div>
             </div>
@@ -318,7 +318,7 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                                                                 : "bg-slate-100 text-slate-700 border-slate-300"
                                                         }`}
                                                     >
-                                                        {alojado ? "Alojado" : "Por llegar"}
+                                                        {alojado ? "Alojado" : "Reservada"}
                                                     </span>
                                                     <span className="inline-flex items-center text-amber-600 font-medium">Debe: {formatAmount(remaining)}</span>
                                                 </div>

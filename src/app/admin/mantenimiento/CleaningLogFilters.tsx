@@ -55,6 +55,8 @@ export default function CleaningLogFilters({
     const rango: Record<string, string> = {};
     if (desde) rango.from = desde;
     if (hasta) rango.to = hasta;
+    // En "Todo el historial" sin fechas cargadas, aplicar categoría/habitación no lo pierde.
+    if (isAll && !desde && !hasta) rango.todo = "1";
     go(rango);
   };
 
