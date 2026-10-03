@@ -824,6 +824,11 @@ export type ShiftCreditChargeRow = {
   reservation_id: string | null;
   client_name: string;
   room_number: string | null;
+  /**
+   * Correlativo del remito que firmó el cliente (mig 106), el mismo del papel. Con él
+   * la Caja muestra "Remito R-000017" y deja reimprimirlo si no salió.
+   */
+  remito_numero: number | null;
 };
 
 export type ShiftSummary = {

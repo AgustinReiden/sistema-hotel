@@ -97,3 +97,25 @@ describe("middleware: Habitaciones, Categorías y Limpiezas son sólo admin", ()
     expect(await visit("/admin/fiscal")).toBeNull();
   });
 });
+
+describe("middleware: el remito de cuenta corriente lo imprimen recepción y el admin", () => {
+  // La Caja lo reimprime y el check-out lo imprime por esta ruta: si pasara a ser sólo
+  // admin, recepción rendiría el turno sin el papel firmado.
+  const reimpresion = "/admin/comprobante-cc/mov-1?autoprint=1&reimpresion=1";
+
+  it("recepción entra al remito, con y sin la marca de reimpresión", async () => {
+    loginAs("receptionist");
+    expect(await visit(reimpresion)).toBeNull();
+    expect(await visit("/admin/comprobante-cc/mov-1?autoprint=1")).toBeNull();
+  });
+
+  it("el admin también", async () => {
+    loginAs("admin");
+    expect(await visit(reimpresion)).toBeNull();
+  });
+
+  it("mantenimiento no: va a su pantalla", async () => {
+    loginAs("maintenance");
+    expect(await visit(reimpresion)).toBe("/maintenance");
+  });
+});
