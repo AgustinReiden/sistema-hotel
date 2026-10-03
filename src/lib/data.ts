@@ -29,6 +29,7 @@ import {
   buildWeekdaySeasonality,
   computeWindowKpis,
   sumAccountMovements,
+  agruparReservadoSinCobrar,
   countDaysInclusive,
   hotelRangeToUtc,
   pctDelta,
@@ -47,6 +48,7 @@ import {
   type RoomBreakdownRow,
   type RoomBreakdownTotals,
   type RoomCleaning,
+  type ReservadoSinCobrarGroup,
   type RoomInfo,
   type WeekdayStat,
 } from "./analytics";
@@ -3015,6 +3017,8 @@ export type ManagementDashboardData = {
   accountFlow: AccountFlow;
   // Cobranzas (snapshot actual, no acotado al rango)
   accountsReceivable: number;
+  /** Desglose de `accountsReceivable` por empresa (top 5, "Otras empresas", "Particulares"). */
+  receivableByCompany: ReservadoSinCobrarGroup[];
   currentAccountDebt: number;
   topDebtors: { name: string; balance: number }[];
   // Control de caja y operación del período
@@ -3123,7 +3127,7 @@ export async function getManagementDashboardData(
     // Reservas activas con saldo (por cobrar) — snapshot.
     supabase
       .from("reservations")
-      .select("total_price, paid_amount")
+      .select("total_price, paid_amount, associated_client_id, associated_clients(display_name)")
       .in("status", ["confirmed", "checked_in"]),
     // Cuentas corrientes (deuda) — snapshot; reutiliza el cálculo central.
     getCtaCteAccounts(),
@@ -3300,14 +3304,28 @@ export async function getManagementDashboardData(
     .sort((a, b) => b.total - a.total);
 
   // ── Cobranzas (snapshot) ──
+  type ReceivableRow = {
+    total_price: number | string;
+    paid_amount: number | string;
+    associated_client_id: number | string | null;
+    associated_clients: { display_name: string | null } | { display_name: string | null }[] | null;
+  };
+  const receivableRows = (receivableRes.data ?? []) as ReceivableRow[];
   const accountsReceivable = round2(
-    ((receivableRes.data ?? []) as { total_price: number | string; paid_amount: number | string }[]).reduce(
-      (sum, r) => {
-        const bal = (Number(r.total_price) || 0) - (Number(r.paid_amount) || 0);
-        return sum + (bal > 0 ? bal : 0);
-      },
-      0
-    )
+    receivableRows.reduce((sum, r) => {
+      const bal = (Number(r.total_price) || 0) - (Number(r.paid_amount) || 0);
+      return sum + (bal > 0 ? bal : 0);
+    }, 0)
+  );
+  const receivableByCompany = agruparReservadoSinCobrar(
+    receivableRows.map((r) => ({
+      clientId: r.associated_client_id,
+      clientName: Array.isArray(r.associated_clients)
+        ? r.associated_clients[0]?.display_name ?? null
+        : r.associated_clients?.display_name ?? null,
+      totalPrice: r.total_price,
+      paidAmount: r.paid_amount,
+    }))
   );
   const debtors = (ccAccounts as CtaCteAccount[]).filter((a) => a.balance > 0);
   const currentAccountDebt = round2(debtors.reduce((sum, a) => sum + a.balance, 0));
@@ -3348,6 +3366,7 @@ export async function getManagementDashboardData(
     settlement,
     accountFlow,
     accountsReceivable,
+    receivableByCompany,
     currentAccountDebt,
     topDebtors,
     cashDiscrepancyTotal,

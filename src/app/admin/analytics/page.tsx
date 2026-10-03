@@ -300,11 +300,29 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <div className="grid grid-cols-2 gap-4 mb-5">
               <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                  <CircleDollarSign size={14} /> <span>Reservas activas</span>
+                  <CircleDollarSign size={14} /> <span>Reservado sin cobrar</span>
                   <InfoTooltip metric="accountsReceivable" />
                 </div>
                 <div className="text-xl font-bold text-slate-900 mt-1">{money(data.accountsReceivable)}</div>
                 <div className="text-xs text-slate-400 mt-0.5">Saldo de confirmadas y alojados</div>
+                {data.receivableByCompany.length > 0 && (
+                  <ul
+                    aria-label="Reservado sin cobrar por empresa"
+                    className="mt-3 pt-3 border-t border-slate-100 space-y-1.5"
+                  >
+                    {data.receivableByCompany.map((g, i) => (
+                      <li key={`${g.kind}-${i}`}className="flex items-baseline justify-between gap-2 text-xs">
+                        <span
+                          className={`truncate ${g.kind === "empresa" ? "text-slate-700 font-medium" : "text-slate-500 italic"}`}
+                          title={g.name}
+                        >
+                          {g.name}
+                        </span>
+                        <span className="font-semibold text-slate-900 shrink-0">{money(g.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">

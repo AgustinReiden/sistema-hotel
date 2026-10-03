@@ -80,9 +80,9 @@ export const METRIC_INFO = {
     how: "Pasajeros-noche ÷ habitaciones-noche ocupadas (base física) del período.",
   },
   accountsReceivable: {
-    title: "Por cobrar",
-    what: "Plata pendiente de las reservas activas (confirmadas o con huésped alojado). Es una foto de hoy, no del período elegido.",
-    how: "Por cada reserva activa: precio total − pagado. Se suman los saldos positivos.",
+    title: "Reservado sin cobrar",
+    what: "Plata que falta cobrar de las reservas activas (confirmadas o con huésped alojado), por empresa y en Particulares. Es una foto de hoy, no del período elegido. No es deuda de cuenta corriente: esa va aparte.",
+    how: "Por cada reserva activa: precio total − pagado. Se suman los saldos positivos y se reparten por la empresa de la reserva (las 5 con más saldo, el resto junto en Otras empresas; las reservas sin empresa van a Particulares).",
   },
   reservationsCreated: {
     title: "Reservas nuevas",
