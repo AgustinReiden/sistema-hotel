@@ -128,6 +128,18 @@ describe("WalkInModal: el botón dice qué falta", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("Enter en el buscador no envía el formulario ni salta el cursor", () => {
+    const { container } = abrir();
+    const buscador = campo(container, "walkinClientSearch");
+    buscador.focus();
+    fireEvent.change(buscador, { target: { value: "Juan Pe" } });
+
+    // fireEvent devuelve false si el evento quedó cancelado (no hay envío implícito).
+    expect(fireEvent.keyDown(buscador, { key: "Enter" })).toBe(false);
+    expect(screen.queryByText(/Falta completar/)).toBeNull();
+    expect(document.activeElement).toBe(buscador);
+  });
+
   it("con todo cargado asigna", async () => {
     const { container, onSubmit } = abrir();
     escribir(container, "clientFirstName", "Juan");
