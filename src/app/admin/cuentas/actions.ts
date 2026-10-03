@@ -215,6 +215,15 @@ export async function registerAccountPaymentAction(input: {
     if (!input.clientId) {
       return { success: false, error: "Falta el cliente." };
     }
+    // El medio ya no arranca en "Efectivo" (F2-11): si llega vacío, nadie lo eligió,
+    // y guardarlo con uno inventado deja una transferencia anotada como efectivo.
+    const method = (input.method ?? "").trim();
+    if (!method) {
+      return {
+        success: false,
+        error: "Elegí cómo entró el pago (efectivo, transferencia, Mercado Pago u otro).",
+      };
+    }
 
     const retencionGanancias = Number(input.retencionGanancias ?? 0);
     const retencionIibb = Number(input.retencionIibb ?? 0);
@@ -254,7 +263,7 @@ export async function registerAccountPaymentAction(input: {
       kind: input.kind,
       clientId: input.clientId,
       amount,
-      method: input.method,
+      method,
       notes: input.notes,
       retencionGanancias,
       retencionIibb,
