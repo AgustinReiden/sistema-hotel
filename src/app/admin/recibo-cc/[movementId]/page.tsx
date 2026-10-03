@@ -196,10 +196,10 @@ function ReceiptCopy({
       {receipt.imputaciones.length > 0 && (
         <>
           <hr />
-          <p className="seccion">Imputado a</p>
+          <p className="seccion">Aplicado a</p>
           {/*
             La clave es imputacion_id y no invoice_id: desde la mig 111 una misma
-            factura puede figurar dos veces en el mismo pago (una línea desimputada y
+            factura puede figurar dos veces en el mismo pago (una línea quitada y
             la que la reemplazó), y con invoice_id React vería claves repetidas.
           */}
           {receipt.imputaciones.map((imp) => (
@@ -207,23 +207,23 @@ function ReceiptCopy({
               <span>
                 {nombreImputado(imp)}
                 {imp.anulada ? " (anulada)" : ""}
-                {/* Mudada y desimputada no son lo mismo: a la mudada no la soltó
+                {/* Mudada y quitada no son lo mismo: a la mudada no la soltó
                     nadie, se la llevó la factura de esa estadía (mig 114). Decirle
-                    "desimputada" en el papel sería decirle al cliente que esa plata
+                    "quitada" en el papel sería decirle al cliente que esa plata
                     volvió a quedar suelta. */}
-                {imp.revertida ? (imp.mudada ? " (pasó a su factura)" : " (desimputada)") : ""}
+                {imp.revertida ? (imp.mudada ? " (pasó a su factura)" : " (quitada)") : ""}
               </span>
               <span className="money">{formatAmount(imp.imputado)}</span>
             </p>
           ))}
           {/*
-            Se imprime sólo si hay alguna desimputada. Sin esta línea el recibo listaría
+            Se imprime sólo si hay alguna quitada. Sin esta línea el recibo listaría
             importes que ya no cancelan nada y quedaría sin explicar por qué la suma de
-            "Imputado a" no coincide con lo que la factura tiene aplicado hoy.
+            "Aplicado a" no coincide con lo que la factura tiene aplicado hoy.
           */}
           {receipt.imputaciones.some((imp) => imp.revertida && !imp.mudada) && (
             <p className="note">
-              Las líneas marcadas como desimputadas ya no cancelan eso: ese importe
+              Las líneas marcadas como quitadas ya no cancelan eso: ese importe
               volvió a quedar disponible en este pago.
             </p>
           )}

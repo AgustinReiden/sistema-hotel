@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { toast } from "sonner";
+
 import CuentasClient from "./CuentasClient";
+import { buildMovementsCsv } from "./FichaClienteModal";
 import type {
   CcAccountStayRow,
   CcClientPaymentRow,
@@ -381,7 +384,7 @@ describe("CuentasClient — solapa Pagos", () => {
     expect(fila.getByText(/\$40\.000,00 quedaron a cuenta/)).toBeTruthy();
     // La imputación soltada se muestra marcada, no se esconde: un recibo reimpreso
     // dice lo mismo que el día que salió. Lo que no hace es seguir sumando.
-    expect(fila.getByText(/desimputada: Se imputó a la factura equivocada/)).toBeTruthy();
+    expect(fila.getByText(/quitada: Se imputó a la factura equivocada/)).toBeTruthy();
   });
 
   it("reimprime el recibo en la misma ventana que el resto de los impresos", async () => {
@@ -416,6 +419,129 @@ describe("CuentasClient — solapa Pagos", () => {
     // que es la unidad de cobro.
     expect(pastillas.getByText("Pago parcial")).toBeTruthy();
     expect(pastillas.getByText("· $60.000,00 de $100.000,00")).toBeTruthy();
+  });
+});
+
+/**
+ * El medio de pago y el vocabulario de la solapa Pagos. Hasta acá la ficha mostraba
+ * `bank_transfer` tal cual en Movimientos y en el CSV que se le manda al cliente, y la
+ * solapa Pagos hablaba de "imputar" y "desimputar", que nadie en recepción entiende.
+ */
+describe("CuentasClient — medio de pago legible y 'aplicar' en vez de 'imputar'", () => {
+  const movimientosConTransferencia: CtaCteMovimiento[] = [
+    ...movements,
+    {
+      ...movements[1],
+      id: "m3",
+      payment_method: "bank_transfer",
+      recibo_cc_numero: 2,
+    },
+  ];
+
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+    loadCtaCteAccountAction.mockReset();
+    loadCtaCteAccountAction.mockResolvedValue({
+      success: true,
+      data: { movements: movimientosConTransferencia, balance: 15000 },
+    });
+    loadClientInvoicesAction.mockReset();
+    loadClientInvoicesAction.mockResolvedValue({ success: true, data: [] });
+    loadClientPaymentsAction.mockReset();
+    loadClientPaymentsAction.mockResolvedValue({ success: true, data: pagos });
+    loadCcAccountStaysAction.mockReset();
+    loadCcAccountStaysAction.mockResolvedValue({ success: true, data: [] });
+    revertPaymentImputacionAction.mockReset();
+    revertPaymentImputacionAction.mockResolvedValue({
+      success: true,
+      data: { liberado: 60000, sinImputar: 100000 },
+    });
+    vi.stubGlobal("open", vi.fn());
+  });
+
+  it("en Movimientos, un pago por transferencia dice 'Pago a cuenta · Transferencia', nunca bank_transfer", async () => {
+    render(<CuentasClient accounts={accounts} />);
+    fireEvent.click(screen.getByTitle("Ver ficha del cliente"));
+
+    expect(await screen.findByText("Pago a cuenta · Transferencia")).toBeTruthy();
+    // Y los demás medios siguen legibles: el efectivo no pierde su etiqueta.
+    expect(screen.getByText("Pago a cuenta · Efectivo")).toBeTruthy();
+    expect(screen.queryByText(/bank_transfer/)).toBeNull();
+  });
+
+  it("el CSV de movimientos trae la etiqueta, no el valor interno, en la columna Concepto", () => {
+    const csv = buildMovementsCsv(movimientosConTransferencia, "Acme SA", 15000, "", "");
+
+    expect(csv).toContain(";Transferencia;");
+    expect(csv).toContain(";Efectivo;");
+    expect(csv).not.toContain("bank_transfer");
+    // El cargo sigue diciendo Estadía.
+    expect(csv).toContain(";Estadía;");
+  });
+
+  it("el CSV de un pago sin método deja la celda de Concepto vacía y no escribe 'Sin método'", () => {
+    const csv = buildMovementsCsv(
+      [{ ...movements[1], payment_method: null }],
+      "Acme SA",
+      0,
+      "",
+      ""
+    );
+
+    expect(csv).not.toContain("Sin método");
+  });
+
+  it("la solapa Pagos dice 'Aplicado a' y no habla de imputar", async () => {
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getByText("Aplicado a")).toBeTruthy();
+    expect(fila.getByText(/· Transferencia/)).toBeTruthy();
+    expect(fila.getByText(/\$40\.000,00 quedaron a cuenta, sin aplicar/)).toBeTruthy();
+    // El único "imput" que queda es el motivo que escribió una persona (dato, no texto
+    // de la pantalla).
+    const textoDeLaFila = (screen.getByTestId("fila-pago").textContent ?? "").replace(
+      "Se imputó a la factura equivocada",
+      ""
+    );
+    expect(textoDeLaFila).not.toMatch(/imput/i);
+  });
+
+  it("un pago a cuenta sin nada aplicado lo explica con 'sin aplicar a ninguna factura ni estadía'", async () => {
+    loadClientPaymentsAction.mockResolvedValue({
+      success: true,
+      data: [{ ...pagos[0], imputaciones: [], sin_imputar: 100000 }],
+    });
+    await abrirSolapaPagos();
+
+    const fila = within(await screen.findByTestId("fila-pago"));
+    expect(fila.getByText("A cuenta, sin aplicar a ninguna factura ni estadía.")).toBeTruthy();
+  });
+
+  it("el panel de confirmación dice 'quitar' y pide el motivo", async () => {
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
+
+    const panel = screen.getByPlaceholderText("Por qué se quita (obligatorio)").parentElement;
+    expect(panel?.textContent ?? "").not.toMatch(/imput/i);
+    expect(screen.getByText("Confirmar")).toBeDisabled();
+  });
+
+  it("el aviso de éxito dice cuánto se quitó y cuánto queda a cuenta", async () => {
+    await abrirSolapaPagos();
+
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se quita/), {
+      target: { value: "Error de carga" },
+    });
+    fireEvent.click(screen.getByText("Confirmar"));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Se quitaron $60.000,00. Quedan $100.000,00 a cuenta."
+      )
+    );
   });
 });
 
@@ -470,14 +596,14 @@ describe("CuentasClient — pagos aplicados a una estadía", () => {
     expect(fila.queryByText(/Factura\s+s\/nro/)).toBeNull();
   });
 
-  it("distingue la que se mudó a su factura de la que alguien desimputó", async () => {
+  it("distingue la que se mudó a su factura de la que alguien quitó", async () => {
     await abrirSolapaPagos();
 
     const fila = within(await screen.findByTestId("fila-pago"));
     expect(fila.getByText(/pasó a su factura/)).toBeTruthy();
-    expect(fila.queryByText(/desimputada/)).toBeNull();
-    // Y a la mudada no se le ofrece desimputar: ya está revertida.
-    expect(fila.getAllByLabelText("Desimputar", { selector: "button" })).toHaveLength(1);
+    expect(fila.queryByText(/quitada/)).toBeNull();
+    // Y a la mudada no se le ofrece quitar la aplicación: ya está revertida.
+    expect(fila.getAllByLabelText("Quitar aplicación", { selector: "button" })).toHaveLength(1);
   });
 });
 
@@ -486,7 +612,7 @@ describe("CuentasClient — pagos aplicados a una estadía", () => {
  * revertida pero no había forma de revertir ninguna: la RPC y la action existían sin
  * un solo consumidor, así que soltar plata seguía siendo algo que se hacía en la base.
  */
-describe("CuentasClient — desimputar desde la solapa Pagos", () => {
+describe("CuentasClient — quitar la aplicación desde la solapa Pagos", () => {
   beforeEach(() => {
     loadCtaCteAccountAction.mockReset();
     loadCtaCteAccountAction.mockResolvedValue({
@@ -507,13 +633,13 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     vi.stubGlobal("open", vi.fn());
   });
 
-  it("ofrece desimputar sólo en las imputaciones vivas", async () => {
+  it("ofrece quitar la aplicación sólo en las vivas", async () => {
     // El fixture tiene una viva (i1) y una ya desimputada (i2). La RPC rechaza la
     // segunda vuelta con P0040, así que ofrecer el botón ahí sería ofrecer un error.
     await abrirSolapaPagos();
 
     const fila = within(await screen.findByTestId("fila-pago"));
-    expect(fila.getAllByLabelText("Desimputar", { selector: "button" })).toHaveLength(1);
+    expect(fila.getAllByLabelText("Quitar aplicación", { selector: "button" })).toHaveLength(1);
   });
 
   it("no deja confirmar sin motivo y manda el que se escribió", async () => {
@@ -522,12 +648,12 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     // un año, que es la mitad de la razón por la que se marca en vez de borrarse.
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByLabelText("Desimputar"));
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
 
     const confirmar = screen.getByText("Confirmar");
     expect(confirmar).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se quita/), {
       target: { value: "Se facturó de nuevo en la consolidada de septiembre" },
     });
     expect(confirmar).not.toBeDisabled();
@@ -542,14 +668,14 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     );
   });
 
-  it("vuelve a leer los pagos después de desimputar", async () => {
+  it("vuelve a leer los pagos después de quitar la aplicación", async () => {
     // Sin la relectura la fila seguiría viéndose viva y el "quedaron a cuenta" mostraría
     // el número viejo: el admin creería que la plata sigue aplicada a una factura de la
     // que ya la sacó.
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByLabelText("Desimputar"));
-    fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se quita/), {
       target: { value: "Error de carga" },
     });
     fireEvent.click(screen.getByText("Confirmar"));
@@ -561,11 +687,11 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
     // Abrir el panel no puede tener efecto: lo que mueve plata es Confirmar.
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByLabelText("Desimputar"));
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
     fireEvent.click(screen.getByText("Cancelar"));
 
     expect(revertPaymentImputacionAction).not.toHaveBeenCalled();
-    expect(screen.queryByPlaceholderText(/Por qué se desimputa/)).toBeNull();
+    expect(screen.queryByPlaceholderText(/Por qué se quita/)).toBeNull();
   });
 
   it("si la RPC rechaza, no recarga y la pantalla no miente", async () => {
@@ -578,8 +704,8 @@ describe("CuentasClient — desimputar desde la solapa Pagos", () => {
 
     await abrirSolapaPagos();
 
-    fireEvent.click(await screen.findByLabelText("Desimputar"));
-    fireEvent.change(screen.getByPlaceholderText(/Por qué se desimputa/), {
+    fireEvent.click(await screen.findByLabelText("Quitar aplicación"));
+    fireEvent.change(screen.getByPlaceholderText(/Por qué se quita/), {
       target: { value: "Probando" },
     });
     fireEvent.click(screen.getByText("Confirmar"));
