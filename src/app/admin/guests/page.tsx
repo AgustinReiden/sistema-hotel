@@ -31,11 +31,12 @@ type GuestsPageProps = {
   }>;
 };
 
-const VIEWS: { label: string; value: GuestsView }[] = [
-  { label: "Directorio", value: "directorio" },
-  { label: "Historial", value: "historial" },
-  { label: "Por llegar", value: "por_llegar" },
-];
+// El título dice en qué lista estás; las pestañas están en la barra del panel.
+const VIEW_TITLES: Record<GuestsView, string> = {
+  directorio: "Directorio de huéspedes",
+  historial: "Historial de reservas",
+  por_llegar: "Por llegar",
+};
 
 function parseView(value: string | undefined): GuestsView {
   if (value === "historial" || value === "por_llegar") return value;
@@ -109,7 +110,7 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
             <div className="p-2 bg-slate-100 rounded-lg">
               <Users size={20} className="text-slate-600" />
             </div>
-            <h1 className="text-xl font-bold text-slate-800">Huéspedes</h1>
+            <h1 className="text-xl font-bold text-slate-800">{VIEW_TITLES[view]}</h1>
           </div>
 
           <form method="get" className="relative">
@@ -132,44 +133,24 @@ export default async function GuestsPage({ searchParams }: GuestsPageProps) {
           </form>
         </div>
 
-        {/* Pestañas: Directorio / Historial / Por llegar */}
-        <div className="flex gap-2 flex-wrap items-center">
-          {VIEWS.map((v) => {
-            const isActive = view === v.value;
-            return (
-              <a
-                key={v.value}
-                href={buildHref({ view: v.value })}
-                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
-                  isActive
-                    ? "bg-brand-600 text-white border-brand-600"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
-                }`}
-              >
-                {v.label}
-              </a>
-            );
-          })}
-
-          {view === "historial" && (
-            <>
-              <span className="mx-2 text-slate-300">|</span>
-              <a
-                href={buildHref({ cancelled: includeCancelled ? "" : "1" })}
-                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors flex items-center gap-1.5 ${
-                  includeCancelled
-                    ? "bg-red-100 text-red-700 border-red-200"
-                    : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
-                }`}
-              >
-                <span
-                  className={`inline-block w-3 h-3 rounded border ${includeCancelled ? "bg-red-500 border-red-500" : "bg-white border-slate-300"}`}
-                />
-                Ver cancelados
-              </a>
-            </>
-          )}
-        </div>
+        {/* Las pestañas (Por llegar, Historial, Directorio) van en la barra del panel. */}
+        {view === "historial" && (
+          <div className="flex gap-2 flex-wrap items-center">
+            <a
+              href={buildHref({ cancelled: includeCancelled ? "" : "1" })}
+              className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors flex items-center gap-1.5 ${
+                includeCancelled
+                  ? "bg-red-100 text-red-700 border-red-200"
+                  : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+              }`}
+            >
+              <span
+                className={`inline-block w-3 h-3 rounded border ${includeCancelled ? "bg-red-500 border-red-500" : "bg-white border-slate-300"}`}
+              />
+              Ver cancelados
+            </a>
+          </div>
+        )}
 
         <p className="text-xs text-slate-500 mt-2">
           {view === "directorio" &&

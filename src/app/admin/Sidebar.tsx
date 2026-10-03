@@ -29,8 +29,8 @@ function Badge({ badge }: { badge: NavBadge }) {
 
 type SidebarProps = NavState & { role: string; userEmail: string };
 
-// Menú lateral de escritorio: las secciones, con la de la pantalla actual marcada y sus
-// pestañas debajo (hasta que F1-1b las pase a una barra arriba del contenido). Es de
+// Menú lateral de escritorio: las secciones, con la de la pantalla actual marcada. Sus
+// pestañas están en la barra de arriba del contenido (AdminTopBar). Es de
 // cliente porque la pantalla actual sale de la URL (ruta y ?view=); no busca datos: los
 // numeritos los calcula el layout y llegan por props.
 export default function Sidebar({ role, userEmail, ...navState }: SidebarProps) {
@@ -62,12 +62,9 @@ export default function Sidebar({ role, userEmail, ...navState }: SidebarProps) 
                 {sections.map((section) => {
                     const Icon = section.icon;
                     const isActive = active?.section.id === section.id;
-                    // Las pestañas se ven solo en la sección activa; con una sola, la
-                    // sección ya es la pantalla y no hace falta repetirla.
-                    const showTabs = isActive && section.tabs.length > 1;
-                    // Con las pestañas a la vista cada una lleva su numerito; cerrada, la
-                    // sección muestra el más urgente.
-                    const badge = showTabs ? undefined : sectionBadge(section);
+                    // Las pestañas están en la barra de arriba del contenido (AdminTopBar):
+                    // acá la sección muestra siempre el aviso más urgente de las suyas.
+                    const badge = sectionBadge(section);
                     return (
                         <div key={section.id}>
                             <Link
@@ -86,31 +83,6 @@ export default function Sidebar({ role, userEmail, ...navState }: SidebarProps) 
                                 <span className="font-medium flex-1">{section.label}</span>
                                 {badge && <Badge badge={badge} />}
                             </Link>
-                            {showTabs && (
-                                <ul className="mt-1 mb-2 ml-5 border-l border-slate-700 space-y-0.5">
-                                    {section.tabs.map((tab) => {
-                                        const TabIcon = tab.icon;
-                                        const tabActive = active?.tab.id === tab.id;
-                                        return (
-                                            <li key={tab.id}>
-                                                <Link
-                                                    href={tab.href}
-                                                    aria-current={tabActive ? 'page' : undefined}
-                                                    className={`-ml-px flex items-center border-l-2 pl-3 pr-2 py-1.5 text-sm transition-colors ${
-                                                        tabActive
-                                                            ? 'border-emerald-400 text-white font-semibold'
-                                                            : 'border-transparent text-slate-400 hover:text-white'
-                                                    }`}
-                                                >
-                                                    <TabIcon size={15} className="mr-2 shrink-0" />
-                                                    <span className="flex-1">{tab.label}</span>
-                                                    {tab.badge && <Badge badge={tab.badge} />}
-                                                </Link>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            )}
                         </div>
                     );
                 })}

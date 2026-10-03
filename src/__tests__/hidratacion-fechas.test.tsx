@@ -642,7 +642,7 @@ describe("hidratación: lo que dibuja el servidor coincide con el navegador", ()
 
         expect(errores).toEqual([]);
         const texto = container.textContent ?? "";
-        expect(texto).toContain("Vista Global: sábado, 26 sept");
+        expect(texto).toContain("Hoy · sábado, 26 sept");
         expect(texto).toContain("Hay 1 habitación usada sin estadía cargada");
         expect(texto).toContain("26 sept 14:30");
         expect(texto).toContain("Tenés 3 avisos sin revisar");

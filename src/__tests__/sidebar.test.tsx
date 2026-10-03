@@ -26,17 +26,15 @@ function link(texto: string, scope: HTMLElement = document.body) {
 beforeEach(() => en("/admin"));
 
 describe("menú lateral de escritorio", () => {
-  it("en /admin/cuentas queda marcada Clientes, con sus pestañas debajo", () => {
+  it("en /admin/cuentas queda marcada Clientes, y las pestañas ya no van en el menú (están arriba)", () => {
     en("/admin/cuentas");
     render(<Sidebar role="admin" userEmail="admin@example.com" />);
     expect(link("Clientes")).toHaveAttribute("aria-current", "page");
-    expect(link("Cuenta corriente")).toHaveAttribute("aria-current", "page");
-    expect(link("Directorio")).not.toHaveAttribute("aria-current");
-    expect(screen.getByText("Empresas y convenios")).toBeInTheDocument();
-    expect(screen.getByText("Descuentos")).toBeInTheDocument();
-    // Las otras secciones no se marcan ni despliegan.
     expect(link("Hoy")).not.toHaveAttribute("aria-current");
-    expect(screen.queryByText("Rendiciones")).toBeNull();
+    // Ni la sección activa ni las otras despliegan pestañas: las dibuja AdminTopBar.
+    for (const pestana of ["Cuenta corriente", "Directorio", "Empresas y convenios", "Descuentos", "Rendiciones"]) {
+      expect(screen.queryByText(pestana)).toBeNull();
+    }
   });
 
   it("el dueño ve las 7 secciones", () => {
@@ -57,8 +55,8 @@ describe("menú lateral de escritorio", () => {
       expect(screen.queryByText(s)).toBeNull();
     }
     expect(link("Caja")).toHaveAttribute("aria-current", "page");
-    expect(link("Mis rendiciones")).toHaveAttribute("aria-current", "page");
-    expect(link("Mi turno")).toHaveAttribute("href", "/admin/caja");
+    expect(link("Caja")).toHaveAttribute("href", "/admin/caja");
+    expect(screen.queryByText("Mis rendiciones")).toBeNull();
   });
 
   it("la sección abre su primera pestaña", () => {
@@ -67,7 +65,7 @@ describe("menú lateral de escritorio", () => {
     expect(link("Clientes")).toHaveAttribute("href", "/admin/guests");
   });
 
-  it("los numeritos: en la sección cerrada el más urgente, abierta cada uno en su pestaña", () => {
+  it("los numeritos: la sección muestra el más urgente, esté cerrada o abierta (cada uno en su pestaña va arriba)", () => {
     render(<Sidebar role="admin" userEmail="admin@example.com" unbilledCount={5} remitosPendientes={3} />);
     expect(within(link("Facturación")!).getByText("5")).toBeInTheDocument();
 
@@ -75,9 +73,9 @@ describe("menú lateral de escritorio", () => {
     render(<Sidebar role="admin" userEmail="admin@example.com" unbilledCount={5} remitosPendientes={3} />);
     const menus = document.body.querySelectorAll("aside");
     const abierto = menus[menus.length - 1] as HTMLElement;
-    expect(link("Emitidas", abierto)).toHaveAttribute("aria-current", "page");
-    expect(within(link("Por facturar", abierto)!).getByText("5")).toBeInTheDocument();
-    expect(within(link("Remitos", abierto)!).getByText("3")).toBeInTheDocument();
+    expect(link("Facturación", abierto)).toHaveAttribute("aria-current", "page");
+    expect(within(link("Facturación", abierto)!).getByText("5")).toBeInTheDocument();
+    expect(within(abierto).queryByText("Remitos")).toBeNull();
   });
 
   it("con Facturación cerrada, las facturas que no salieron no quedan tapadas por lo que falta facturar", () => {

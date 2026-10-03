@@ -215,7 +215,7 @@ export default async function Dashboard() {
           este render, que viaja con la página (con Atrás, Next la muestra de su caché). */}
       <AutoRefresh timezone={hotelSettings.timezone} renderedAt={now.getTime()} />
       <PageHeader
-        title={`Vista Global: ${formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}`}
+        title={`Hoy · ${formatHotelWeekdayDate(now.toISOString(), hotelSettings.timezone)}`}
         badge={
           lateCheckoutsCount > 0 ? (
             <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium border border-amber-200 flex items-center">

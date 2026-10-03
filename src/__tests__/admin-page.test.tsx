@@ -69,7 +69,7 @@ describe("Hoy (admin/page.tsx) monta el refresco automático", () => {
         `AutoRefresh zona=America/Argentina/Buenos_Aires armada=${AHORA.getTime()}`
       );
       // La línea del aviso va arriba del encabezado de Hoy.
-      const encabezado = screen.getByText(/^Vista Global:/);
+      const encabezado = screen.getByText(/^Hoy · /);
       expect(
         autoRefresh.compareDocumentPosition(encabezado) & Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy();
