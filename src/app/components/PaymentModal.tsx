@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 import { registerPaymentAction } from "@/app/admin/finances/actions";
 import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
-import { formatAmountForInput, parseArMoney } from "@/lib/format";
+import { formatAmount, formatAmountForInput, parseArMoney } from "@/lib/format";
 import type { ActionResult, PaymentMethod } from "@/lib/types";
 
 function openReceipt(paymentId: string) {
@@ -65,6 +65,14 @@ interface PaymentModalProps {
   }) => Promise<ActionResult<{ paymentId: string | null }>>;
   /** Aviso opcional arriba del monto (ej. rótulo de salida anticipada). */
   noteText?: string;
+  /**
+   * Cobro a cuenta: una seña o un pago antes del check-out (Hoy y el calendario). Va
+   * sin onSubmitPayment, con reservationId: lo registra registerPaymentAction en la
+   * caja abierta y sale el recibo. El monto no puede pasar lo que falta, y no hay Vale
+   * Blanco, que tiene que cubrir el total de una vez. Con onSubmitPayment no aplica:
+   * manda el check-out.
+   */
+  partial?: boolean;
 }
 
 export default function PaymentModal({
@@ -83,6 +91,7 @@ export default function PaymentModal({
   onSuccess,
   onSubmitPayment,
   noteText,
+  partial = false,
 }: PaymentModalProps) {
   const numericBaseTotal = Number(baseTotalPrice ?? totalPrice);
   const numericDiscountPercent = Number(discountPercent ?? 0);
@@ -91,6 +100,7 @@ export default function PaymentModal({
   const numericPaid = Number(paidAmount);
   const debt = Math.max(0, numericTotal - numericPaid);
   const isCheckoutMode = Boolean(onSubmitPayment);
+  const isPartialMode = partial && !isCheckoutMode;
   const amountEditable = !isCheckoutMode;
   // Solo mostrar el recuadro de descuento cuando hay un descuento real. NO comparar
   // base vs total: un cargo extra sube el total por encima de la base y encendía un
@@ -141,6 +151,15 @@ export default function PaymentModal({
     const parsedAmount = isCheckoutMode ? debt : parseArMoney(amount);
     if (parsedAmount === null || parsedAmount <= 0) {
       setError("Ingresá un monto mayor a 0 (ej. 43.700 o 43.700,50).");
+      setLoading(false);
+      return;
+    }
+
+    // A cuenta no se cobra de más: el tope es lo que falta (en centavos, para que un
+    // saldo con restos de coma flotante no rechace el monto justo). El RPC lo
+    // rechaza igual, pero así se ve antes y con la cifra.
+    if (isPartialMode && Math.round(parsedAmount * 100) > Math.round(debt * 100)) {
+      setError(`No puede superar lo que falta (${formatAmount(debt)})`);
       setLoading(false);
       return;
     }
@@ -200,7 +219,9 @@ export default function PaymentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200 w-full h-full text-left">
+    // A cuenta se abre también desde el detalle de una reserva del calendario, que es
+    // z-[60]: va encima. Debajo de PrintBlockedModal (z-[70]).
+    <div className={`fixed inset-0 ${isPartialMode ? "z-[65]" : "z-50"} flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200 w-full h-full text-left`}>
       {/* Con scroll propio: en un celular, fiar (recuadro violeta, botón largo) o el
           aviso de "Elegí cómo paga" pasan el alto de la pantalla, y sin esto la X y
           el botón de cobrar quedaban recortados y sin forma de llegar. */}
@@ -213,7 +234,9 @@ export default function PaymentModal({
             <div>
               {/* Fiar no es cobrar: con Cta. Cte. el título lo dice, como el rótulo y el botón. */}
               <h2 className="text-xl font-bold text-slate-800">
-                {!isCheckoutMode
+                {isPartialMode
+                  ? "Cobrar a cuenta"
+                  : !isCheckoutMode
                   ? "Cargar Pago"
                   : isAccountCredit
                     ? "Finalizar a cuenta corriente"
@@ -310,7 +333,9 @@ export default function PaymentModal({
               />
               {amountEditable && <ParsedAmountHint value={amount} />}
               <p className="mt-2 text-xs text-slate-500">
-                {!isCheckoutMode
+                {isPartialMode
+                  ? "Queda en tu caja. Lo que falte se cobra en el check-out."
+                  : !isCheckoutMode
                   ? "Podés registrar un pago parcial o total para esta reserva."
                   : isAccountCredit
                     ? "Se carga a la cuenta el saldo exacto pendiente."
@@ -355,8 +380,9 @@ export default function PaymentModal({
                   <span className="text-sm">Tarjeta</span>
                 </label>
                 {/* Vale blanco (consumo interno) solo si NO hubo pagos previos: tiene que
-                    cubrir el total de una sola vez, sin combinar con otro medio. */}
-                {numericPaid === 0 && (
+                    cubrir el total de una sola vez, sin combinar con otro medio. Por eso
+                    tampoco va a cuenta: lo que se cobra a cuenta deja algo para después. */}
+                {numericPaid === 0 && !isPartialMode && (
                   <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "vale_blanco" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
                     <input type="radio" name="method" value="vale_blanco" checked={method === "vale_blanco"} onChange={() => chooseMethod("vale_blanco")} className="sr-only" />
                     <Banknote size={18} className="text-slate-400" />
