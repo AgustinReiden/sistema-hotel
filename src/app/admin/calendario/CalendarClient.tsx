@@ -888,6 +888,9 @@ export default function CalendarClient({
           totalPrice={selectedReservation.total_price}
           paidAmount={selectedReservation.paid_amount}
           reservationId={selectedReservation.id}
+          // Sin confirmar: el detalle se cierra (mostraba un saldo que puede estar viejo y
+          // esta pantalla no se actualiza sola), pero sin router.refresh(): sin red navega.
+          onUncertain={() => setSelectedReservation(null)}
           onSuccess={() => {
             setSelectedReservation(null);
             router.refresh();

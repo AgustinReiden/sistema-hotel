@@ -55,6 +55,12 @@ interface PaymentModalProps {
   accountHolderName?: string | null;
   onSuccess?: () => void;
   /**
+   * El cobro no volvió (se cortó la red): pudo haberse registrado. Se llama en vez de
+   * onSuccess, justo antes de cerrar. Sirve para que el padre deje de mostrar un saldo
+   * que puede estar viejo, SIN refrescar la página (sin red, router.refresh() navega).
+   */
+  onUncertain?: () => void;
+  /**
    * Cobro del check-out: lo hace el padre. El recibo también lo abre el padre (la
    * tarjeta de la habitación), porque si después sale la pregunta de factura, el
    * recibo espera a que se decida: abierto antes, la tapaba.
@@ -89,6 +95,7 @@ export default function PaymentModal({
   defaultMethod,
   accountHolderName,
   onSuccess,
+  onUncertain,
   onSubmitPayment,
   noteText,
   partial = false,
@@ -203,6 +210,7 @@ export default function PaymentModal({
           "No pudimos confirmar el cobro. Pudo haberse registrado: mirá el pendiente de la reserva y la caja antes de repetirlo.",
           { duration: Infinity, closeButton: true }
         );
+        onUncertain?.();
         onClose();
         return;
       }

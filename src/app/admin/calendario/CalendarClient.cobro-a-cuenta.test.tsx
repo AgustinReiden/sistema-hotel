@@ -219,6 +219,23 @@ describe("Calendario: cobrar una seña o a cuenta desde el detalle", () => {
     expect(screen.queryByText("Detalle de Reserva")).toBeNull();
   });
 
+  it("si la respuesta no vuelve (red cortada), cierra el detalle con el saldo viejo y no refresca", async () => {
+    H.registerPaymentAction.mockRejectedValue(new Error("network"));
+    calendario([reserva()]);
+    abrirDetalle();
+    fireEvent.click(screen.getByText(BOTON));
+
+    fireEvent.change(screen.getByLabelText("Monto a abonar ($)"), { target: { value: "20.000" } });
+    fireEvent.click(screen.getByLabelText("Transferencia"));
+    fireEvent.click(screen.getByText("Registrar Pago"));
+
+    await waitFor(() => expect(H.toast.warning).toHaveBeenCalled());
+    expect(screen.queryByText("Cobrar a cuenta")).toBeNull();
+    expect(screen.queryByText("Detalle de Reserva")).toBeNull();
+    expect(screen.queryByText(BOTON)).toBeNull();
+    expect(H.refresh).not.toHaveBeenCalled();
+  });
+
   it("si cancela el cobro, vuelve al detalle", () => {
     calendario([reserva()]);
     abrirDetalle();
