@@ -45,4 +45,25 @@ describe("focusFirst", () => {
     expect(scroll).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(document.getElementById("campo"));
   });
+
+  it("mide contra el cuadro que scrollea y no contra la ventana", async () => {
+    document.body.innerHTML =
+      '<div id="cuadro" style="overflow-y: auto"><input id="campo" /><div data-missing-notice>Falta completar: Campo</div></div>';
+    const cuadro = document.getElementById("cuadro")!;
+    Object.defineProperty(cuadro, "clientHeight", { configurable: true, value: 704 });
+    const campo = document.getElementById("campo")!;
+    const aviso = document.querySelector<HTMLElement>("[data-missing-notice]")!;
+    campo.getBoundingClientRect = () => ({ top: 0, bottom: 40 }) as DOMRect;
+    aviso.getBoundingClientRect = () => ({ top: 720, bottom: 760 }) as DOMRect;
+    const scroll = vi.fn();
+    aviso.scrollIntoView = scroll;
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+
+    focusFirst([{ id: "campo", label: "Campo", ok: false }]);
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    expect(scroll).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(campo);
+  });
 });

@@ -3,6 +3,23 @@ import { AlertTriangle } from "lucide-react";
 import { missingMessage, type FieldCheck } from "@/lib/form-checks";
 
 /**
+ * Alto que de verdad se ve alrededor del campo: el del cuadro que scrollea (los modales
+ * scrollean adentro, con un alto máximo menor al de la ventana) y, si no hay ninguno, el
+ * de la ventana. Nunca más que la ventana.
+ */
+function visibleHeight(element: HTMLElement): number {
+  let parent = element.parentElement;
+  while (parent) {
+    const overflowY = window.getComputedStyle(parent).overflowY;
+    if ((overflowY === "auto" || overflowY === "scroll") && parent.clientHeight > 0) {
+      return Math.min(parent.clientHeight, window.innerHeight);
+    }
+    parent = parent.parentElement;
+  }
+  return window.innerHeight;
+}
+
+/**
  * Lleva el cursor al primer campo pendiente que se pueda tocar. Se salta los que no
  * están en pantalla (el aviso de un precio, por ejemplo) y los deshabilitados, que no
  * aceptan el foco. Devuelve el id al que fue, o null si no había a dónde ir.
@@ -14,7 +31,7 @@ export function focusFirst(pending: FieldCheck[]): string | null {
     if ((element as HTMLInputElement).disabled) continue;
     element.focus();
     // El foco ya llevó la pantalla hasta el campo. El aviso se trae a la vista solo si
-    // entra junto con el campo: si está más lejos que el alto de la pantalla, se deja el
+    // entra junto con el campo: si está más lejos que el alto que se ve (el del cuadro que scrollea), se deja el
     // campo a la vista (con su borde rojo) en vez de esconderlo. Va en el cuadro
     // siguiente porque el aviso recién se dibuja después de este foco, y sin scroll
     // suave, que en el celular compite con el teclado.
@@ -23,7 +40,7 @@ export function focusFirst(pending: FieldCheck[]): string | null {
       if (!notice) return;
       const span =
         notice.getBoundingClientRect().bottom - element.getBoundingClientRect().top;
-      if (span > window.innerHeight) return;
+      if (span > visibleHeight(element)) return;
       notice.scrollIntoView?.({ block: "nearest" });
     });
     return check.id;
