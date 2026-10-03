@@ -23,6 +23,65 @@ export function resolveRange(
   return { fromKey, toKey };
 }
 
+export type CleaningRange = {
+  /** Límites en claves de día del hotel; null cuando se pide todo el historial. */
+  fromKey: string | null;
+  toKey: string | null;
+  isAll: boolean;
+  /** true cuando no vino nada en la URL y rige el mes en curso. */
+  isDefault: boolean;
+  /** Rótulo para mostrar el período: lo que ve el dueño al lado de los números. */
+  label: string;
+};
+
+/**
+ * Período de la pantalla de Limpiezas. Sin parámetros: del 1° del mes a hoy. `todo=1`:
+ * todo el historial (el rótulo lo dice, para que nadie lea un acumulado como si fuera
+ * del mes). Con desde/hasta válidos: ese rango. Si solo viene una punta, la otra sale
+ * de hoy (desde) o del 1° del mes de la fecha (hasta). Fechas inválidas = mes en curso.
+ */
+export function resolveCleaningRange(
+  params: { from?: string; to?: string; todo?: string },
+  todayKey: string
+): CleaningRange {
+  if (params.todo === "1") {
+    return { fromKey: null, toKey: null, isAll: true, isDefault: false, label: "Todo el historial" };
+  }
+  const validFrom = params.from && isRealDateKey(params.from) ? params.from : null;
+  const validTo = params.to && isRealDateKey(params.to) ? params.to : null;
+  const monthStartOf = (key: string) => `${key.slice(0, 7)}-01`;
+
+  if (!validFrom && !validTo) {
+    const fromKey = monthStartOf(todayKey);
+    return {
+      fromKey,
+      toKey: todayKey,
+      isAll: false,
+      isDefault: true,
+      label: `Mes en curso: ${formatKey(fromKey)} al ${formatKey(todayKey)}`,
+    };
+  }
+
+  let fromKey = validFrom ?? monthStartOf(validTo as string);
+  let toKey = validTo ?? (validFrom && validFrom > todayKey ? validFrom : todayKey);
+  if (fromKey > toKey) [fromKey, toKey] = [toKey, fromKey];
+  return {
+    fromKey,
+    toKey,
+    isAll: false,
+    isDefault: false,
+    label: `Del ${formatKey(fromKey)} al ${formatKey(toKey)}`,
+  };
+}
+
+/** "2026-09-31" cumple el formato pero no existe: se descarta. */
+function isRealDateKey(key: string): boolean {
+  if (!DATE_KEY.test(key)) return false;
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 export type RangePreset = { label: string; from: string; to: string };
 
 /** Presets de rango relativos a hoy (en zona del hotel). */

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { Wallet, TrendingUp, AlertCircle, Banknote, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
+import { Wallet, TrendingUp, AlertCircle, Banknote, CalendarClock, CreditCard, Landmark, CircleDollarSign } from "lucide-react";
 import { getActiveOpenShift, getCurrentUserRole } from "@/lib/data";
 import { formatHotelTime } from "@/lib/time";
-import { localToISO } from "@/lib/format";
+import { formatAmount, localToISO } from "@/lib/format";
+import { partirSaldosPorCobrar } from "@/lib/saldos-por-cobrar";
 import { addDaysToDateKey } from "@/lib/analytics";
 
 export const revalidate = 0; // Ensure fresh data on every load
@@ -109,8 +110,9 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
         .filter(p => p.payment_method === 'vale_blanco' || p.payment_method === 'cuenta_corriente')
         .reduce((sum, p) => sum + Number(p.amount), 0);
     const cashIncome = todayIncome - nonCashIncome;
-    const debts = (reservationsResult.data || []).filter(r => Number(r.total_price) > Number(r.paid_amount));
-    const totalDebtPending = debts.reduce((sum, r) => sum + (Number(r.total_price) - Number(r.paid_amount)), 0);
+    // Dos números que no se mezclan: lo que deben los alojados y lo reservado que
+    // todavía no se cobró (gente que aún no llegó).
+    const { items: debts, alojados, reservados } = partirSaldosPorCobrar(reservationsResult.data || []);
     const isToday = selectedDateStr === todayLocalStr;
 
     return (
@@ -139,9 +141,9 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
             )}
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Resumen Financiero</h1>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Cobros del día</h1>
                     <p className="text-slate-500">
-                        Monitorea la caja del día, ingresos registrados y saldos pendientes de huéspedes actuales.
+                        Lo cobrado en el día elegido, por medio de pago.
                     </p>
                 </div>
                 <form method="GET" className="flex items-center gap-2 shrink-0">
@@ -164,7 +166,7 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                 </form>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
                 <div className="bg-emerald-600 rounded-2xl p-6 shadow-lg relative overflow-hidden text-white flex flex-col justify-between">
                     <div className="absolute top-0 right-0 p-4 opacity-20">
                         <TrendingUp size={100} />
@@ -212,12 +214,28 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                     <div className="relative z-10">
                         <div className="flex items-center gap-2 text-amber-100 font-medium mb-1">
                             <AlertCircle size={16} />
-                            Saldos Por Cobrar
+                            Deben los alojados
                         </div>
-                        <h2 className="text-4xl font-bold tracking-tight">${totalDebtPending.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
+                        <h2 className="text-4xl font-bold tracking-tight">{formatAmount(alojados.total)}</h2>
                     </div>
                     <div className="relative z-10 mt-6 text-sm text-amber-100 opacity-90">
-                        Deuda pendiente de huéspedes activos no liquidados.
+                        Saldo de las estadías que están en curso ({alojados.cantidad}).
+                    </div>
+                </div>
+
+                <div className="bg-slate-600 rounded-2xl p-6 shadow-lg relative overflow-hidden text-white flex flex-col justify-between">
+                    <div className="absolute top-0 right-0 p-4 opacity-20">
+                        <CalendarClock size={100} />
+                    </div>
+                    <div className="relative z-10">
+                        <div className="flex items-center gap-2 text-slate-200 font-medium mb-1">
+                            <CalendarClock size={16} />
+                            Reservado sin cobrar
+                        </div>
+                        <h2 className="text-4xl font-bold tracking-tight">{formatAmount(reservados.total)}</h2>
+                    </div>
+                    <div className="relative z-10 mt-6 text-sm text-slate-200 opacity-90">
+                        Reservas confirmadas que no pagaron todo ({reservados.cantidad}).
                     </div>
                 </div>
             </div>
@@ -278,21 +296,31 @@ export default async function FinancesPage({ searchParams }: FinancesPageProps) 
                                 <span className="bg-emerald-100 text-emerald-600 p-2 rounded-full">
                                     <TrendingUp size={24} />
                                 </span>
-                                Todos los huéspedes activos están al día con sus pagos.
+                                Nadie tiene saldo pendiente: los alojados y las reservas están al día.
                             </div>
                         ) : (
                             <ul className="divide-y divide-slate-100">
                                 {debts.map((debt) => {
                                     const roomRel = debt.rooms;
                                     const roomNumber = Array.isArray(roomRel) ? (roomRel[0] as { room_number: string })?.room_number : (roomRel as { room_number: string })?.room_number;
-                                    const remaining = Number(debt.total_price) - Number(debt.paid_amount);
+                                    const remaining = debt.saldo;
+                                    const alojado = debt.grupo === "alojado";
 
                                     return (
                                         <li key={debt.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between">
                                             <div>
                                                 <p className="font-bold text-slate-800 text-sm">{debt.client_name} (Hab. {roomNumber})</p>
-                                                <div className="text-xs text-slate-500 mt-0.5 space-x-2">
-                                                    <span className="inline-flex items-center text-amber-600 font-medium">Debe: ${remaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                                <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                                                    <span
+                                                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                                                            alojado
+                                                                ? "bg-amber-100 text-amber-800 border-amber-300"
+                                                                : "bg-slate-100 text-slate-700 border-slate-300"
+                                                        }`}
+                                                    >
+                                                        {alojado ? "Alojado" : "Reservada"}
+                                                    </span>
+                                                    <span className="inline-flex items-center text-amber-600 font-medium">Debe: {formatAmount(remaining)}</span>
                                                 </div>
                                             </div>
                                             <div className="text-right">
