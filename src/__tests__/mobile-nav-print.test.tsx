@@ -8,6 +8,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/app/admin/LogoutButton", () => ({ default: () => null }));
 
 import { MobileTabBar, MobileTopBar } from "@/app/admin/MobileNav";
+import { MobileMenuProvider } from "@/app/admin/MobileMenuContext";
 
 // Los comprobantes térmicos se abren en una ventana de 420 px, así que se imprimen con
 // el panel en versión celular. Lo que no tenga print:hidden (o sea aside/nav) sale en
@@ -15,10 +16,10 @@ import { MobileTabBar, MobileTopBar } from "@/app/admin/MobileNav";
 describe("barras del panel en el celular, al imprimir", () => {
   it("ninguna de las dos sale en el papel", () => {
     render(
-      <>
+      <MobileMenuProvider>
         <MobileTopBar role="admin" userEmail="admin@example.com" hasOpenShift unbilledCount={0} />
-        <MobileTabBar hasOpenShift />
-      </>
+        <MobileTabBar role="admin" hasOpenShift />
+      </MobileMenuProvider>
     );
     // Por etiqueta y atributo, no con getByRole sobre toda la pantalla: getByRole calcula
     // el rol de cada elemento y llama a getComputedStyle de jsdom por cada ancestro, y con
@@ -26,7 +27,7 @@ describe("barras del panel en el celular, al imprimir", () => {
     const barras = document.body.querySelectorAll("header");
     expect(barras).toHaveLength(1);
     expect(barras[0]).toHaveClass("print:hidden");
-    const accesos = document.body.querySelectorAll('nav[aria-label="Accesos de recepción"]');
+    const accesos = document.body.querySelectorAll('nav[aria-label="Accesos rápidos"]');
     expect(accesos).toHaveLength(1);
     expect(accesos[0]).toHaveClass("print:hidden");
   });

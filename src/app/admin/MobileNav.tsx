@@ -1,25 +1,26 @@
 "use client";
 
 // Navegación del panel en el celular. Son dos piezas que resuelven cosas distintas:
-//  - La barra inferior: los cinco accesos que recepción usa todo el día, a un toque y al
-//    alcance del pulgar.
+//  - La barra inferior: los accesos que se usan todo el día, a un toque y al alcance del
+//    pulgar. Recepción: Hoy, Reservas, Caja y Facturación. El dueño: Hoy, Reservas, Caja,
+//    Tablero y "Más", que abre el mismo cajón que la hamburguesa.
 //  - El cajón de la hamburguesa: el menú entero, sección por sección con sus pestañas
 //    (así nadie pierde Rendiciones, Descuentos o Limpiezas), el usuario y cerrar sesión.
 //
 // Arriba de 768px las dos desaparecen (md:hidden) y manda el <Sidebar>. Los links salen
 // de nav-links.ts, así que el menú se escribe en un solo lugar.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { BedDouble, Menu, X } from "lucide-react";
+import { BedDouble, Menu, MoreHorizontal, X } from "lucide-react";
 
 import LogoutButton from "./LogoutButton";
+import { useMobileMenu } from "./MobileMenuContext";
 import {
   findActiveNav,
+  getMobileBarSections,
   getNavSections,
-  getReceptionItems,
-  isNavItemActive,
   sectionBadge,
   sectionHref,
   type NavBadge,
@@ -50,14 +51,9 @@ type MobileNavProps = NavState & {
 export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNavProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // El cajón se cierra solo al navegar: en vez de un efecto que lo sincronice, se guarda
-  // desde qué pantalla se abrió y sólo sigue abierto mientras la URL siga siendo esa. Va
-  // con los parámetros porque hay pestañas que solo cambian el ?view= (Por llegar e
-  // Historial son /admin/guests).
-  const currentUrl = `${pathname}?${searchParams.toString()}`;
-  const [openedOn, setOpenedOn] = useState<string | null>(null);
-  const isOpen = openedOn === currentUrl;
-  const closeMenu = () => setOpenedOn(null);
+  // Si el cajón está abierto lo guarda el MobileMenuContext, porque "Más" de la barra de
+  // abajo lo abre también; él mismo lo cierra al navegar.
+  const { isOpen, open: openMenu, close: closeMenu } = useMobileMenu();
   const sections = getNavSections(role, navState);
   const active = findActiveNav(sections, pathname, searchParams);
   const isAdmin = role === "admin";
@@ -65,7 +61,7 @@ export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNa
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenedOn(null);
+      if (event.key === "Escape") closeMenu();
     };
     window.addEventListener("keydown", onKeyDown);
     // Sin esto, el dedo scrollea la página de atrás en vez del menú.
@@ -75,7 +71,7 @@ export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNa
       window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [isOpen]);
+  }, [isOpen, closeMenu]);
 
   return (
     <>
@@ -97,7 +93,7 @@ export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNa
           {actions}
           <button
             type="button"
-            onClick={() => setOpenedOn(currentUrl)}
+            onClick={openMenu}
             className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
             aria-label="Abrir menú"
             aria-expanded={isOpen}
@@ -210,48 +206,75 @@ export function MobileTopBar({ role, userEmail, actions, ...navState }: MobileNa
   );
 }
 
-export function MobileTabBar({ hasOpenShift }: NavState) {
+/** Cada acceso de la barra: el color del punto sale del color del aviso de la sección. */
+const DOT_TONE: Record<NavBadge["tone"], string> = {
+  ok: "bg-emerald-400",
+  warn: "bg-amber-400",
+  alert: "bg-rose-400",
+};
+
+const TAB_CLASS = "flex flex-col items-center justify-center gap-1 px-1 py-2.5 transition-colors";
+
+export function MobileTabBar({ role, ...navState }: NavState & { role: string }) {
   const pathname = usePathname();
-  const items = getReceptionItems({ hasOpenShift });
+  const searchParams = useSearchParams();
+  const { open } = useMobileMenu();
+  const isAdmin = role === "admin";
+  const sections = getNavSections(role, navState);
+  const bar = getMobileBarSections(role, navState);
+  const active = findActiveNav(sections, pathname, searchParams);
+  // Con una pantalla de las que quedan detrás de "Más" (Clientes, Configuración...) ningún
+  // acceso fijo está marcado: lo marcado es "Más", porque ahí está el camino de vuelta.
+  const activeInBar = bar.some((s) => s.id === active?.section.id);
 
   return (
     <nav
       // Idem la barra de arriba: hijo flex del shell, no fixed. Así no tapa el final de la
       // página (no hace falta padding extra) ni se mueve al scrollear.
-      className="md:hidden shrink-0 grid grid-cols-5 border-t border-slate-800 bg-slate-900 print:hidden"
-      aria-label="Accesos de recepción"
+      className={`md:hidden shrink-0 grid ${
+        isAdmin ? "grid-cols-5" : "grid-cols-4"
+      } border-t border-slate-800 bg-slate-900 print:hidden`}
+      aria-label="Accesos rápidos"
     >
-      {items.map((item) => {
-        const Icon = item.icon;
-        const active = isNavItemActive(item.href, pathname);
+      {bar.map((section) => {
+        const Icon = section.icon;
+        const isActive = active?.section.id === section.id;
+        // El badge (ABIERTA/CERRADA, un conteo) no entra acá: se reduce a un punto sobre el
+        // icono, del color del aviso. Con turno abierto, verde; sin turno, ámbar.
+        const badge = sectionBadge(section);
         return (
           <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={`flex flex-col items-center justify-center gap-1 px-1 py-2.5 transition-colors ${
-              active ? "text-emerald-400" : "text-slate-400"
-            }`}
+            key={section.id}
+            href={sectionHref(section)}
+            aria-current={isActive ? "page" : undefined}
+            className={`${TAB_CLASS} ${isActive ? "text-emerald-400" : "text-slate-400"}`}
           >
             <span className="relative">
               <Icon size={20} />
-              {/* El badge ABIERTA/CERRADA no entra acá: se reduce a un punto sobre el
-                  icono, que es lo único que recepción necesita ver de un vistazo. */}
-              {item.badge && (
+              {badge && (
                 <span
-                  title={item.badge.title}
-                  className={`absolute -right-1 -top-0.5 h-2 w-2 rounded-full ring-2 ring-slate-900 ${
-                    item.highlighted ? "bg-emerald-400" : "bg-amber-400"
-                  }`}
+                  title={badge.title}
+                  className={`absolute -right-1 -top-0.5 h-2 w-2 rounded-full ring-2 ring-slate-900 ${DOT_TONE[badge.tone]}`}
                 />
               )}
             </span>
             <span className="w-full truncate text-center text-[10px] font-semibold leading-none">
-              {item.shortLabel ?? item.label}
+              {section.label}
             </span>
           </Link>
         );
       })}
+      {isAdmin && (
+        <button
+          type="button"
+          onClick={open}
+          aria-haspopup="dialog"
+          className={`${TAB_CLASS} ${active && !activeInBar ? "text-emerald-400" : "text-slate-400"}`}
+        >
+          <MoreHorizontal size={20} />
+          <span className="w-full truncate text-center text-[10px] font-semibold leading-none">Más</span>
+        </button>
+      )}
     </nav>
   );
 }

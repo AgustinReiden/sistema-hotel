@@ -11,6 +11,7 @@ vi.mock("@/app/admin/LogoutButton", () => ({ default: () => null }));
 
 import Sidebar from "@/app/admin/Sidebar";
 import { MobileTopBar } from "@/app/admin/MobileNav";
+import { MobileMenuProvider } from "@/app/admin/MobileMenuContext";
 
 function en(url: string) {
   const [pathname, search = ""] = url.split("?");
@@ -100,7 +101,11 @@ describe("cajón del celular", () => {
 
   it("lista las secciones con sus pestañas y marca la activa", () => {
     en("/admin/guests?view=por_llegar");
-    render(<MobileTopBar role="admin" userEmail="admin@example.com" />);
+    render(
+      <MobileMenuProvider>
+        <MobileTopBar role="admin" userEmail="admin@example.com" />
+      </MobileMenuProvider>
+    );
     const cajon = abrir();
     expect(link("Reservas", cajon)).toHaveAttribute("aria-current", "page");
     expect(link("Por llegar", cajon)).toHaveAttribute("aria-current", "page");
@@ -111,7 +116,11 @@ describe("cajón del celular", () => {
   });
 
   it("recepción no ve Clientes en el cajón", () => {
-    render(<MobileTopBar role="receptionist" userEmail="" facturasConError={2} />);
+    render(
+      <MobileMenuProvider>
+        <MobileTopBar role="receptionist" userEmail="" facturasConError={2} />
+      </MobileMenuProvider>
+    );
     const cajon = abrir();
     expect(within(cajon).queryByText("Clientes")).toBeNull();
     expect(link("Hoy", cajon)).toHaveAttribute("aria-current", "page");
