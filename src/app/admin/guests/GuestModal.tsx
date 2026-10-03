@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, CreditCard, Hash, Loader2, Percent, Receipt, UserRound, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
 
+import MissingFieldsNotice, { focusFirst } from "../components/MissingFieldsNotice";
 import { avisoModoFacturacion, modoFacturacionAlCambiarCtaCte } from "@/lib/billing";
+import { invalidClass, pendingFields, type FieldCheck } from "@/lib/form-checks";
 import type { FacturacionModo } from "@/lib/types";
 import { loadGuestRecordAction, updateGuestAction, type GuestRecordPayload } from "./actions";
 
@@ -45,12 +47,15 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
   // mano, y si la cuenta vuelve a No se restaura (una ficha en consolidada sin
   // cuenta corriente saca sus check-outs de "Por facturar"). null = nadie lo cambió solo.
   const [modoPrevio, setModoPrevio] = useState<FacturacionModo | null>(null);
+  // Se apretó "Guardar" con algo sin completar: desde ahí el formulario marca qué falta.
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     if (!guestId) return;
     let active = true;
     setLoading(true);
     setModoPrevio(null);
+    setAttempted(false);
     (async () => {
       const result = await loadGuestRecordAction(guestId);
       if (!active) return;
@@ -107,10 +112,18 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
     modoPrevio !== null && form.cuentaCorrienteHabilitada && modoActual === "consolidada";
   const avisoFacturacion = avisoModoFacturacion(form.cuentaCorrienteHabilitada, modoActual);
 
+  // El botón no queda gris: sin nombre, el aviso lo dice y el cursor va al campo.
+  const checks: FieldCheck[] = [
+    { id: "guest-full-name", label: "Nombre completo", ok: Boolean(form.fullName.trim()) },
+  ];
+  const pending = pendingFields(checks);
+  const nameInvalid = attempted && pending.some((check) => check.id === "guest-full-name");
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.fullName.trim()) {
-      toast.error("El nombre es obligatorio.");
+    if (pending.length > 0) {
+      setAttempted(true);
+      focusFirst(pending);
       return;
     }
     setIsSubmitting(true);
@@ -149,15 +162,18 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
             <Loader2 size={20} className="animate-spin mr-2" /> Cargando…
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="p-6 space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nombre completo</label>
+              <label htmlFor="guest-full-name" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Nombre completo
+              </label>
               <input
+                id="guest-full-name"
                 type="text"
-                required
                 value={form.fullName}
                 onChange={(e) => set({ fullName: e.target.value })}
-                className={inputClass}
+                aria-invalid={nameInvalid || undefined}
+                className={invalidClass(inputClass, nameInvalid)}
                 placeholder="Ej. María López"
               />
             </div>
@@ -403,6 +419,8 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
               </div>
             </div>
 
+            {attempted && <MissingFieldsNotice pending={pending} />}
+
             <div className="pt-4 border-t border-slate-100 flex gap-3">
               <button
                 type="button"
@@ -413,7 +431,7 @@ export default function GuestModal({ guestId, onClose, onSaved }: GuestModalProp
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting || !form.fullName.trim()}
+                disabled={isSubmitting}
                 className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-md shadow-emerald-600/20"
               >
                 {isSubmitting ? "Guardando..." : "Guardar Cambios"}
