@@ -680,6 +680,20 @@ describe("checkoutPaymentsSchema", () => {
     ).toMatch(/centavos/i);
   });
 
+  it("redondea a centavos el ruido de coma flotante de un saldo calculado", () => {
+    // 43700.3 - 20000.1 = 23700.200000000004 y 85000.15 - 40000.05 = 45000.09999999999
+    const parsed = checkoutPaymentsSchema.parse([
+      { method: "cash", amount: 20000.1 },
+      { method: "credit_card", amount: 43700.3 - 20000.1 },
+    ]);
+    expect(parsed[1].amount).toBe(23700.2);
+    const second = checkoutPaymentsSchema.parse([
+      { method: "cash", amount: 40000.05 },
+      { method: "credit_card", amount: 85000.15 - 40000.05 },
+    ]);
+    expect(second[1].amount).toBe(45000.1);
+  });
+
   it("rechaza un monto que no es un número", () => {
     expect(
       checkoutPaymentsSchema.safeParse([
@@ -721,6 +735,10 @@ describe("checkoutSplitSchema", () => {
   });
 
   it("rechaza una reserva que no es un id válido", () => {
-    expect(checkoutSplitSchema.safeParse({ reservationId: "abc", payments, early: false }).success).toBe(false);
+    const result = checkoutSplitSchema.safeParse({ reservationId: "abc", payments, early: false });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toBe("La reserva seleccionada es inválida.");
+    }
   });
 });

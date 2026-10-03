@@ -412,7 +412,11 @@ const checkoutPaymentLineSchema = z.object({
   amount: z
     .number({ error: "Cada pago tiene que tener un monto." })
     .refine((v) => Number.isFinite(v) && v > 0, { message: "Cada monto tiene que ser mayor a 0." })
-    .refine(hasAtMostTwoDecimals, { message: "Los montos llevan como mucho 2 decimales (centavos)." }),
+    .refine(hasAtMostTwoDecimals, { message: "Los montos llevan como mucho 2 decimales (centavos)." })
+    // El saldo restante se calcula en la pantalla (saldo - lo ya cargado) y en coma
+    // flotante puede traer ruido (43700.3 - 20000.1 = 23700.200000000004). La base
+    // rechaza cualquier monto con más de 2 decimales, así que se redondea a centavos.
+    .transform((v) => Math.round(v * 100) / 100),
 });
 
 /** Los pagos de un check-out partido: de 2 a 4, en el orden en que se cargaron. */
@@ -422,7 +426,7 @@ export const checkoutPaymentsSchema = z
   .max(4, "Se puede cobrar en hasta 4 medios.");
 
 export const checkoutSplitSchema = z.object({
-  reservationId: z.string().uuid("La reserva seleccionada es invalida."),
+  reservationId: z.string().uuid("La reserva seleccionada es inválida."),
   payments: checkoutPaymentsSchema,
   early: z.boolean().default(false),
 });

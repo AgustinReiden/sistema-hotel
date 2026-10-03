@@ -48,10 +48,12 @@
 --
 -- VUELTA ATRAS. DROP FUNCTION public.rpc_staff_checkout_split(uuid, jsonb, boolean)
 -- y recrear rpc_shift_checkout_export con la definicion de PROD del 03/10 (ORDER BY
--- p.created_at DESC en el LATERAL "pay"). Los pagos que ya se hayan cargado partidos
--- quedan: son cobros reales.
+-- p.created_at DESC en el LATERAL "pay"), y borrar la fila de la 119 de
+-- public.applied_migrations para que el registro no diga que esta aplicada. Los pagos
+-- que ya se hayan cargado partidos quedan: son cobros reales.
 --
--- Aplicar via select public.exec_ddl($m119$ ... $m119$) tal cual: el archivo no
+-- Aplicar pasando el archivo entero a public.exec_ddl entre dollar-quotes (con una
+-- marca que NO aparezca en este texto, por ejemplo la de la migracion): el archivo no
 -- trae BEGIN ni COMMIT (exec_ddl corre todo en una sola transaccion) ni ; final.
 -- Si PostgREST no ve la funcion nueva: NOTIFY pgrst, 'reload schema'.
 -- ─────────────────────────────────────────────────────────────────────────────
