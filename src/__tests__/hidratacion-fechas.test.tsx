@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AdminLayout from "@/app/admin/layout";
-import AlertsPanel from "@/app/admin/mantenimiento/AlertsPanel";
+import AdminAlertsList from "@/app/admin/AdminAlertsList";
 import { MobileTabBar, MobileTopBar } from "@/app/admin/MobileNav";
 import OccupiedRoomAlertBanner from "@/app/admin/OccupiedRoomAlertBanner";
 import OpenShiftAgeAlert from "@/app/admin/OpenShiftAgeAlert";
@@ -66,6 +66,7 @@ vi.mock("@/lib/data", () => ({
 }));
 vi.mock("@/app/admin/mantenimiento/actions", () => ({
   authorizeOldTariffAction: vi.fn(),
+  listAdminAlertsAction: vi.fn(),
   rejectOldTariffAction: vi.fn(),
   resolveAdminAlertAction: vi.fn(),
 }));
@@ -477,10 +478,11 @@ describe("hidratación: lo que dibuja el servidor coincide con el navegador", ()
     expect(await enZona(ZONA_DE_LA_PC, corrimiento)).toBe(180);
   });
 
-  // Mantenimiento: la fecha y hora de cada aviso sin revisar (AlertsPanel.tsx).
-  it("el panel de avisos de Mantenimiento hidrata sin diferencias", async () => {
+  // La campana de avisos: la fecha y hora de cada aviso sin revisar (AdminAlertsList.tsx,
+  // que reemplazó al panel de Mantenimiento).
+  it("la lista de avisos de la campana hidrata sin diferencias", async () => {
     const { container, errores } = await hidratar(
-      <AlertsPanel
+      <AdminAlertsList
         hotelTimezone={TZ}
         alerts={[aviso(), aviso({ id: 2, kind: "room_change_keep_old_tariff_request" })]}
       />
@@ -646,6 +648,9 @@ describe("hidratación: lo que dibuja el servidor coincide con el navegador", ()
         expect(texto).toContain("Hay 1 habitación usada sin estadía cargada");
         expect(texto).toContain("26 sept 14:30");
         expect(texto).toContain("Tenés 3 avisos sin revisar");
+        expect(texto).toContain("Ver avisos");
+        // La campana del dueño, arriba en el escritorio y en la barra del celular.
+        expect(container.querySelectorAll('[aria-label="Avisos: 3 sin revisar"]')).toHaveLength(2);
         expect(texto).toContain("Tenés 2 solicitudes pendientes");
         expect(texto).toContain("Retraso Check-out");
         expect(texto).toContain("$50.000,00");

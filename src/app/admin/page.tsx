@@ -28,6 +28,7 @@ import {
   getUnresolvedAdminAlertsCount,
   listRoomOccupancyAlerts,
 } from "@/lib/data";
+import OpenAlertsButton from "./OpenAlertsButton";
 
 export const dynamic = "force-dynamic";
 
@@ -271,13 +272,8 @@ export default async function Dashboard() {
                 </p>
               </div>
             </div>
-            <Link
-              href="/admin/mantenimiento"
-              className="shrink-0 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center gap-2"
-            >
-              <Sparkles size={16} />
-              Ver alertas
-            </Link>
+            {/* Abre la campana de arriba, que tiene la lista y las acciones. */}
+            <OpenAlertsButton className="shrink-0 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center gap-2" />
           </div>
         )}
         {pendingSolicitudesCount > 0 && (
