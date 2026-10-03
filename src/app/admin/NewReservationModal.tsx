@@ -23,6 +23,8 @@ import GuestDniHint from "./GuestDniHint";
 import GuestRegistryFields from "./GuestRegistryFields";
 import NumberStepper from "./NumberStepper";
 import { fetchAvailableRoomsAction, searchGuestsAction } from "./actions";
+import MissingFieldsNotice, { focusFirst } from "./components/MissingFieldsNotice";
+import { invalidClass, pendingFields, type FieldCheck } from "@/lib/form-checks";
 import { calculateReservationPriceBreakdown, resolveEffectiveDiscountPercent } from "@/lib/pricing";
 import { nochesYSalida } from "@/lib/stepper";
 import { hotelDateKey } from "@/lib/time";
@@ -205,12 +207,15 @@ export default function NewReservationModal({
   const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
   const [dniMatch, setDniMatch] = useState<GuestDirectoryEntry | null>(null);
+  // Se apretó "Crear reserva" con algo sin completar: desde ahí el formulario marca qué falta.
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(buildInitialState(initialValues, standardCheckInTime, standardCheckOutTime));
     setRegistry({});
     setDniMatch(null);
+    setAttempted(false);
   }, [isOpen, initialValues, standardCheckInTime, standardCheckOutTime]);
 
   // Habitaciones libres para las fechas elegidas; se actualiza al cambiar check-in/out.
@@ -377,27 +382,42 @@ export default function NewReservationModal({
     Boolean(form.clientFirstName.trim()) &&
     Boolean(form.clientLastName.trim()) &&
     Boolean(form.clientDni.trim());
-  // La reserva de empresa se confirma solo con la empresa: quien viaja se carga en el
-  // check-in, porque cuando la empresa reserva todavia no sabe a quien manda.
-  const companyComplete = Boolean(form.associatedClientId);
-  const clientComplete = form.mode === "person" ? personComplete : companyComplete;
+
+  // Qué le falta a la reserva: primero las fechas, después la habitación y el cliente. El
+  // botón nunca queda gris: al tocarlo con algo pendiente, el aviso lo dice y el cursor va
+  // al primero que se pueda tocar. La reserva de empresa se confirma solo con la empresa:
+  // quien viaja se carga en el check-in, porque cuando la empresa reserva todavia no sabe a
+  // quien manda.
+  const salidaAntesDeEntrada = Boolean(form.checkIn) && Boolean(form.checkOut) && !hasValidDates;
+  const checks: FieldCheck[] = [
+    { id: "checkIn", label: "Entrada", ok: Boolean(form.checkIn) },
+    {
+      id: "checkOut",
+      label: "Salida",
+      ok: Boolean(form.checkOut) && !salidaAntesDeEntrada,
+      message: salidaAntesDeEntrada ? "La salida tiene que ser después de la entrada." : undefined,
+    },
+    { id: "roomId", label: "Habitación", ok: form.roomId !== "" },
+    ...(form.mode === "person"
+      ? [
+          { id: "clientFirstName", label: "Nombre", ok: Boolean(form.clientFirstName.trim()) },
+          { id: "clientLastName", label: "Apellido", ok: Boolean(form.clientLastName.trim()) },
+          { id: "clientDni", label: "DNI", ok: Boolean(form.clientDni.trim()) },
+        ]
+      : [{ id: "clientSearch", label: "Empresa o convenio", ok: Boolean(form.associatedClientId) }]),
+  ];
+  const pending = pendingFields(checks);
+  const invalid = (id: string) => attempted && pending.some((check) => check.id === id);
+  const fieldProps = (id: string) => ({
+    "aria-invalid": invalid(id) || undefined,
+    className: invalidClass(inputClass, invalid(id)),
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.roomId === "" || !form.checkIn || !form.checkOut) {
-      toast.error("Elegí fechas y habitación.");
-      return;
-    }
-    if (new Date(form.checkOut) <= new Date(form.checkIn)) {
-      toast.error("La fecha de salida debe ser posterior a la fecha de entrada.");
-      return;
-    }
-    if (form.mode === "person" && !personComplete) {
-      toast.error("Cargá nombre, apellido y DNI del huésped.");
-      return;
-    }
-    if (form.mode === "company" && !form.associatedClientId) {
-      toast.error("Seleccioná la empresa/convenio.");
+    if (pending.length > 0) {
+      setAttempted(true);
+      focusFirst(pending);
       return;
     }
 
@@ -457,7 +477,7 @@ export default function NewReservationModal({
             <X size={20} />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
           {/* Buscador único: huésped o empresa. Lo que se elige define el modo. */}
           <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
             <ClientSearch
@@ -503,7 +523,7 @@ export default function NewReservationModal({
                       type="text"
                       value={form.clientFirstName}
                       onChange={(e) => setForm((current) => ({ ...current, clientFirstName: e.target.value }))}
-                      className={inputClass}
+                      {...fieldProps("clientFirstName")}
                       placeholder="Ej. María"
                     />
                   </div>
@@ -516,7 +536,7 @@ export default function NewReservationModal({
                       type="text"
                       value={form.clientLastName}
                       onChange={(e) => setForm((current) => ({ ...current, clientLastName: e.target.value }))}
-                      className={inputClass}
+                      {...fieldProps("clientLastName")}
                       placeholder="Ej. López"
                     />
                   </div>
@@ -532,7 +552,7 @@ export default function NewReservationModal({
                       type="text"
                       value={form.clientDni}
                       onChange={(e) => setForm((current) => ({ ...current, clientDni: e.target.value }))}
-                      className={inputClass}
+                      {...fieldProps("clientDni")}
                       placeholder="Ej. 20-12345678-3"
                     />
                     {!form.guestId && (
@@ -645,10 +665,10 @@ export default function NewReservationModal({
             </div>
             <select
               id="roomId"
-              required
               value={form.roomId}
               disabled={loadingRooms || !hasValidDates}
               aria-describedby={avisoQuitada ? "roomId-aviso" : undefined}
+              aria-invalid={invalid("roomId") || undefined}
               onChange={(e) => {
                 const value = e.target.value;
                 setForm((current) => ({
@@ -658,7 +678,10 @@ export default function NewReservationModal({
                   habitacionQuitada: value ? null : current.habitacionQuitada,
                 }));
               }}
-              className="w-full px-4 py-2.5 bg-white border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className={invalidClass(
+                "w-full px-4 py-2.5 bg-white border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed",
+                invalid("roomId")
+              )}
             >
               {!hasValidDates ? (
                 <option value="">Elegí primero las fechas</option>
@@ -749,6 +772,8 @@ export default function NewReservationModal({
             </div>
           )}
 
+          {attempted && <MissingFieldsNotice pending={pending} />}
+
           <div className="pt-4 border-t border-slate-100 flex gap-3">
             <button
               type="button"
@@ -759,7 +784,7 @@ export default function NewReservationModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || form.roomId === "" || !clientComplete}
+              disabled={isSubmitting}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-colors shadow-md shadow-emerald-600/20"
             >
               {/* Con precio a la vista, el botón repite las noches y el día de salida. */}

@@ -10,6 +10,7 @@ import type { Room } from "@/lib/types";
 
 const H = vi.hoisted(() => ({
   fetchAvailableRoomsAction: vi.fn(),
+  onSubmit: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -51,7 +52,7 @@ function abrir(initialValues: React.ComponentProps<typeof NewReservationModal>["
     <NewReservationModal
       isOpen
       onClose={vi.fn()}
-      onSubmit={vi.fn()}
+      onSubmit={H.onSubmit}
       rooms={[hab5, hab7, hab12]}
       associatedClients={[]}
       initialValues={initialValues}
@@ -91,6 +92,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   H.fetchAvailableRoomsAction.mockReset();
+  H.onSubmit.mockReset();
 });
 
 describe("NewReservationModal: primero las fechas", () => {
@@ -127,7 +129,11 @@ describe("NewReservationModal: aviso cuando la habitación elegida deja de estar
     expect(selector()).toHaveAttribute("aria-describedby", (aviso as Element).id);
 
     expect(selector().value).toBe("");
-    expect(botonCrear(container)).toBeDisabled();
+    // F2-9: el botón no queda gris, pero sin habitación no manda la reserva.
+    expect(botonCrear(container)).toBeEnabled();
+    fireEvent.click(botonCrear(container));
+    expect(H.onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/^Falta completar: Habitación/)).toBeInTheDocument();
   });
 
   it("con la Hab. 12 elegida, cambiar la salida a un día en que está ocupada: aviso y selector vacío", async () => {
@@ -159,7 +165,9 @@ describe("NewReservationModal: aviso cuando la habitación elegida deja de estar
     fireEvent.change(screen.getByLabelText("Apellido"), { target: { value: "Prueba" } });
     fireEvent.change(screen.getByLabelText("DNI o CUIT"), { target: { value: "30123456" } });
     // Con el huésped completo, lo único que falta es la habitación.
-    expect(botonCrear(container)).toBeDisabled();
+    fireEvent.click(botonCrear(container));
+    expect(H.onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText("Falta completar: Habitación")).toBeInTheDocument();
 
     fireEvent.change(selector(), { target: { value: "7" } });
 
@@ -234,7 +242,8 @@ describe("NewReservationModal: el aviso sigue a las fechas que están en pantall
     await waitFor(() => expect(selector()).toBeEnabled());
     expect(screen.queryByText(/no está libre/)).toBeNull();
     expect(selector().value).toBe("");
-    expect(botonCrear(container)).toBeDisabled();
+    fireEvent.click(botonCrear(container));
+    expect(H.onSubmit).not.toHaveBeenCalled();
 
     // La consulta siguiente anda y la 5 está libre: vuelve a quedar elegida.
     cambiarSalida("13");
