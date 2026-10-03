@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CreditCard,
+  DollarSign,
   FileText,
   LogIn,
   Pencil,
@@ -19,6 +20,7 @@ import { toast } from "sonner";
 import NewReservationModal from "../NewReservationModal";
 import EditReservationModal from "../EditReservationModal";
 import CompanyCheckInModal from "../CompanyCheckInModal";
+import PaymentModal from "@/app/components/PaymentModal";
 import { handleCancelReservation, handleCheckIn, handleCreateReservation } from "../actions";
 import { isPendingArrival } from "@/lib/arrivals";
 import {
@@ -161,18 +163,21 @@ export default function CalendarClient({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
+  /** Cobro a cuenta (seña o pago antes del check-out) abierto encima del detalle. */
+  const [isCobroOpen, setIsCobroOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     // No cierra mientras hay un cancel/check-in en curso (isPending): los botones de
-    // esa accion ya se deshabilitan igual con `disabled={isPending}`.
-    if (!selectedReservation || isPending) return;
+    // esa accion ya se deshabilitan igual con `disabled={isPending}`. Tampoco con el
+    // cobro a cuenta abierto: Escape se llevaba el detalle y el cobro con él.
+    if (!selectedReservation || isPending || isCobroOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelectedReservation(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedReservation, isPending]);
+  }, [selectedReservation, isPending, isCobroOpen]);
 
   const days = useMemo(
     () => Array.from({ length: daysCount }, (_, index) => addDaysToKey(startDateKey, index)),
@@ -205,6 +210,7 @@ export default function CalendarClient({
   const openReservationDetails = (reservation: Reservation) => {
     setSelectedReservation(reservation);
     setCancelReason("");
+    setIsCobroOpen(false);
   };
 
   const handleCancelSelectedReservation = () => {
@@ -302,6 +308,17 @@ export default function CalendarClient({
       (selectedReservation.status === "pending" || selectedReservation.status === "confirmed")) ||
       (isAdmin && selectedReservation.status === "checked_in"));
   const selectedIsFinished = selectedReservation?.status === "checked_out";
+  const selectedBalance = selectedReservation
+    ? Math.max(0, selectedReservation.total_price - selectedReservation.paid_amount)
+    : 0;
+  // Seña o pago a cuenta: solo en una reserva tomada (confirmada) o en curso, y con
+  // saldo. El RPC no mira el estado de la reserva; el filtro es este. Una solicitud
+  // web pendiente todavía no es una reserva, y una estadía cerrada ya se cobró.
+  const canChargeSelected =
+    isStaff &&
+    selectedReservation != null &&
+    (selectedReservation.status === "confirmed" || selectedReservation.status === "checked_in") &&
+    selectedBalance > 0;
 
   // ── Scroll horizontal de la grilla ──────────────────────────────────────────
   // La grilla es mas ancha que la pantalla a proposito (ver CELL_WIDTH), asi que
@@ -811,9 +828,19 @@ export default function CalendarClient({
                     <div>
                       <p className="text-xs text-slate-400">Saldo</p>
                       <p className="font-semibold text-amber-700">
-                        ${Math.max(0, selectedReservation.total_price - selectedReservation.paid_amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        ${selectedBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </p>
                     </div>
+                    {canChargeSelected && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCobroOpen(true)}
+                        disabled={isPending}
+                        className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                      >
+                        <DollarSign size={16} /> Cobrar seña / a cuenta
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -846,6 +873,29 @@ export default function CalendarClient({
             </div>
           </div>
         </div>
+      )}
+      {/* Encima del detalle (z-[60]): el modo a cuenta va en z-[65]. Al registrar, el
+          detalle se cierra, porque mostraba el pagado y el saldo de antes. */}
+      {isCobroOpen && selectedReservation && canChargeSelected && (
+        <PaymentModal
+          isOpen
+          partial
+          onClose={() => setIsCobroOpen(false)}
+          clientName={selectedReservation.client_name}
+          baseTotalPrice={selectedReservation.base_total_price}
+          discountPercent={selectedReservation.discount_percent}
+          discountAmount={selectedReservation.discount_amount}
+          totalPrice={selectedReservation.total_price}
+          paidAmount={selectedReservation.paid_amount}
+          reservationId={selectedReservation.id}
+          // Sin confirmar: el detalle se cierra (mostraba un saldo que puede estar viejo y
+          // esta pantalla no se actualiza sola), pero sin router.refresh(): sin red navega.
+          onUncertain={() => setSelectedReservation(null)}
+          onSuccess={() => {
+            setSelectedReservation(null);
+            router.refresh();
+          }}
+        />
       )}
       <EditReservationModal
         isOpen={editingId !== null}

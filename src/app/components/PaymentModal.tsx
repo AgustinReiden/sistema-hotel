@@ -7,17 +7,17 @@ import { toast } from "sonner";
 
 import { registerPaymentAction } from "@/app/admin/finances/actions";
 import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
-import { formatAmountForInput, parseArMoney } from "@/lib/format";
+import { formatAmount, formatAmountForInput, parseArMoney } from "@/lib/format";
+import { openPrintWindow } from "@/lib/print-window";
 import type { ActionResult, PaymentMethod } from "@/lib/types";
 
-function openReceipt(paymentId: string) {
+function openReceipt(paymentId: string): boolean {
   // Abre el recibo imprimible en una ventana nueva con auto-print.
   // En Chrome con --kiosk-printing imprime sin diálogo.
-  if (typeof window === "undefined") return;
-  window.open(
+  // Devuelve false si el navegador bloqueó la ventana: el pago ya está asentado.
+  return openPrintWindow(
     `/admin/recibo/${paymentId}?autoprint=1&copy=original`,
-    "recibo-" + paymentId,
-    "width=420,height=720"
+    "recibo-" + paymentId
   );
 }
 
@@ -55,6 +55,12 @@ interface PaymentModalProps {
   accountHolderName?: string | null;
   onSuccess?: () => void;
   /**
+   * El cobro no volvió (se cortó la red): pudo haberse registrado. Se llama en vez de
+   * onSuccess, justo antes de cerrar. Sirve para que el padre deje de mostrar un saldo
+   * que puede estar viejo, SIN refrescar la página (sin red, router.refresh() navega).
+   */
+  onUncertain?: () => void;
+  /**
    * Cobro del check-out: lo hace el padre. El recibo también lo abre el padre (la
    * tarjeta de la habitación), porque si después sale la pregunta de factura, el
    * recibo espera a que se decida: abierto antes, la tapaba.
@@ -65,6 +71,14 @@ interface PaymentModalProps {
   }) => Promise<ActionResult<{ paymentId: string | null }>>;
   /** Aviso opcional arriba del monto (ej. rótulo de salida anticipada). */
   noteText?: string;
+  /**
+   * Cobro a cuenta: una seña o un pago antes del check-out (Hoy y el calendario). Va
+   * sin onSubmitPayment, con reservationId: lo registra registerPaymentAction en la
+   * caja abierta y sale el recibo. El monto no puede pasar lo que falta, y no hay Vale
+   * Blanco, que tiene que cubrir el total de una vez. Con onSubmitPayment no aplica:
+   * manda el check-out.
+   */
+  partial?: boolean;
 }
 
 export default function PaymentModal({
@@ -81,8 +95,10 @@ export default function PaymentModal({
   defaultMethod,
   accountHolderName,
   onSuccess,
+  onUncertain,
   onSubmitPayment,
   noteText,
+  partial = false,
 }: PaymentModalProps) {
   const numericBaseTotal = Number(baseTotalPrice ?? totalPrice);
   const numericDiscountPercent = Number(discountPercent ?? 0);
@@ -91,6 +107,7 @@ export default function PaymentModal({
   const numericPaid = Number(paidAmount);
   const debt = Math.max(0, numericTotal - numericPaid);
   const isCheckoutMode = Boolean(onSubmitPayment);
+  const isPartialMode = partial && !isCheckoutMode;
   const amountEditable = !isCheckoutMode;
   // Solo mostrar el recuadro de descuento cuando hay un descuento real. NO comparar
   // base vs total: un cargo extra sube el total por encima de la base y encendía un
@@ -99,12 +116,15 @@ export default function PaymentModal({
     numericDiscountPercent > 0 || numericDiscountAmount > 0;
 
   const [loading, setLoading] = useState(false);
+  // Con el cobro en vuelo (fuera del check-out, que tiene su propio control) no se
+  // cierra el cuadro: cerrarlo dejaba volver a cobrar mientras el primero seguía.
+  const closeLocked = loading && !isCheckoutMode;
   const [error, setError] = useState<string | null>(null);
   const [noOpenShift, setNoOpenShift] = useState(false);
   // Precargado ya formateado ("43.700,00"). Con debt.toString() un saldo con restos
   // de coma flotante ("0.19999999999999998") tiene más de 2 decimales y
   // parseArMoney no lo acepta.
-  const [amount, setAmount] = useState(debt > 0 ? formatAmountForInput(debt) : "");
+  const [amount, setAmount] = useState(debt > 0 && !isPartialMode ? formatAmountForInput(debt) : "");
   // Sin medio de antemano (null): la recepcionista lo elige siempre. La única
   // excepción es fiar en el check-out de una empresa con cuenta corriente.
   const [method, setMethod] = useState<PaymentMethod | null>(
@@ -145,6 +165,15 @@ export default function PaymentModal({
       return;
     }
 
+    // A cuenta no se cobra de más: el tope es lo que falta (en centavos, para que un
+    // saldo con restos de coma flotante no rechace el monto justo). El RPC lo
+    // rechaza igual, pero así se ve antes y con la cifra.
+    if (isPartialMode && Math.round(parsedAmount * 100) > Math.round(debt * 100)) {
+      setError(`No puede superar lo que falta (${formatAmount(debt)})`);
+      setLoading(false);
+      return;
+    }
+
     // Sin medio no se registra nada: se avisa al lado de los medios y el foco va
     // ahí, para que se vea qué falta elegir.
     if (!method) {
@@ -168,7 +197,23 @@ export default function PaymentModal({
         return;
       }
 
-      result = await registerPaymentAction(reservationId, parsedAmount, method);
+      try {
+        result = await registerPaymentAction(reservationId, parsedAmount, method);
+      } catch {
+        // La respuesta no volvió (se cortó la red): el pago pudo haber entrado.
+        // Repetirlo a ciegas lo duplicaría (un click con el monto y el medio puestos),
+        // así que, como en el check-out, el cuadro se cierra y queda el aviso. NO se llama
+        // a onSuccess: sin red, router.refresh() hace una navegación completa y se perdería
+        // el aviso. Hoy se actualiza solo (AutoRefresh, que hace ping antes de refrescar).
+        setLoading(false);
+        toast.warning(
+          "No pudimos confirmar el cobro. Pudo haberse registrado: mirá el pendiente de la reserva y la caja antes de repetirlo.",
+          { duration: Infinity, closeButton: true }
+        );
+        onUncertain?.();
+        onClose();
+        return;
+      }
     }
 
     setLoading(false);
@@ -185,7 +230,15 @@ export default function PaymentModal({
       // check-out lo abre el padre, después de la pregunta de factura.
       const paymentId = (result.data as { paymentId?: string | null } | undefined)?.paymentId;
       if (paymentId && !isCheckoutMode) {
-        openReceipt(paymentId);
+        if (!openReceipt(paymentId)) {
+          // Ventana emergente bloqueada: el pago quedó, falta el papel. El botón es
+          // un click nuevo, así que el navegador sí deja abrirla.
+          toast.warning("El navegador bloqueó el recibo. El pago ya quedó registrado.", {
+            duration: Infinity,
+            closeButton: true,
+            action: { label: "Abrir recibo", onClick: () => openReceipt(paymentId) },
+          });
+        }
       }
       onSuccess?.();
       onClose();
@@ -200,7 +253,9 @@ export default function PaymentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200 w-full h-full text-left">
+    // A cuenta se abre también desde el detalle de una reserva del calendario, que es
+    // z-[60]: va encima. Debajo de PrintBlockedModal (z-[70]).
+    <div className={`fixed inset-0 ${isPartialMode ? "z-[65]" : "z-50"} flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200 w-full h-full text-left`}>
       {/* Con scroll propio: en un celular, fiar (recuadro violeta, botón largo) o el
           aviso de "Elegí cómo paga" pasan el alto de la pantalla, y sin esto la X y
           el botón de cobrar quedaban recortados y sin forma de llegar. */}
@@ -213,7 +268,9 @@ export default function PaymentModal({
             <div>
               {/* Fiar no es cobrar: con Cta. Cte. el título lo dice, como el rótulo y el botón. */}
               <h2 className="text-xl font-bold text-slate-800">
-                {!isCheckoutMode
+                {isPartialMode
+                  ? "Cobrar a cuenta"
+                  : !isCheckoutMode
                   ? "Cargar Pago"
                   : isAccountCredit
                     ? "Finalizar a cuenta corriente"
@@ -222,7 +279,12 @@ export default function PaymentModal({
               <p className="text-slate-500 text-sm font-medium">{clientName}</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            disabled={closeLocked}
+            className="text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <X size={24} />
           </button>
         </div>
@@ -299,7 +361,7 @@ export default function PaymentModal({
                   const parsed = parseArMoney(amount);
                   if (parsed !== null) setAmount(formatAmountForInput(parsed));
                 }}
-                placeholder="0"
+                placeholder={isPartialMode && debt > 0 ? `Lo que recibiste (hasta ${formatAmountForInput(debt)})` : "0"}
                 readOnly={!amountEditable}
                 className={`w-full px-4 py-3 rounded-xl border outline-none transition-all text-xl font-bold ${
                   amountEditable
@@ -310,7 +372,9 @@ export default function PaymentModal({
               />
               {amountEditable && <ParsedAmountHint value={amount} />}
               <p className="mt-2 text-xs text-slate-500">
-                {!isCheckoutMode
+                {isPartialMode
+                  ? "Queda en tu caja. Lo que falte se cobra en el check-out."
+                  : !isCheckoutMode
                   ? "Podés registrar un pago parcial o total para esta reserva."
                   : isAccountCredit
                     ? "Se carga a la cuenta el saldo exacto pendiente."
@@ -355,8 +419,9 @@ export default function PaymentModal({
                   <span className="text-sm">Tarjeta</span>
                 </label>
                 {/* Vale blanco (consumo interno) solo si NO hubo pagos previos: tiene que
-                    cubrir el total de una sola vez, sin combinar con otro medio. */}
-                {numericPaid === 0 && (
+                    cubrir el total de una sola vez, sin combinar con otro medio. Por eso
+                    tampoco va a cuenta: lo que se cobra a cuenta deja algo para después. */}
+                {numericPaid === 0 && !isPartialMode && (
                   <label className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${method === "vale_blanco" ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-bold" : "border-slate-200 hover:border-slate-300 text-slate-600"}`}>
                     <input type="radio" name="method" value="vale_blanco" checked={method === "vale_blanco"} onChange={() => chooseMethod("vale_blanco")} className="sr-only" />
                     <Banknote size={18} className="text-slate-400" />
@@ -415,7 +480,8 @@ export default function PaymentModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+            disabled={closeLocked}
+            className="px-6 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancelar
           </button>

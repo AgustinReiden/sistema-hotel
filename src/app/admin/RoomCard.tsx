@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, useTransition } from "react";
-import { AlertTriangle, BedDouble, Clock, Pencil, Plus, Replace } from "lucide-react";
+import { AlertTriangle, BedDouble, Clock, DollarSign, Pencil, Plus, Replace } from "lucide-react";
 import { toast } from "sonner";
 
 import WalkInModal from "./WalkInModal";
@@ -214,6 +214,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
   const [isCompanyCheckInOpen, setIsCompanyCheckInOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  /**
+   * Qué cobro abre el PaymentModal: el del check-out (cierra la estadía) o uno a
+   * cuenta (una seña o un pago antes de irse, botón "Cobrar"). Se fija cada vez que
+   * se abre, así uno nunca hereda el modo del otro.
+   */
+  const [paymentMode, setPaymentMode] = useState<"partial" | "checkout">("checkout");
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
   const [isCheckoutConfirmOpen, setIsCheckoutConfirmOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
@@ -266,6 +272,12 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     setEarlyPreview(null);
     setCheckoutMode("normal");
     setConfirmacion(null);
+  };
+
+  /** Abre el PaymentModal en el modo que corresponde (ver paymentMode). */
+  const abrirCobro = (modo: "partial" | "checkout") => {
+    setPaymentMode(modo);
+    setIsPaymentModalOpen(true);
   };
 
   // Hoy se actualiza solo. Si la habitación ya muestra otra reserva (o ninguna), los
@@ -425,7 +437,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
 
     setCheckoutMode("normal");
     if (debt > 0) {
-      setIsPaymentModalOpen(true);
+      abrirCobro("checkout");
       return;
     }
     setIsCheckoutConfirmOpen(true);
@@ -436,7 +448,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     setIsEarlyModalOpen(false);
     setCheckoutMode("early");
     if ((earlyPreview?.breakdown.newBalance ?? 0) > 0) {
-      setIsPaymentModalOpen(true);
+      abrirCobro("checkout");
       return;
     }
     setIsCheckoutConfirmOpen(true);
@@ -447,7 +459,7 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
     setIsEarlyModalOpen(false);
     setCheckoutMode("normal");
     if (debt > 0) {
-      setIsPaymentModalOpen(true);
+      abrirCobro("checkout");
       return;
     }
     setIsCheckoutConfirmOpen(true);
@@ -837,7 +849,13 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 Hacer Check-Out
               </button>
             </div>
-            <div className={`pt-1 grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
+            {/* Con cuatro botones (admin con saldo) van de a dos por renglón: en una
+                fila no entran en la tarjeta. */}
+            <div
+              className={`pt-1 grid gap-2 ${
+                2 + (isAdmin ? 1 : 0) + (debt > 0 ? 1 : 0) === 3 ? "grid-cols-3" : "grid-cols-2"
+              }`}
+            >
               <button
                 onClick={() => setIsExtrasModalOpen(true)}
                 disabled={isPending}
@@ -846,6 +864,18 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
                 <Plus size={13} />
                 Extra
               </button>
+              {/* Una seña o un pago a cuenta antes de irse: queda en la caja abierta, con
+                  recibo, y el check-out cobra solo lo que falte. */}
+              {debt > 0 && (
+                <button
+                  onClick={() => abrirCobro("partial")}
+                  disabled={isPending}
+                  className="flex items-center justify-center gap-1 px-2 py-3 md:py-2 rounded-lg text-xs font-bold transition-colors bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-50"
+                >
+                  <DollarSign size={13} />
+                  Cobrar
+                </button>
+              )}
               <button
                 onClick={() => setIsChangeRoomModalOpen(true)}
                 disabled={isPending}
@@ -1040,7 +1070,25 @@ export default function RoomCard({ room, associatedClients, isAdmin = false, tim
         onSubmit={(data) => handleAssignWalkIn({ ...data, roomId: room.id })}
       />
 
-      {isPaymentModalOpen && room.reservationId && (
+      {/* A cuenta: sin onSubmitPayment, con la reserva y los montos de siempre (nunca
+          los de una salida anticipada). Lo registra registerPaymentAction, sale el
+          recibo y Hoy se actualiza con el nuevo pendiente. */}
+      {isPaymentModalOpen && room.reservationId && paymentMode === "partial" && (
+        <PaymentModal
+          isOpen
+          partial
+          onClose={() => setIsPaymentModalOpen(false)}
+          clientName={room.client || "Desconocido"}
+          baseTotalPrice={room.baseTotalPrice}
+          discountPercent={room.discountPercent}
+          discountAmount={room.discountAmount}
+          totalPrice={room.totalPrice}
+          paidAmount={room.paidAmount}
+          reservationId={room.reservationId}
+        />
+      )}
+
+      {isPaymentModalOpen && room.reservationId && paymentMode === "checkout" && (
         <PaymentModal
           isOpen
           onClose={() => setIsPaymentModalOpen(false)}
