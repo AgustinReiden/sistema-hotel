@@ -34,6 +34,46 @@ export function formatArcaDate(yyyymmdd: string | null | undefined): string {
 }
 
 /**
+ * El DNI de la Factura B no sirve. Dice qué tiene que tener y no a dónde ir: el
+ * texto viejo mandaba a "corregirlo en la reserva", y con la estadía cerrada
+ * recepción no tiene dónde. Ahora se corrige ahí mismo, con "Corregir DNI".
+ */
+export const DNI_INVALIDO_MSG =
+  "El DNI no sirve para facturar: tiene que tener 7 u 8 dígitos (sin puntos).";
+
+/**
+ * El texto con que las RPC de la base rechazan el DNI de la reserva (P0022, migs
+ * 72 a 112). Sigue en PROD y queda guardado en `last_error`: se traduce en la
+ * pantalla, porque reescribir funciones de PROD por un texto no vale la pena.
+ *
+ * Es a propósito "DNI DE LA RESERVA" y no cualquier "DNI": la consolidada también
+ * tira P0022 por el documento ("DNI del huésped/receptor … Corregilo en la ficha"),
+ * y ese mensaje queda como viene porque ahí no hay "Corregir DNI".
+ */
+const DNI_RESERVA_RPC = /DNI de la reserva no es v[aá]lido/i;
+
+/**
+ * ¿El error es el del DNI de la reserva? Reconoce el texto crudo de la base y el
+ * ya traducido (`DNI_INVALIDO_MSG`). No mira el código: quien lo llama con un
+ * error de Postgres chequea antes que sea P0022.
+ */
+export function esErrorDniReserva(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return message.includes(DNI_INVALIDO_MSG) || DNI_RESERVA_RPC.test(message);
+}
+
+/**
+ * `last_error` de una factura, para mostrar en Facturación › Con error. El error
+ * del DNI de la reserva cambia por el texto nuevo y el botón que lo arregla; el
+ * resto (rechazos de ARCA, red, CUIT, consolidada) pasa tal cual.
+ */
+export function humanizarErrorFiscal(raw: string | null): string | null {
+  if (raw === null) return null;
+  if (esErrorDniReserva(raw)) return `${DNI_INVALIDO_MSG} Usá «Corregir DNI».`;
+  return raw;
+}
+
+/**
  * Valida el documento del receptor para Factura B a consumidor final.
  * Regla v1: DNI de 7 u 8 dígitos → DocTipo 96. Sin fallback a "sin identificar"
  * (doc 99): el hotel siempre registra DNI, y así cumplimos RG 5615 por diseño.
@@ -51,10 +91,7 @@ export function parseDniForArca(
         "El documento de la reserva parece un CUIT. La Factura A a empresas la emite la oficina; para Factura B corregí el DNI del huésped (7 u 8 dígitos).",
     };
   }
-  return {
-    error:
-      "El DNI de la reserva no es válido para facturar (necesita 7 u 8 dígitos). Corregilo en la reserva y reintentá.",
-  };
+  return { error: DNI_INVALIDO_MSG };
 }
 
 /** "00003-00001234" — presentación estándar PV-número. */

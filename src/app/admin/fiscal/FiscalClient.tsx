@@ -25,7 +25,14 @@ import DateRangeFilter from "../DateRangeFilter";
 import DownloadCsvButton from "../DownloadCsvButton";
 import PaginationFooter from "../PaginationFooter";
 import { usePagination } from "../usePagination";
-import { cbteLetra, cbteNombre, formatCbteNumero, isNotaCredito } from "@/lib/arca/amounts";
+import {
+  cbteLetra,
+  cbteNombre,
+  esErrorDniReserva,
+  formatCbteNumero,
+  humanizarErrorFiscal,
+  isNotaCredito,
+} from "@/lib/arca/amounts";
 import { AUTHORIZED_INVOICES_LIMIT } from "@/lib/billing";
 import { buildCsv, type CsvColumn } from "@/lib/csv";
 import { buildBillingPresets } from "@/lib/date-range";
@@ -214,10 +221,25 @@ export default function FiscalClient({
     router.refresh();
   };
 
-  const retry = async (invoiceId: string) => {
+  /**
+   * Reintento de una factura trabada. Si vuelve con el DNI de la reserva rechazado
+   * y la fila tiene "Corregir DNI", se abre el campo de esa misma fila: reintentar
+   * otra vez sin corregirlo no cambia nada. "Corregir y reintentar" hace las dos
+   * cosas de una.
+   */
+  const retry = async (invoiceId: string, puedeCorregirDni: boolean) => {
     setBusyId(invoiceId);
     const result = await retryInvoiceAction(invoiceId);
     setBusyId(null);
+    const errorDni = result.success
+      ? result.data?.status === "pending" && esErrorDniReserva(result.data.userMessage)
+      : result.code === "P0022" && esErrorDniReserva(result.error);
+    if (errorDni && puedeCorregirDni) {
+      setDniEditId(invoiceId);
+      setDniValue("");
+      toast.warning("Corregí el DNI acá abajo y se reintenta solo.", { duration: 9000 });
+      return;
+    }
     if (!result.success) {
       toast.error(result.error);
       return;
@@ -323,7 +345,9 @@ export default function FiscalClient({
                             <AlertTriangle size={12} className="text-amber-500 shrink-0" />
                             {STATUS_LABEL[p.status] ?? p.status}
                             {p.attempt_count > 0 && ` · ${p.attempt_count} intento${p.attempt_count === 1 ? "" : "s"}`}
-                            {p.last_error && ` · ${p.last_error}`}
+                            {/* El texto viejo del DNI ("Corregilo en la reserva") sigue en
+                                la base: acá dice qué tiene que tener y usa el botón de al lado. */}
+                            {p.last_error && ` · ${humanizarErrorFiscal(p.last_error)}`}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -343,7 +367,7 @@ export default function FiscalClient({
                           )}
                           <button
                             type="button"
-                            onClick={() => retry(p.invoice_id)}
+                            onClick={() => retry(p.invoice_id, canFixDni)}
                             disabled={busyId !== null}
                             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
                           >
