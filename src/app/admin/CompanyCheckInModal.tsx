@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { Building2, CreditCard, LogIn, Phone, UserRound, X } from "lucide-react";
-import { toast } from "sonner";
 
 import CompanyPassengerSelector from "./CompanyPassengerSelector";
 import GuestRegistryFields from "./GuestRegistryFields";
+import MissingFieldsNotice, { focusFirst } from "./components/MissingFieldsNotice";
+import { invalidClass, pendingFields, type FieldCheck } from "@/lib/form-checks";
 import type { CheckInPassengerInput, CompanyPassenger, GuestRegistryInput } from "@/lib/types";
 
 type CompanyCheckInModalProps = {
@@ -45,6 +46,7 @@ export default function CompanyCheckInModal({
   const [passengerDni, setPassengerDni] = useState(initialPassenger?.dni ?? "");
   const [passengerPhone, setPassengerPhone] = useState("");
   const [registry, setRegistry] = useState<GuestRegistryInput>({});
+  const [attempted, setAttempted] = useState(false);
 
   const handleSelect = (p: CompanyPassenger) => {
     setCompanyPassengerId(p.id);
@@ -53,12 +55,19 @@ export default function CompanyCheckInModal({
     setPassengerPhone(p.phone ?? "");
   };
 
-  const complete = Boolean(passengerName.trim()) && Boolean(passengerDni.trim());
+  // El botón no queda gris: con algo pendiente, el aviso dice qué falta y el cursor va al primero.
+  const checks: FieldCheck[] = [
+    { id: "checkInPassengerName", label: "Nombre y apellido", ok: Boolean(passengerName.trim()) },
+    { id: "checkInPassengerDni", label: "DNI", ok: Boolean(passengerDni.trim()) },
+  ];
+  const pending = pendingFields(checks);
+  const invalid = (id: string) => attempted && pending.some((check) => check.id === id);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!complete) {
-      toast.error("Cargá el nombre y el DNI del pasajero que entra.");
+    if (pending.length > 0) {
+      setAttempted(true);
+      focusFirst(pending);
       return;
     }
     onConfirm({
@@ -87,7 +96,7 @@ export default function CompanyCheckInModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center gap-2 text-sm">
             <Building2 size={16} className="text-sky-600 shrink-0" />
             <span className="font-semibold text-slate-800 truncate">{companyName}</span>
@@ -124,7 +133,8 @@ export default function CompanyCheckInModal({
                     setPassengerName(e.target.value);
                     setCompanyPassengerId(null);
                   }}
-                  className={inputClass}
+                  aria-invalid={invalid("checkInPassengerName") || undefined}
+                  className={invalidClass(inputClass, invalid("checkInPassengerName"))}
                   placeholder="Ej. Juan Pérez"
                   autoComplete="off"
                 />
@@ -144,7 +154,8 @@ export default function CompanyCheckInModal({
                     setPassengerDni(e.target.value);
                     setCompanyPassengerId(null);
                   }}
-                  className={inputClass}
+                  aria-invalid={invalid("checkInPassengerDni") || undefined}
+                  className={invalidClass(inputClass, invalid("checkInPassengerDni"))}
                   placeholder="Ej. 30123456"
                   autoComplete="off"
                 />
@@ -181,6 +192,8 @@ export default function CompanyCheckInModal({
             idPrefix="checkin"
           />
 
+          {attempted && <MissingFieldsNotice pending={pending} />}
+
           <div className="pt-4 border-t border-slate-100 flex gap-3">
             <button
               type="button"
@@ -191,7 +204,7 @@ export default function CompanyCheckInModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !complete}
+              disabled={isSubmitting}
               className="flex-1 px-4 py-2.5 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:hover:bg-green-600 transition-colors shadow-md shadow-green-600/20 flex items-center justify-center gap-2"
             >
               <LogIn size={16} />
