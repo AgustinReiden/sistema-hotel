@@ -42,7 +42,6 @@ export async function registerPaymentAction(
     revalidatePath("/admin/caja");
     revalidatePath("/admin/guests");
     revalidatePath("/admin/calendario");
-    revalidatePath("/admin/timeline");
 
     return { success: true, data: { paymentId: result.payment_id ?? null } };
 }
