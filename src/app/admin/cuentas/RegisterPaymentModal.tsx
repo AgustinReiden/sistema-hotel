@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   DollarSign,
@@ -22,6 +22,7 @@ import BalanceTag from "./BalanceTag";
 import { cbteLetra, formatCbteNumero } from "@/lib/arca/amounts";
 import {
   aImputacionDestino,
+  cancelaDesdeLoQueEntro,
   claveDeuda,
   problemasDelPago,
   repartirMasViejoPrimero,
@@ -31,6 +32,7 @@ import {
 } from "@/lib/cc-pagos";
 import ParsedAmountHint from "@/app/admin/ParsedAmountHint";
 import { formatAmount, formatAmountForInput, formatShiftCode, parseArMoney } from "@/lib/format";
+import { paymentMethodLabel } from "@/lib/payment-methods";
 import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types";
 
 /**
@@ -49,6 +51,12 @@ import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types
  * que entra a la cuenta bancaria son números distintos, y hasta ahora la diferencia
  * recién se veía en el recibo, cuando el asiento ya estaba hecho.
  *
+ * Desde F2-11 la pantalla pide LO QUE ENTRÓ (lo que dice el extracto del banco) y las
+ * retenciones justo debajo, y el monto que cancela se CALCULA (`cancelaDesdeLoQueEntro`).
+ * Antes se pedía primero "lo que cancela", y quien tenía el extracto en la mano tipeaba
+ * lo que entró: la deuda bajaba de menos. La regla de arriba no cambia: lo que viaja
+ * como `amount` sigue siendo lo que cancela.
+ *
  * Imputar es OPCIONAL. Un pago a cuenta sin nada asignado —el cliente adelanta plata
  * y no dice por qué— es el flujo que existía antes de todo esto y tiene que seguir
  * andando sin tocar nada de la parte nueva.
@@ -60,12 +68,14 @@ import type { CcOpenInvoiceRow, CcOpenStayRow, CtaCteAccount } from "@/lib/types
  * nada, y por eso la pantalla no ofrece ningún botón para moverla.
  */
 
-const METHODS = [
-  { value: "cash", label: "Efectivo" },
-  { value: "bank_transfer", label: "Transferencia" },
-  { value: "mercado_pago", label: "Mercado Pago" },
-  { value: "other", label: "Otro" },
-];
+/** Los medios que ofrece el cobro a cuenta; las etiquetas, de la tabla única. */
+const METHODS = ["cash", "bank_transfer", "mercado_pago", "other"].map((value) => ({
+  value,
+  label: paymentMethodLabel(value),
+}));
+
+/** Lo que falta para poder guardar si nadie eligió el medio (F2-11). */
+const FALTA_METODO = "Elegí cómo entró el pago: efectivo, transferencia, Mercado Pago u otro.";
 
 const inputClass =
   "w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm";
@@ -184,16 +194,35 @@ export default function RegisterPaymentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [amount, setAmount] = useState(
-    account.balance > 0 ? formatAmountForInput(account.balance) : ""
-  );
-  const [method, setMethod] = useState("cash");
+  // Lo que entró, sin precarga: precargar el saldo invitaba a guardar un número que
+  // nadie había mirado contra el extracto.
+  const [entro, setEntro] = useState("");
+  // Sin medio preseleccionado: arrancar en "Efectivo" dejaba transferencias anotadas
+  // como efectivo. Vacío hasta que alguien elija.
+  const [method, setMethod] = useState("");
   const [notes, setNotes] = useState("");
   const [retGanancias, setRetGanancias] = useState("");
   const [retIibb, setRetIibb] = useState("");
   const [certificado, setCertificado] = useState("");
   const [saving, setSaving] = useState(false);
   const [guardado, setGuardado] = useState<Guardado | null>(null);
+  /**
+   * Candado contra el doble envío. `saving` deshabilita el botón, pero un Enter en un
+   * campo manda el formulario igual, y el estado de React recién se ve en el próximo
+   * render: el ref corta en el acto. Se suelta sólo si la acción falla.
+   */
+  const enviando = useRef(false);
+
+  /** Lo que CANCELA de deuda: lo que entró + las retenciones. Es el `amount` (mig 109). */
+  const amount = useMemo(
+    () =>
+      cancelaDesdeLoQueEntro({
+        entro: monto(entro),
+        retencionGanancias: monto(retGanancias),
+        retencionIibb: monto(retIibb),
+      }),
+    [entro, retGanancias, retIibb]
+  );
 
   const [facturas, setFacturas] = useState<CcOpenInvoiceRow[]>([]);
   const [estadias, setEstadias] = useState<CcOpenStayRow[]>([]);
@@ -249,7 +278,7 @@ export default function RegisterPaymentModal({
     () =>
       resumenPago(
         {
-          amount: monto(amount),
+          amount,
           retencionGanancias: monto(retGanancias),
           retencionIibb: monto(retIibb),
         },
@@ -259,14 +288,16 @@ export default function RegisterPaymentModal({
   );
 
   const problemas = useMemo(
-    () =>
-      problemasDelPago({
-        amount: monto(amount),
+    () => [
+      ...problemasDelPago({
+        amount,
         retencionGanancias: monto(retGanancias),
         retencionIibb: monto(retIibb),
         imputaciones,
       }),
-    [amount, retGanancias, retIibb, imputaciones]
+      ...(method === "" ? [FALTA_METODO] : []),
+    ],
+    [amount, retGanancias, retIibb, imputaciones, method]
   );
 
   /** Retener sin anotar el certificado no rompe nada, pero deja el papel inútil. */
@@ -279,7 +310,7 @@ export default function RegisterPaymentModal({
    * tenga papel.
    */
   const repartirSolo = () => {
-    const reparto = repartirMasViejoPrimero(monto(amount), deudas);
+    const reparto = repartirMasViejoPrimero(amount, deudas);
     setImputado(
       Object.fromEntries(
         reparto.map((i) => [claveDeuda(i.destino, i.id), formatAmountForInput(i.amount)])
@@ -301,22 +332,33 @@ export default function RegisterPaymentModal({
       // del pago si es menos. Tildar y que aparezca un 0 obliga a hacer a mano la
       // cuenta que la pantalla ya tiene hecha.
       const yaImputado = Object.entries(prev).reduce((sum, [, v]) => sum + monto(v), 0);
-      const libre = Math.max(0, monto(amount) - yaImputado);
+      const libre = Math.max(0, amount - yaImputado);
       const propuesto = Math.round((Math.min(d.saldo, libre) + Number.EPSILON) * 100) / 100;
       next[d.clave] = formatAmountForInput(propuesto > 0 ? propuesto : d.saldo);
       return next;
     });
   };
 
+  /**
+   * "Paga todo el saldo": lo que tuvo que entrar para dejar la cuenta en cero, o sea
+   * el saldo menos lo que ya se cargó de retenciones. Nunca negativo: si la retención
+   * se come el saldo, no entró nada.
+   */
+  const pagaTodoElSaldo = () => {
+    const falta = Math.max(0, account.balance - resumen.retenciones);
+    setEntro(formatAmountForInput(Math.round((falta + Number.EPSILON) * 100) / 100));
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (problemas.length > 0) return;
+    if (enviando.current || problemas.length > 0) return;
 
+    enviando.current = true;
     setSaving(true);
     const result = await registerAccountPaymentAction({
       kind: account.kind,
       clientId: account.id,
-      amount: monto(amount),
+      amount,
       method,
       notes: notes.trim() || undefined,
       retencionGanancias: monto(retGanancias),
@@ -327,6 +369,8 @@ export default function RegisterPaymentModal({
     setSaving(false);
 
     if (!result.success) {
+      // No se guardó nada: se puede corregir y volver a mandar.
+      enviando.current = false;
       toast.error(result.error);
       return;
     }
@@ -376,47 +420,75 @@ export default function RegisterPaymentModal({
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5" htmlFor="pago-monto">
-                Monto que cancela
+          {/* El orden es el del papel que el admin tiene en la mano: primero lo que
+              dice el extracto (lo que entró), justo debajo lo que dice el certificado
+              de retención, y recién ahí lo que cancela, calculado. */}
+          <div>
+            <div className="flex flex-wrap items-end justify-between gap-2 mb-1.5">
+              <label className="block text-sm font-bold text-slate-700" htmlFor="pago-entro">
+                Lo que entró (a la cuenta o en mano)
               </label>
-              <input
-                id="pago-monto"
-                type="text"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                onBlur={() => alSalirDelCampo(amount, setAmount)}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-bold"
-                required
-                autoFocus
-              />
-              <ParsedAmountHint value={amount} />
-              <p className="text-[11px] text-slate-500 mt-1">
-                Incluye las retenciones: es lo que le baja de deuda al cliente.
-              </p>
+              {account.balance > 0 && (
+                <button
+                  type="button"
+                  onClick={pagaTodoElSaldo}
+                  title="Completa lo que tuvo que entrar para dejar la cuenta en cero, descontando las retenciones cargadas"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 rounded-full transition-colors"
+                >
+                  Paga todo el saldo
+                </button>
+              )}
             </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5" htmlFor="pago-metodo">
-                Método (informativo)
-              </label>
-              <select
-                id="pago-metodo"
-                value={method}
-                onChange={(e) => setMethod(e.target.value)}
-                className={inputClass}
-              >
-                {METHODS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-slate-500 mt-1">
-                No impacta el arqueo de caja; queda como registro de la cuenta corriente.
-              </p>
-            </div>
+            <input
+              id="pago-entro"
+              type="text"
+              inputMode="decimal"
+              value={entro}
+              onChange={(e) => setEntro(e.target.value)}
+              onBlur={() => alSalirDelCampo(entro, setEntro)}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-bold"
+              placeholder="0,00"
+              autoFocus
+            />
+            <ParsedAmountHint value={entro} />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Lo que dice el extracto del banco o lo que te dieron en mano, SIN las
+              retenciones: esas van justo abajo.
+            </p>
+          </div>
+
+          <Retenciones
+            ganancias={retGanancias}
+            iibb={retIibb}
+            certificado={certificado}
+            faltaCertificado={faltaCertificado}
+            onGanancias={setRetGanancias}
+            onIibb={setRetIibb}
+            onCertificado={setCertificado}
+          />
+
+          <CancelaDeDeuda cancela={amount} retenciones={resumen.retenciones} />
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5" htmlFor="pago-metodo">
+              Cómo entró
+            </label>
+            <select
+              id="pago-metodo"
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">Elegí…</option>
+              {METHODS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              No impacta el arqueo de caja; queda como registro de la cuenta corriente.
+            </p>
           </div>
 
           <DeudasImputables
@@ -427,17 +499,7 @@ export default function RegisterPaymentModal({
             onToggle={toggleDeuda}
             onImporte={(clave, value) => setImputado((prev) => ({ ...prev, [clave]: value }))}
             onRepartir={repartirSolo}
-            puedeRepartir={monto(amount) > 0}
-          />
-
-          <Retenciones
-            ganancias={retGanancias}
-            iibb={retIibb}
-            certificado={certificado}
-            faltaCertificado={faltaCertificado}
-            onGanancias={setRetGanancias}
-            onIibb={setRetIibb}
-            onCertificado={setCertificado}
+            puedeRepartir={amount > 0}
           />
 
           <div>
@@ -675,11 +737,11 @@ function Retenciones({
     <div className="rounded-xl border border-slate-200 px-4 py-3 space-y-3">
       <div>
         <p className="text-sm font-bold text-slate-700">Retenciones</p>
-        {/* Por qué no se restan del monto: es plata que el cliente le pagó a ARCA en
+        {/* Por qué se SUMAN a lo que entró: es plata que el cliente le pagó a ARCA en
             nombre del hotel, así que cancela deuda igual que el efectivo. */}
         <p className="text-[11px] text-slate-500">
-          Van DENTRO del monto: cancelan deuda igual que el efectivo. Dejalas en cero si
-          el cliente no retuvo.
+          Se suman a lo que entró: cancelan deuda igual que el efectivo. Dejalas en cero
+          si el cliente no retuvo.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -737,6 +799,32 @@ function Retenciones({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Lo que cancela de deuda, calculado y de solo lectura (F2-11). Va en grande y
+ * pegado a lo que se tipeó, porque es el número que antes se tipeaba mal.
+ */
+function CancelaDeDeuda({ cancela, retenciones }: { cancela: number; retenciones: number }) {
+  return (
+    <div
+      data-testid="pago-cancela"
+      aria-live="polite"
+      className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3"
+    >
+      <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+        Cancela de deuda
+      </p>
+      <p className="text-2xl sm:text-3xl font-bold text-emerald-900 leading-tight">
+        {formatAmount(cancela)}
+      </p>
+      <p className="text-[11px] font-semibold text-emerald-800/80 mt-1">
+        {retenciones > 0
+          ? `Lo que entró + ${formatAmount(retenciones)} de retenciones. Es lo que le baja de deuda al cliente y lo que dice el recibo.`
+          : "Lo que entró. Es lo que le baja de deuda al cliente y lo que dice el recibo."}
+      </p>
     </div>
   );
 }
