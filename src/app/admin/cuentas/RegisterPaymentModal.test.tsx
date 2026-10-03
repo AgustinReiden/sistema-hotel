@@ -77,7 +77,7 @@ const etiquetaNueva = "Factura B 00008-00000030";
 const etiquetaEstadia = "Estadía Hab. 3 · 10/06/2026 al 12/06/2026";
 
 function montoDe(etiqueta: string): HTMLInputElement {
-  return screen.getByLabelText(`Importe imputado a ${etiqueta}`) as HTMLInputElement;
+  return screen.getByLabelText(`Importe aplicado a ${etiqueta}`) as HTMLInputElement;
 }
 
 async function abrir(onSaved = vi.fn()) {

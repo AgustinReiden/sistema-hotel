@@ -108,7 +108,7 @@ export async function loadCcAccountStaysAction(
 }
 
 /**
- * Facturas con saldo del cliente: lo que el modal de cobro ofrece para imputar.
+ * Facturas con saldo del cliente: lo que el modal de cobro ofrece para aplicar el pago.
  *
  * El saldo que devuelve es una FOTO. El techo real lo valida la RPC con la fila de la
  * factura lockeada (P0038): entre que esto se lee y el admin guarda, otro pago pudo
@@ -157,19 +157,6 @@ export async function loadClientOpenStaysAction(
 }
 
 /**
- * Registra un cobro a cuenta corriente, con retenciones e imputación a facturas.
- *
- * `amount` es lo que CANCELA de deuda: efectivo más retenciones (mig 109). Devuelve
- * el movimiento y su número de recibo para que la pantalla pueda abrir el impreso
- * (`/admin/recibo-cc/<movementId>?autoprint=1&copy=original`).
- *
- * Las validaciones de acá son para que el admin vea el problema en su pantalla y con
- * los importes escritos en pesos, en vez de comerse un round-trip. **La autoridad
- * sigue siendo la RPC**, que valida lo mismo con la fila de la factura lockeada y es
- * lo único que puede cerrar una carrera entre dos cobros simultáneos: no borrar esas
- * guardas creyendo que esto las reemplaza.
- */
-/**
  * Lo que está mal en la LISTA de destinos, o null si está bien.
  *
  * Vive acá y no en cada action porque las dos escriben imputaciones y las dos tienen
@@ -182,19 +169,32 @@ function problemaEnDestinos(imputaciones: readonly ImputacionDestino[]): string 
     const tieneFactura = Boolean(i.invoiceId);
     const tieneEstadia = Boolean(i.cargoMovimientoId);
     if (tieneFactura === tieneEstadia) {
-      return "Cada imputación tiene que apuntar a una factura o a una estadía, no a las dos.";
+      return "Cada aplicación tiene que apuntar a una factura o a una estadía, no a las dos.";
     }
     if (!Number.isFinite(i.amount) || i.amount <= 0) {
-      return "El importe imputado a cada factura o estadía tiene que ser mayor a 0.";
+      return "El importe aplicado a cada factura o estadía tiene que ser mayor a 0.";
     }
   }
   const ids = imputaciones.map((i) => i.invoiceId ?? i.cargoMovimientoId);
   if (new Set(ids).size !== ids.length) {
-    return "La misma factura o estadía aparece dos veces en la imputación.";
+    return "La misma factura o estadía aparece dos veces en la aplicación.";
   }
   return null;
 }
 
+/**
+ * Registra un cobro a cuenta corriente, con retenciones y aplicación a facturas.
+ *
+ * `amount` es lo que CANCELA de deuda: efectivo más retenciones (mig 109). Devuelve
+ * el movimiento y su número de recibo para que la pantalla pueda abrir el impreso
+ * (`/admin/recibo-cc/<movementId>?autoprint=1&copy=original`).
+ *
+ * Las validaciones de acá son para que el admin vea el problema en su pantalla y con
+ * los importes escritos en pesos, en vez de comerse un round-trip. **La autoridad
+ * sigue siendo la RPC**, que valida lo mismo con la fila de la factura lockeada y es
+ * lo único que puede cerrar una carrera entre dos cobros simultáneos: no borrar esas
+ * guardas creyendo que esto las reemplaza.
+ */
 export async function registerAccountPaymentAction(input: {
   kind: CtaCteClientKind;
   clientId: string;
@@ -246,7 +246,7 @@ export async function registerAccountPaymentAction(input: {
     if (sobraImputado > 0) {
       return {
         success: false,
-        error: `Lo imputado se pasa ${formatAmount(sobraImputado)} del monto del pago.`,
+        error: `Lo aplicado se pasa ${formatAmount(sobraImputado)} del monto del pago.`,
       };
     }
 
@@ -270,7 +270,7 @@ export async function registerAccountPaymentAction(input: {
 }
 
 /**
- * Suelta una imputación de un pago (mig 111). El motivo es obligatorio acá y en la
+ * Quita la aplicación de un pago a una factura o estadía (mig 111). El motivo es obligatorio acá y en la
  * RPC: la fila queda como historia, y una historia sin el porqué no sirve de nada
  * cuando dentro de un año haya que explicar por qué se movió esa plata.
  */
@@ -281,11 +281,11 @@ export async function revertPaymentImputacionAction(input: {
   try {
     await assertCuentasAdmin();
     if (!input.imputacionId) {
-      return { success: false, error: "Falta la imputación a desimputar." };
+      return { success: false, error: "Falta la aplicación a quitar." };
     }
     const motivo = (input.motivo ?? "").trim();
     if (!motivo) {
-      return { success: false, error: "Escribí por qué se desimputa." };
+      return { success: false, error: "Escribí por qué se quita." };
     }
     const { liberado, sinImputar } = await revertPaymentImputacion({
       imputacionId: input.imputacionId,
@@ -294,14 +294,14 @@ export async function revertPaymentImputacionAction(input: {
     revalidatePath("/admin/cuentas");
     return { success: true, data: { liberado, sinImputar } };
   } catch (error: unknown) {
-    const parsed = parseActionError(error, "No se pudo desimputar el pago.");
+    const parsed = parseActionError(error, "No se pudo quitar la aplicación del pago.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }
 
 /**
  * Aplica un pago ya registrado a una o más facturas o estadías (mig 111 y 114): lo
- * que se hace con la plata que quedó libre después de desimputar, o con un adelanto
+ * que se hace con la plata que quedó libre después de quitar una aplicación, o con un adelanto
  * que se cobró antes de que existiera la factura.
  */
 export async function addPaymentImputacionesAction(input: {
@@ -311,7 +311,7 @@ export async function addPaymentImputacionesAction(input: {
   try {
     await assertCuentasAdmin();
     if (!input.movementId) {
-      return { success: false, error: "Falta el pago a imputar." };
+      return { success: false, error: "Falta el pago a aplicar." };
     }
     const imputaciones = (input.imputaciones ?? []).map(
       (i) => ({ ...i, amount: Number(i.amount) }) as ImputacionDestino
@@ -330,7 +330,7 @@ export async function addPaymentImputacionesAction(input: {
     revalidatePath("/admin/cuentas");
     return { success: true, data };
   } catch (error: unknown) {
-    const parsed = parseActionError(error, "No se pudo imputar el pago.");
+    const parsed = parseActionError(error, "No se pudo aplicar el pago.");
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

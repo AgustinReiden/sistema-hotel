@@ -639,7 +639,7 @@ function GrupoDeDeudas({
                     if (parsed !== null) onImporte(d.clave, formatAmountForInput(parsed));
                   }}
                   disabled={!tildada}
-                  aria-label={`Importe imputado a ${d.etiqueta}`}
+                  aria-label={`Importe aplicado a ${d.etiqueta}`}
                   placeholder="0,00"
                   className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-right font-semibold outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
                 />
