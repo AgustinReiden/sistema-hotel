@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RoomCard from "./RoomCard";
@@ -680,7 +680,7 @@ describe("RoomCard: los cuadros se cierran si cambia la reserva", () => {
     {
       cuadro: "Ampliar Reserva",
       boton: "Ampliar Reserva",
-      abierto: "Noches Adicionales",
+      abierto: /^Ampliar 1 noche/,
       desde: () => particular(),
       hacia: () => particular({ reservationId: "res-2" }),
     },
@@ -1072,7 +1072,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
     /** Ampliar Reserva → una noche → Ampliar, sin respuesta. */
     async function ampliarSinRespuesta() {
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      fireEvent.click(screen.getByText("Ampliar"));
+      fireEvent.click(screen.getByText(/^Ampliar 1 noche/));
       await waitFor(() => expect(screen.getByText(AVISO_INCIERTO)).toBeTruthy());
     }
 
@@ -1081,13 +1081,13 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
 
       await ampliarSinRespuesta();
       expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
-      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.queryByLabelText("Noches adicionales")).toBeNull();
       fireEvent.click(screen.getByText("Entendido"));
 
       // La tarjeta sigue con la salida de antes: no se sabe si entró.
       fireEvent.click(screen.getByText("Ampliar Reserva"));
 
-      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.queryByLabelText("Noches adicionales")).toBeNull();
       expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
       expect(H.handleExtendReservation).toHaveBeenCalledTimes(1);
     });
@@ -1100,7 +1100,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       actualizar(particular({ check_out_target: SALIDA }));
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.queryByText("Noches Adicionales")).toBeNull();
+      expect(screen.queryByLabelText("Noches adicionales")).toBeNull();
       expect(screen.getByText(RENGLON_AMPLIAR)).toBeTruthy();
     });
 
@@ -1114,7 +1114,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       );
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+      expect(screen.getByLabelText("Noches adicionales")).toBeTruthy();
     });
 
     it("recargar la página (la tarjeta se monta de cero) también lo destraba", async () => {
@@ -1125,7 +1125,7 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       abrir(particular({ check_out_target: SALIDA }));
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+      expect(screen.getByLabelText("Noches adicionales")).toBeTruthy();
     });
 
     it("el medio día (que no se cobra dos veces) no frena la ampliación", async () => {
@@ -1140,7 +1140,65 @@ describe("RoomCard: si la acción no vuelve (red cortada)", () => {
       fireEvent.click(screen.getByText("Entendido"));
 
       fireEvent.click(screen.getByText("Ampliar Reserva"));
-      expect(screen.getByText("Noches Adicionales")).toBeTruthy();
+      expect(screen.getByLabelText("Noches adicionales")).toBeTruthy();
     });
+  });
+});
+
+describe("RoomCard: ampliar la reserva", () => {
+  it("el botón dice las noches y el nuevo día de salida, y amplía las noches del stepper", async () => {
+    const { handleExtendReservation } = await import("./actions");
+    vi.mocked(handleExtendReservation).mockResolvedValue({
+      success: true,
+      data: { halfDayRemoved: false, halfDayAmount: 0 },
+    });
+    // Entró el 24/09 y sale el 25/09 a las 10:00.
+    abrir(
+      habitacion({
+        check_in_target: "2026-09-24T17:00:00.000Z",
+        check_out_target: "2026-09-25T13:00:00.000Z",
+      })
+    );
+
+    fireEvent.click(screen.getByText("Ampliar Reserva"));
+    expect(screen.getByText("Ampliar 1 noche · sale el 26/09")).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("Noches adicionales: sumar 1"));
+    expect(screen.getByText("Ampliar 2 noches · sale el 27/09")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Ampliar 2 noches · sale el 27/09"));
+    await waitFor(() => expect(handleExtendReservation).toHaveBeenCalledWith("res-1", 2));
+  });
+
+  it("un número que se pasa de 30 queda en 30 al tipearlo, y se amplía lo que decía el botón", async () => {
+    const { handleExtendReservation } = await import("./actions");
+    vi.mocked(handleExtendReservation).mockClear();
+    vi.mocked(handleExtendReservation).mockResolvedValue({
+      success: true,
+      data: { halfDayRemoved: false, halfDayAmount: 0 },
+    });
+    // Sale el 25/09 a las 10:00.
+    abrir(
+      habitacion({
+        check_in_target: "2026-09-24T17:00:00.000Z",
+        check_out_target: "2026-09-25T13:00:00.000Z",
+      })
+    );
+
+    fireEvent.click(screen.getByText("Ampliar Reserva"));
+    const campo = screen.getByLabelText("Noches adicionales") as HTMLInputElement;
+    // Quería 4 y se le escapó un 5.
+    act(() => campo.focus());
+    fireEvent.change(campo, { target: { value: "4" } });
+    fireEvent.change(campo, { target: { value: "45" } });
+    expect(campo.value).toBe("30");
+    const boton = screen.getByText("Ampliar 30 noches · sale el 25/10");
+
+    // En el navegador el mousedown sobre el botón saca el foco del campo antes del click.
+    act(() => campo.blur());
+    expect(boton.textContent).toBe("Ampliar 30 noches · sale el 25/10");
+    fireEvent.click(boton);
+    await waitFor(() => expect(handleExtendReservation).toHaveBeenCalledWith("res-1", 30));
+    expect(handleExtendReservation).toHaveBeenCalledTimes(1);
   });
 });
