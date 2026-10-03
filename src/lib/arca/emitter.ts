@@ -26,7 +26,13 @@ import {
 } from "@/lib/data";
 import type { EmitInvoiceOutcome, FiscalEnvironment } from "@/lib/types";
 
-import { cbteLetra, cbteNombre, formatCbteNumero } from "./amounts";
+import {
+  cbteLetra,
+  cbteNombre,
+  DNI_INVALIDO_MSG,
+  esErrorDniReserva,
+  formatCbteNumero,
+} from "./amounts";
 import { ARCA_ENDPOINTS, getArcaCertPem, getArcaInternalKey, getArcaKeyPem } from "./config";
 import { buildQrUrl } from "./qr";
 import {
@@ -500,15 +506,33 @@ export async function emitInvoice(invoiceId: string): Promise<EmitInvoiceOutcome
   } catch (error) {
     // Colisión de numeración (unique_violation): otra factura retiene el número.
     // Traducir a algo accionable en vez del mensaje crudo de Postgres.
+    //
+    // P0022 del DNI de la reserva (el claim re-lee el DNI y lo rechaza): el texto de
+    // la base manda a "corregirlo en la reserva", que recepción no puede con la
+    // estadía cerrada. Va el texto nuevo, que las pantallas reconocen para abrir
+    // "Corregir DNI". Los otros P0022 (CUIT, documento de la consolidada) salen con
+    // el texto de la base, que ya dice qué hacer.
+    //
+    // El error de la base NO es un `Error`: `beginInvoiceEmission` tira el objeto
+    // plano de PostgREST ({ code, message, details, hint }). El mensaje se lee del
+    // objeto, como en `parseActionError`; con `instanceof Error` no se traducía nunca.
     const pgCode = (error as { code?: string } | null)?.code;
+    const pgMessage = (error as { message?: unknown } | null)?.message;
+    const p0022 =
+      pgCode === "P0022" && typeof pgMessage === "string" && pgMessage !== ""
+        ? esErrorDniReserva(pgMessage)
+          ? DNI_INVALIDO_MSG
+          : pgMessage
+        : null;
     const message =
       pgCode === "23505"
         ? "Hay otra factura en verificación que quedó reteniendo el número. Reintentá esa primero desde Facturación (En verificación) y volvé a intentar esta."
-        : error instanceof ArcaNetworkError
-          ? "ARCA no está respondiendo. La factura quedó pendiente — reintentá desde Facturación."
-          : error instanceof Error
-            ? error.message
-            : "Error inesperado al emitir la factura.";
+        : (p0022 ??
+          (error instanceof ArcaNetworkError
+            ? "ARCA no está respondiendo. La factura quedó pendiente — reintentá desde Facturación."
+            : error instanceof Error
+              ? error.message
+              : "Error inesperado al emitir la factura."));
 
     // Mejor esfuerzo: si la invoice quedó en processing por un fallo previo al
     // envío, liberarla a pending para que el reintento no espere el TTL.

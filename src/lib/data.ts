@@ -6,6 +6,17 @@ import { isValidCuit } from "./arca/amounts";
 import { AUTHORIZED_INVOICES_LIMIT } from "./billing";
 import { netoRecibido } from "./cc-pagos";
 import { getRoomCapacity, sortRoomsByNumber } from "./rooms";
+import {
+  classifySearchTerm,
+  dniWithDots,
+  GLOBAL_SEARCH_PER_GROUP,
+  matchesClient,
+  sinFichaDbFilter,
+  matchesRoomNumber,
+  summarizeStays,
+  type GlobalSearchMatches,
+  type StayRow,
+} from "./global-search";
 import { localToISO } from "./format";
 import { addDaysToDateKey, DEFAULT_TZ, hotelDateKey } from "./time";
 import {
@@ -96,6 +107,7 @@ import type {
   CleaningLogResult,
   Room,
   RoomOccupancyAlert,
+  RoomStatus,
   ShiftCreditChargeRow,
   ShiftPaymentRow,
   TodayCleaning,
@@ -1796,6 +1808,357 @@ export async function searchCompanyPassengers(
   return (data ?? []) as CompanyPassenger[];
 }
 
+// ===========================================================================
+// Buscador global (F1-5a). Las reglas viven en global-search.ts; acá solo se lee.
+// ===========================================================================
+
+type SearchStayRow = {
+  guest_id: string | null;
+  associated_client_id: string | null;
+  company_passenger_id: string | null;
+  client_name: string;
+  client_dni: string | null;
+  status: ReservationStatus;
+  check_in_target: string;
+  check_out_target: string;
+  rooms: { room_number: string } | { room_number: string }[] | null;
+};
+
+const SEARCH_STAY_COLUMNS =
+  "guest_id, associated_client_id, company_passenger_id, client_name, client_dni, status, check_in_target, check_out_target, rooms ( room_number )";
+
+function toSearchStay(row: SearchStayRow): StayRow {
+  const relation = row.rooms;
+  return {
+    status: row.status,
+    check_in_target: row.check_in_target,
+    check_out_target: row.check_out_target,
+    room_number: Array.isArray(relation)
+      ? relation[0]?.room_number ?? null
+      : relation?.room_number ?? null,
+  };
+}
+
+/** Un documento que se puede poner entre comillas en un filtro `in.(...)` de PostgREST. */
+const SAFE_FILTER_VALUE = /^[0-9A-Za-z.\- ]+$/;
+
+const searchDigits = (text: string | null | undefined) => (text ?? "").replace(/\D/g, "");
+
+/**
+ * Buscador global: habitaciones activas, huéspedes, empresas y pasajeros, para admin y
+ * recepción (la RLS de las cinco tablas deja leer a todo el staff). Los datos son chicos
+ * (unos cientos de huéspedes, decenas de empresas y pasajeros): se traen enteros y se
+ * filtran en memoria con las reglas de global-search.ts, que entienden el DNI con o sin
+ * puntos y el CUIT con o sin guiones. Las personas sin ficha salen de las reservas.
+ *
+ * Devuelve todo sin recortar: la acción le saca a recepción los montos y los links.
+ * El saldo es SOLO el de cuenta corriente (decisión 1), con el mismo criterio que
+ * getCtaCteAccount; null si no opera a cuenta. Tope de 5 por grupo.
+ */
+export async function searchGlobal(term: string): Promise<GlobalSearchMatches> {
+  const query = classifySearchTerm(term);
+  const result: GlobalSearchMatches = { habitaciones: [], huespedes: [], empresas: [], pasajeros: [] };
+  if (!query) return result;
+
+  const supabase = await createClient();
+
+  if (query.kind === "habitacion") {
+    const { data, error } = await supabase
+      .from("rooms")
+      .select("id, room_number, status")
+      .eq("is_active", true);
+    if (error) throw error;
+    const rooms = sortRoomsByNumber(
+      (data ?? []) as { id: number; room_number: string; status: RoomStatus }[]
+    )
+      .filter((room) => matchesRoomNumber(room.room_number, query.value))
+      .slice(0, GLOBAL_SEARCH_PER_GROUP);
+    if (rooms.length === 0) return result;
+
+    const { data: stays, error: staysError } = await supabase
+      .from("reservations")
+      .select("room_id, client_name, check_in_target, check_out_target")
+      .eq("status", "checked_in")
+      .in("room_id", rooms.map((room) => room.id));
+    if (staysError) throw staysError;
+
+    type RoomStay = { room_id: number; client_name: string; check_in_target: string; check_out_target: string };
+    const stayByRoom = new Map<number, RoomStay>();
+    for (const stay of (stays ?? []) as RoomStay[]) {
+      if (!stayByRoom.has(stay.room_id)) stayByRoom.set(stay.room_id, stay);
+    }
+    result.habitaciones = rooms.map((room) => {
+      const stay = stayByRoom.get(room.id);
+      return {
+        key: `habitacion:${room.id}`,
+        numero: room.room_number,
+        estado: room.status,
+        alojado: stay
+          ? { nombre: stay.client_name, entrada: stay.check_in_target, salida: stay.check_out_target }
+          : null,
+      };
+    });
+    return result;
+  }
+
+  // Personas sin ficha: las reservas por nombre o DNI que no están enlazadas a una ficha
+  // de huésped ni son de una empresa (esas salen como pasajeros). El filtro de la base es
+  // más flojo que matchesClient (tildes, orden de las palabras, puntos del DNI); lo decide
+  // matchesClient en memoria.
+  const sinFichaFilter = sinFichaDbFilter(query);
+
+  const [guestsRes, companiesRes, passengersRes, sinFichaRes] = await Promise.all([
+    supabase
+      .from("guests")
+      .select("id, full_name, document_id, discount_percent, cuenta_corriente_habilitada"),
+    supabase
+      .from("associated_clients")
+      .select("id, display_name, razon_social, document_id, discount_percent, cuenta_corriente_habilitada, is_active"),
+    supabase.from("company_passengers").select("id, associated_client_id, full_name, document_id"),
+    supabase
+      .from("reservations")
+      .select(SEARCH_STAY_COLUMNS)
+      .in("status", ["confirmed", "checked_in", "checked_out"])
+      .is("associated_client_id", null)
+      .is("guest_id", null)
+      .or(sinFichaFilter)
+      .order("check_in_target", { ascending: false })
+      .limit(40),
+  ]);
+  if (guestsRes.error) throw guestsRes.error;
+  if (companiesRes.error) throw companiesRes.error;
+  if (passengersRes.error) throw passengersRes.error;
+  if (sinFichaRes.error) throw sinFichaRes.error;
+
+  type GuestSearchRow = {
+    id: string;
+    full_name: string;
+    document_id: string | null;
+    discount_percent: number | string | null;
+    cuenta_corriente_habilitada: boolean | null;
+  };
+  type CompanySearchRow = {
+    id: string;
+    display_name: string;
+    razon_social: string | null;
+    document_id: string | null;
+    discount_percent: number | string | null;
+    cuenta_corriente_habilitada: boolean | null;
+    is_active: boolean;
+  };
+  type PassengerSearchRow = {
+    id: string;
+    associated_client_id: string;
+    full_name: string;
+    document_id: string | null;
+  };
+
+  const byName = (a: string, b: string) => a.localeCompare(b, "es-AR", { sensitivity: "base" });
+  const guests = ((guestsRes.data ?? []) as GuestSearchRow[])
+    .filter((g) => matchesClient({ nombre: g.full_name, documento: g.document_id }, query))
+    .sort((a, b) => byName(a.full_name, b.full_name))
+    .slice(0, GLOBAL_SEARCH_PER_GROUP);
+  const allCompanies = (companiesRes.data ?? []) as CompanySearchRow[];
+  const companyById = new Map(allCompanies.map((c) => [c.id, c]));
+  const companies = allCompanies
+    .filter((c) =>
+      matchesClient(
+        { nombre: c.display_name, documento: c.document_id, otrosNombres: [c.razon_social] },
+        query
+      )
+    )
+    .sort((a, b) => byName(a.display_name, b.display_name))
+    .slice(0, GLOBAL_SEARCH_PER_GROUP);
+  const passengers = ((passengersRes.data ?? []) as PassengerSearchRow[])
+    .filter((p) => matchesClient({ nombre: p.full_name, documento: p.document_id }, query))
+    .sort((a, b) => byName(a.full_name, b.full_name))
+    .slice(0, GLOBAL_SEARCH_PER_GROUP);
+
+  // Filtro de reservas de cada cliente. Un huésped se reconoce por su ficha (guest_id)
+  // y, en las reservas viejas sin ficha enlazada (mig 59), por su DNI.
+  const guestDocDigits = new Map(guests.map((g) => [g.id, searchDigits(g.document_id)]));
+  const filterFor = {
+    guest: (g: GuestSearchRow) => {
+      const values = new Set<string>();
+      const raw = (g.document_id ?? "").trim();
+      if (raw && SAFE_FILTER_VALUE.test(raw)) values.add(raw);
+      const digits = guestDocDigits.get(g.id) ?? "";
+      if (digits.length >= 6) {
+        values.add(digits);
+        values.add(dniWithDots(digits));
+      }
+      const parts = [`guest_id.eq.${g.id}`];
+      if (values.size > 0) {
+        parts.push(`client_dni.in.(${[...values].map((v) => `"${v}"`).join(",")})`);
+      }
+      return parts.join(",");
+    },
+    company: (c: CompanySearchRow) => `associated_client_id.eq.${c.id}`,
+    passenger: (p: PassengerSearchRow) => `company_passenger_id.eq.${p.id}`,
+  };
+  const belongsTo = {
+    guest: (g: GuestSearchRow, r: SearchStayRow) => {
+      const digits = guestDocDigits.get(g.id) ?? "";
+      return r.guest_id === g.id || (digits.length >= 6 && searchDigits(r.client_dni) === digits);
+    },
+    company: (c: CompanySearchRow, r: SearchStayRow) => r.associated_client_id === c.id,
+    passenger: (p: PassengerSearchRow, r: SearchStayRow) => r.company_passenger_id === p.id,
+  };
+
+  const clientFilters = [
+    ...guests.map(filterFor.guest),
+    ...companies.map(filterFor.company),
+    ...passengers.map(filterFor.passenger),
+  ];
+  const movFilters = [
+    ...guests.map((g) => `guest_id.eq.${g.id}`),
+    ...companies.map((c) => `associated_client_id.eq.${c.id}`),
+  ];
+  const emptyRows = Promise.resolve({ data: [] as unknown[], error: null });
+
+  // Lo activo (en curso o confirmado) es poco y va en una consulta. La última estadía
+  // va de a una por cliente: en una sola, una empresa con cientos de estadías dejaba
+  // sin la suya a los demás.
+  const lastStayOf = (filter: string) =>
+    supabase
+      .from("reservations")
+      .select(SEARCH_STAY_COLUMNS)
+      .eq("status", "checked_out")
+      .or(filter)
+      .order("check_out_target", { ascending: false })
+      .limit(1);
+
+  const [activeRes, movRes, ...lastStayResults] = await Promise.all([
+    clientFilters.length
+      ? supabase
+          .from("reservations")
+          .select(SEARCH_STAY_COLUMNS)
+          .in("status", ["confirmed", "checked_in"])
+          .or(clientFilters.join(","))
+          .order("check_in_target", { ascending: true })
+          .limit(1000)
+      : emptyRows,
+    movFilters.length
+      ? supabase
+          .from("cuenta_corriente_movimientos")
+          .select("associated_client_id, guest_id, tipo, amount")
+          .or(movFilters.join(","))
+      : emptyRows,
+    ...clientFilters.map(lastStayOf),
+  ]);
+  if (activeRes.error) throw activeRes.error;
+  if (movRes.error) throw movRes.error;
+  for (const res of lastStayResults) if (res.error) throw res.error;
+
+  const activeRows = (activeRes.data ?? []) as SearchStayRow[];
+  const lastStayRows = lastStayResults.flatMap((res) => (res.data ?? []) as SearchStayRow[]);
+  const now = new Date();
+
+  const companyMov = new Map<string, { sum: number; count: number }>();
+  const guestMov = new Map<string, { sum: number; count: number }>();
+  for (const m of (movRes.data ?? []) as CcMovRow[]) {
+    const target = m.associated_client_id
+      ? { map: companyMov, id: m.associated_client_id }
+      : m.guest_id
+        ? { map: guestMov, id: m.guest_id }
+        : null;
+    if (!target) continue;
+    const acc = target.map.get(target.id) ?? { sum: 0, count: 0 };
+    acc.sum += signedMovement(m.tipo, Number(m.amount) || 0);
+    acc.count += 1;
+    target.map.set(target.id, acc);
+  }
+  const saldoCuenta = (enabled: boolean | null, mov: { sum: number; count: number } | undefined) =>
+    enabled || (mov?.count ?? 0) > 0
+      ? Math.round(((mov?.sum ?? 0) + Number.EPSILON) * 100) / 100
+      : null;
+  const staysOf = (matches: (r: SearchStayRow) => boolean) =>
+    summarizeStays([...activeRows, ...lastStayRows].filter(matches).map(toSearchStay), now);
+
+  result.huespedes = guests.map((g) => ({
+    kind: "huesped",
+    key: `huesped:${g.id}`,
+    nombre: g.full_name,
+    detalle: g.document_id ? `Doc. ${g.document_id}` : null,
+    filtro: g.document_id || g.full_name,
+    facts: {
+      descuento: Number(g.discount_percent) || 0,
+      saldoCuenta: saldoCuenta(g.cuenta_corriente_habilitada, guestMov.get(g.id)),
+      ...staysOf((r) => belongsTo.guest(g, r)),
+    },
+  }));
+
+  // Personas que se alojaron sin ficha de huésped: sin descuento ni cuenta corriente.
+  // Si su DNI o su nombre es el de una ficha que ya salió arriba, no se repite.
+  const knownKeys = new Set(guests.map((g) => guestDedupKey(g.document_id, g.full_name)));
+  const sinFicha = new Map<string, { nombre: string; dni: string | null; rows: SearchStayRow[] }>();
+  for (const row of (sinFichaRes.data ?? []) as SearchStayRow[]) {
+    if (!matchesClient({ nombre: row.client_name, documento: row.client_dni }, query)) continue;
+    const key = guestDedupKey(row.client_dni, row.client_name);
+    if (knownKeys.has(key)) continue;
+    const entry = sinFicha.get(key) ?? { nombre: row.client_name, dni: row.client_dni, rows: [] };
+    entry.rows.push(row);
+    sinFicha.set(key, entry);
+  }
+  for (const [key, entry] of sinFicha) {
+    if (result.huespedes.length >= GLOBAL_SEARCH_PER_GROUP) break;
+    result.huespedes.push({
+      kind: "huesped",
+      key: `huesped:sin-ficha:${key}`,
+      nombre: entry.nombre,
+      detalle: entry.dni ? `Doc. ${entry.dni} · Sin ficha` : "Sin ficha",
+      filtro: entry.dni || entry.nombre,
+      facts: {
+        descuento: 0,
+        saldoCuenta: null,
+        ...summarizeStays(entry.rows.map(toSearchStay), now),
+      },
+    });
+  }
+
+  result.empresas = companies.map((c) => {
+    const doc = c.document_id ?? "";
+    const docLabel = doc ? (searchDigits(doc).length === 11 ? `CUIT ${doc}` : `Doc. ${doc}`) : null;
+    return {
+      kind: "empresa",
+      key: `empresa:${c.id}`,
+      nombre: c.display_name,
+      detalle: [docLabel, c.is_active ? null : "Inactiva"].filter(Boolean).join(" · ") || null,
+      filtro: c.document_id || c.display_name,
+      facts: {
+        descuento: Number(c.discount_percent) || 0,
+        saldoCuenta: saldoCuenta(c.cuenta_corriente_habilitada, companyMov.get(c.id)),
+        ...staysOf((r) => belongsTo.company(c, r)),
+      },
+    };
+  });
+
+  // El pasajero viaja por la empresa: lleva su descuento, y la cuenta corriente es de
+  // la empresa (sale en su fila), no del pasajero.
+  result.pasajeros = passengers.map((p) => {
+    const company = companyById.get(p.associated_client_id);
+    return {
+      kind: "pasajero",
+      key: `pasajero:${p.id}`,
+      nombre: p.full_name,
+      detalle: [
+        `Viaja por ${company?.display_name ?? "una empresa"}`,
+        p.document_id ? `Doc. ${p.document_id}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      filtro: company?.document_id || company?.display_name || p.full_name,
+      facts: {
+        descuento: Number(company?.discount_percent) || 0,
+        saldoCuenta: null,
+        ...staysOf((r) => belongsTo.passenger(p, r)),
+      },
+    };
+  });
+
+  return result;
+}
+
 export async function applyLateCheckOut(
   reservationId: string
 ): Promise<{ halfDayCharged: boolean; halfDayAmount: number }> {
@@ -3203,6 +3566,7 @@ type CreditChargeWithReservationRow = {
   amount: number | string;
   created_at: string;
   reservation_id: string | null;
+  remito_numero: number | string | null;
   reservations:
     | { client_name: string; rooms: { room_number: string }[] | { room_number: string } | null }
     | { client_name: string; rooms: { room_number: string }[] | { room_number: string } | null }[]
@@ -3224,6 +3588,7 @@ function normalizeShiftCreditCharge(
     reservation_id: row.reservation_id,
     client_name: reservation?.client_name ?? "Desconocido",
     room_number: room?.room_number ?? null,
+    remito_numero: numeroONull(row.remito_numero),
   };
 }
 
@@ -3279,11 +3644,12 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
   // pasa por `payments` (por eso no toca el arqueo), pero sin mostrarlo la rendición
   // esconde plata vendida. Se trae el detalle (quién y qué habitación) y no solo el
   // total: en el cierre, un número sin nombre no se puede contrastar contra nada.
+  // El número de remito va para que la Caja lo muestre y lo deje reimprimir.
   const { data: creditData, error: creditError } = await supabase
     .from("cuenta_corriente_movimientos")
     .select(
       `
-      id, amount, created_at, reservation_id,
+      id, amount, created_at, reservation_id, remito_numero,
       reservations!inner ( checkout_cash_shift_id, client_name, rooms ( room_number ) )
       `
     )
