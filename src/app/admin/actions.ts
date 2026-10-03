@@ -12,6 +12,7 @@ import {
   confirmReservation,
   doCheckIn,
   doCheckout,
+  doCheckoutSplit,
   doEarlyCheckout,
   extendReservation,
   findGuestByDni,
@@ -34,7 +35,7 @@ import {
   type UpdateReservationInput,
 } from "@/lib/data";
 import { parseActionError } from "@/lib/error-utils";
-import { assertAdmin } from "@/lib/server-auth";
+import { assertAdmin, assertStaff } from "@/lib/server-auth";
 import { notifyReservationWebhook } from "@/lib/webhook";
 import {
   buildCancellationMessage,
@@ -56,6 +57,8 @@ import type {
 import {
   assignWalkInSchema,
   checkInSchema,
+  checkoutSplitSchema,
+  type CheckoutSplitInput,
   closeOccupancyAlertSchema,
   createReservationSchema,
 } from "@/lib/validations";
@@ -177,6 +180,39 @@ export async function handleEarlyCheckOut({
     return { success: true, data: { paymentId: result.paymentId, movementId: result.movementId } };
   } catch (error: unknown) {
     const parsed = parseActionError(error, "Error al ejecutar la salida anticipada.");
+    return { success: false, error: parsed.error, code: parsed.code };
+  }
+}
+
+/**
+ * Check-out cobrado en varios medios (F2-4, mig 119): efectivo + tarjeta, etc. Todos
+ * los pagos entran en la misma transacción que cierra la estadía; si la suma no da
+ * justo el saldo, no se cobra nada. `early` = salida anticipada (el saldo se recalcula
+ * a las noches usadas). Un solo medio y la cuenta corriente siguen por handleCheckOut /
+ * handleEarlyCheckOut. Mismas revalidaciones que esos dos.
+ */
+export async function handleCheckOutSplit(
+  input: CheckoutSplitInput
+): Promise<ActionResult<{ paymentIds: string[]; paymentId: string | null; movementId: null }>> {
+  try {
+    await assertStaff();
+    const validated = checkoutSplitSchema.parse(input);
+    const result = await doCheckoutSplit(validated);
+    revalidatePath("/admin");
+    revalidateCalendarViews();
+    revalidatePath("/admin/guests");
+    revalidatePath("/admin/finances");
+    revalidatePath("/admin/caja");
+    revalidatePath("/admin/cuentas");
+    return {
+      success: true,
+      data: { paymentIds: result.paymentIds, paymentId: result.paymentId, movementId: null },
+    };
+  } catch (error: unknown) {
+    const parsed = parseActionError(
+      error,
+      input?.early ? "Error al ejecutar la salida anticipada." : "Error al ejecutar check-out."
+    );
     return { success: false, error: parsed.error, code: parsed.code };
   }
 }

@@ -2243,6 +2243,43 @@ export async function doEarlyCheckout({
   return { paymentId: result.payment_id ?? null, movementId: result.movement_id ?? null };
 }
 
+/** Un pago de un check-out partido. Sin cuenta corriente ni vale blanco (ver mig 119). */
+export type CheckoutSplitPayment = {
+  method: Exclude<PaymentMethod, "cuenta_corriente" | "vale_blanco">;
+  amount: number;
+};
+
+/**
+ * Check-out cobrado en varios medios (F2-4): de 2 a 4 pagos que entran en la MISMA
+ * transacción que cierra la estadía (rpc_staff_checkout_split, mig 119). Si la suma no
+ * da justo el saldo, la base deshace todo y no queda ningún pago suelto. `early` elige
+ * la salida anticipada, que recalcula el total a las noches usadas.
+ *
+ * Un solo medio y la cuenta corriente siguen por doCheckout / doEarlyCheckout.
+ * `paymentIds` viene en el orden en que se cargaron; `paymentId` es el primero.
+ */
+export async function doCheckoutSplit({
+  reservationId,
+  payments,
+  early,
+}: {
+  reservationId: string;
+  payments: CheckoutSplitPayment[];
+  early: boolean;
+}): Promise<{ paymentIds: string[]; paymentId: string | null; movementId: null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("rpc_staff_checkout_split", {
+    p_reservation_id: reservationId,
+    p_payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
+    p_early: early,
+  });
+
+  if (error) throw error;
+  const result = (data ?? {}) as { payment_id?: string | null; payment_ids?: string[] | null };
+  const paymentIds = Array.isArray(result.payment_ids) ? result.payment_ids : [];
+  return { paymentIds, paymentId: result.payment_id ?? paymentIds[0] ?? null, movementId: null };
+}
+
 export async function markRoomAsAvailable(roomId: number): Promise<void> {
   // Se rutea por el RPC que valida rol (admin o maintenance) y registra
   // la limpieza en room_cleaning_log para auditoría.
